@@ -48,14 +48,14 @@ from langchain.memory import ConversationBufferMemory
 # Construct the Alita agent
 prompt = llm.client.prompt(prompt_id=5, prompt_version_id=9)
 
-# from langchain_community.chat_models.azure_openai import AzureChatOpenAI
+from langchain_community.chat_models.azure_openai import AzureChatOpenAI
 
-# llm = AzureChatOpenAI(
-#     azure_endpoint=environ.get("DIAL_ENDPOINT"),
-#     deployment_name="gpt-4-1106-preview",
-#     openai_api_version="2023-03-15-preview",
-#     openai_api_key=environ.get('DIAL_AUTH_TOKEN')
-# )
+llm = AzureChatOpenAI(
+    azure_endpoint=environ.get("DIAL_ENDPOINT"),
+    deployment_name="gpt-4-1106-preview",
+    openai_api_version="2023-03-15-preview",
+    openai_api_key=environ.get('DIAL_AUTH_TOKEN')
+)
 
 
 from src.alita_sdk.agents import create_mixed_agent

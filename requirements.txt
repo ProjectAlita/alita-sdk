@@ -1,3 +1,5 @@
 langchain_core==0.1.30
+langchain==0.1.11
 tiktoken==0.6.0
+openai==1.13.3
 python-dotenv==1.0.1
