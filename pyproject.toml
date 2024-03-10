@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alita_sdk"
+version = "0.0.1"
+authors = [
+  { name="Artem Rozumenko", email="artem_rozumenko@epam.com" },
+]
+description = "SDK for building langchain agents using resouces from Alita"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[project.urls]
+Homepage = "https://projectalita.ai"
+Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
