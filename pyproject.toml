@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alita_sdk"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
-  { name="Artem Rozumenko", email="artem_rozumenko@epam.com" },
+  { name="Artem Rozumenko", email="support@analysta.ai" },
 ]
 description = "SDK for building langchain agents using resouces from Alita"
 readme = "README.md"

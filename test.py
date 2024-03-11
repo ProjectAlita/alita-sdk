@@ -28,4 +28,16 @@ llm = AlitaChatModel(**settings)
 print(llm.invoke([HumanMessage(content="Hello")]))
 
 ## Getting PromptTemplate from Project with version_id 7
-print(llm.client.get_prompt(prompt_id=7, prompt_version_id=7))
+prompt = llm.client.prompt(prompt_id=2, prompt_version_id=7)
+
+chain = prompt | llm
+
+print(chain.invoke(
+    {"input": "Hello"}
+))
+
+## Getting datasource
+datasource = llm.client.datasource(1)
+
+print(datasource.predict("How EPAM Do performance testing?"))
+ 

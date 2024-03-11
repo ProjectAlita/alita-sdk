@@ -1,6 +1,6 @@
 import logging
 import requests
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from jinja2 import Environment, DebugUndefined, meta
 
 from langchain_core.messages import (
@@ -49,6 +49,23 @@ class Jinja2TemplatedChatMessagesTemplate(ChatPromptTemplate):
                 logger.debug(message.content)
                 result.append(message)
         return result
+    
+
+    
+class AlitaDataSource:
+    def __init__(self, alita:Any, datasource_id:int, datasource_settings, datasource_predict_settings):
+        self.alita = alita
+        self.datasource_id = datasource_id
+        self.datasource_settings = datasource_settings
+        self.datasource_predict_settings = datasource_predict_settings
+    
+    def predict(self, user_input: str, chat_history: Optional[list[BaseMessage]]=[]):
+        messages = chat_history + [HumanMessage(content=user_input)]
+        return self.alita.rag(self.datasource_id, messages, 
+                              self.datasource_settings, 
+                              self.datasource_predict_settings)
+
+
 
 class AlitaClient:
     def __init__(self, base_url: str, project_id: int, auth_token: str):
@@ -61,6 +78,8 @@ class AlitaClient:
         self.predict_url = f"{self.base_url}/api/v1/prompt_lib/predict/prompt_lib/{self.project_id}"
         self.prompt_versions = f"{self.base_url}/api/v1/prompt_lib/version/prompt_lib/{self.project_id}"
         self.prompts = f"{self.base_url}/api/v1/prompt_lib/prompt/prompt_lib/{self.project_id}"
+        self.datasources = f"{self.base_url}/api/v1/datasources/datasource/prompt_lib/{self.project_id}"
+        self.datasources_predict = f"{self.base_url}/api/v1/datasources/predict/prompt_lib/{self.project_id}"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -89,8 +108,41 @@ class AlitaClient:
         if variables:
             template.partial_variables = variables
         return template
-    
-    def _prepare_payload(self, messages: list[BaseMessage], model_settings: dict, variables: dict):
+
+    def datasource(self, datasource_id:int) -> AlitaDataSource:
+        url = f"{self.datasources}/{datasource_id}"
+        data = requests.get(url, headers=self.headers).json()
+        ai_model = data['version_details']['datasource_settings']['chat']['chat_model']
+        datasource_model = data['version_details']['datasource_settings']['chat']['embedding_model']
+        temperature = data['version_details']['datasource_settings']['chat']['temperature']
+        top_p = data['version_details']['datasource_settings']['chat']['top_p']
+        top_k = data['version_details']['datasource_settings']['chat']['top_k']
+        max_length = data['version_details']['datasource_settings']['chat']['max_length']
+        stream = data['version_details']['datasource_settings']['chat'].get('stream', True)
+        cut_off_score = data['version_details']['datasource_settings']['chat'].get('cut_off_score', 0.5)
+        page_top_k = data['version_details']['datasource_settings']['chat'].get('page_top_k', 5)
+        fetch_k = data['version_details']['datasource_settings']['chat'].get('fetch_k', 30)
+        embedding_k = data['version_details']['datasource_settings']['chat'].get('embedding_k', 5)
+        datasource_settings = {
+            "embedding_integration_uid": datasource_model['integration_uid'],
+            "embedding_model_name": datasource_model['model_name'],
+            "cut_off_score": cut_off_score,
+            "page_top_k": page_top_k,
+            "fetch_k": fetch_k,
+            "top_k": embedding_k
+        }
+        datasource_predict_settings = {
+            "ai_integration_uid": ai_model["integration_uid"],
+            "ai_model_name": ai_model["model_name"],
+            "temperature": temperature,
+            "top_p": top_p,
+            "top_k": top_k,
+            "max_length": max_length,
+            "stream": stream,
+        }
+        return AlitaDataSource(self, datasource_id,datasource_settings, datasource_predict_settings)
+        
+    def _prepare_messages(self, messages: list[BaseMessage]):
         context = ''
         chat_history = []
         if messages[0].type == "system":
@@ -111,9 +163,13 @@ class AlitaClient:
                     'role': 'assistant',
                     'content': message.content
                 })
+        user_input = messages[-1].content
+        return context, chat_history, user_input
+    
+    def _prepare_payload(self, messages: list[BaseMessage], model_settings: dict, variables: dict):
+        context, chat_history, user_input = self._prepare_messages(messages)
         if not variables:
             variables = []
-        user_input = messages[-1].content
         return {
             "type": "chat",
             "project_id": self.project_id,
@@ -157,3 +213,20 @@ class AlitaClient:
             logger.error(f"TypeError in response of predict: {response_data}")
             raise
     
+    def rag(self, datasource_id:int, messages:list[BaseMessage], 
+        datasource_settings: dict, datasource_predict_settings: dict):
+        context, chat_history, user_input = self._prepare_messages(messages)
+        data = {
+            "input": user_input,
+            "context": '',
+            "chat_history": chat_history,
+            "chat_settings_ai": datasource_predict_settings,
+            "chat_settings_embedding": datasource_settings
+        }
+        if context:
+            data['context'] = context
+        headers = self.headers | {"Content-Type": "application/json"}
+        response = requests.post(f"{self.datasources_predict}/{datasource_id}", headers=headers, json=data).json()
+        return AIMessage(content=response['response'], additional_kwargs={"references": response['references']})
+            
+        
