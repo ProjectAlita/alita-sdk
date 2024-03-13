@@ -1,10 +1,10 @@
 from ..clients.client import AlitaDataSource
 from langchain.tools import BaseTool
 from langchain.pydantic_v1 import BaseModel, Field
-
+from typing import AnyStr
 
 class DatasourceToolSchema(BaseModel):
-    query: str = Field(description="The query to run against the datasource.")
+    query: AnyStr = Field(description="The query to run against the datasource.")
 
 class DatasourcePredict(BaseTool):
     name: str
@@ -23,6 +23,5 @@ class DatasourceSearch(BaseTool):
     
     def _run(self, query):
         result = self.datasource.search(query)
-        content = "\n\n".join([finding["page_content"] for finding in result["findings"]])
-        return f"Search Results: {result.content}"
+        return f"Search Results: {result.content}\n\nReferences: {result.additional_kwargs['references']}"
     

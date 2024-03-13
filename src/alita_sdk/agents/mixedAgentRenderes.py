@@ -12,19 +12,16 @@ def render_text_description_and_args(tools: List[BaseTool]) -> str:
     for tool in tools:
         args_schema = ""
         for arg in tool.args.keys():
-            args_schema += f"{arg} ({tool.args[arg]['type']}): \"{tool.args[arg].get('description', arg)}\"; "
+            args_schema += f"{arg} ({tool.args[arg].get('type', 'str')}): \"{tool.args[arg].get('description', arg)}\"; "
         tool_strings.append(f' - {tool.description}: tool: "{tool.name}", agrs: {args_schema}')
     return "\n".join(tool_strings)
 
 def format_log_to_str(
-    x: Dict[str, Any],
+    intermediate_steps: List[Tuple[AgentAction, str]],
 ) -> str:
     """Construct the scratchpad that lets the agent continue its thought process."""
     thoughts = ""
-    if x.get("memory"):
-        x("memory").save_context({"input": action.log, "output": result})
-    # TODO: In case I'll pass chat_history to an agent this is the prace I can fill it up
-    for action, result in x['intermediate_steps']:
+    for action, result in intermediate_steps:
         thoughts += action.log
         thoughts += f"\nTool Result:\n{result}"
     return thoughts

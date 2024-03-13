@@ -64,6 +64,10 @@ class AlitaDataSource:
         return self.alita.rag(self.datasource_id, messages, 
                               self.datasource_settings, 
                               self.datasource_predict_settings)
+        
+    def search(self, query: str):
+        return self.alita.search(self.datasource_id, [HumanMessage(content=query)], 
+                                  self.datasource_settings)
 
 
 
@@ -80,6 +84,7 @@ class AlitaClient:
         self.prompts = f"{self.base_url}/api/v1/prompt_lib/prompt/prompt_lib/{self.project_id}"
         self.datasources = f"{self.base_url}/api/v1/datasources/datasource/prompt_lib/{self.project_id}"
         self.datasources_predict = f"{self.base_url}/api/v1/datasources/predict/prompt_lib/{self.project_id}"
+        self.datasources_search = f"{self.base_url}/api/v1/datasources/search/prompt_lib/{self.project_id}"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -228,5 +233,25 @@ class AlitaClient:
         headers = self.headers | {"Content-Type": "application/json"}
         response = requests.post(f"{self.datasources_predict}/{datasource_id}", headers=headers, json=data).json()
         return AIMessage(content=response['response'], additional_kwargs={"references": response['references']})
-            
+    
+    def search(self, datasource_id:int, messages:list[BaseMessage], datasource_settings: dict):
+        _, _, user_input = self._prepare_messages(messages)
+        data = {
+            "chat_history": [
+                {
+                    "role": "user",
+                    "content": user_input
+                }
+            ],
+            "embedding_integration_uid": datasource_settings['integration_uid'],
+            "embedding_model_name": datasource_settings['model_name'],
+            "cut_off_score": datasource_settings["cut_off_score"],
+            "page_top_k": datasource_settings["page_top_k"],
+            "fetch_k": datasource_settings["fetch_k"],
+            "top_k": datasource_settings["embedding_k"]
+        }
+        headers = self.headers | {"Content-Type": "application/json"}
+        response = requests.post(f"{self.datasources_search}/{datasource_id}", headers=headers, json=data).json()
+        content = "\n\n".join([finding["page_content"] for finding in response["findings"]])
+        return AIMessage(content=content, additional_kwargs={"references": response['references']})
         
