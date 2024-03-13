@@ -243,12 +243,12 @@ class AlitaClient:
                     "content": user_input
                 }
             ],
-            "embedding_integration_uid": datasource_settings['integration_uid'],
-            "embedding_model_name": datasource_settings['model_name'],
+            "embedding_integration_uid": datasource_settings['embedding_integration_uid'],
+            "embedding_model_name": datasource_settings['embedding_model_name'],
             "cut_off_score": datasource_settings["cut_off_score"],
             "page_top_k": datasource_settings["page_top_k"],
             "fetch_k": datasource_settings["fetch_k"],
-            "top_k": datasource_settings["embedding_k"]
+            "top_k": datasource_settings["top_k"]
         }
         headers = self.headers | {"Content-Type": "application/json"}
         response = requests.post(f"{self.datasources_search}/{datasource_id}", headers=headers, json=data).json()

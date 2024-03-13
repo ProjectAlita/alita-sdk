@@ -1,4 +1,5 @@
 import re
+import json
 from typing import Union
 
 from langchain_core.agents import AgentAction, AgentFinish
@@ -33,7 +34,11 @@ class MixedAgentOutputParser(AgentOutputParser):
         return FORMAT_INSTRUCTIONS
 
     def parse(self, text: str) -> Union[AgentAction, AgentFinish]:
-        response = unpack_json(text)
+        try:
+            response = unpack_json(text)
+        except json.decoder.JSONDecodeError:
+            text.replace("\n", "\\n")
+            response = unpack_json(text)
         action = response.get("tool", {"name": None}).get("name")
         tool_input = response.get("tool", {"args": {}}).get("args")
         plan = response.get("thoughts", {"plan": []}).get("plan")
@@ -53,7 +58,7 @@ Running Tool:
 """
         if action:
             if action == 'complete_task':
-                return AgentFinish({"output": log}, log=log)
+                return AgentFinish({"output": tool_input[list(tool_input.keys())[0]]}, log=log)
             return AgentAction(action, tool_input, log)
         else:
             raise OutputParserException(f"""ERROR: RESPONSE FORMAT IS INCORRECT

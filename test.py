@@ -40,4 +40,6 @@ print(chain.invoke(
 datasource = llm.client.datasource(1)
 
 print(datasource.predict("How EPAM Do performance testing?"))
+
+print(datasource.search("How EPAM Do performance testing?"))
  
