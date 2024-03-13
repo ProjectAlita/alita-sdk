@@ -55,7 +55,7 @@ def create_mixed_agent(
     logger.debug("Prompt in mixed agent: %s", prompt)
     agent = (
         RunnablePassthrough.assign(
-            agent_scratchpad=lambda x: format_log_to_str(x["intermediate_steps"]),
+            agent_scratchpad=lambda x: format_log_to_str(x),
         )
         | prompt
         | llm

@@ -1,9 +1,9 @@
 """Parser for MixedAgentTools."""
 import logging
-from typing import  List, Tuple
+from typing import  List, Tuple, Dict, Any
 from langchain_core.tools import BaseTool
 from langchain_core.agents import AgentAction
-
+from langchain_core.messages import ToolMessage, AIMessage
 logger = logging.getLogger(__name__)
 
 def render_text_description_and_args(tools: List[BaseTool]) -> str:
@@ -17,12 +17,14 @@ def render_text_description_and_args(tools: List[BaseTool]) -> str:
     return "\n".join(tool_strings)
 
 def format_log_to_str(
-    intermediate_steps: List[Tuple[AgentAction, str]],
+    x: Dict[str, Any],
 ) -> str:
     """Construct the scratchpad that lets the agent continue its thought process."""
     thoughts = ""
-    logger.debug(intermediate_steps)
-    for action, result in intermediate_steps:
+    if x.get("memory"):
+        x("memory").save_context({"input": action.log, "output": result})
+    # TODO: In case I'll pass chat_history to an agent this is the prace I can fill it up
+    for action, result in x['intermediate_steps']:
         thoughts += action.log
         thoughts += f"\nTool Result:\n{result}"
     return thoughts

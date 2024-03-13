@@ -67,4 +67,4 @@ agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools,
 
 agent_executor.invoke({"input": """Use repository spring-petclinic/spring-framework-petclinic with branch main 
 It is Java Spring application, please create swagger spec. 
-Deployment URL is https://petclinic.example.com"""}, include_run_info=True)
+Deployment URL is https://petclinic.example.com""", "chat_history": []}, include_run_info=True)
