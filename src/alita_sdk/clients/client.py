@@ -11,8 +11,11 @@ from langchain_core.messages import (
     ToolMessage
 )
 from langchain_core.prompts import ChatPromptTemplate
+from langchain.agents import  AgentExecutor
 
 logger = logging.getLogger(__name__)
+from ..agents import create_mixed_agent
+from ..agents.alita_openai import AlitaAssistantRunnable
 
 class Jinja2TemplatedChatMessagesTemplate(ChatPromptTemplate):
     
@@ -68,8 +71,38 @@ class AlitaDataSource:
     def search(self, query: str):
         return self.alita.search(self.datasource_id, [HumanMessage(content=query)], 
                                   self.datasource_settings)
+        
 
 
+class Assistant:
+    def __init__(self, client:Any, prompt:ChatPromptTemplate, tools: list, 
+                 openai_tools: Optional[Dict]=None):
+        self.prompt = prompt
+        self.client = client
+        self.tools = tools
+        self.openai_tools = openai_tools
+    
+    def getAgentExecutor(self):
+        agent = create_mixed_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
+        return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
+                                                  verbose=True, handle_parsing_errors=True, 
+                                                  max_execution_time=None, return_intermediate_steps=True)
+        
+    def getOpenAIAgentExecutor(self):
+        agent = AlitaAssistantRunnable(client=self.client, assistant=self)
+        return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
+                                                  verbose=True, handle_parsing_errors=True, 
+                                                  max_execution_time=None,
+                                                  return_intermediate_steps=True)
+    
+    # This one is used only in Alita OpenAI
+    def apredict(self, messages: list[BaseMessage]):
+        yield from self.client.ainvoke([self.prompt.messages[0]] + messages, functions=self.openai_tools)
+    
+    def predict(self, messages: list[BaseMessage]):
+        response = self.client.invoke([self.prompt.messages[0]] + messages, functions=self.openai_tools)
+        return response
+    
 
 class AlitaClient:
     def __init__(self, base_url: str, project_id: int, auth_token: str):
@@ -146,7 +179,14 @@ class AlitaClient:
             "stream": stream,
         }
         return AlitaDataSource(self, datasource_id,datasource_settings, datasource_predict_settings)
-        
+    
+    
+    def assistant(self, prompt_id: int, prompt_version_id: int, 
+                  tools: list, openai_tools: Optional[Dict]=None, 
+                  client: Optional[Any] = None):
+        prompt = self.prompt(prompt_id=prompt_id, prompt_version_id=prompt_version_id)
+        return Assistant(client, prompt, tools, openai_tools)
+    
     def _prepare_messages(self, messages: list[BaseMessage]):
         context = ''
         chat_history = []

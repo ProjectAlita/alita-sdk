@@ -13,7 +13,7 @@ from langchain.agents.format_scratchpad import format_log_to_str
 from langchain.tools.render import ToolsRenderer
 
 from .mixedAgentRenderes import render_text_description_and_args, format_log_to_str
-from .mixedAgentParser import MixedAgentOutputParser
+from .mixedAgentParser import MixedAgentOutputParser, FORMAT_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ def create_mixed_agent(
     prompt = prompt.partial(
         tools=tools_renderer(list(tools)),
         tool_names=", ".join([t.name for t in tools]),
+        response_format = FORMAT_INSTRUCTIONS
     )
     # llm_with_stop = llm.bind(stop=["\"tool\":", "Running Tool:"])
     output_parser = output_parser or MixedAgentOutputParser()

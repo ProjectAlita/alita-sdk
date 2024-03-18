@@ -60,6 +60,8 @@ Running Tool:
             if action == 'complete_task':
                 return AgentFinish({"output": tool_input[list(tool_input.keys())[0]]}, log=log)
             return AgentAction(action, tool_input, log)
+        elif txt:
+            return AgentFinish({"output": txt}, log=log)
         else:
             raise OutputParserException(f"""ERROR: RESPONSE FORMAT IS INCORRECT
 The response may have a great data, format response to the required JSON strcuture. 
