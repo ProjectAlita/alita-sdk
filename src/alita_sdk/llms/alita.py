@@ -190,7 +190,7 @@ class AlitaChatModel(BaseChatModel):
                 "max_tokens": self.max_tokens,
                 "stream": self.stream_response,
                 "model": {
-                    "name": self.model_name,
+                    "model_name": self.model_name,
                     "integration_uid": self.integration_uid,
                 }
             }

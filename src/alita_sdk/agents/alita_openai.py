@@ -49,12 +49,9 @@ class AlitaAssistantRunnable(RunnableSerializable):
             messages = format_to_messages(input["intermediate_steps"])
         print(input)
         try:
-            run = self._create_thread_and_run(
-                self.chat_history + 
-                input["chat_history"][:-1] + 
-                messages + 
-                [input["chat_history"][-1]]
-            )
+            mgs = self.chat_history + input["chat_history"][:-1] + messages + [input["chat_history"][-1]]
+            callback_manager.on_llm_start(dumpd(self), [message["content"] for message in mgs])
+            run = self._create_thread_and_run(mgs)
             response = self._get_response(run)
         except BaseException as e:
             run_manager.on_chain_error(e, metadata=format_exc())

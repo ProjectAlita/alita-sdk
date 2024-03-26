@@ -50,6 +50,8 @@ prompt = llm.client.prompt(prompt_id=5, prompt_version_id=9)
 
 from langchain_community.chat_models.azure_openai import AzureChatOpenAI
 
+
+
 llm = AzureChatOpenAI(
     azure_endpoint=environ.get("DIAL_ENDPOINT"),
     deployment_name="gpt-4-1106-preview",
@@ -58,13 +60,15 @@ llm = AzureChatOpenAI(
 )
 
 
-from src.alita_sdk.agents import create_mixed_agent
-agent = create_mixed_agent(llm, tools, prompt)
 
-agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools,
-    verbose=True, handle_parsing_errors=True, max_execution_time=None,
-    return_intermediate_steps=True)
+# from src.alita_sdk.agents import create_mixed_agent
+# agent = create_mixed_agent(llm, tools, prompt)
 
-agent_executor.invoke({"input": """Use repository spring-petclinic/spring-framework-petclinic with branch main 
-It is Java Spring application, please create swagger spec. 
-Deployment URL is https://petclinic.example.com""", "chat_history": []}, include_run_info=True)
+# agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools,
+#     verbose=True, handle_parsing_errors=True, max_execution_time=None,
+#     return_intermediate_steps=True)
+
+# agent_executor.invoke({"input": """Use repository spring-petclinic/spring-framework-petclinic with branch main 
+# It is Java Spring application, please create swagger spec. 
+# Deployment URL is https://petclinic.example.com""", "chat_history": []}, include_run_info=True)
+

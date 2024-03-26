@@ -150,35 +150,9 @@ class AlitaClient:
     def datasource(self, datasource_id:int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"
         data = requests.get(url, headers=self.headers).json()
-        ai_model = data['version_details']['datasource_settings']['chat']['chat_model']
-        datasource_model = data['version_details']['datasource_settings']['chat']['embedding_model']
-        temperature = data['version_details']['datasource_settings']['chat']['temperature']
-        top_p = data['version_details']['datasource_settings']['chat']['top_p']
-        top_k = data['version_details']['datasource_settings']['chat']['top_k']
-        max_length = data['version_details']['datasource_settings']['chat']['max_length']
-        stream = data['version_details']['datasource_settings']['chat'].get('stream', True)
-        cut_off_score = data['version_details']['datasource_settings']['chat'].get('cut_off_score', 0.5)
-        page_top_k = data['version_details']['datasource_settings']['chat'].get('page_top_k', 5)
-        fetch_k = data['version_details']['datasource_settings']['chat'].get('fetch_k', 30)
-        embedding_k = data['version_details']['datasource_settings']['chat'].get('embedding_k', 5)
-        datasource_settings = {
-            "embedding_integration_uid": datasource_model['integration_uid'],
-            "embedding_model_name": datasource_model['model_name'],
-            "cut_off_score": cut_off_score,
-            "page_top_k": page_top_k,
-            "fetch_k": fetch_k,
-            "top_k": embedding_k
-        }
-        datasource_predict_settings = {
-            "ai_integration_uid": ai_model["integration_uid"],
-            "ai_model_name": ai_model["model_name"],
-            "temperature": temperature,
-            "top_p": top_p,
-            "top_k": top_k,
-            "max_length": max_length,
-            "stream": stream,
-        }
-        return AlitaDataSource(self, datasource_id,datasource_settings, datasource_predict_settings)
+        datasource_model = data['version_details']['datasource_settings']['chat']['chat_settings_embedding']
+        chat_model = data['version_details']['datasource_settings']['chat']['chat_settings_ai']
+        return AlitaDataSource(self, datasource_id, datasource_model, chat_model)
     
     
     def assistant(self, prompt_id: int, prompt_version_id: int, 
@@ -248,8 +222,9 @@ class AlitaClient:
         try:
             response_data = response.json()
             response_messages = []
+            print(response_data['messages'])
             for message in response_data['messages']:
-                if message.get('role') == 'user':
+                if message.get('type') == 'user':
                     response_messages.append(HumanMessage(content=message['content']))
                 else:
                     response_messages.append(AIMessage(content=message['content']))
@@ -283,12 +258,8 @@ class AlitaClient:
                     "content": user_input
                 }
             ],
-            "embedding_integration_uid": datasource_settings['embedding_integration_uid'],
-            "embedding_model_name": datasource_settings['embedding_model_name'],
-            "cut_off_score": datasource_settings["cut_off_score"],
-            "page_top_k": datasource_settings["page_top_k"],
-            "fetch_k": datasource_settings["fetch_k"],
-            "top_k": datasource_settings["top_k"]
+            "chat_settings_embedding": datasource_settings,
+            "str_content": True
         }
         headers = self.headers | {"Content-Type": "application/json"}
         response = requests.post(f"{self.datasources_search}/{datasource_id}", headers=headers, json=data).json()
