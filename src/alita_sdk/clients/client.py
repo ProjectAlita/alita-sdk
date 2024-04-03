@@ -2,6 +2,7 @@ import logging
 import requests
 from typing import Dict, List, Any, Optional
 from jinja2 import Environment, DebugUndefined, meta
+from langchain_core.pydantic_v1 import BaseModel, Field
 
 from langchain_core.messages import (
     AIMessage,
@@ -54,10 +55,12 @@ class Jinja2TemplatedChatMessagesTemplate(ChatPromptTemplate):
         return result
     
 
-    
 class AlitaDataSource:
-    def __init__(self, alita:Any, datasource_id:int, datasource_settings, datasource_predict_settings):
+    def __init__(self, alita:Any, datasource_id:int, name:str, description: str,
+                 datasource_settings, datasource_predict_settings):
         self.alita = alita
+        self.name = name
+        self.description = description
         self.datasource_id = datasource_id
         self.datasource_settings = datasource_settings
         self.datasource_predict_settings = datasource_predict_settings
@@ -72,6 +75,26 @@ class AlitaDataSource:
         return self.alita.search(self.datasource_id, [HumanMessage(content=query)], 
                                   self.datasource_settings)
         
+
+class AlitaPrompt:
+    def __init__(self, alita:Any, prompt: ChatPromptTemplate, name:str, description: str, llm_settings: dict):
+        self.alita = alita
+        self.prompt = prompt
+        self.name = name
+        self.llm_settings = llm_settings
+        self.description = description
+    
+    def create_pydantic_model(self):
+        class Model(BaseModel):
+            input: str
+        return Model
+    
+    def predict(self, input: str, variables: dict={}):
+        messages = [SystemMessage(content=self.prompt.messages[0].content), HumanMessage(content=input)]
+        result = []
+        for message in self.alita.predict(messages, self.llm_settings, variables=variables):
+            result.append(message.content)
+        return "\n\n".join(result)
 
 
 class Assistant:
@@ -119,9 +142,10 @@ class AlitaClient:
         self.datasources_predict = f"{self.base_url}/api/v1/datasources/predict/prompt_lib/{self.project_id}"
         self.datasources_search = f"{self.base_url}/api/v1/datasources/search/prompt_lib/{self.project_id}"
 
-    def prompt(self, prompt_id, prompt_version_id, chat_history=None):
+    def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
         data = requests.get(url, headers=self.headers).json()
+        model_settings = data['model_settings']
         messages = [SystemMessage(content=data['context'])]
         variables = {}
         if data['messages']:
@@ -145,14 +169,21 @@ class AlitaClient:
             template.input_variables = input_variables
         if variables:
             template.partial_variables = variables
-        return template
+        if not return_tool:
+            return template
+        else:
+            url = f"{self.prompts}/{prompt_id}"
+            data = requests.get(url, headers=self.headers).json()
+            return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
+
 
     def datasource(self, datasource_id:int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"
         data = requests.get(url, headers=self.headers).json()
         datasource_model = data['version_details']['datasource_settings']['chat']['chat_settings_embedding']
         chat_model = data['version_details']['datasource_settings']['chat']['chat_settings_ai']
-        return AlitaDataSource(self, datasource_id, datasource_model, chat_model)
+        return AlitaDataSource(self, datasource_id, data["name"], data["description"],
+                               datasource_model, chat_model)
     
     
     def assistant(self, prompt_id: int, prompt_version_id: int, 

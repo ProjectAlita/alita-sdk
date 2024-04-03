@@ -58,10 +58,14 @@ Running Tool:
 """
         if action:
             if action == 'complete_task':
+                
                 try:
-                    return AgentFinish({"output": tool_input[list(tool_input.keys())[0]]}, log=log)
+                    output = tool_input[list(tool_input.keys())[0]]
                 except AttributeError:
-                    return AgentFinish({"output": tool_input}, log=log)  
+                    output = tool_input
+                if output.strip() == "final_answer":
+                    output = txt
+                return AgentFinish({"output": output}, log=log)  
             return AgentAction(action, tool_input, log)
         elif txt:
             return AgentFinish({"output": txt}, log=log)
