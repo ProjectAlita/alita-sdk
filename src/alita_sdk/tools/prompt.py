@@ -9,8 +9,6 @@ class Prompt(BaseTool):
     description: str
     prompt: AlitaPrompt
     
-    def _run(self, input, **kwargs):
-        if not kwargs:
-            return self.prompt.predict(input=input)
-        return self.prompt.predict(input=input, variables=kwargs)
+    def _run(self, **kwargs):
+        return self.prompt.predict(variables=kwargs)
     

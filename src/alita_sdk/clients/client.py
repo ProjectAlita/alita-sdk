@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 from ..agents import create_mixed_agent
 from ..agents.alita_openai import AlitaAssistantRunnable
 
+from pydantic import create_model
+
 class Jinja2TemplatedChatMessagesTemplate(ChatPromptTemplate):
     
     def _resolve_variables(self, message:BaseMessage, kwargs:Dict) -> BaseMessage:
@@ -85,14 +87,25 @@ class AlitaPrompt:
         self.description = description
     
     def create_pydantic_model(self):
-        class Model(BaseModel):
-            input: str
-        return Model
+        fields = {}
+        for variable in self.prompt.input_variables:
+            fields[variable] = (str, None)
+        if "input" not in list(fields.keys()):
+            fields["input"] = (str, None)
+        return create_model("PromptVariables", **fields)
+        
     
-    def predict(self, input: str, variables: dict={}):
+    def predict(self, variables: dict={}):
+        input = variables.pop("input", None)
+        alita_vars = []
+        for key, value in variables.items():
+            alita_vars.append({
+                "name": key,
+                "value": value
+            })
         messages = [SystemMessage(content=self.prompt.messages[0].content), HumanMessage(content=input)]
         result = []
-        for message in self.alita.predict(messages, self.llm_settings, variables=variables):
+        for message in self.alita.predict(messages, self.llm_settings, variables=alita_vars):
             result.append(message.content)
         return "\n\n".join(result)
 

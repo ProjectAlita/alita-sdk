@@ -1,10 +1,8 @@
 from ..clients.client import AlitaDataSource
 from langchain.tools import BaseTool
-from langchain.pydantic_v1 import BaseModel, Field
-from typing import AnyStr
+from langchain.pydantic_v1 import create_model
 
-class DatasourceToolSchema(BaseModel):
-    query: AnyStr = Field(description="The query to run against the datasource.")
+datasourceToolSchema = create_model("datasourceSchema", query = (str, None))
 
 class DatasourcePredict(BaseTool):
     name: str
