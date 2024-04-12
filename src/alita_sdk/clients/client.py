@@ -13,11 +13,14 @@ from langchain_core.messages import (
 )
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.agents import  AgentExecutor
+from langchain_core.utils.function_calling import convert_to_openai_function
 
 logger = logging.getLogger(__name__)
 from ..agents import create_mixed_agent
 from ..agents.alita_openai import AlitaAssistantRunnable
-
+from ..toolkits.prompt import PromptToolkit
+from ..toolkits.datasource import DatasourcesToolkit
+from alita_tools.openapi import AlitaOpenAPIToolkit
 from pydantic import create_model
 
 class Jinja2TemplatedChatMessagesTemplate(ChatPromptTemplate):
@@ -154,6 +157,8 @@ class AlitaClient:
         self.datasources = f"{self.base_url}/api/v1/datasources/datasource/prompt_lib/{self.project_id}"
         self.datasources_predict = f"{self.base_url}/api/v1/datasources/predict/prompt_lib/{self.project_id}"
         self.datasources_search = f"{self.base_url}/api/v1/datasources/search/prompt_lib/{self.project_id}"
+        self.application_versions = f"{self.base_url}/api/v1/applications/version/prompt_lib/{self.project_id}"
+        
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -189,6 +194,55 @@ class AlitaClient:
             data = requests.get(url, headers=self.headers).json()
             return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
 
+    
+    def application(self, client: Any, application_id:int, application_version_id:int):
+        url = f"{self.application_versions}/{application_id}/{application_version_id}"
+        data = requests.get(url, headers=self.headers).json()
+        messages = [SystemMessage(content=data['instructions'])]
+        variables = {}
+        input_variables = []
+        for variable in data['variables']:
+            print(variable)
+            if variable['value'] != "":
+                variables[variable['name']] = variable['value']
+            else:
+                input_variables.append(variable['name'])
+        template = Jinja2TemplatedChatMessagesTemplate(messages=messages)
+        if input_variables and not variables:
+            template.input_variables = input_variables
+        if variables:
+            template.partial_variables = variables
+        if input_variables:
+            prompt_type = 'react'
+        else:
+            prompt_type = 'openai'
+        prompts = []
+        tools = []
+        for tool in data['tools']:
+            if tool['type'] == 'prompt':
+                prompts.append([tool['settings']['prompt_id'], tool['settings']['prompt_version_id']])
+            elif tool['type'] == 'datasource':
+                tools += DatasourcesToolkit.get_toolkit(self, [tool['settings']['datasource_id']], tool['settings']['selected_tools']).get_tools()
+            elif tool['type'] == 'openapi':
+                headers = {}
+                if tool['settings'].get('authentication'):
+                    if tool['settings']['authentication']['type'] == 'api_key': 
+                        auth_type = tool['settings']['authentication']['settings']['auth_type']
+                        auth_key = tool["settings"]["authentication"]["settings"]["api_key"]
+                        if auth_type.lower() == 'bearer':
+                            headers['Authorization'] = f'Bearer {auth_key}'
+                        if auth_type.lower() == 'basic':
+                            headers['Authorization'] = f'Basic {auth_key}'
+                        if auth_type.lower() == 'custom':
+                            headers[tool["settings"]["authentication"]["settings"]["custom_header_name"]] = f'{auth_key}'  
+                tools += AlitaOpenAPIToolkit.get_toolkit(tool['settings']['schema_settings'], headers={}).get_tools()
+        if len(prompts) > 0:
+            tools += PromptToolkit.get_toolkit(self, prompts).get_tools() 
+        if prompt_type == 'openai':
+            open_ai_funcs = [convert_to_openai_function(t) for t in tools]
+            return Assistant(client, template, tools, open_ai_funcs).getOpenAIAgentExecutor()
+        else:
+            return Assistant(client, template, tools).getAgentExecutor()
 
     def datasource(self, datasource_id:int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"
@@ -197,7 +251,6 @@ class AlitaClient:
         chat_model = data['version_details']['datasource_settings']['chat']['chat_settings_ai']
         return AlitaDataSource(self, datasource_id, data["name"], data["description"],
                                datasource_model, chat_model)
-    
     
     def assistant(self, prompt_id: int, prompt_version_id: int, 
                   tools: list, openai_tools: Optional[Dict]=None, 
@@ -309,4 +362,3 @@ class AlitaClient:
         response = requests.post(f"{self.datasources_search}/{datasource_id}", headers=headers, json=data).json()
         content = "\n\n".join([finding["page_content"] for finding in response["findings"]])
         return AIMessage(content=content, additional_kwargs={"references": response['references']})
-        

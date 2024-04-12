@@ -1,4 +1,4 @@
-from ..clients.client import AlitaDataSource
+from typing import Any
 from langchain.tools import BaseTool
 from langchain.pydantic_v1 import create_model
 
@@ -7,7 +7,7 @@ datasourceToolSchema = create_model("datasourceSchema", query = (str, None))
 class DatasourcePredict(BaseTool):
     name: str
     description: str
-    datasource: AlitaDataSource
+    datasource: Any
     
     def _run(self, query):
         result = self.datasource.predict(query)
@@ -17,7 +17,7 @@ class DatasourcePredict(BaseTool):
 class DatasourceSearch(BaseTool):
     name: str
     description: str
-    datasource: AlitaDataSource
+    datasource: Any
     
     def _run(self, query):
         result = self.datasource.search(query)
