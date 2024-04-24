@@ -195,7 +195,7 @@ class AlitaClient:
             return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
 
     
-    def application(self, client: Any, application_id:int, application_version_id:int):
+    def application(self, client: Any, application_id:int, application_version_id:int, tools: Optional[list] = []):
         url = f"{self.application_versions}/{application_id}/{application_version_id}"
         data = requests.get(url, headers=self.headers).json()
         messages = [SystemMessage(content=data['instructions'])]
@@ -217,12 +217,11 @@ class AlitaClient:
         else:
             prompt_type = 'openai'
         prompts = []
-        tools = []
         for tool in data['tools']:
             if tool['type'] == 'prompt':
                 prompts.append([tool['settings']['prompt_id'], tool['settings']['prompt_version_id']])
             elif tool['type'] == 'datasource':
-                tools += DatasourcesToolkit.get_toolkit(self, [tool['settings']['datasource_id']], tool['settings']['selected_tools']).get_tools()
+                tools += DatasourcesToolkit.get_toolkit(self, [tool['settings']['datasource_id']], tool['settings']['actions']).get_tools()
             elif tool['type'] == 'openapi':
                 headers = {}
                 if tool['settings'].get('authentication'):
