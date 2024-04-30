@@ -1,12 +1,12 @@
-
 import logging
 import json
 import re
 
 logger = logging.getLogger(__name__)
 
-def unpack_json(json_data, message_key=None):
-    if (isinstance(json_data, str)):
+
+def unpack_json(json_data: str | dict, message_key=None):
+    if isinstance(json_data, str):
         if '```json' in json_data:
             pattern = r'```json(.*)```'
             matches = re.findall(pattern, json_data, re.DOTALL)
@@ -19,13 +19,13 @@ def unpack_json(json_data, message_key=None):
                 return res
             except IndexError:
                 logger.error(f"Error in unpacking json: {json_data}")
-                raise ValueError("Wrong type of json_data")        
+                raise ValueError("Wrong type of json_data")
         try:
             return json.loads(json_data)
-        except json.decoder.JSONDecodeError:
+        except json.decoder.JSONDecodeError as e:
             logger.error(f"Error in unpacking json: {json_data}")
-            raise json.decoder.JSONDecodeError(f"Error in unpacking json: {json_data}")
-    elif (isinstance(json_data, dict)):
+            raise e
+    elif isinstance(json_data, dict):
         return json_data
     else:
         raise ValueError("Wrong type of json_data")
