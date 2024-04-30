@@ -45,7 +45,11 @@ class MaxRetriesExceededError(Exception):
         self.message = message
         super().__init__(self.message)
 
+
 class AlitaChatModel(BaseChatModel):
+    class Config:
+        allow_population_by_field_name = True
+
     client: Any  #: :meta private:
     encoding: Any  #: :meta private:
     model_name: str = Field(default="gpt-3.5-turbo", alias="model")
