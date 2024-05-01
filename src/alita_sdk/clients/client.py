@@ -1,5 +1,6 @@
 import logging
 import requests
+from importlib import import_module
 from typing import Dict, List, Any, Optional
 from jinja2 import Environment, DebugUndefined, meta
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -19,7 +20,10 @@ from ..agents import create_mixed_agent
 from ..agents.alita_openai import AlitaAssistantRunnable
 from ..toolkits.prompt import PromptToolkit
 from ..toolkits.datasource import DatasourcesToolkit
+from alita_tools.github import AlitaGitHubToolkit
 from alita_tools.openapi import AlitaOpenAPIToolkit
+from alita_tools.jira import JiraToolkit
+from alita_tools.confluence import ConfluenceToolkit
 from pydantic import create_model
 
 logger = logging.getLogger(__name__)
@@ -253,6 +257,48 @@ class AlitaClient:
                     selected_tools=tool['settings'].get('selected_tools', []),
                     headers={}
                 ).get_tools())
+            elif tool['type'] == 'github':
+                github_toolkit = AlitaGitHubToolkit().get_toolkit(
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    github_repository=tool['settings']['repository'],
+                    active_branch=tool['settings']['active_branch'],
+                    github_base_branch=tool['settings']['base_branch'],
+                    github_access_token=tool['settings'].get('access_token', None),
+                )
+                tools.extend(github_toolkit.get_tools())
+            elif tool['type'] == 'jira':
+                jira_tools = JiraToolkit().get_toolkit(
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    base_url=tool['settings']['base_url'], 
+                    cloud=tool['settings'].get('cloud', True),
+                    api_key=tool['settings'].get('api_key', None),
+                    username=tool['settings'].get('username', None),
+                    token=tool['settings'].get('token', None),
+                    limit=tool['settings'].get('limit', 5),
+                    additional_fields=tool['settings'].get('additional_fields', []),
+                    verify_ssl=tool['settings'].get('verify_ssl', True))
+                tools.extend(jira_tools.get_tools())
+            elif tool['type'] == 'confluence':
+                confluence_tools = ConfluenceToolkit().get_toolkit(
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    base_url=tool['settings']['base_url'],
+                    cloud=tool['settings'].get('cloud', True),
+                    api_key=tool['settings'].get('api_key', None),
+                    username=tool['settings'].get('username', None),
+                    token=tool['settings'].get('token', None),
+                    limit=tool['settings'].get('limit', 5),
+                    additional_fields=tool['settings'].get('additional_fields', []),
+                    verify_ssl=tool['settings'].get('verify_ssl', True))
+                tools.extend(confluence_tools.get_tools())
+            else:
+                if tool.get("module"):
+                    try:
+                        mod = import_module(tool.get("module"))
+                        tkitclass = getattr(mod, tool.get("class"))
+                        toolkit = tkitclass.get_toolkit(**tool["settings"])
+                        tools.extend(toolkit.get_tools())
+                    except Exception as e:
+                        logger.error(f"Error in getting toolkit: {e}")
         if len(prompts) > 0:
             tools += PromptToolkit.get_toolkit(self, prompts).get_tools()
         if prompt_type == 'openai':
