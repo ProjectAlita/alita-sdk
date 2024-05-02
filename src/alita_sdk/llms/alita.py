@@ -18,6 +18,8 @@
 #
 
 import logging
+import requests
+from time import sleep
 from traceback import format_exc
 
 from typing import Any, List, Optional, AsyncIterator, Dict, Iterator, Mapping, Type
@@ -171,6 +173,13 @@ class AlitaChatModel(BaseChatModel):
     def completion_with_retry(self, messages, retry_count=0):
         try:
             return self.client.predict(messages, self._get_model_default_parameters)
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"ERROR: Error in completion_with_retry: {e}, retry_count: {retry_count}")
+            sleep(60)
+            if retry_count >= self.max_retries:
+                logger.error(f"ERROR: Retry count exceeded: {format_exc()}")
+                raise MaxRetriesExceededError(format_exc())
+            return self.completion_with_retry(messages, retry_count+1)
         except Exception as e:
             logger.error(f"ERROR: Error in completion_with_retry: {e}, retry_count: {retry_count}")
             if retry_count >= self.max_retries:
