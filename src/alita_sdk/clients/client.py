@@ -20,10 +20,12 @@ from ..agents import create_mixed_agent
 from ..agents.alita_openai import AlitaAssistantRunnable
 from ..toolkits.prompt import PromptToolkit
 from ..toolkits.datasource import DatasourcesToolkit
+from ..toolkits.application import ApplicationToolkit
 from alita_tools.github import AlitaGitHubToolkit
 from alita_tools.openapi import AlitaOpenAPIToolkit
 from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
+from alita_tools.browser import BrowserToolkit
 from pydantic import create_model
 
 logger = logging.getLogger(__name__)
@@ -167,6 +169,7 @@ class AlitaClient:
         self.datasources = f"{self.base_url}{self.api_path}/datasources/datasource/prompt_lib/{self.project_id}"
         self.datasources_predict = f"{self.base_url}{self.api_path}/datasources/predict/prompt_lib/{self.project_id}"
         self.datasources_search = f"{self.base_url}{self.api_path}/datasources/search/prompt_lib/{self.project_id}"
+        self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
@@ -203,6 +206,11 @@ class AlitaClient:
             data = requests.get(url, headers=self.headers).json()
             return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
 
+    def get_app_details(self, application_id: int):
+        url = f"{self.app}/{application_id}"
+        data = requests.get(url, headers=self.headers).json()
+        return data
+        
     def application(self, client: Any, application_id: int, application_version_id: int, tools: Optional[list] = None):
         if tools is None:
             tools = []
@@ -238,6 +246,13 @@ class AlitaClient:
                     self,
                     datasource_ids=[int(tool['settings']['datasource_id'])],
                     selected_tools=tool['settings']['selected_tools']
+                ).get_tools())
+            elif tool['type'] == 'application':
+                tools.extend(ApplicationToolkit.get_toolkit(
+                    self,
+                    application_id=int(tool['settings']['application_id']),
+                    application_version_id=int(tool['settings']['application_version_id']),
+                    selected_tools=[]
                 ).get_tools())
             elif tool['type'] == 'openapi':
                 headers = {}
@@ -290,6 +305,12 @@ class AlitaClient:
                     additional_fields=tool['settings'].get('additional_fields', []),
                     verify_ssl=tool['settings'].get('verify_ssl', True))
                 tools.extend(confluence_tools.get_tools())
+            elif tool['type'] == 'browser':
+                browser_tools = BrowserToolkit().get_toolkit(
+                    google_api_key=tool['settings'].get('google_api_key'), 
+                    google_cse_id=tool['settings'].get("google_cse_id")
+                )
+                tools.extend(browser_tools.get_tools())
             else:
                 if tool.get("module"):
                     try:
