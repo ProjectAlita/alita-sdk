@@ -23,6 +23,7 @@ def format_log_to_str(
     """Construct the scratchpad that lets the agent continue its thought process."""
     thoughts = ""
     for action, result in intermediate_steps:
+        thoughts += "Tool: " + action.tool + " PARAMS of tool: " + str(action.tool_input) + "\n"
         thoughts += action.log
         thoughts += f"\nTool Result:\n{result}"
     return thoughts
