@@ -2,7 +2,7 @@ import re
 import json
 from typing import Union
 
-from langchain_core.agents import AgentAction, AgentFinish
+from langchain_core.agents import AgentAction, AgentFinish, AgentStep
 from langchain_core.exceptions import OutputParserException
 
 from langchain.agents.agent import AgentOutputParser
@@ -43,7 +43,7 @@ class MixedAgentOutputParser(AgentOutputParser):
             text.replace("\n", "\\n")
             response = unpack_json(text)
         if not isinstance(response, dict):
-            raise UnexpectedResponseError(f'Could not parse response: {response}')
+            return AgentFinish({"output": f'Could not parse response: {response}'}, log=response)
         tool: dict | str = response.get("tool", {})
         if isinstance(tool, dict):
             action: str | None = tool.get("name")
@@ -55,7 +55,7 @@ class MixedAgentOutputParser(AgentOutputParser):
             raise UnexpectedResponseError(f'Unexpected response {response}')
         thoughts = response.get("thoughts", {})
         if not isinstance(thoughts, dict):
-            raise UnexpectedResponseError(f'Unexpected response {response}')
+            return AgentFinish({"output": f'Unexpected Format: {response}'}, log=response)
         plan: list | str = thoughts.get("plan", [])
         if isinstance(plan, list):
             plan: str = "\n".join(plan)

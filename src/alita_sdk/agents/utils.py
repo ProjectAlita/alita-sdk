@@ -19,12 +19,12 @@ def unpack_json(json_data: str | dict, message_key=None):
                 return res
             except IndexError:
                 logger.error(f"Error in unpacking json: {json_data}")
-                raise ValueError("Wrong type of json_data")
+                return json_data
         try:
             return json.loads(json_data)
         except json.decoder.JSONDecodeError as e:
             logger.error(f"Error in unpacking json: {json_data}")
-            raise e
+            return json_data
     elif isinstance(json_data, dict):
         return json_data
     else:
