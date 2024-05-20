@@ -252,6 +252,7 @@ class AlitaClient:
                     self,
                     application_id=int(tool['settings']['application_id']),
                     application_version_id=int(tool['settings']['application_version_id']),
+                    app_api_key=tool['settings']['api_key'],
                     selected_tools=[]
                 ).get_tools())
             elif tool['type'] == 'openapi':

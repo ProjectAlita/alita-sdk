@@ -7,9 +7,24 @@ class ApplicationToolkit(BaseToolkit):
     tools: List[BaseTool] = []
     
     @classmethod
-    def get_toolkit(cls, client: Any, application_id: list[int], application_version_id: list[int], selected_tools: list[str] = [] ):
+    def get_toolkit(cls, client: Any, application_id: int, application_version_id: int, app_api_key: str, selected_tools: list[str] = [] ):
+        from ..llms.alita import AlitaChatModel
+        
+        
         app_details = client.get_app_details(application_id)
-        app = client.application(application_id, application_version_id)
+        settings = {
+            "deployment": "https://eye.projectalita.ai",
+            "model": "gpt-4-0125-preview",
+            "api_key": app_api_key,
+            "project_id": client.project_id,
+            "integration_uid": settings['llm_settings']['integration_uid'],
+            "max_tokens": settings['llm_settings']['max_tokens'],
+            "top_p": settings['llm_settings']['top_p'],
+            "top_k": settings['llm_settings']['top_k'],
+            "temperature": settings['llm_settings']['temperature'],
+        }
+
+        app = client.application(AlitaChatModel(**settings), application_id, application_version_id)
         return cls(tools=[Application(name=app_details.get("name"), description=app_details.get("description"), appliacation=app, args_schema=applicationToolSchema)])
             
     def get_tools(self):
