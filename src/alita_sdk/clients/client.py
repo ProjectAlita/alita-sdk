@@ -278,7 +278,9 @@ class AlitaClient:
                     github_repository=tool['settings']['repository'],
                     active_branch=tool['settings']['active_branch'],
                     github_base_branch=tool['settings']['base_branch'],
-                    github_access_token=tool['settings'].get('access_token', None),
+                    github_access_token=tool['settings'].get('access_token', ''),
+                    github_username=tool['settings'].get('username', ''),
+                    github_password=tool['settings'].get('password', '')
                 )
                 tools.extend(github_toolkit.get_tools())
             elif tool['type'] == 'jira':
