@@ -210,12 +210,16 @@ class AlitaClient:
         url = f"{self.app}/{application_id}"
         data = requests.get(url, headers=self.headers).json()
         return data
+
+    def get_app_version_details(self, application_id: int, application_version_id:int):
+        url = f"{self.application_versions}/{application_id}/{application_version_id}"
+        data = requests.get(url, headers=self.headers).json()
+        return data
         
     def application(self, client: Any, application_id: int, application_version_id: int, tools: Optional[list] = None):
         if tools is None:
             tools = []
-        url = f"{self.application_versions}/{application_id}/{application_version_id}"
-        data = requests.get(url, headers=self.headers).json()
+        data = self.get_app_version_details(application_id, application_version_id)
         messages = [SystemMessage(content=data['instructions'])]
         variables = {}
         input_variables = []

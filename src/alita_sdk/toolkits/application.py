@@ -12,16 +12,17 @@ class ApplicationToolkit(BaseToolkit):
         
         
         app_details = client.get_app_details(application_id)
+        version_details = client.get_app_version_details(application_id, application_version_id)
         settings = {
             "deployment": "https://eye.projectalita.ai",
             "model": "gpt-4-0125-preview",
             "api_key": app_api_key,
             "project_id": client.project_id,
-            "integration_uid": settings['llm_settings']['integration_uid'],
-            "max_tokens": settings['llm_settings']['max_tokens'],
-            "top_p": settings['llm_settings']['top_p'],
-            "top_k": settings['llm_settings']['top_k'],
-            "temperature": settings['llm_settings']['temperature'],
+            "integration_uid": version_details['llm_settings']['integration_uid'],
+            "max_tokens": version_details['llm_settings']['max_tokens'],
+            "top_p": version_details['llm_settings']['top_p'],
+            "top_k": version_details['llm_settings']['top_k'],
+            "temperature": version_details['llm_settings']['temperature'],
         }
 
         app = client.application(AlitaChatModel(**settings), application_id, application_version_id)
