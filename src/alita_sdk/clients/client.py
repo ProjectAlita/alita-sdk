@@ -26,6 +26,7 @@ from alita_tools.openapi import AlitaOpenAPIToolkit
 from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
 from alita_tools.browser import BrowserToolkit
+from alita_tools.zephyr import ZephyrToolkit
 from pydantic import create_model
 from .constants import REACT_ADDON
 
@@ -349,6 +350,17 @@ class AlitaClient:
                     google_cse_id=tool['settings'].get("google_cse_id")
                 )
                 tools.extend(browser_tools.get_tools())
+            elif tool['type'] == 'zephyr':
+                zephyr_tools = ZephyrToolkit().get_toolkit(
+                    version=tool['settings'].get('version', 1),
+                    base_url=tool['settings'].get('base_url'),
+                    base_path=tool['settings'].get('base_path'),
+                    access_key=tool['settings'].get('access_key'),
+                    secret_key=tool['settings'].get('secret_key'),
+                    account_id=tool['settings'].get('account_id'),
+                    access_token=tool['settings'].get('access_token')
+                )
+                tools.extend(zephyr_tools.get_tools())
             else:
                 if tool.get("module"):
                     try:
