@@ -27,6 +27,7 @@ from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
 from alita_tools.browser import BrowserToolkit
 from pydantic import create_model
+from .constants import REACT_ADDON
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,8 @@ class AlitaClient:
         self.datasources_search = f"{self.base_url}{self.api_path}/datasources/search/prompt_lib/{self.project_id}"
         self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
+        self.integration_details = f"{self.base_url}{self.api_path}/integrations/integration/{self.project_id}"
+        self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/prompt_lib/{self.project_id}"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -216,10 +219,38 @@ class AlitaClient:
         data = requests.get(url, headers=self.headers).json()
         return data
         
+    def get_integration_details(self, integration_id: str, format_for_model: bool = False):
+        url = f"{self.integration_details}/{integration_id}"
+        data = requests.get(url, headers=self.headers).json()
+        return data
+
+    def unsecret(self, secret_name: str):
+        url = f"{self.secrets_url}/{secret_name}"
+        data = requests.get(url, headers=self.headers).json()
+        return data.get("secret", None)
+    
     def application(self, client: Any, application_id: int, application_version_id: int, tools: Optional[list] = None):
         if tools is None:
             tools = []
         data = self.get_app_version_details(application_id, application_version_id)
+        app_type = data.get("agent_type", "raw")
+        if app_type == "react":
+            data['instructions'] += REACT_ADDON
+        elif app_type == "openai":
+            integration_details = self.get_integration_details(data['llm_settings']['integration_uid'])
+            if integration_details['settings']['api_token']['from_secrets']:
+                api_key = self.unsecret(integration_details['settings']['api_token']['value'].slit('.')[1][:-2])
+            from langchain_community.chat_models.azure_openai import AzureChatOpenAI
+            llm_client = AzureChatOpenAI(
+                azure_endpoint=integration_details['settings']['api_base'],
+                deployment_name=data['llm_settings']['model_name'],
+                openai_api_version=integration_details['settings']['api_version'],
+                openai_api_key=api_key,
+                temperature=data['llm_settings']['temperature'],
+                max_tokens=data['llm_settings']['max_tokens'],
+                top_p=data['llm_settings']['top_p'],
+                top_k=data['llm_settings']['top_k']
+            )
         messages = [SystemMessage(content=data['instructions'])]
         variables = {}
         input_variables = []
@@ -331,7 +362,7 @@ class AlitaClient:
             tools += PromptToolkit.get_toolkit(self, prompts).get_tools()
         if prompt_type == 'openai':
             open_ai_funcs = [convert_to_openai_function(t) for t in tools]
-            return Assistant(client, template, tools, open_ai_funcs).getOpenAIAgentExecutor()
+            return Assistant(llm_client, template, tools, open_ai_funcs).getOpenAIAgentExecutor()
         else:
             return Assistant(client, template, tools).getAgentExecutor()
 
