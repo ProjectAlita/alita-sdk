@@ -29,3 +29,5 @@ REACT_ADDON = """
 }
 You must answer with only JSON and it could be parsed by Python json.loads
 """
+
+REACT_VARS = ["tool_names", "tools", "agent_scratchpad", "chat_history", "input"]

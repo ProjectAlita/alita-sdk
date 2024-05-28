@@ -1,6 +1,7 @@
 import logging
 import requests
 from importlib import import_module
+from os import environ
 from typing import Dict, List, Any, Optional
 from jinja2 import Environment, DebugUndefined, meta
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -27,7 +28,7 @@ from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
 from alita_tools.browser import BrowserToolkit
 from pydantic import create_model
-from .constants import REACT_ADDON
+from .constants import REACT_ADDON, REACT_VARS
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,7 @@ class AlitaClient:
         self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
         self.integration_details = f"{self.base_url}{self.api_path}/integrations/integration/{self.project_id}"
-        self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/prompt_lib/{self.project_id}"
+        self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/{self.project_id}"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -227,7 +228,7 @@ class AlitaClient:
     def unsecret(self, secret_name: str):
         url = f"{self.secrets_url}/{secret_name}"
         data = requests.get(url, headers=self.headers).json()
-        return data.get("secret", None)
+        return data.get('secret', None)
     
     def application(self, client: Any, application_id: int, application_version_id: int, tools: Optional[list] = None):
         if tools is None:
@@ -236,39 +237,21 @@ class AlitaClient:
         app_type = data.get("agent_type", "raw")
         if app_type == "react":
             data['instructions'] += REACT_ADDON
-        elif app_type == "openai":
-            integration_details = self.get_integration_details(data['llm_settings']['integration_uid'])
-            if integration_details['settings']['api_token']['from_secrets']:
-                api_key = self.unsecret(integration_details['settings']['api_token']['value'].slit('.')[1][:-2])
-            from langchain_community.chat_models.azure_openai import AzureChatOpenAI
-            llm_client = AzureChatOpenAI(
-                azure_endpoint=integration_details['settings']['api_base'],
-                deployment_name=data['llm_settings']['model_name'],
-                openai_api_version=integration_details['settings']['api_version'],
-                openai_api_key=api_key,
-                temperature=data['llm_settings']['temperature'],
-                max_tokens=data['llm_settings']['max_tokens'],
-                top_p=data['llm_settings']['top_p'],
-                top_k=data['llm_settings']['top_k']
-            )
         messages = [SystemMessage(content=data['instructions'])]
         variables = {}
         input_variables = []
         for variable in data['variables']:
-            print(variable)
             if variable['value'] != "":
                 variables[variable['name']] = variable['value']
             else:
                 input_variables.append(variable['name'])
+        if app_type == "react":
+            input_variables = list(set(input_variables + REACT_VARS))
         template = Jinja2TemplatedChatMessagesTemplate(messages=messages)
         if input_variables and not variables:
             template.input_variables = input_variables
         if variables:
             template.partial_variables = variables
-        if input_variables:
-            prompt_type = 'react'
-        else:
-            prompt_type = 'openai'
         prompts = []
         for tool in data['tools']:
             if tool['type'] == 'prompt':
@@ -360,7 +343,31 @@ class AlitaClient:
                         logger.error(f"Error in getting toolkit: {e}")
         if len(prompts) > 0:
             tools += PromptToolkit.get_toolkit(self, prompts).get_tools()
-        if prompt_type == 'openai':
+        if app_type == "openai":
+            integration_details = self.get_integration_details(data['llm_settings']['integration_uid'])
+            if integration_details['config']['is_shared']:
+                api_key = environ.get('OPENAI_API_KEY')
+            else:
+                api_key = integration_details['settings']['api_token']['value']
+                if integration_details['settings']['api_token']['from_secrets']:
+                    api_key = self.unsecret(integration_details['settings']['api_token']['value'].split('.')[1][:-2])
+            from langchain_openai import AzureChatOpenAI
+            print({
+                "azure_endpoint": 'https://eye.projectalita.ai/llm',
+                "deployment_name": data['llm_settings']['model_name'],
+                "openai_api_version": integration_details['settings']['api_version'],
+                "openai_api_key": api_key,
+                "temperature": data['llm_settings']['temperature'],
+                "max_tokens": data['llm_settings']['max_tokens']
+            })
+            llm_client = AzureChatOpenAI(
+                azure_endpoint='https://eye.projectalita.ai/llm',
+                deployment_name=data['llm_settings']['model_name'],
+                openai_api_version=integration_details['settings']['api_version'],
+                openai_api_key=api_key,
+                temperature=data['llm_settings']['temperature'],
+                max_tokens=data['llm_settings']['max_tokens']
+            )
             open_ai_funcs = [convert_to_openai_function(t) for t in tools]
             return Assistant(llm_client, template, tools, open_ai_funcs).getOpenAIAgentExecutor()
         else:
