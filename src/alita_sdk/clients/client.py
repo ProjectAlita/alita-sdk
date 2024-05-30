@@ -270,7 +270,7 @@ class AlitaClient:
                     self,
                     application_id=int(tool['settings']['application_id']),
                     application_version_id=int(tool['settings']['application_version_id']),
-                    app_api_key=tool['settings']['api_key'],
+                    app_api_key=self.auth_token,
                     selected_tools=[]
                 ).get_tools())
             elif tool['type'] == 'openapi':
@@ -352,14 +352,6 @@ class AlitaClient:
                 if integration_details['settings']['api_token']['from_secrets']:
                     api_key = self.unsecret(integration_details['settings']['api_token']['value'].split('.')[1][:-2])
             from langchain_openai import AzureChatOpenAI
-            print({
-                "azure_endpoint": 'https://eye.projectalita.ai/llm',
-                "deployment_name": data['llm_settings']['model_name'],
-                "openai_api_version": integration_details['settings']['api_version'],
-                "openai_api_key": api_key,
-                "temperature": data['llm_settings']['temperature'],
-                "max_tokens": data['llm_settings']['max_tokens']
-            })
             llm_client = AzureChatOpenAI(
                 azure_endpoint='https://eye.projectalita.ai/llm',
                 deployment_name=data['llm_settings']['model_name'],
