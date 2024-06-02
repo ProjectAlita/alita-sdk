@@ -53,6 +53,7 @@ class AlitaClient:
         self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/{self.project_id}"
         self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/{self.project_id}"
         self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/{self.project_id}"
+        self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
         
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
@@ -275,6 +276,28 @@ class AlitaClient:
         else:
             return data.json()
     
+    
+    def bucket_exists(self, bucket_name):
+        try:
+            resp = self._process_requst(
+                requests.get(f'{self.bucket_url}', headers=self.headers)
+            )
+            for each in resp.get('rows', []):
+                if each['name'] == bucket_name:
+                    return True
+            return False
+        except:
+            return False
+    
+    def create_bucket(self, bucket_name):
+        post_data = {
+            "name":bucket_name,
+            "expiration_measure":"weeks",
+            "expiration_value":"1"
+        }
+        resp = requests.post(f'{self.bucket_url}', headers=self.headers, json=post_data)
+        return self._process_requst(resp)
+        
     
     def list_artifacts(self, bucket_name):
         url = f'{self.artifacts_url}/{bucket_name}'

@@ -27,7 +27,7 @@ print(settings )
 llm = AlitaChatModel(**settings)
 
 
-# print(llm.client.list_artifacts('reports'))
+# print(llm.client.bucket_exists('reports'))
 # print(llm.client.create_artifact('reports', 'test.txt', 'Hello World from Alita SDK'))
 # print(llm.client.list_artifacts('reports'))
 # print(llm.client.download_artifact('reports', 'test.txt'))

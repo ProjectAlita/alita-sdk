@@ -7,6 +7,8 @@ class Artifact:
     def __init__(self, client: Any, bucket_name: str):
         self.client = client
         self.bucket_name = bucket_name
+        if not self.client.bucket_exists(bucket_name):
+            self.client.create_bucket(bucket_name)
     
     def create(self, artifact_name: str, artifact_data: Any):
         return dumps(self.client.create_artifact(self.bucket_name, artifact_name, artifact_data))
