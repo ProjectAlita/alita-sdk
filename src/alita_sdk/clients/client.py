@@ -1,9 +1,9 @@
 import logging
 import requests
+from requests.exceptions import HTTPError
 from importlib import import_module
 from os import environ
 from typing import Dict, List, Any, Optional
-from jinja2 import Environment, DebugUndefined, meta
 from langchain_core.pydantic_v1 import BaseModel, Field
 
 from langchain_core.messages import (
@@ -11,14 +11,10 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
     BaseMessage,
-    ToolMessage
 )
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.agents import AgentExecutor
+
 from langchain_core.utils.function_calling import convert_to_openai_function
 
-from ..agents import create_mixed_agent
-from ..agents.alita_openai import AlitaAssistantRunnable
 from ..toolkits.prompt import PromptToolkit
 from ..toolkits.datasource import DatasourcesToolkit
 from ..toolkits.application import ApplicationToolkit
@@ -27,134 +23,14 @@ from alita_tools.openapi import AlitaOpenAPIToolkit
 from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
 from alita_tools.browser import BrowserToolkit
-from pydantic import create_model
 from .constants import REACT_ADDON, REACT_VARS
+from .assistant import Assistant
+from .prompt import AlitaPrompt
+from .datasource import AlitaDataSource
+from .artifact import Artifact
+from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 
 logger = logging.getLogger(__name__)
-
-
-class Jinja2TemplatedChatMessagesTemplate(ChatPromptTemplate):
-
-    def _resolve_variables(self, message: BaseMessage, kwargs: Dict) -> BaseMessage:
-        environment = Environment(undefined=DebugUndefined)
-        template = environment.from_string(message.content)
-        content = template.render(kwargs)
-        if isinstance(message, SystemMessage):
-            return SystemMessage(content=content)
-        elif isinstance(message, AIMessage):
-            return AIMessage(content=content)
-        elif isinstance(message, HumanMessage):
-            return HumanMessage(content=content)
-        elif isinstance(message, ToolMessage):
-            return ToolMessage(content=content)
-        else:
-            return BaseMessage(content=content)
-
-    def format_messages(self, **kwargs: Any) -> List[BaseMessage]:
-        """Format the chat template into a list of finalized messages.
-
-        Args:
-            **kwargs: keyword arguments to use for filling in template variables
-                      in all the template messages in this chat template.
-
-        Returns:
-            list of formatted messages
-        """
-        kwargs = self._merge_partial_and_user_variables(**kwargs)
-        result = []
-        for message_template in self.messages:
-            if isinstance(message_template, BaseMessage):
-                message = self._resolve_variables(message_template, kwargs)
-                logger.debug(message.content)
-                result.append(message)
-        return result
-
-
-class AlitaDataSource:
-    def __init__(self, alita: Any, datasource_id: int, name: str, description: str,
-                 datasource_settings, datasource_predict_settings):
-        self.alita = alita
-        self.name = name
-        self.description = description
-        self.datasource_id = datasource_id
-        self.datasource_settings = datasource_settings
-        self.datasource_predict_settings = datasource_predict_settings
-
-    def predict(self, user_input: str, chat_history: Optional[list] = None):
-        if chat_history is None:
-            chat_history = []
-        messages = chat_history + [HumanMessage(content=user_input)]
-        return self.alita.rag(self.datasource_id, messages,
-                              self.datasource_settings,
-                              self.datasource_predict_settings)
-
-    def search(self, query: str):
-        return self.alita.search(self.datasource_id, [HumanMessage(content=query)],
-                                 self.datasource_settings)
-
-
-class AlitaPrompt:
-    def __init__(self, alita: Any, prompt: ChatPromptTemplate, name: str, description: str, llm_settings: dict):
-        self.alita = alita
-        self.prompt = prompt
-        self.name = name
-        self.llm_settings = llm_settings
-        self.description = description
-
-    def create_pydantic_model(self):
-        fields = {}
-        for variable in self.prompt.input_variables:
-            fields[variable] = (str, None)
-        if "input" not in list(fields.keys()):
-            fields["input"] = (str, None)
-        return create_model("PromptVariables", **fields)
-
-    def predict(self, variables: Optional[dict] = None):
-        if variables is None:
-            variables = {}
-        user_input = variables.pop("input", '')
-        alita_vars = []
-        for key, value in variables.items():
-            alita_vars.append({
-                "name": key,
-                "value": value
-            })
-        messages = [SystemMessage(content=self.prompt.messages[0].content), HumanMessage(content=user_input)]
-        result = []
-        for message in self.alita.predict(messages, self.llm_settings, variables=alita_vars):
-            result.append(message.content)
-        return "\n\n".join(result)
-
-
-class Assistant:
-    def __init__(self, client: Any, prompt: ChatPromptTemplate, tools: list,
-                 openai_tools: Optional[Dict] = None):
-        self.prompt = prompt
-        self.client = client
-        self.tools = tools
-        self.openai_tools = openai_tools
-
-    def getAgentExecutor(self):
-        agent = create_mixed_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
-        return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
-                                                  verbose=True, handle_parsing_errors=True,
-                                                  max_execution_time=None, return_intermediate_steps=True)
-
-    def getOpenAIAgentExecutor(self):
-        agent = AlitaAssistantRunnable(client=self.client, assistant=self)
-        return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
-                                                  verbose=True, handle_parsing_errors=True,
-                                                  max_execution_time=None,
-                                                  return_intermediate_steps=True)
-
-    # This one is used only in Alita OpenAI
-    def apredict(self, messages: list[BaseMessage]):
-        yield from self.client.ainvoke([self.prompt.messages[0]] + messages, functions=self.openai_tools)
-
-    def predict(self, messages: list[BaseMessage]):
-        response = self.client.invoke([self.prompt.messages[0]] + messages, functions=self.openai_tools)
-        return response
-
 
 class AlitaClient:
     def __init__(self, base_url: str, project_id: int, auth_token: str):
@@ -175,6 +51,9 @@ class AlitaClient:
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
         self.integration_details = f"{self.base_url}{self.api_path}/integrations/integration/{self.project_id}"
         self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/{self.project_id}"
+        self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/{self.project_id}"
+        self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/{self.project_id}"
+        
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -364,7 +243,7 @@ class AlitaClient:
             return Assistant(llm_client, template, tools, open_ai_funcs).getOpenAIAgentExecutor()
         else:
             return Assistant(client, template, tools).getAgentExecutor()
-
+    
     def datasource(self, datasource_id: int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"
         data = requests.get(url, headers=self.headers).json()
@@ -378,7 +257,56 @@ class AlitaClient:
                   client: Optional[Any] = None):
         prompt = self.prompt(prompt_id=prompt_id, prompt_version_id=prompt_version_id)
         return Assistant(client, prompt, tools, openai_tools)
-
+    
+    def artifact(self, bucket_name):
+        return Artifact(self, bucket_name)
+    
+    
+    def _process_requst(self, data):
+        if data.status_code == 403:
+            return { "error": "You are not authorized to access this resource"}
+        elif data.status_code == 404:
+            return { "error": "Resource not found"}
+        elif data.status_code != 200:
+            return { 
+                    "error": "An error occurred while fetching the resource",
+                    "content": data.content
+                    }
+        else:
+            return data.json()
+    
+    
+    def list_artifacts(self, bucket_name):
+        url = f'{self.artifacts_url}/{bucket_name}'
+        data = requests.get(url, headers=self.headers)
+        return self._process_requst(data)
+        
+    def create_artifact(self, bucket_name, artifact_name, artifact_data):
+        url = f'{self.artifacts_url}/{bucket_name}'
+        data = requests.post(url, headers=self.headers, files={
+            'file': (artifact_name , artifact_data)
+        })
+        return self._process_requst(data)
+    
+    def download_artifact(self, bucket_name, artifact_name):
+        url = f'{self.artifact_url}/{bucket_name}/{artifact_name}'
+        data = requests.get(url, headers=self.headers)
+        if data.status_code == 403:
+            return { "error": "You are not authorized to access this resource"}
+        elif data.status_code == 404:
+            return { "error": "Resource not found"}
+        elif data.status_code != 200:
+            return { 
+                    "error": "An error occurred while fetching the resource",
+                    "content": data.content
+                    }
+        return data.content
+        
+    def delete_artifact(self, bucket_name, artifact_name):
+        url = f'{self.artifact_url}/{bucket_name}/{artifact_name}'
+        data = requests.delete(url, headers=self.headers)
+        return self._process_requst(data)
+        
     def _prepare_messages(self, messages: list[BaseMessage]):
         context = ''
         chat_history = []

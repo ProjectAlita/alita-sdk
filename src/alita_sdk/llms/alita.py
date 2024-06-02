@@ -54,7 +54,7 @@ class AlitaChatModel(BaseChatModel):
 
     client: Any  #: :meta private:
     encoding: Any  #: :meta private:
-    model_name: str = Field(default="gpt-3.5-turbo", alias="model")
+    model_name: str = Field(default="gpt-35-turbo", alias="model")
     deployment: str = Field(default="https://eye.projectalita.ai", alias="base_url")
     api_token: str = Field(default=None, alias="api_key")
     project_id: int = None

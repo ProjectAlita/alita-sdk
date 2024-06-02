@@ -10,12 +10,11 @@ class ApplicationToolkit(BaseToolkit):
     def get_toolkit(cls, client: Any, application_id: int, application_version_id: int, app_api_key: str, selected_tools: list[str] = [] ):
         from ..llms.alita import AlitaChatModel
         
-        
         app_details = client.get_app_details(application_id)
         version_details = client.get_app_version_details(application_id, application_version_id)
         settings = {
-            "deployment": "https://eye.projectalita.ai",
-            "model": "gpt-4-0125-preview",
+            "deployment": client.base_url,
+            "model": version_details['llm_settings']['model_name'],
             "api_key": app_api_key,
             "project_id": client.project_id,
             "integration_uid": version_details['llm_settings']['integration_uid'],
