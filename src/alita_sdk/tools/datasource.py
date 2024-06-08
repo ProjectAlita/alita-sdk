@@ -1,13 +1,20 @@
-from typing import Any
+from typing import Any, Type
 from langchain.tools import BaseTool
-from langchain.pydantic_v1 import create_model
+from pydantic import create_model, validator, BaseModel
+from pydantic.fields import FieldInfo
 
-datasourceToolSchema = create_model("datasourceSchema", query = (str, None))
+datasourceToolSchema = create_model("datasourceSchema", query = (str, FieldInfo(description="search query")))
 
 class DatasourcePredict(BaseTool):
     name: str
     description: str
     datasource: Any
+    args_schema: Type[BaseModel] = datasourceToolSchema
+    
+    @validator('name', pre=True, allow_reuse=True)
+    def remove_spaces(cls, v):
+        return v.replace(' ', '')
+    
     
     def _run(self, query):
         result = self.datasource.predict(query)
@@ -18,6 +25,11 @@ class DatasourceSearch(BaseTool):
     name: str
     description: str
     datasource: Any
+    args_schema: Type[BaseModel] = datasourceToolSchema
+    
+    @validator('name', pre=True, allow_reuse=True)
+    def remove_spaces(cls, v):
+        return v.replace(' ', '')
     
     def _run(self, query):
         result = self.datasource.search(query)

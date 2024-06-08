@@ -1,7 +1,7 @@
 from typing import List, Any
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
-from ..tools.application import Application, applicationToolSchema
+from ..tools.application import Application
 
 class ApplicationToolkit(BaseToolkit):
     tools: List[BaseTool] = []
@@ -25,7 +25,7 @@ class ApplicationToolkit(BaseToolkit):
         }
 
         app = client.application(AlitaChatModel(**settings), application_id, application_version_id)
-        return cls(tools=[Application(name=app_details.get("name"), description=app_details.get("description"), appliacation=app, args_schema=applicationToolSchema)])
+        return cls(tools=[Application(name=app_details.get("name"), description=app_details.get("description"), appliacation=app)])
             
     def get_tools(self):
         return self.tools

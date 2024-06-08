@@ -1,6 +1,6 @@
 from langchain.tools import BaseTool
-from typing import Any
-from pydantic import create_model
+from typing import Any, Type
+from pydantic import create_model, validator, BaseModel
 from pydantic.fields import FieldInfo
 
 applicationToolSchema = create_model(
@@ -13,6 +13,11 @@ class Application(BaseTool):
     name: str
     description: str
     appliacation: Any
+    args_schema: Type[BaseModel] = applicationToolSchema
+    
+    @validator('name', pre=True, allow_reuse=True)
+    def remove_spaces(cls, v):
+        return v.replace(' ', '')
     
     def _run(self, task, chat_history):
         if isinstance(chat_history, list):

@@ -1,0 +1,71 @@
+from typing import Sequence, Union, Any, Optional
+from traceback import format_exc
+
+from langchain_core.prompts import BasePromptTemplate
+from langchain_core.messages import BaseMessage
+from langchain_core.tools import BaseTool
+from langchain.agents.openai_assistant.base import OutputType
+from langchain_core.runnables import RunnableSerializable, ensure_config
+from .mixedAgentParser import MixedAgentOutputParser
+from langchain.tools.render import ToolsRenderer
+from langchain_core.load import dumpd
+from .mixedAgentRenderes import render_text_description_and_args
+from .mixedAgentRenderes import conversation_to_messages, format_to_langmessages
+from langchain_core.callbacks import CallbackManager
+from langchain_core.runnables import RunnableConfig, RunnableSerializable, ensure_config
+
+class AlitaAssistantRunnable(RunnableSerializable):
+    client: Optional[Any]
+    assistant: Optional[Any]
+    chat_history: list[BaseMessage] = []
+
+    @classmethod
+    def create_assistant(
+        cls,
+        client: Any,
+        prompt: BasePromptTemplate,
+        tools: Sequence[Union[BaseTool, dict]],
+        tools_renderer: Optional[ToolsRenderer] = render_text_description_and_args,
+    ) -> RunnableSerializable:
+        prompt = prompt.partial(
+            tools=tools_renderer(list(tools)),
+            tool_names=", ".join([t.name for t in tools]),
+        )
+        return cls(client=client, assistant=client, chat_history=prompt.format_messages())
+    
+    def invoke(self, input: dict, config: RunnableConfig | None = None) -> OutputType:
+        config = ensure_config(config)
+        callback_manager = CallbackManager.configure(
+            inheritable_callbacks=config.get("callbacks"),
+            inheritable_tags=config.get("tags"),
+            inheritable_metadata=config.get("metadata"),
+        )
+        run_manager = callback_manager.on_chain_start(
+            dumpd(self), input, name=config.get("run_name")
+        )
+        messages = []
+        if input.get("intermediate_steps"):
+            messages = format_to_langmessages(input["intermediate_steps"])
+        
+        try:
+            msgs = self.chat_history + conversation_to_messages(input["chat_history"]) + messages
+            print(msgs)
+            callback_manager.on_llm_start(dumpd(self), [message.content for message in msgs])
+            run = self._create_thread_and_run(msgs)
+            response = self._get_response(run)
+        except BaseException as e:
+            run_manager.on_chain_error(e, metadata=format_exc())
+            raise e
+        else:
+            run_manager.on_chain_end(response)
+            return response
+        
+    
+    def _create_thread_and_run(self, messages: list[BaseMessage]) -> Any:
+        return self.client.completion_with_retry(messages)
+    
+    def _get_response(self, run: BaseMessage) -> Any:
+        output_parser = MixedAgentOutputParser()
+        return output_parser.parse(run[0].content)
+
+

@@ -23,12 +23,13 @@ from alita_tools.openapi import AlitaOpenAPIToolkit
 from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
 from alita_tools.browser import BrowserToolkit
-from .constants import REACT_ADDON, REACT_VARS
+from .constants import REACT_ADDON, REACT_VARS, ALITA_ADDON, ALITA_VARS
 from .assistant import Assistant
 from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
+from ..agents.mixedAgentRenderes import conversation_to_messages
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +111,18 @@ class AlitaClient:
         data = requests.get(url, headers=self.headers).json()
         return data.get('secret', None)
     
-    def application(self, client: Any, application_id: int, application_version_id: int, tools: Optional[list] = None):
+    def application(self, client: Any, application_id: int, application_version_id: int, 
+                    tools: Optional[list] = None, chat_history: Optional[list] = None,
+                    app_type=None):
         if tools is None:
             tools = []
         data = self.get_app_version_details(application_id, application_version_id)
-        app_type = data.get("agent_type", "raw")
+        if not app_type:
+            app_type = data.get("agent_type", "raw")
         if app_type == "react":
             data['instructions'] += REACT_ADDON
+        elif app_type == "alita":
+            data['instructions'] += ALITA_ADDON
         messages = [SystemMessage(content=data['instructions'])]
         variables = {}
         input_variables = []
@@ -127,6 +133,10 @@ class AlitaClient:
                 input_variables.append(variable['name'])
         if app_type == "react":
             input_variables = list(set(input_variables + REACT_VARS))
+        elif app_type == "alita":
+            input_variables = list(set(input_variables + ALITA_VARS))
+        if chat_history and isinstance(chat_history, list):
+            messages.extend(conversation_to_messages(chat_history))
         template = Jinja2TemplatedChatMessagesTemplate(messages=messages)
         if input_variables and not variables:
             template.input_variables = input_variables
@@ -223,7 +233,7 @@ class AlitaClient:
                         logger.error(f"Error in getting toolkit: {e}")
         if len(prompts) > 0:
             tools += PromptToolkit.get_toolkit(self, prompts).get_tools()
-        if app_type == "openai":
+        if app_type == "dial":
             integration_details = self.get_integration_details(data['llm_settings']['integration_uid'])
             if integration_details['config']['is_shared']:
                 api_key = environ.get('OPENAI_API_KEY')
@@ -233,7 +243,7 @@ class AlitaClient:
                     api_key = self.unsecret(integration_details['settings']['api_token']['value'].split('.')[1][:-2])
             from langchain_openai import AzureChatOpenAI
             llm_client = AzureChatOpenAI(
-                azure_endpoint='https://eye.projectalita.ai/llm',
+                azure_endpoint=integration_details['settings']['api_base'],
                 deployment_name=data['llm_settings']['model_name'],
                 openai_api_version=integration_details['settings']['api_version'],
                 openai_api_key=api_key,
@@ -241,7 +251,9 @@ class AlitaClient:
                 max_tokens=data['llm_settings']['max_tokens']
             )
             open_ai_funcs = [convert_to_openai_function(t) for t in tools]
-            return Assistant(llm_client, template, tools, open_ai_funcs).getOpenAIAgentExecutor()
+            return Assistant(llm_client, template, tools, open_ai_funcs).getDialOpenAIAgentExecutor()
+        elif app_type == "alita":
+            return Assistant(client, template, tools).getAlitaExecutor()
         else:
             return Assistant(client, template, tools).getAgentExecutor()
     
@@ -255,8 +267,8 @@ class AlitaClient:
 
     def assistant(self, prompt_id: int, prompt_version_id: int,
                   tools: list, openai_tools: Optional[Dict] = None,
-                  client: Optional[Any] = None):
-        prompt = self.prompt(prompt_id=prompt_id, prompt_version_id=prompt_version_id)
+                  client: Optional[Any] = None, chat_history: Optional[list] = None):
+        prompt = self.prompt(prompt_id=prompt_id, prompt_version_id=prompt_version_id, chat_history=chat_history)
         return Assistant(client, prompt, tools, openai_tools)
     
     def artifact(self, bucket_name):
@@ -331,11 +343,8 @@ class AlitaClient:
         return self._process_requst(data)
         
     def _prepare_messages(self, messages: list[BaseMessage]):
-        context = ''
         chat_history = []
-        if messages[0].type == "system":
-            context = messages[0].content
-        for message in messages[1:-1]:
+        for message in messages:
             if message.type == 'human':
                 chat_history.append({
                     'role': 'user',
@@ -351,19 +360,18 @@ class AlitaClient:
                     'role': 'assistant',
                     'content': message.content
                 })
-        user_input = messages[-1].content
-        return context, chat_history, user_input
+        return chat_history
 
     def _prepare_payload(self, messages: list[BaseMessage], model_settings: dict, variables: list[dict]):
-        context, chat_history, user_input = self._prepare_messages(messages)
+        chat_history = self._prepare_messages(messages)
         if not variables:
             variables = []
         return {
             "type": "chat",
             "project_id": self.project_id,
-            "context": context,
+            "context": '',
             "model_settings": model_settings,
-            "user_input": user_input,
+            "user_input": '',
             "chat_history": chat_history,
             "variables": variables,
             "format_response": True
@@ -404,22 +412,25 @@ class AlitaClient:
 
     def rag(self, datasource_id: int, messages: list[BaseMessage],
             datasource_settings: dict, datasource_predict_settings: dict):
-        context, chat_history, user_input = self._prepare_messages(messages)
+        chat_history = self._prepare_messages(messages)
         data = {
-            "input": user_input,
+            "input": '',
             "context": '',
             "chat_history": chat_history,
             "chat_settings_ai": datasource_predict_settings,
             "chat_settings_embedding": datasource_settings
         }
-        if context:
-            data['context'] = context
         headers = self.headers | {"Content-Type": "application/json"}
         response = requests.post(f"{self.datasources_predict}/{datasource_id}", headers=headers, json=data).json()
         return AIMessage(content=response['response'], additional_kwargs={"references": response['references']})
 
     def search(self, datasource_id: int, messages: list[BaseMessage], datasource_settings: dict) -> AIMessage:
-        _, _, user_input = self._prepare_messages(messages)
+        chat_history = self._prepare_messages(messages)
+        user_input = ''
+        for message in chat_history[::-1]:
+            if message['role'] == 'user':
+                user_input = message['content']
+                break
         data = {
             "chat_history": [
                 {

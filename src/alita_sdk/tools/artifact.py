@@ -1,14 +1,14 @@
 
 from langchain.tools import BaseTool
-from typing import Any
-from pydantic import create_model
+from typing import Any, Type
+from pydantic import create_model, BaseModel
 from pydantic.fields import FieldInfo
 
 class ListFiles(BaseTool):
     name: str = "listFiles"
     description: str = "List all files in the artifact"
     artifact: Any
-    args_schema = create_model( "listBucket")
+    args_schema: Type[BaseModel] = create_model( "listBucket")
     
     def _run(self):
         return self.artifact.list()
@@ -18,7 +18,7 @@ class CreateFile(BaseTool):
     name: str = "createFile"
     description: str = "Create a file in the artifact"
     artifact: Any
-    args_schema = create_model(
+    args_schema: Type[BaseModel] = create_model(
         "createFile", 
         filename = (str, FieldInfo(description="Filename")),
         filedata = (str, FieldInfo(description="Stringified content of the file"))
@@ -32,7 +32,7 @@ class ReadFile(BaseTool):
     name: str = "readFile"
     description: str = "Read a file in the artifact"
     artifact: Any
-    args_schema = create_model(
+    args_schema: Type[BaseModel] = create_model(
         "readFile", 
         filename = (str, FieldInfo(description="Filename"))
         )
@@ -44,7 +44,7 @@ class DeleteFile(BaseTool):
     name: str = "deleteFile"
     description: str = "Delete a file in the artifact"
     artifact: Any
-    args_schema = create_model(
+    args_schema: Type[BaseModel] = create_model(
         "deleteFile", 
         filename = (str, FieldInfo(description="Filename"))
         )
@@ -57,7 +57,7 @@ class AppendData(BaseTool):
     name: str = "appendData"
     description: str = "Append data to a file in the artifact"
     artifact: Any
-    args_schema = create_model(
+    args_schema: Type[BaseModel] = create_model(
         "appendData", 
         filename = (str, FieldInfo(description="Filename")),
         filedata = (str, FieldInfo(description="Stringified content to append"))
@@ -70,7 +70,7 @@ class OverwriteData(BaseTool):
     name: str = "overwriteData"
     description: str = "Overwrite data in a file in the artifact"
     artifact: Any
-    args_schema = create_model(
+    args_schema: Type[BaseModel] = create_model(
         "overwriteData", 
         filename = (str, FieldInfo(description="Filename")),
         filedata = (str, FieldInfo(description="Stringified content to overwrite"))
@@ -81,27 +81,27 @@ class OverwriteData(BaseTool):
     
 __all__ = [
     {
-        "name": "ListFiles",
+        "name": "listFiles",
         "tool": ListFiles
     },
     {
-        "name": "CreateFile",
+        "name": "createFile",
         "tool": CreateFile
     },
     {
-        "name": "ReadFile",
+        "name": "readFile",
         "tool": ReadFile
     },
     {
-        "name": "DeleteFile",
+        "name": "deleteFile",
         "tool": DeleteFile
     },
     {
-        "name": "AppendData",
+        "name": "appendData",
         "tool": AppendData
     },
     {
-        "name": "OverwriteData",
+        "name": "overwriteData",
         "tool": OverwriteData
     }
 ]
