@@ -9,8 +9,8 @@ def unpack_json(json_data: str | dict, message_key=None):
     if isinstance(json_data, str):
         if '```json' in json_data:
             pattern = r'```json(.*)```'
+            matches = re.findall(pattern, json_data, re.DOTALL)
             if matches:
-                matches = re.findall(pattern, json_data, re.DOTALL)
                 try:
                     text = json_data.replace(f'{matches[0]}', '').replace('```json', '').replace('```', '').strip()
                     res = json.loads(matches[0])
