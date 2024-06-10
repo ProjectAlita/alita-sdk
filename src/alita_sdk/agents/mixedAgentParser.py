@@ -1,4 +1,3 @@
-import re
 import json
 from typing import Union
 
@@ -43,7 +42,7 @@ class MixedAgentOutputParser(AgentOutputParser):
             text.replace("\n", "\\n")
             response = unpack_json(text)
         if not isinstance(response, dict):
-            return AgentFinish({"output": f'Could not parse response: {response}'}, log=response)
+            return AgentFinish({"output": f'Could not parse response:\n\n {response}'}, log=response)
         tool: dict | str = response.get("tool", {})
         if isinstance(tool, dict):
             action: str | None = tool.get("name")
