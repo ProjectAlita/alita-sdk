@@ -52,12 +52,15 @@ def conversation_to_messages(conversation: List[Dict[str, str]]) -> List[BaseMes
     """Format the conversation to messages."""
     messages = []
     for message in conversation:
-        if message["role"] == "user":
-            messages.append(HumanMessage(content=message["content"]))
-        elif message["role"] == "ai" or message["role"] == "bot" or message["role"] == "assistant":
-            messages.append(AIMessage(content=message["content"]))
-        elif message["role"] == "tool":
-            messages.append(HumanMessage(content=message["content"]))
-        else:
-            messages.append(SystemMessage(content=message["content"]))
+        if isinstance(message, BaseMessage):
+            messages.append(message)
+        elif isinstance(message, dict):
+            if message["role"] == "user":
+                messages.append(HumanMessage(content=message["content"]))
+            elif message["role"] == "ai" or message["role"] == "bot" or message["role"] == "assistant":
+                messages.append(AIMessage(content=message["content"]))
+            elif message["role"] == "tool":
+                messages.append(HumanMessage(content=message["content"]))
+            else:
+                messages.append(SystemMessage(content=message["content"]))
     return messages

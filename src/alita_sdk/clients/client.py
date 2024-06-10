@@ -112,7 +112,7 @@ class AlitaClient:
         return data.get('secret', None)
     
     def application(self, client: Any, application_id: int, application_version_id: int, 
-                    tools: Optional[list] = None, chat_history: Optional[list] = None,
+                    tools: Optional[list] = None, chat_history: Optional[BaseMessage] = None,
                     app_type=None):
         if tools is None:
             tools = []
@@ -136,7 +136,7 @@ class AlitaClient:
         elif app_type == "alita":
             input_variables = list(set(input_variables + ALITA_VARS))
         if chat_history and isinstance(chat_history, list):
-            messages.extend(conversation_to_messages(chat_history))
+            messages.extend(chat_history)
         template = Jinja2TemplatedChatMessagesTemplate(messages=messages)
         if input_variables and not variables:
             template.input_variables = input_variables
