@@ -15,6 +15,7 @@ from langchain_core.agents import AgentAction, AgentFinish
 from .alita_agent import AlitaAssistantRunnable
 
 class AlitaDialOpenAIAssistantRunnable(AlitaAssistantRunnable):
+    agent_type:str = "openai"
     
     def _get_response(self, run: BaseMessage) -> Any:
         if run.additional_kwargs.get("function_call"):

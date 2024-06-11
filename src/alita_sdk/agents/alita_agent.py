@@ -2,7 +2,7 @@ from typing import Sequence, Union, Any, Optional
 from traceback import format_exc
 
 from langchain_core.prompts import BasePromptTemplate
-from langchain_core.messages import BaseMessage, AIMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langchain.agents.openai_assistant.base import OutputType
 from langchain_core.runnables import RunnableSerializable, ensure_config
@@ -17,11 +17,13 @@ from uuid import uuid4
 from langchain_core.outputs import LLMResult, ChatGenerationChunk
 from langchain_core.outputs.run_info import RunInfo
 from langchain_core.outputs.generation import Generation
+from ..clients.constants import ALITA_OUTPUT_FORMAT
 
 class AlitaAssistantRunnable(RunnableSerializable):
     client: Optional[Any]
     assistant: Optional[Any]
     chat_history: list[BaseMessage] = []
+    agent_type:str = "alita"
 
     @classmethod
     def create_assistant(
@@ -53,7 +55,11 @@ class AlitaAssistantRunnable(RunnableSerializable):
             messages = format_to_langmessages(input["intermediate_steps"])
         
         try:
-            msgs = self.chat_history + conversation_to_messages(input["chat_history"]) + messages
+            input_mgs = []
+            if self.agent_type == "alita":
+                input_mgs.append(SystemMessage(content=ALITA_OUTPUT_FORMAT))
+            input_mgs.append(HumanMessage(content=input.get('input')))
+            msgs = self.chat_history + conversation_to_messages(input["chat_history"]) + input_mgs + messages
             llm_manager = callback_manager.on_llm_start(dumpd(self), [msgs[-1].content], run_id=run_id)
             run = self._create_thread_and_run(msgs)
             response = self._get_response(run)

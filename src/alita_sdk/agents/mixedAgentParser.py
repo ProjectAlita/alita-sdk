@@ -42,16 +42,19 @@ class MixedAgentOutputParser(AgentOutputParser):
             text.replace("\n", "\\n")
             response = unpack_json(text)
         if not isinstance(response, dict):
-            return AgentFinish({"output": f'Could not parse response:\n\n {response}'}, log=response)
-        tool: dict | str = response.get("tool", {})
-        if isinstance(tool, dict):
-            action: str | None = tool.get("name")
-            tool_input: dict = tool.get("args", {})
-        elif isinstance(tool, str):
-            action: str | None = tool
-            tool_input: dict = response.get("args", {})
-        else:
-            raise UnexpectedResponseError(f'Unexpected response {response}')
+            return AgentFinish({"output": f'{response}\n\n*Note:* reposonse was not in expected format'}, log=response)
+        tool: dict | str | None = response.get("tool", None)
+        action = None
+        tool_input = {}
+        if tool:
+            if isinstance(tool, dict):
+                action: str | None = tool.get("name")
+                tool_input: dict = tool.get("args", {})
+            elif isinstance(tool, str):
+                action: str | None = tool
+                tool_input: dict = response.get("args", {})
+            else:
+                raise UnexpectedResponseError(f'Unexpected response {response}')
         thoughts = response.get("thoughts", {})
         if not isinstance(thoughts, dict):
             return AgentFinish({"output": f'Unexpected Format: {response}'}, log=response)
@@ -70,7 +73,7 @@ Criticism:
 Running Tool:
 {action} with param {tool_input}
 """
-        if action == 'complete_task':
+        if action in ['complete_task', 'respond', 'ask_user']:
             try:
                 output: str = tool_input[list(tool_input.keys())[0]]
             except AttributeError:

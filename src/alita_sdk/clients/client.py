@@ -112,7 +112,7 @@ class AlitaClient:
         return data.get('secret', None)
     
     def application(self, client: Any, application_id: int, application_version_id: int, 
-                    tools: Optional[list] = None, chat_history: Optional[BaseMessage] = None,
+                    tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                     app_type=None):
         if tools is None:
             tools = []

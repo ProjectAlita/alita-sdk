@@ -41,7 +41,9 @@ ALITA_ADDON = """
 ### Tools:
 {{tools}} 
 - Respond tool: "complete_task", args: "final_answer"  - complete message to be communicated to the user,  must contain generated tests code and as much details as possible for user to understand next steps
+"""
 
+ALITA_OUTPUT_FORMAT = """
 ### Response format
 {
     "thoughts": {
