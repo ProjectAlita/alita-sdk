@@ -81,7 +81,7 @@ def unpack_json(json_data: str | dict, message_key=None):
                 return json_data
             else:
                 logger.error(f"Error in unpacking json with regex: {json_data}")
-                raise e
+                return json_data
     elif isinstance(json_data, dict):
         return json_data
     else:
