@@ -58,7 +58,7 @@ class AlitaAssistantRunnable(RunnableSerializable):
             input_mgs = []
             if self.agent_type == "alita":
                 input_mgs.append(SystemMessage(content=ALITA_OUTPUT_FORMAT))
-            input_mgs.append(HumanMessage(content=input.get('input')))
+            input_mgs.append(HumanMessage(content=input.get('content')))
             msgs = self.chat_history + conversation_to_messages(input["chat_history"]) + input_mgs + messages
             llm_manager = callback_manager.on_llm_start(dumpd(self), [msgs[-1].content], run_id=run_id)
             run = self._create_thread_and_run(msgs)
