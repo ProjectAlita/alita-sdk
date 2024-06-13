@@ -1,8 +1,7 @@
 import json
 from typing import Union
 
-from langchain_core.agents import AgentAction, AgentFinish, AgentStep
-from langchain_core.exceptions import OutputParserException
+from langchain_core.agents import AgentAction, AgentFinish
 
 from langchain.agents.agent import AgentOutputParser
 
@@ -42,7 +41,9 @@ class MixedAgentOutputParser(AgentOutputParser):
             text.replace("\n", "\\n")
             response = unpack_json(text)
         if not isinstance(response, dict):
-            return AgentFinish({"output": f'{response}\n\n*Note:* reposonse was not in expected format'}, log=response)
+            return AgentAction("echo", 
+                               json.dumps({"text": response}), 
+                               log=f"Echoing: {response}")
         tool: dict | str | None = response.get("tool", None)
         action = None
         tool_input = {}

@@ -76,9 +76,9 @@ def unpack_json(json_data: str | dict, message_key=None):
                 else:
                     raise IndexError("No match found")
         except (json.decoder.JSONDecodeError, IndexError) as e:
-            json_data = extract_using_regex(json_data)
-            if json_data.get('thoughts', {}).get("text", None) or json_data.get('tool', {}).get("name", None):
-                return json_data
+            _json_data = extract_using_regex(json_data)
+            if _json_data.get('thoughts', {}).get("text", None) or _json_data.get('tool', {}).get("name", None):
+                return _json_data
             else:
                 logger.error(f"Error in unpacking json with regex: {json_data}")
                 return json_data
