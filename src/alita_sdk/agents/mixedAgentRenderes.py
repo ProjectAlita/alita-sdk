@@ -29,8 +29,12 @@ def format_log_to_str(
         thoughts += "Tool: " + action.tool + " PARAMS of tool: " + str(action.tool_input) + "\n"
         thoughts += action.log
         thoughts += f"\nTool Result:\n{result}"
-    if intermediate_steps[-1][0].tool == "echo":
-        thoughts += "Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"
+    try:
+        if intermediate_steps[-1][0].tool == "echo":
+            thoughts += "Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"
+    except IndexError:
+        logger.error("Index error in intermediate state: {intermediate_steps}")
+        pass
     return thoughts
 
 def format_to_messages(intermediate_steps: List[Tuple[AgentAction, str]]) -> List[BaseMessage]:
@@ -45,9 +49,13 @@ def format_to_messages(intermediate_steps: List[Tuple[AgentAction, str]]) -> Lis
         messages.append(
             {"role": "tool", "content": result, "tool_call_id": str(uuid4())}
         )
-    if intermediate_steps[-1][0].tool == "echo":
-        messages.append({"role": "human", 
-                         "content": f"Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"})
+    try:
+        if intermediate_steps[-1][0].tool == "echo":
+            messages.append({"role": "human", 
+                            "content": f"Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"})
+    except IndexError:
+        logger.error("Index error in intermediate state: {intermediate_steps}")
+        pass
     return messages
 
 def format_to_langmessages(intermediate_steps: List[Tuple[AgentAction, str]]) -> List[Dict[str, Any]]:
@@ -58,8 +66,12 @@ def format_to_langmessages(intermediate_steps: List[Tuple[AgentAction, str]]) ->
             continue 
         messages.append(AIMessage(content=action.log))
         messages.append(FunctionMessage(name=action.tool, content=result, id=str(uuid4())))
-    if intermediate_steps[-1][0].tool == "echo":
-        messages.append(HumanMessage(content=f"Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"))
+    try:
+        if intermediate_steps[-1][0].tool == "echo":
+            messages.append(HumanMessage(content=f"Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"))
+    except IndexError:
+        logger.error("Index error in intermediate state: {intermediate_steps}")
+        pass
     return messages
 
 def conversation_to_messages(conversation: List[Dict[str, str]]) -> List[BaseMessage]:
