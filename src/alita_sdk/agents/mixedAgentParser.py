@@ -86,12 +86,7 @@ Running Tool:
         elif txt:
             return AgentFinish({"output": txt}, log=log)
         else:
-            raise OutputParserException(f"""ERROR: RESPONSE FORMAT IS INCORRECT
-The response may have a great data, format response to the required JSON strcuture. 
-Expected format: {FORMAT_INSTRUCTIONS}
-
-Recieved data: {response}""")
-
+            return AgentFinish({"output": f"{response}. \n\n *NOTE: Response format wasn't followed*"}, log=log)
     @property
     def _type(self) -> str:
         return "mixed-agent-parser"
