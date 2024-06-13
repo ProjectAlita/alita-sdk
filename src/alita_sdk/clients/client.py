@@ -143,7 +143,7 @@ class AlitaClient:
         if variables:
             template.partial_variables = variables
         prompts = []
-        tools.append(EchoTool())
+        # tools.append(EchoTool()) 
         for tool in data['tools']:
             if tool['type'] == 'prompt':
                 prompts.append([

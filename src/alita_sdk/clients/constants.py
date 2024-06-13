@@ -44,7 +44,7 @@ ALITA_ADDON = """
 """
 
 ALITA_OUTPUT_FORMAT = """
-### Response format
+### Expected Response format
 {
     "thoughts": {
         "text": "message to a user follow the style of your persona",

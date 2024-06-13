@@ -30,7 +30,7 @@ def format_log_to_str(
         thoughts += action.log
         thoughts += f"\nTool Result:\n{result}"
     try:
-        if intermediate_steps[-1][0].tool == "echo":
+        if len(intermediate_steps) and intermediate_steps[-1][0].tool == "echo":
             thoughts += "Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"
     except IndexError:
         logger.error("Index error in intermediate state: {intermediate_steps}")
@@ -50,7 +50,7 @@ def format_to_messages(intermediate_steps: List[Tuple[AgentAction, str]]) -> Lis
             {"role": "tool", "content": result, "tool_call_id": str(uuid4())}
         )
     try:
-        if intermediate_steps[-1][0].tool == "echo":
+        if len(intermediate_steps) and intermediate_steps[-1][0].tool == "echo":
             messages.append({"role": "human", 
                             "content": f"Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"})
     except IndexError:
@@ -67,7 +67,7 @@ def format_to_langmessages(intermediate_steps: List[Tuple[AgentAction, str]]) ->
         messages.append(AIMessage(content=action.log))
         messages.append(FunctionMessage(name=action.tool, content=result, id=str(uuid4())))
     try:
-        if intermediate_steps[-1][0].tool == "echo":
+        if len(intermediate_steps) and intermediate_steps[-1][0].tool == "echo":
             messages.append(HumanMessage(content=f"Your answer was: {intermediate_steps[-1][1]}\nIMPORTANT: YOU MUST ANSWER IN FORMAT: \n{FORMAT_INSTRUCTIONS}"))
     except IndexError:
         logger.error("Index error in intermediate state: {intermediate_steps}")
