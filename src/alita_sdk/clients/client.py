@@ -1,10 +1,9 @@
 import logging
 import requests
-from requests.exceptions import HTTPError
+from alita_tools.zephyr import ZephyrToolkit
 from importlib import import_module
 from os import environ
 from typing import Dict, List, Any, Optional
-from langchain_core.pydantic_v1 import BaseModel, Field
 
 from langchain_core.messages import (
     AIMessage,
@@ -216,6 +215,13 @@ class AlitaClient:
                     additional_fields=tool['settings'].get('additional_fields', []),
                     verify_ssl=tool['settings'].get('verify_ssl', True))
                 tools.extend(confluence_tools.get_tools())
+            elif tool['type'] == 'zephyr':
+                zephyr_tools = ZephyrToolkit().get_toolkit(
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    base_url=tool['settings']['base_url'],
+                    user_name=tool['settings']['username'],
+                    password=tool['settings']['password'])
+                tools.extend(zephyr_tools.get_tools())
             elif tool['type'] == 'browser':
                 browser_tools = BrowserToolkit().get_toolkit(
                     google_api_key=tool['settings'].get('google_api_key'), 
