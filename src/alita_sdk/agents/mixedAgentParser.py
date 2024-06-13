@@ -41,7 +41,7 @@ class MixedAgentOutputParser(AgentOutputParser):
             text.replace("\n", "\\n")
             response = unpack_json(text)
         if not isinstance(response, dict):
-            return AgentFinish({"output": response}, log=log)
+            return AgentFinish({"output": response}, log=f"Echoing: {response}")
             # return AgentAction("echo", 
             #                    json.dumps({"text": response}), 
             #                    log=f"Echoing: {response}")
