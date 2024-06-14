@@ -1,6 +1,6 @@
 import logging
 import requests
-# from alita_tools.zephyr import ZephyrToolkit
+
 from importlib import import_module
 from os import environ
 from typing import Dict, List, Any, Optional
@@ -23,6 +23,7 @@ from alita_tools.openapi import AlitaOpenAPIToolkit
 from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
 from alita_tools.browser import BrowserToolkit
+from alita_tools.zephyr import ZephyrToolkit
 from .constants import REACT_ADDON, REACT_VARS, ALITA_ADDON, ALITA_VARS
 from .assistant import Assistant
 from .prompt import AlitaPrompt
@@ -143,7 +144,7 @@ class AlitaClient:
         if variables:
             template.partial_variables = variables
         prompts = []
-        # tools.append(EchoTool()) 
+        tools.append(EchoTool()) 
         for tool in data['tools']:
             if tool['type'] == 'prompt':
                 prompts.append([
@@ -217,13 +218,13 @@ class AlitaClient:
                     additional_fields=tool['settings'].get('additional_fields', []),
                     verify_ssl=tool['settings'].get('verify_ssl', True))
                 tools.extend(confluence_tools.get_tools())
-            # elif tool['type'] == 'zephyr':
-            #     zephyr_tools = ZephyrToolkit().get_toolkit(
-            #         selected_tools=tool['settings'].get('selected_tools', []),
-            #         base_url=tool['settings']['base_url'],
-            #         user_name=tool['settings']['username'],
-            #         password=tool['settings']['password'])
-            #     tools.extend(zephyr_tools.get_tools())
+            elif tool['type'] == 'zephyr':
+                zephyr_tools = ZephyrToolkit().get_toolkit(
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    base_url=tool['settings']['base_url'],
+                    user_name=tool['settings']['username'],
+                    password=tool['settings']['password'])
+                tools.extend(zephyr_tools.get_tools())
             elif tool['type'] == 'browser':
                 browser_tools = BrowserToolkit().get_toolkit(
                     google_api_key=tool['settings'].get('google_api_key'), 

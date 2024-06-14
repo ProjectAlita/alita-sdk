@@ -55,11 +55,13 @@ class AlitaAssistantRunnable(RunnableSerializable):
             messages = format_to_langmessages(input["intermediate_steps"])
         
         try:
+            user_messages = [] 
             if self.agent_type == "alita":
-                messages.append(HumanMessage(content=ALITA_OUTPUT_FORMAT))
+                messages.append(SystemMessage(content=ALITA_OUTPUT_FORMAT))
+            user_messages.append(HumanMessage(content=input.get('input')))
             msgs = self.chat_history + \
                 conversation_to_messages(input["chat_history"]) + \
-                    [HumanMessage(content=input.get('input'))] + \
+                     user_messages + \
                         messages
             llm_manager = callback_manager.on_llm_start(dumpd(self), [msgs[-1].content], run_id=run_id)
             run = self._create_thread_and_run(msgs)

@@ -41,10 +41,9 @@ class MixedAgentOutputParser(AgentOutputParser):
             text.replace("\n", "\\n")
             response = unpack_json(text)
         if not isinstance(response, dict):
-            return AgentFinish({"output": response}, log=f"Echoing: {response}")
-            # return AgentAction("echo", 
-            #                    json.dumps({"text": response}), 
-            #                    log=f"Echoing: {response}")
+            return AgentAction("echo", 
+                               json.dumps({"text": response}), 
+                               log=f"Echoing: {response}")
         tool: dict | str | None = response.get("tool", None)
         action = None
         tool_input = {}
@@ -64,17 +63,7 @@ class MixedAgentOutputParser(AgentOutputParser):
         if isinstance(plan, list):
             plan: str = "\n".join(plan)
         txt: str = thoughts.get("text", '')
-        criticism: str = thoughts.get("criticism", '')
-        log: str = f"""Step Details:
-{txt}
-Long Term Plan:
-{plan}
-Criticism:
-{criticism}
-
-Running Tool:
-{action} with param {tool_input}
-"""
+        log: str = json.dumps(response, indent=2)
         if action in ['complete_task', 'respond', 'ask_user']:
             try:
                 output: str = tool_input[list(tool_input.keys())[0]]
