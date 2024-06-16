@@ -1,13 +1,14 @@
 
 from typing import Dict, Any, Optional
-from langchain.agents import AgentExecutor
+from langchain.agents import AgentExecutor, create_react_agent
+from ..agents.mixedAgentParser import MixedAgentOutputParser
+from ..agents.mixedAgentRenderes import render_text_description_and_args
 from langchain_core.messages import (
     BaseMessage,
 )
 from langchain_core.prompts import ChatPromptTemplate
 from ..agents.alita_openai import AlitaDialOpenAIAssistantRunnable
 from ..agents.alita_agent import AlitaAssistantRunnable
-from ..agents import create_mixed_agent
 
 
 class Assistant:
@@ -19,7 +20,9 @@ class Assistant:
         self.openai_tools = openai_tools
 
     def getAgentExecutor(self):
-        agent = create_mixed_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
+        agent = create_react_agent(llm=self.client, tools=self.tools, prompt=self.prompt,
+                                   output_parser=MixedAgentOutputParser(), 
+                                   tools_renderer=render_text_description_and_args)
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
                                                   verbose=True, handle_parsing_errors=True,
                                                   max_execution_time=None, return_intermediate_steps=True)

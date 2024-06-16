@@ -1,5 +1,4 @@
 REACT_ADDON = """
-
 ### Use the tools from this list of available tools: {{tool_names}}
 ### When calling "complete_task" tool, provide as much details as possible to address user's request and strictly forward format of anwer if defined
 
@@ -7,28 +6,39 @@ REACT_ADDON = """
 {{tools}} 
 - Respond tool: "complete_task", args: "final_answer"  - complete message to be communicated to the user,  must contain generated tests code and as much details as possible for user to understand next steps
 
-### Scratchpad
-{{agent_scratchpad}}
-
-### Chat History
-{{chat_history}}
-
-### User Input:
-{{input}}
-
-### Response format
+To use tool, use following format:
+```
 {
     "thoughts": {
         "text": "message to a user follow the style of your persona",
         "plan": "short bulleted, list that conveys long-term plan",
-        "criticism": "constructive self-criticism",
     },
     "tool": {
         "name": "tool name",
         "args": { "arg name": "value" }
     }
 }
-You must answer with only JSON and it could be parsed by Python json.loads
+```
+
+To respond to a user, use the following format:
+```
+{
+    "tool": {
+        "name": "complete_task",
+        "args": { "final_answer": "<complete message to be communicated to the user,  must contain generated tests code and as much details as possible for user to understand next steps>" }
+    }
+}
+```
+
+Begin!
+
+### Previous Conversation History
+{{chat_history}}
+
+### New Input:
+{{input}}
+{{agent_scratchpad}}
+
 """
 
 REACT_VARS = ["tool_names", "tools", "agent_scratchpad", "chat_history", "input"]
@@ -44,19 +54,28 @@ ALITA_ADDON = """
 """
 
 ALITA_OUTPUT_FORMAT = """
-### Expected Response format
+```
 {
     "thoughts": {
         "text": "message to a user follow the style of your persona",
         "plan": "short bulleted, list that conveys long-term plan",
-        "criticism": "constructive self-criticism",
     },
     "tool": {
         "name": "tool name",
         "args": { "arg name": "value" }
     }
 }
-You must answer with only JSON and it could be parsed by Python json.loads
+```
+
+To respond to a user, use the following format:
+```
+{
+    "tool": {
+        "name": "complete_task",
+        "args": { "final_answer": "<complete message to be communicated to the user,  must contain generated tests code and as much details as possible for user to understand next steps>" }
+    }
+}
+```
 """
 
 ALITA_VARS = ["tool_names", "tools"]
