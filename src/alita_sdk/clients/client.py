@@ -19,6 +19,7 @@ from ..toolkits.datasource import DatasourcesToolkit
 from ..toolkits.application import ApplicationToolkit
 from ..tools.echo import EchoTool
 from alita_tools.github import AlitaGitHubToolkit
+from alita_tools.gitlab import AlitaGitlabToolkit
 from alita_tools.openapi import AlitaOpenAPIToolkit
 from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
@@ -218,6 +219,15 @@ class AlitaClient:
                     additional_fields=tool['settings'].get('additional_fields', []),
                     verify_ssl=tool['settings'].get('verify_ssl', True))
                 tools.extend(confluence_tools.get_tools())
+            elif tool['type'] == 'gitlab':
+                gitlab_tools = AlitaGitlabToolkit().get_toolkit(
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    url=tool['settings']['url'],
+                    repository=tool['settings']['repository'],
+                    branch=tool['settings']['branch'],
+                    private_token=tool['settings']['private_token']
+                )
+                tools.extend(gitlab_tools.get_tools())
             elif tool['type'] == 'zephyr':
                 zephyr_tools = ZephyrToolkit().get_toolkit(
                     selected_tools=tool['settings'].get('selected_tools', []),
