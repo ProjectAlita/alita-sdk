@@ -242,10 +242,11 @@ class AlitaClient:
                 )
                 tools.extend(browser_tools.get_tools())
             else:
-                if tool.get("module"):
+                if tool.get("settings", {}).get("module"):
                     try:
-                        mod = import_module(tool.get("module"))
-                        tkitclass = getattr(mod, tool.get("class"))
+                        settings = tool.get("settings", {})
+                        mod = import_module(settings.pop("module"))
+                        tkitclass = getattr(mod, settings.pop("class"))
                         toolkit = tkitclass.get_toolkit(**tool["settings"])
                         tools.extend(toolkit.get_tools())
                     except Exception as e:
