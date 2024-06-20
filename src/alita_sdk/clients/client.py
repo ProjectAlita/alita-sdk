@@ -232,7 +232,7 @@ class AlitaClient:
                 zephyr_tools = ZephyrToolkit().get_toolkit(
                     selected_tools=tool['settings'].get('selected_tools', []),
                     base_url=tool['settings']['base_url'],
-                    user_name=tool['settings']['username'],
+                    user_name=tool['settings']['user_name'],
                     password=tool['settings']['password'])
                 tools.extend(zephyr_tools.get_tools())
             elif tool['type'] == 'browser':
