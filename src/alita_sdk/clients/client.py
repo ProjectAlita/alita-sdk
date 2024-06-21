@@ -17,6 +17,7 @@ from langchain_core.utils.function_calling import convert_to_openai_function
 from ..toolkits.prompt import PromptToolkit
 from ..toolkits.datasource import DatasourcesToolkit
 from ..toolkits.application import ApplicationToolkit
+from ..toolkits.artifact import ArtifactToolkit
 from ..tools.echo import EchoTool
 from alita_tools.github import AlitaGitHubToolkit
 from alita_tools.gitlab import AlitaGitlabToolkit
@@ -165,6 +166,12 @@ class AlitaClient:
                     application_version_id=int(tool['settings']['application_version_id']),
                     app_api_key=self.auth_token,
                     selected_tools=[]
+                ).get_tools())
+            elif tool['type'] == 'artifact':
+                tools.extend(ArtifactToolkit.get_toolkit(
+                    client=self,
+                    bucket=tool['settings']['bucket'],
+                    selected_tools=tool['settings'].get('selected_tools', [])
                 ).get_tools())
             elif tool['type'] == 'openapi':
                 headers = {}
