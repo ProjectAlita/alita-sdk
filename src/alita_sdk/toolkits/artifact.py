@@ -14,7 +14,7 @@ class ArtifactToolkit(BaseToolkit):
     def get_toolkit(cls, client: Any, bucket: str, selected_tools: list[str] = []):
         if selected_tools is None:
             selected_tools = []
-        artifact = client.client.artifact(bucket)
+        artifact = client.artifact(bucket)
         tools = []
         for tool in artifact_tools:
             if selected_tools:
