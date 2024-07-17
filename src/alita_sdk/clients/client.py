@@ -58,11 +58,11 @@ class AlitaClient:
         self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/{self.project_id}"
         self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/{self.project_id}"
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
-        
+
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
-        data = requests.get(url, headers=self.headers).json()
+        data = requests.get(url, headers=self.headers, verify=False).json()
         model_settings = data['model_settings']
         messages = [SystemMessage(content=data['context'])]
         variables = {}
@@ -91,30 +91,30 @@ class AlitaClient:
             return template
         else:
             url = f"{self.prompts}/{prompt_id}"
-            data = requests.get(url, headers=self.headers).json()
+            data = requests.get(url, headers=self.headers, verify=False).json()
             return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
 
     def get_app_details(self, application_id: int):
         url = f"{self.app}/{application_id}"
-        data = requests.get(url, headers=self.headers).json()
+        data = requests.get(url, headers=self.headers, verify=False).json()
         return data
 
     def get_app_version_details(self, application_id: int, application_version_id:int):
         url = f"{self.application_versions}/{application_id}/{application_version_id}"
-        data = requests.get(url, headers=self.headers).json()
+        data = requests.get(url, headers=self.headers, verify=False).json()
         return data
-        
+
     def get_integration_details(self, integration_id: str, format_for_model: bool = False):
         url = f"{self.integration_details}/{integration_id}"
-        data = requests.get(url, headers=self.headers).json()
+        data = requests.get(url, headers=self.headers, verify=False).json()
         return data
 
     def unsecret(self, secret_name: str):
         url = f"{self.secrets_url}/{secret_name}"
-        data = requests.get(url, headers=self.headers).json()
+        data = requests.get(url, headers=self.headers, verify=False).json()
         return data.get('secret', None)
-    
-    def application(self, client: Any, application_id: int, application_version_id: int, 
+
+    def application(self, client: Any, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                     app_type=None):
         if tools is None:
@@ -146,7 +146,7 @@ class AlitaClient:
         if variables:
             template.partial_variables = variables
         prompts = []
-        tools.append(EchoTool()) 
+        tools.append(EchoTool())
         for tool in data['tools']:
             if tool['type'] == 'prompt':
                 prompts.append([
@@ -205,7 +205,7 @@ class AlitaClient:
             elif tool['type'] == 'jira':
                 jira_tools = JiraToolkit().get_toolkit(
                     selected_tools=tool['settings'].get('selected_tools', []),
-                    base_url=tool['settings']['base_url'], 
+                    base_url=tool['settings']['base_url'],
                     cloud=tool['settings'].get('cloud', True),
                     api_key=tool['settings'].get('api_key', None),
                     username=tool['settings'].get('username', None),
@@ -244,7 +244,7 @@ class AlitaClient:
                 tools.extend(zephyr_tools.get_tools())
             elif tool['type'] == 'browser':
                 browser_tools = BrowserToolkit().get_toolkit(
-                    google_api_key=tool['settings'].get('google_api_key'), 
+                    google_api_key=tool['settings'].get('google_api_key'),
                     google_cse_id=tool['settings'].get("google_cse_id")
                 )
                 tools.extend(browser_tools.get_tools())
@@ -283,10 +283,10 @@ class AlitaClient:
             return Assistant(client, template, tools).getAlitaExecutor()
         else:
             return Assistant(client, template, tools).getAgentExecutor()
-    
+
     def datasource(self, datasource_id: int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"
-        data = requests.get(url, headers=self.headers).json()
+        data = requests.get(url, headers=self.headers, verify=False).json()
         datasource_model = data['version_details']['datasource_settings']['chat']['chat_settings_embedding']
         chat_model = data['version_details']['datasource_settings']['chat']['chat_settings_ai']
         return AlitaDataSource(self, datasource_id, data["name"], data["description"],
@@ -297,29 +297,29 @@ class AlitaClient:
                   client: Optional[Any] = None, chat_history: Optional[list] = None):
         prompt = self.prompt(prompt_id=prompt_id, prompt_version_id=prompt_version_id, chat_history=chat_history)
         return Assistant(client, prompt, tools, openai_tools)
-    
+
     def artifact(self, bucket_name):
         return Artifact(self, bucket_name)
-    
-    
+
+
     def _process_requst(self, data):
         if data.status_code == 403:
             return { "error": "You are not authorized to access this resource"}
         elif data.status_code == 404:
             return { "error": "Resource not found"}
         elif data.status_code != 200:
-            return { 
+            return {
                     "error": "An error occurred while fetching the resource",
                     "content": data.content
                     }
         else:
             return data.json()
-    
-    
+
+
     def bucket_exists(self, bucket_name):
         try:
             resp = self._process_requst(
-                requests.get(f'{self.bucket_url}', headers=self.headers)
+                requests.get(f'{self.bucket_url}', headers=self.headers, verify=False)
             )
             for each in resp.get('rows', []):
                 if each['name'] == bucket_name:
@@ -327,48 +327,48 @@ class AlitaClient:
             return False
         except:
             return False
-    
+
     def create_bucket(self, bucket_name):
         post_data = {
             "name":bucket_name,
             "expiration_measure":"weeks",
             "expiration_value":"1"
         }
-        resp = requests.post(f'{self.bucket_url}', headers=self.headers, json=post_data)
+        resp = requests.post(f'{self.bucket_url}', headers=self.headers, json=post_data, verify=False)
         return self._process_requst(resp)
-        
-    
+
+
     def list_artifacts(self, bucket_name):
         url = f'{self.artifacts_url}/{bucket_name}'
-        data = requests.get(url, headers=self.headers)
+        data = requests.get(url, headers=self.headers, verify=False)
         return self._process_requst(data)
-        
+
     def create_artifact(self, bucket_name, artifact_name, artifact_data):
         url = f'{self.artifacts_url}/{bucket_name}'
         data = requests.post(url, headers=self.headers, files={
             'file': (artifact_name , artifact_data)
-        })
+        }, verify=False)
         return self._process_requst(data)
-    
+
     def download_artifact(self, bucket_name, artifact_name):
         url = f'{self.artifact_url}/{bucket_name}/{artifact_name}'
-        data = requests.get(url, headers=self.headers)
+        data = requests.get(url, headers=self.headers, verify=False)
         if data.status_code == 403:
             return { "error": "You are not authorized to access this resource"}
         elif data.status_code == 404:
             return { "error": "Resource not found"}
         elif data.status_code != 200:
-            return { 
+            return {
                     "error": "An error occurred while fetching the resource",
                     "content": data.content
                     }
         return data.content
-        
+
     def delete_artifact(self, bucket_name, artifact_name):
         url = f'{self.artifact_url}/{bucket_name}/{artifact_name}'
-        data = requests.delete(url, headers=self.headers)
+        data = requests.delete(url, headers=self.headers, verify=False)
         return self._process_requst(data)
-        
+
     def _prepare_messages(self, messages: list[BaseMessage]):
         chat_history = []
         for message in messages:
@@ -407,7 +407,7 @@ class AlitaClient:
     def async_predict(self, messages: list[BaseMessage], model_settings: dict, variables: list[dict] = None):
         # TODO: Modify to make it appropriate stream response
         prompt_data = self._prepare_payload(messages, model_settings, variables)
-        response = requests.post(self.predict_url, headers=self.headers, json=prompt_data)
+        response = requests.post(self.predict_url, headers=self.headers, json=prompt_data, verify=False)
         logger.info(response.content)
         response_data = response.json()
         for message in response_data['messages']:
@@ -419,7 +419,7 @@ class AlitaClient:
     def predict(self, messages: list[BaseMessage], model_settings: dict, variables: list[dict] = None):
         prompt_data = self._prepare_payload(messages, model_settings, variables)
 
-        response = requests.post(self.predict_url, headers=self.headers, json=prompt_data)
+        response = requests.post(self.predict_url, headers=self.headers, json=prompt_data, verify=False)
         if response.status_code != 200:
             logger.error("Error in response of predict: {response.content}")
             raise requests.exceptions.HTTPError(response.content)
@@ -448,7 +448,7 @@ class AlitaClient:
             "chat_settings_embedding": datasource_settings
         }
         headers = self.headers | {"Content-Type": "application/json"}
-        response = requests.post(f"{self.datasources_predict}/{datasource_id}", headers=headers, json=data).json()
+        response = requests.post(f"{self.datasources_predict}/{datasource_id}", headers=headers, json=data, verify=False).json()
         return AIMessage(content=response['response'], additional_kwargs={"references": response['references']})
 
     def search(self, datasource_id: int, messages: list[BaseMessage], datasource_settings: dict) -> AIMessage:
@@ -469,7 +469,7 @@ class AlitaClient:
             "str_content": True
         }
         headers = self.headers | {"Content-Type": "application/json"}
-        response = requests.post(f"{self.datasources_search}/{datasource_id}", headers=headers, json=data)
+        response = requests.post(f"{self.datasources_search}/{datasource_id}", headers=headers, json=data, verify=False)
         if not response.ok:
             raise Exception(f'Search request failed with code {response.status_code}')
         resp_data = response.json()
