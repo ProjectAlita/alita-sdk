@@ -244,6 +244,7 @@ class AlitaClient:
                 tools.extend(zephyr_tools.get_tools())
             elif tool['type'] == 'browser':
                 browser_tools = BrowserToolkit().get_toolkit(
+                    selected_tools=tool['settings'].get('selected_tools', []),
                     google_api_key=tool['settings'].get('google_api_key'),
                     google_cse_id=tool['settings'].get("google_cse_id")
                 )
