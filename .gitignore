@@ -161,3 +161,4 @@ cython_debug/
 .promptLib/
 .DS_Store
 dist/
+test.py

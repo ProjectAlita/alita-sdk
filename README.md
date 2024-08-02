@@ -61,49 +61,41 @@ The Alita SDK allows you to create and execute agents with ease. Here's a simple
 
 
 ```python
-import logging 
-from src.alita_sdk.llms.alita import AlitaChatModel 
-from langchain_core.messages import HumanMessage  
-# Set up 
-logging logging.basicConfig(level=logging.INFO) 
-logger = logging.getLogger(__name__)  
+import logging
+from os import environ
+from dotenv import load_dotenv
 
-# Load environment variables 
-from os import environ 
-load_dotenv('.env')  
+logging.basicConfig(level=logging.INFO)
+load_dotenv('.env')
+logger = logging.getLogger(__name__)
 
-# Configuration settings for AlitaChatModel 
+from alita_sdk.utils.streamlit import run_streamlit
+
+try:
+    import streamlit as st
+except ImportError:
+    logger.error("Streamlit not found, please install it using `pip install streamlit`")
+    exit(1)
+
+from alita_sdk.llms.alita import AlitaChatModel
+            
+# Minimal set of setting for AlitaChatModel
 settings = {
     "deployment": "https://eye.projectalita.ai",
-    "model": "gpt-4-1106-preview",
+    "model": "gpt-4-0125-preview",
     "api_key": environ.get("AUTH_TOKEN"),
     "project_id": environ.get("PROJECT_ID"),
     "integration_uid": environ.get("INTEGRATION_UID"),
-    "max_tokens": 2048,
-    "stream": True 
-}  
-# Instantiate AlitaChatModel 
-llm = AlitaChatModel(**settings)  
+    
+}
 
-# Define tools for agent operations 
-from demo.demo_react_agent.tools import getRepoTreeTool, getRawFileTool, storeSpecFile  t
-ools = [getRepoTreeTool(), getRawFileTool, storeSpecFile]  
+print(settings)
+if 'messages' not in st.session_state:
+    llm = AlitaChatModel(**settings)
+    st.session_state.messages = []
+    st.session_state.agent_executor = llm.client.application(llm, <application_id>, <application_version_id>)
+    
+ 
+run_streamlit(st)
 
-# Construct the agent with mixed capabilities 
-
-from src.alita_sdk.agents import create_mixed_agent 
-from langchain.agents import AgentExecutor 
-
-prompt = llm.client.prompt(prompt_id=<prompt_id>, prompt_version_id=<prompt_version_id>) 
-agent = create_mixed_agent(llm, tools, prompt)  
-
-# Execute the agent 
-agent_executor = AgentExecutor.from_agent_and_tools(
-    agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, max_execution_time=None, return_intermediate_steps=True)  
-
-input_data = {"input": """Use repository spring-petclinic/spring-framework-petclinic with branch main. 
-It is a Java Spring application, please create a swagger spec. 
-Deployment URL is https://petclinic.example.com"""}  
-
-agent_executor.invoke(input_data, include_run_info=True)
 ```

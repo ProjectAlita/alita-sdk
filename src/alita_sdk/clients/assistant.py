@@ -2,7 +2,8 @@
 from typing import Dict, Any, Optional
 from langchain.agents import AgentExecutor, create_react_agent
 from ..agents.mixedAgentParser import MixedAgentOutputParser
-from ..agents.mixedAgentRenderes import render_text_description_and_args
+from ..agents.llama_agent import LLamaAssistantRunnable
+from ..agents.mixedAgentRenderes import render_react_text_description_and_args
 from langchain_core.messages import (
     BaseMessage,
 )
@@ -22,14 +23,23 @@ class Assistant:
     def getAgentExecutor(self):
         agent = create_react_agent(llm=self.client, tools=self.tools, prompt=self.prompt,
                                    output_parser=MixedAgentOutputParser(), 
-                                   tools_renderer=render_text_description_and_args)
+                                   tools_renderer=render_react_text_description_and_args)
+        return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
+                                                  verbose=True, handle_parsing_errors=True,
+                                                  max_execution_time=None, return_intermediate_steps=True)
+    
+    def getLLamaAgentExecutor(self):
+        agent = LLamaAssistantRunnable.create_assistant(
+            client=self.client, 
+            tools=self.tools,
+            prompt=self.prompt)
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
                                                   verbose=True, handle_parsing_errors=True,
                                                   max_execution_time=None, return_intermediate_steps=True)
 
     def getDialOpenAIAgentExecutor(self):
         agent = AlitaDialOpenAIAssistantRunnable(client=self.client, assistant=self, 
-                                             chat_history=self.prompt.messages)
+                                                 chat_history=self.prompt.messages)
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
                                                   prompt=self.prompt, verbose=True, 
                                                   handle_parsing_errors=True,

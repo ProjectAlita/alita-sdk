@@ -1,5 +1,6 @@
 """Parser for MixedAgentTools."""
 import logging
+from json import dumps
 from typing import  List, Tuple, Dict, Any
 from uuid import uuid4
 from langchain_core.tools import BaseTool
@@ -8,7 +9,30 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, Human
 from .mixedAgentParser import FORMAT_INSTRUCTIONS
 logger = logging.getLogger(__name__)
 
-def render_text_description_and_args(tools: List[BaseTool]) -> str:
+def get_instruction_string(custom_tool_definition) -> str:
+    return f"Use the function '{custom_tool_definition.name}' to '{custom_tool_definition.description}'"
+
+def get_parameters_string(custom_tool_definition: BaseTool) -> str:
+    tool = {
+        "name": custom_tool_definition.name,
+        "description": custom_tool_definition.description,
+        "parameters": {}
+    }
+    print(custom_tool_definition)
+    for arg in custom_tool_definition.args.keys():
+        tool['parameters'][f'{arg} ({custom_tool_definition.args[arg].get("type", "str")})'] = custom_tool_definition.args[arg].get('description', arg)
+    return dumps(tool)
+
+
+def render_llama_text_description_and_args(tools: List[BaseTool]) -> str:
+    """Render the tool name, description, and args in plain text."""
+    tool_str = ''
+    for tool in tools:
+        tool_str += get_instruction_string(tool) + "\n"
+        tool_str += get_parameters_string(tool) + "\n\n"
+    return tool_str
+
+def render_react_text_description_and_args(tools: List[BaseTool]) -> str:
     """Render the tool name, description, and args in plain text."""
     tool_strings = []
     for tool in tools:

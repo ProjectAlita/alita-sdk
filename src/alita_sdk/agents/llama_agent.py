@@ -2,14 +2,14 @@ from typing import Sequence, Union, Any, Optional
 from traceback import format_exc
 
 from langchain_core.prompts import BasePromptTemplate
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langchain.agents.openai_assistant.base import OutputType
 from langchain_core.runnables import RunnableSerializable, ensure_config
-from .mixedAgentParser import MixedAgentOutputParser
+from .llamaAgentParser import LlamaAgentOutputParser
 from langchain.tools.render import ToolsRenderer
 from langchain_core.load import dumpd
-from .mixedAgentRenderes import render_react_text_description_and_args
+from .mixedAgentRenderes import render_llama_text_description_and_args
 from .mixedAgentRenderes import conversation_to_messages, format_to_langmessages
 from langchain_core.callbacks import CallbackManager
 from langchain_core.runnables import RunnableConfig, RunnableSerializable, ensure_config
@@ -17,13 +17,13 @@ from uuid import uuid4
 from langchain_core.outputs import LLMResult, ChatGenerationChunk
 from langchain_core.outputs.run_info import RunInfo
 from langchain_core.outputs.generation import Generation
-from ..clients.constants import ALITA_OUTPUT_FORMAT
+from ..clients.constants import LLAMA_ADDON
 
-class AlitaAssistantRunnable(RunnableSerializable):
+class LLamaAssistantRunnable(RunnableSerializable):
     client: Optional[Any]
     assistant: Optional[Any]
     chat_history: list[BaseMessage] = []
-    agent_type:str = "alita"
+    agent_type:str = "llama"
 
     @classmethod
     def create_assistant(
@@ -31,11 +31,10 @@ class AlitaAssistantRunnable(RunnableSerializable):
         client: Any,
         prompt: BasePromptTemplate,
         tools: Sequence[Union[BaseTool, dict]],
-        tools_renderer: Optional[ToolsRenderer] = render_react_text_description_and_args,
+        tools_renderer: Optional[ToolsRenderer] = render_llama_text_description_and_args,
     ) -> RunnableSerializable:
         prompt = prompt.partial(
-            tools=tools_renderer(list(tools)),
-            tool_names=", ".join([t.name for t in tools]),
+            tools=tools_renderer(list(tools))
         )
         return cls(client=client, assistant=client, chat_history=prompt.format_messages())
     
@@ -56,9 +55,7 @@ class AlitaAssistantRunnable(RunnableSerializable):
         
         try:
             user_messages = [] 
-            if self.agent_type == "alita":
-                messages.append(SystemMessage(content=ALITA_OUTPUT_FORMAT))
-            user_messages.append(HumanMessage(content=input.get('input')))
+            user_messages.append(HumanMessage(content=input.get('input', input.get('content'))))
             msgs = self.chat_history + \
                 conversation_to_messages(input["chat_history"]) + \
                      user_messages + \
@@ -88,5 +85,5 @@ class AlitaAssistantRunnable(RunnableSerializable):
         return self.client.completion_with_retry(messages)
     
     def _get_response(self, run: BaseMessage) -> Any:
-        output_parser = MixedAgentOutputParser()
+        output_parser = LlamaAgentOutputParser()
         return output_parser.parse(run[0].content)

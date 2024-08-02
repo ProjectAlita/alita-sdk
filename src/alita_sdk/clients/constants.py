@@ -35,8 +35,10 @@ Begin!
 ### Previous Conversation History
 {{chat_history}}
 
-### New Input:
+### User Request:
 {{input}}
+
+### Agent Scratchpad:
 {{agent_scratchpad}}
 
 """
@@ -79,3 +81,22 @@ To respond to a user, use the following format:
 """
 
 ALITA_VARS = ["tool_names", "tools"]
+
+
+LLAMA_ADDON = """You have access to the following functions:
+
+{{tools}}
+Think very carefully before calling functions.
+If you choose to call a function ONLY reply in the following format with no prefix or suffix:
+
+<function=example_function_name>{"example_name": "example_value"}</function>
+
+Reminder:
+- If looking for real time information use relevant functions before falling back to brave_search
+- Function calls MUST follow the specified format, start with <function= and end with </function>
+- Required parameters MUST be specified
+- Only call one function at a time from the list of {{tool_names}}
+- Put the entire function call reply on one line
+"""
+
+LLAMA_VARS = ["tools"]

@@ -22,7 +22,7 @@ def decode_img(msg):
     img = Image.open(buf)
     return img
 
-def run_streamlit(st, agent_executor, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
+def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
     from langchain_community.callbacks.streamlit import (
         StreamlitCallbackHandler,
     )
@@ -46,12 +46,7 @@ def run_streamlit(st, agent_executor, ai_icon=decode_img(ai_icon), user_icon=dec
         </style>
         """, unsafe_allow_html=True
     )
-    
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
-        st.session_state["agent_executor"] = agent_executor
-        
+
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar=ai_icon if message["role"] == "assistant" else user_icon):
             st.markdown(message["content"])
@@ -59,12 +54,11 @@ def run_streamlit(st, agent_executor, ai_icon=decode_img(ai_icon), user_icon=dec
 
     if prompt := st.chat_input():
         st.chat_message("user", avatar=user_icon).write(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("assistant", avatar=ai_icon):
             st_callback = StreamlitCallbackHandler(st.container())
             response = st.session_state.agent_executor.invoke(
-                {"content": prompt, "chat_history": st.session_state.messages}, {"callbacks": [st_callback]}
+                {"input": prompt, "chat_history": st.session_state.messages}, {"callbacks": [st_callback]}
             )
             st.write(response["output"])
-            
+            st.session_state.messages.append({"role": "user", "content": prompt})
             st.session_state.messages.append({"role": "assistant", "content": response["output"]})
