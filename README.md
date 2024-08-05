@@ -59,6 +59,9 @@ Basic Usage
 
 The Alita SDK allows you to create and execute agents with ease. Here's a simple example to get you started:
 
+```bash
+pip install alita-sdk
+```
 
 ```python
 import logging
@@ -89,13 +92,16 @@ settings = {
     
 }
 
+agent_id = 1  # Created Agent ID in Alita Platform
+agent_version_id = 1
+
 print(settings)
 if 'messages' not in st.session_state:
     llm = AlitaChatModel(**settings)
     st.session_state.messages = []
-    st.session_state.agent_executor = llm.client.application(llm, <application_id>, <application_version_id>)
-    
- 
+    st.session_state.agent_executor = llm.client.application(llm, agent_id, agent_version_id)
+
+
 run_streamlit(st)
 
 ```
