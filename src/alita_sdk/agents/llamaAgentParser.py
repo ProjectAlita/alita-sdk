@@ -12,7 +12,7 @@ class UnexpectedResponseError(Exception):
 
 def extract_using_regex(text) -> dict:
  # Extracting the thoughts section
-    pattern = r'<function=(.*?)>(.*?)</function>'
+    pattern = r'<function=(.*?)>(.*?)</?function>'
     match = re.search(pattern, text)
     if match:
         function_name = match.group(1)

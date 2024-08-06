@@ -54,8 +54,9 @@ class LLamaAssistantRunnable(RunnableSerializable):
             messages = format_to_langmessages(input["intermediate_steps"])
         
         try:
-            user_messages = [] 
-            user_messages.append(HumanMessage(content=input.get('input', input.get('content'))))
+            user_messages = []
+            if input.get('input', input.get('content')):
+                user_messages.append(HumanMessage(content=input.get('input', input.get('content'))))
             msgs = self.chat_history + \
                 conversation_to_messages(input["chat_history"]) + \
                      user_messages + \

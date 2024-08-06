@@ -58,7 +58,8 @@ class AlitaAssistantRunnable(RunnableSerializable):
             user_messages = [] 
             if self.agent_type == "alita":
                 messages.append(SystemMessage(content=ALITA_OUTPUT_FORMAT))
-            user_messages.append(HumanMessage(content=input.get('input')))
+            if input.get('input', input.get('content')):
+                user_messages.append(HumanMessage(content=input.get('input', input.get('content'))))
             msgs = self.chat_history + \
                 conversation_to_messages(input["chat_history"]) + \
                      user_messages + \
