@@ -21,7 +21,7 @@ def extract_using_regex(text) -> dict:
         return {
             "tool": {
                 "name": function_name,
-                "args": json.loads(params)
+                "args": json.loads(params) if params else {}
             }
         }
     else:

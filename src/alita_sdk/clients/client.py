@@ -137,7 +137,7 @@ class AlitaClient:
             template.input_variables = input_variables
         if variables:
             template.partial_variables = variables
-        tools = get_tools(client, data['tools'])
+        tools = get_tools(client, data['tools']) + tools
         if app_type == "dial":
             integration_details = self.get_integration_details(data['llm_settings']['integration_uid'])
             if integration_details['config']['is_shared']:
