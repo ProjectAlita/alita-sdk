@@ -112,6 +112,7 @@ class AlitaClient:
         if tools is None:
             tools = []
         data = self.get_app_version_details(application_id, application_version_id)
+        print(data)
         if not app_type:
             app_type = data.get("agent_type", "raw")
         if app_type == "react":
@@ -145,7 +146,7 @@ class AlitaClient:
             template.input_variables = input_variables
         if variables:
             template.partial_variables = variables
-        tools = get_tools(client, data['tools']) + tools
+        tools = get_tools(self, client, data['tools']) + tools
         if app_type == "dial" or app_type == "openai":
             integration_details = data['llm_settings']['integration_details']
             from langchain_openai import AzureChatOpenAI

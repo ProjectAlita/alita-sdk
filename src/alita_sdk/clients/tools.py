@@ -18,7 +18,7 @@ from ..tools.echo import EchoTool
 
 logger = logging.getLogger(__name__)
 
-def get_tools(client, tools_list):
+def get_tools(alita, llm, tools_list):
     prompts = []
     tools = []
     tools.append(EchoTool())
@@ -30,21 +30,21 @@ def get_tools(client, tools_list):
             ])
         elif tool['type'] == 'datasource':
             tools.extend(DatasourcesToolkit.get_toolkit(
-                client,
+                alita,
                 datasource_ids=[int(tool['settings']['datasource_id'])],
                 selected_tools=tool['settings']['selected_tools']
             ).get_tools())
         elif tool['type'] == 'application':
             tools.extend(ApplicationToolkit.get_toolkit(
-                client,
+                alita,
                 application_id=int(tool['settings']['application_id']),
                 application_version_id=int(tool['settings']['application_version_id']),
-                app_api_key=client.auth_token,
+                app_api_key=alita.auth_token,
                 selected_tools=[]
             ).get_tools())
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
-                client=client,
+                client=alita,
                 bucket=tool['settings']['bucket'],
                 selected_tools=tool['settings'].get('selected_tools', [])
             ).get_tools())
@@ -135,5 +135,5 @@ def get_tools(client, tools_list):
                 except Exception as e:
                     logger.error(f"Error in getting toolkit: {e}")
     if len(prompts) > 0:
-        tools += PromptToolkit.get_toolkit(client, prompts).get_tools()
+        tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
     return tools
