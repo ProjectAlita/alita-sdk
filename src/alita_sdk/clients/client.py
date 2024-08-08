@@ -11,7 +11,7 @@ from langchain_core.messages import (
     BaseMessage,
 )
 
-from langchain_core.utils.function_calling import convert_to_openai_function
+from langchain_core.prompts import MessagesPlaceholder
 
 from .tools import get_tools
 from .constants import REACT_ADDON, REACT_VARS, ALITA_ADDON, ALITA_VARS, LLAMA_ADDON, LLAMA_VARS
@@ -20,7 +20,6 @@ from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
-from ..agents.mixedAgentRenderes import conversation_to_messages
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +121,10 @@ class AlitaClient:
         elif app_type == 'llama':
             data['instructions'] += LLAMA_ADDON
         messages = [SystemMessage(content=data['instructions'])]
+        if app_type == 'openai':
+            messages.append(MessagesPlaceholder("chat_history", optional=True))
+            messages.append(MessagesPlaceholder("agent_scratchpad", optional=True))
+            messages.append(HumanMessage("{{input}}"))
         variables = {}
         input_variables = []
         for variable in data['variables']:
@@ -143,25 +146,21 @@ class AlitaClient:
         if variables:
             template.partial_variables = variables
         tools = get_tools(client, data['tools']) + tools
-        if app_type == "dial":
-            integration_details = self.get_integration_details(data['llm_settings']['integration_uid'])
-            if integration_details['config']['is_shared']:
-                api_key = environ.get('OPENAI_API_KEY')
-            else:
-                api_key = integration_details['settings']['api_token']['value']
-                if integration_details['settings']['api_token']['from_secrets']:
-                    api_key = self.unsecret(integration_details['settings']['api_token']['value'].split('.')[1][:-2])
+        if app_type == "dial" or app_type == "openai":
+            integration_details = data['llm_settings']['integration_details']
             from langchain_openai import AzureChatOpenAI
             llm_client = AzureChatOpenAI(
                 azure_endpoint=integration_details['settings']['api_base'],
                 deployment_name=data['llm_settings']['model_name'],
                 openai_api_version=integration_details['settings']['api_version'],
-                openai_api_key=api_key,
+                openai_api_key=integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
                 temperature=data['llm_settings']['temperature'],
                 max_tokens=data['llm_settings']['max_tokens']
             )
-            open_ai_funcs = [convert_to_openai_function(t) for t in tools]
-            return Assistant(llm_client, template, tools, open_ai_funcs).getDialOpenAIAgentExecutor()
+            if app_type == 'dial':
+                return Assistant(llm_client, template, tools).getOpenAIFunctionsAgentExecutor()
+            else:
+                return Assistant(llm_client, template, tools).getOpenAIToolsAgentExecutor()
         elif app_type == "alita":
             return Assistant(client, template, tools).getAlitaExecutor()
         elif app_type == "llama":
