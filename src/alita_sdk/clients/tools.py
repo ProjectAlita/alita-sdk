@@ -13,15 +13,12 @@ from ..toolkits.prompt import PromptToolkit
 from ..toolkits.datasource import DatasourcesToolkit
 from ..toolkits.application import ApplicationToolkit
 from ..toolkits.artifact import ArtifactToolkit
-from ..tools.echo import EchoTool
-
 
 logger = logging.getLogger(__name__)
 
-def get_tools(alita, llm, tools_list):
+def get_tools(alita, tools_list):
     prompts = []
     tools = []
-    tools.append(EchoTool())
     for tool in tools_list:
         if tool['type'] == 'prompt':
             prompts.append([

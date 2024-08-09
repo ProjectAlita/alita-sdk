@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 from langchain.agents import AgentExecutor, create_react_agent, create_openai_tools_agent, create_openai_functions_agent
 from ..agents.mixedAgentParser import MixedAgentOutputParser
 from ..agents.llama_agent import LLamaAssistantRunnable
+from ..agents.autogen_agent import AutoGenAssistantRunnable
 from ..agents.mixedAgentRenderes import render_react_text_description_and_args
 from langchain_core.messages import (
     BaseMessage,
@@ -53,6 +54,14 @@ class Assistant:
                                                   verbose=True, handle_parsing_errors=True,
                                                   max_execution_time=None,
                                                   return_intermediate_steps=True)
+    
+    def getAutoGenExecutor(self):
+        agent = AutoGenAssistantRunnable.create_assistant(client=self.client, tools=self.tools, prompt=self.prompt)
+        return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
+                                                  verbose=True, handle_parsing_errors=True,
+                                                  max_execution_time=None,
+                                                  return_intermediate_steps=True)
+
 
     # This one is used only in Alita and OpenAI
     def apredict(self, messages: list[BaseMessage]):

@@ -114,3 +114,20 @@ def conversation_to_messages(conversation: List[Dict[str, str]]) -> List[BaseMes
             else:
                 messages.append(SystemMessage(content=message["content"]))
     return messages
+
+def convert_message_to_json(conversation: List[BaseMessage]) -> List[Dict[str, str]]:
+    """Format the conversation to List of Dict"""
+    messages = []
+    for message in conversation:
+        if isinstance(message, dict):
+            messages.append(message)
+        elif isinstance(message, BaseMessage):
+            if isinstance(messages, HumanMessage):
+                messages.append({"role": "user", "content": message.content})
+            elif isinstance(messages, AIMessage):
+                messages.append({"role": "assistant", "content": message.content})
+            elif isinstance(message, SystemMessage):
+                messages.append({"role": "system", "content": message.content})
+            else:
+                messages.append({"role": "assistant", "content": message.content})
+    return messages

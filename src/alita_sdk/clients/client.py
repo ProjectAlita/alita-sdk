@@ -20,6 +20,7 @@ from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
+from ..tools.echo import EchoTool
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ class AlitaClient:
             template.input_variables = input_variables
         if variables:
             template.partial_variables = variables
-        tools = get_tools(self, client, data['tools']) + tools
+        tools = get_tools(self, data['tools']) + tools
         if app_type == "dial" or app_type == "openai":
             integration_details = data['llm_settings']['integration_details']
             from langchain_openai import AzureChatOpenAI
@@ -162,11 +163,23 @@ class AlitaClient:
                 return Assistant(llm_client, template, tools).getOpenAIFunctionsAgentExecutor()
             else:
                 return Assistant(llm_client, template, tools).getOpenAIToolsAgentExecutor()
+        elif app_type == 'autogpt':
+            integration_details = data['llm_settings']['integration_details']
+            client_config = {
+                "model": data['llm_settings']['model_name'],
+                "api_key": integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
+                "base_url": integration_details['settings']['api_base'],
+                'api_type': 'azure',
+                'api_version': integration_details['settings']['api_version'],
+            }
+            return Assistant(client_config, template, tools).getAutoGenExecutor()
         elif app_type == "alita":
+            tools = [EchoTool()] + tools
             return Assistant(client, template, tools).getAlitaExecutor()
         elif app_type == "llama":
             return Assistant(client, template, tools).getLLamaAgentExecutor()
         else:
+            tools = [EchoTool()] + tools
             return Assistant(client, template, tools).getAgentExecutor()
 
     def datasource(self, datasource_id: int) -> AlitaDataSource:
