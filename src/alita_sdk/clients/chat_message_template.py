@@ -7,8 +7,9 @@ from langchain_core.messages import (
     SystemMessage,
     AIMessage,
     HumanMessage,
-    ToolMessage
+    ToolMessage,
 )
+from langchain_core.prompts.chat import BaseMessagePromptTemplate, BaseChatPromptTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -46,4 +47,9 @@ class Jinja2TemplatedChatMessagesTemplate(ChatPromptTemplate):
                 message = self._resolve_variables(message_template, kwargs)
                 logger.debug(message.content)
                 result.append(message)
+            elif isinstance(message_template, 
+                            (BaseMessagePromptTemplate, BaseChatPromptTemplate)
+                            ):
+                message = message_template.format_messages(**kwargs)
+                result.extend(message)
         return result

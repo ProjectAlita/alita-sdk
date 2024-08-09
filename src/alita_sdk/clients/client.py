@@ -122,10 +122,10 @@ class AlitaClient:
         elif app_type == 'llama':
             data['instructions'] += LLAMA_ADDON
         messages = [SystemMessage(content=data['instructions'])]
-        if app_type == 'openai':
-            messages.append(MessagesPlaceholder("chat_history", optional=True))
-            messages.append(MessagesPlaceholder("agent_scratchpad", optional=True))
+        if app_type in ['openai', 'dial']:
+            messages.append(MessagesPlaceholder("chat_history"))
             messages.append(HumanMessage("{{input}}"))
+            messages.append(MessagesPlaceholder("agent_scratchpad"))
         variables = {}
         input_variables = []
         for variable in data['variables']:

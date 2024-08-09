@@ -1,2 +1,1 @@
 from .alita_agent import AlitaAssistantRunnable
-from .alita_openai import AlitaDialOpenAIAssistantRunnable
