@@ -163,7 +163,7 @@ class AlitaClient:
                 return Assistant(llm_client, template, tools).getOpenAIFunctionsAgentExecutor()
             else:
                 return Assistant(llm_client, template, tools).getOpenAIToolsAgentExecutor()
-        elif app_type == 'autogpt':
+        elif app_type == 'autogen':
             integration_details = data['llm_settings']['integration_details']
             client_config = {
                 "model": data['llm_settings']['model_name'],
