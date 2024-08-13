@@ -8,6 +8,8 @@ from alita_tools.jira import JiraToolkit
 from alita_tools.confluence import ConfluenceToolkit
 from alita_tools.browser import BrowserToolkit
 from alita_tools.zephyr import ZephyrToolkit
+from alita_tools.yagmail import AlitaYagmailToolkit
+from alita_tools.yagmail.yagmail_wrapper import SMTP_SERVER
 
 from ..toolkits.prompt import PromptToolkit
 from ..toolkits.datasource import DatasourcesToolkit
@@ -121,6 +123,14 @@ def get_tools(alita, tools_list):
                 google_cse_id=tool['settings'].get("google_cse_id")
             )
             tools.extend(browser_tools.get_tools())
+        elif tool['type'] == 'yagmail':
+            yagmailToolkit = AlitaYagmailToolkit().get_toolkit(
+                selected_tools=tool['settings'].get('selected_tools', []),
+                host=tool['settings'].get('host', SMTP_SERVER),
+                username=tool['settings'].get('username'),
+                password=tool['settings'].get("password")
+            )
+            tools.extend(yagmailToolkit.get_tools())
         else:
             if tool.get("settings", {}).get("module"):
                 try:
