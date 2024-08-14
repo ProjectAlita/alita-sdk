@@ -37,7 +37,7 @@ class AlitaAssistantRunnable(RunnableSerializable):
             tools=tools_renderer(list(tools)),
             tool_names=", ".join([t.name for t in tools]),
         )
-        return cls(client=client, assistant=client, chat_history=prompt.format_messages())
+        return cls(client=client, assistant=client, agent_type='alita', chat_history=prompt.format_messages())
     
     def invoke(self, input: dict, config: RunnableConfig | None = None) -> OutputType:
         run_id = uuid4()

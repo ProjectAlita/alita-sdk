@@ -147,7 +147,7 @@ class AlitaClient:
             template.input_variables = input_variables
         if variables:
             template.partial_variables = variables
-        tools = get_tools(self, data['tools']) + tools
+        tools = get_tools(self, data['tools']) + tools    
         if app_type == "dial" or app_type == "openai":
             integration_details = data['llm_settings']['integration_details']
             from langchain_openai import AzureChatOpenAI
