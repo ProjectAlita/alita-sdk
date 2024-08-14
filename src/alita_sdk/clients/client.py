@@ -335,16 +335,22 @@ class AlitaClient:
             logger.error(f"TypeError in response of predict: {response.content}")
             raise
 
-    def rag(self, datasource_id: int, messages: list[BaseMessage],
-            datasource_settings: dict, datasource_predict_settings: dict):
-        chat_history = self._prepare_messages(messages)
+    def rag(self, datasource_id: int,
+            user_input: Optional[str] = '',
+            context: Optional[str] = None,
+            chat_history: Optional[list] = None,
+            datasource_settings: Optional[dict] = None,
+            datasource_predict_settings: Optional[dict] = None):
         data = {
-            "input": '',
-            "context": '',
+            "input": user_input,
             "chat_history": chat_history,
-            "chat_settings_ai": datasource_predict_settings,
-            "chat_settings_embedding": datasource_settings
         }
+        if context is not None:
+            data["context"] = context
+        if datasource_settings is not None:
+            data["chat_settings_embedding"] = datasource_settings
+        if datasource_predict_settings is not None:
+            data["datasource_predict_settings"] = datasource_predict_settings
         headers = self.headers | {"Content-Type": "application/json"}
         response = requests.post(f"{self.datasources_predict}/{datasource_id}", headers=headers, json=data,
                                  verify=False).json()
