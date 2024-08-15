@@ -1,5 +1,5 @@
 
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool
 from typing import Any, Type
 from pydantic import create_model, BaseModel
 from pydantic.fields import FieldInfo

@@ -7,7 +7,7 @@ from langchain_core.tools import BaseTool
 from langchain.agents.openai_assistant.base import OutputType
 from langchain_core.runnables import RunnableSerializable, ensure_config
 from .mixedAgentParser import MixedAgentOutputParser
-from langchain.tools.render import ToolsRenderer
+from langchain_core.tools.render import ToolsRenderer
 from langchain_core.load import dumpd
 from .mixedAgentRenderes import render_react_text_description_and_args
 from .mixedAgentRenderes import conversation_to_messages, format_to_langmessages
