@@ -18,10 +18,9 @@ class AlitaDataSource:
     def predict(self, user_input: str, chat_history: Optional[list] = None):
         if chat_history is None:
             chat_history = []
-        messages = chat_history + [HumanMessage(content=user_input)]
-        return self.alita.rag(self.datasource_id, messages,
-                              self.datasource_settings,
-                              self.datasource_predict_settings)
+        return self.alita.rag(datasource_id=self.datasource_id,
+                              chat_history=chat_history,
+                              user_input=user_input)
 
     def search(self, query: str):
         return self.alita.search(self.datasource_id, [HumanMessage(content=query)],
