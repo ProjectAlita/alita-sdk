@@ -9,16 +9,21 @@ from ..agents.llama_agent import LLamaAssistantRunnable
 from ..agents.autogen_agent import AutoGenAssistantRunnable
 from ..agents.mixedAgentRenderes import render_react_text_description_and_args
 from ..agents.alita_agent import AlitaAssistantRunnable
+from ..agents.langraph_agent import LGAssistantRunnable
 from langchain_core.messages import (
     BaseMessage,
 )
 from langchain_core.prompts import ChatPromptTemplate
 
 class Assistant:
-    def __init__(self, client: Any, prompt: ChatPromptTemplate, tools: list):
+    def __init__(self, client: Any, 
+                 prompt: ChatPromptTemplate, 
+                 tools: list, 
+                 chat_history: list[BaseMessage] = []):
         self.prompt = prompt
         self.client = client
         self.tools = tools
+        self.chat_history = chat_history
 
     def _agent_executor(self, agent: Any):
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
@@ -52,6 +57,14 @@ class Assistant:
                                                   verbose=True, handle_parsing_errors=True,
                                                   max_execution_time=None,
                                                   return_intermediate_steps=True)
+    
+    def getLGExecutor(self):
+        agent = LGAssistantRunnable.create_assistant(
+            client=self.client, 
+            tools=self.tools, 
+            prompt=self.prompt,
+            chat_history=self.chat_history)
+        return self._agent_executor(agent)
     
     def getAutoGenExecutor(self):
         agent = AutoGenAssistantRunnable.create_assistant(client=self.client, tools=self.tools, prompt=self.prompt)

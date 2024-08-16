@@ -1,13 +1,14 @@
 from typing import List, Any
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
-from ..tools.application import Application
+from ..tools.application import Application, applicationToolSchema, applicationWFSchema
 
 class ApplicationToolkit(BaseToolkit):
     tools: List[BaseTool] = []
     
     @classmethod
-    def get_toolkit(cls, client: Any, application_id: int, application_version_id: int, app_api_key: str, selected_tools: list[str] = [] ):
+    def get_toolkit(cls, client: Any, application_id: int, application_version_id: int, app_api_key: str, 
+                    selected_tools: list[str] = [], is_wf=False):
         from ..llms.alita import AlitaChatModel
         
         app_details = client.get_app_details(application_id)
@@ -25,7 +26,11 @@ class ApplicationToolkit(BaseToolkit):
         }
 
         app = client.application(AlitaChatModel(**settings), application_id, application_version_id)
-        return cls(tools=[Application(name=app_details.get("name"), description=app_details.get("description"), appliacation=app)])
+        return cls(tools=[Application(name=app_details.get("name"), 
+                                      description=app_details.get("description"), 
+                                      appliacation=app, 
+                                      args_schema=applicationWFSchema if is_wf else applicationToolSchema,
+                                      return_type='dict' if is_wf else 'str')])
             
     def get_tools(self):
         return self.tools

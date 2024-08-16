@@ -121,13 +121,12 @@ def convert_message_to_json(conversation: List[BaseMessage]) -> List[Dict[str, s
     for message in conversation:
         if isinstance(message, dict):
             messages.append(message)
-        elif isinstance(message, BaseMessage):
-            if isinstance(messages, HumanMessage):
-                messages.append({"role": "user", "content": message.content})
-            elif isinstance(messages, AIMessage):
-                messages.append({"role": "assistant", "content": message.content})
-            elif isinstance(message, SystemMessage):
-                messages.append({"role": "system", "content": message.content})
-            else:
-                messages.append({"role": "assistant", "content": message.content})
+        elif message.type == 'human':
+            messages.append({"role": "user", "content": message.content})
+        elif message.type == 'ai':
+            messages.append({"role": "assistant", "content": message.content})
+        elif message.type == 'system':
+            messages.append({"role": "system", "content": message.content})
+        else:
+            messages.append({"role": "assistant", "content": message.content})
     return messages
