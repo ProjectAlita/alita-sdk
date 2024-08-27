@@ -66,8 +66,8 @@ class MixedAgentOutputParser(AgentOutputParser):
         log: str = json.dumps(response, indent=2)
         if action in ['complete_task', 'respond', 'ask_user']:
             try:
-                output: str = tool_input[list(tool_input.keys())[0]]
-            except AttributeError:
+                output: str = list(tool_input.values())[0]
+            except (AttributeError, IndexError):
                 output: str = tool_input
             if output.strip() == "final_answer":
                 output = txt
