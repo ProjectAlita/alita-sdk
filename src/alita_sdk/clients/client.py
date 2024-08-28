@@ -1,4 +1,6 @@
 import logging
+import importlib
+
 import requests
 
 from os import environ
@@ -148,18 +150,31 @@ class AlitaClient:
             template.input_variables = input_variables
         if variables:
             template.partial_variables = variables
-        tools = get_tools(data['tools'], self) + tools    
+        tools = get_tools(data['tools'], self) + tools
         if app_type == "dial" or app_type == "openai":
-            integration_details = data['llm_settings']['integration_details']
-            from langchain_openai import AzureChatOpenAI
-            llm_client = AzureChatOpenAI(
-                azure_endpoint=integration_details['settings']['api_base'],
-                deployment_name=data['llm_settings']['model_name'],
-                openai_api_version=integration_details['settings']['api_version'],
-                openai_api_key=integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
-                temperature=data['llm_settings']['temperature'],
-                max_tokens=data['llm_settings']['max_tokens']
-            )
+            if "indexer_config" in data["llm_settings"]:
+                model_type = data["llm_settings"]["indexer_config"]["ai_model"]
+                model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
+                #
+                target_pkg, target_name = model_type.rsplit(".", 1)
+                target_cls = getattr(
+                    importlib.import_module(target_pkg),
+                    target_name
+                )
+                llm_client = target_cls(**model_params)
+            else:
+                integration_details = data['llm_settings']['integration_details']
+                #
+                from langchain_openai import AzureChatOpenAI
+                llm_client = AzureChatOpenAI(
+                    azure_endpoint=integration_details['settings']['api_base'],
+                    deployment_name=data['llm_settings']['model_name'],
+                    openai_api_version=integration_details['settings']['api_version'],
+                    openai_api_key=integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
+                    temperature=data['llm_settings']['temperature'],
+                    max_tokens=data['llm_settings']['max_tokens']
+                )
+            #
             if app_type == 'dial':
                 return Assistant(llm_client, template, tools).getOpenAIFunctionsAgentExecutor()
             else:
@@ -201,7 +216,7 @@ class AlitaClient:
         tools = get_tools(app_data['tools'], self, True)
         return Assistant(self, yaml_schema, tools, chat_history).getLGExecutor()
 
-    
+
     def assistant(self, prompt_id: int, prompt_version_id: int,
                   tools: list, openai_tools: Optional[Dict] = None,
                   client: Optional[Any] = None, chat_history: Optional[list] = None):
