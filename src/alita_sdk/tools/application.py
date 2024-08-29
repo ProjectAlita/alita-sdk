@@ -16,7 +16,7 @@ applicationWFSchema = create_model(
 )
 
 def formulate_query(args, kwargs):
-    task = kwargs.get('task', kwargs.get('messages')[-1].content)
+    task = kwargs.get('task') if kwargs.get('task') else kwargs.get('messages')[-1].content
     chat_history = kwargs.get('chat_history', convert_message_to_json(kwargs.get('messages', [])[:-1]))
     return {"input": task, "chat_history": chat_history}
 
