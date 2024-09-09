@@ -1,3 +1,4 @@
+from ..utils.utils import clean_string
 from langchain_core.tools import BaseTool
 from typing import Any, Type
 from pydantic import create_model, validator, BaseModel
@@ -25,7 +26,7 @@ def formulate_query(args, kwargs):
         chat_history = kwargs.get('chat_history', '')        
         if chat_history:
             task = "Task: " + task + "\nAdditional context: " + chat_history
-        return {"input": task}
+        return {"input": task, "chat_history": []}
     
 
 class Application(BaseTool):
@@ -37,7 +38,8 @@ class Application(BaseTool):
     
     @validator('name', pre=True, allow_reuse=True)
     def remove_spaces(cls, v):
-        return v.replace(' ', '')
+        return clean_string(v)
+        
     
     def _run(self, *args, **kwargs):
         response = self.application.invoke(formulate_query(args, kwargs))

@@ -2,6 +2,7 @@ from typing import Any, Type
 from langchain_core.tools import BaseTool
 from pydantic import create_model, validator, BaseModel
 from pydantic.fields import FieldInfo
+from ..utils.utils import clean_string
 
 datasourceToolSchema = create_model("datasourceSchema", query = (str, FieldInfo(description="search query")))
 datasourceWFSchema = create_model("datasourceSchema", messages = (list, FieldInfo(description="conversation")))
@@ -47,7 +48,7 @@ class DatasourceSearch(BaseTool):
     
     @validator('name', pre=True, allow_reuse=True)
     def remove_spaces(cls, v):
-        return v.replace(' ', '')
+        return clean_string(v)
     
     def _run(self, *args, **kwargs):
         result = self.datasource.search(get_query(args, kwargs))
