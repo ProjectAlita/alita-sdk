@@ -28,7 +28,7 @@ class ApplicationToolkit(BaseToolkit):
         app = client.application(AlitaChatModel(**settings), application_id, application_version_id)
         return cls(tools=[Application(name=app_details.get("name"), 
                                       description=app_details.get("description"), 
-                                      appliacation=app, 
+                                      application=app, 
                                       args_schema=applicationWFSchema if is_wf else applicationToolSchema,
                                       return_type='dict' if is_wf else 'str')])
             
