@@ -16,14 +16,22 @@ applicationWFSchema = create_model(
 )
 
 def formulate_query(args, kwargs):
-    task = kwargs.get('task') if kwargs.get('task') else kwargs.get('messages')[-1].content
-    chat_history = kwargs.get('chat_history', convert_message_to_json(kwargs.get('messages', [])[:-1]))
-    return {"input": task, "chat_history": chat_history}
+    if kwargs.get('messages'):
+        task = kwargs.get('messages')[-1].content
+        chat_history = convert_message_to_json(kwargs.get('messages')[:-1])
+        return {"input": task, "chat_history": chat_history}
+    else:
+        task = kwargs.get('task')
+        chat_history = kwargs.get('chat_history', '')        
+        if chat_history:
+            task = "Task: " + task + "\nAdditional context: " + chat_history
+        return {"input": task}
+    
 
 class Application(BaseTool):
     name: str
     description: str
-    appliacation: Any
+    application: Any
     args_schema: Type[BaseModel] = applicationToolSchema
     return_type: str = "str"
     
@@ -32,7 +40,7 @@ class Application(BaseTool):
         return v.replace(' ', '')
     
     def _run(self, *args, **kwargs):
-        response = self.appliacation.invoke(formulate_query(args, kwargs))
+        response = self.application.invoke(formulate_query(args, kwargs))
         if self.return_type == "str":
             return response["output"]
         else:
