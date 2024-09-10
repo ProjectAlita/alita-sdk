@@ -1,46 +1,61 @@
 import logging
 import json
 import re
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
 
+def _find_json_bounds(json_string: str) -> Tuple[int, int] | Tuple[None, None]:
+    stack = []
+    json_start = None
 
-def extract_using_regex(text):
-    # Extracting the thoughts section
-    try:
-        thoughts_text = re.search(r'"text": "(.*?)",', text, re.DOTALL).group(1)
-    except AttributeError:
-        thoughts_text = None
-    try:
-        thoughts_plan = re.search(r'"plan": "(.*?)",', text, re.DOTALL).group(1)
-    except AttributeError:
-        thoughts_plan = None
-    try:
-        thoughts_criticism = re.search(r'"criticism": "(.*?)"\s*},', text, re.DOTALL).group(1)
-    except AttributeError:
-        thoughts_criticism = None
+    for i, char in enumerate(json_string):
+        if char == '{':
+            if not stack:
+                json_start = i
+            stack.append(char)
+        elif char == '}':
+            if stack:
+                stack.pop()
+                if not stack:
+                    return json_start, i + 1
 
-    # Extracting the tool section
+    return None, None
+
+
+def _extract_json(json_string: str) -> dict:
+    json_start, json_end = _find_json_bounds(json_string)
+
+    if json_start is None or json_end is None:
+        raise ValueError('Cannot parse json string')
+
+    json_str = json_string[json_start:json_end]
+    return json.loads(json_str)
+
+
+def _extract_using_regex(text: str) -> dict:
+    def extract_group(pattern):
+        match = re.search(pattern, text, re.DOTALL)
+        return match.group(1) if match else None
+
+    thoughts_text = extract_group(r'"text": "(.*?)",')
+    thoughts_plan = extract_group(r'"plan": "(.*?)",')
+    thoughts_criticism = extract_group(r'"criticism": "(.*?)"\s*},')
+
+    tool_name = extract_group(r'"name": "(.*?)"')
     args_dict = {}
-    try:
-        tool_name = re.search(r'"name": "(.*?)"', text, re.DOTALL).group(1)
-        # Parsing the args JSON string to dict
-        args_block_match = re.search(r'"args":\s*{(.+?)}\s*}', text, re.DOTALL)
-        args_dict = {}
-        if args_block_match:
-            args_block = args_block_match.group(1)
-            keys = [match.group(1) for match in re.finditer(r'"(\w+)":', args_block)]
-            for key in keys:
-                args_pattern = r'"'+key+'":\s*"(.*?)"(?=,?|$)'
-                args_matches = re.findall(args_pattern, args_block, re.DOTALL)
-                for value in args_matches:
-                    # Here you could handle specific parsing logic for each key if necessary
-                    args_dict[key] = value.replace('\\n', '\n')  # Convert escaped newlines back to actual newlines if needed  
-    except AttributeError:
-        tool_name = None
-    # Constructing result dictionary
-    result = {
+    args_block_match = re.search(r'"args":\s*{(.+?)}\s*}', text, re.DOTALL)
+    if args_block_match:
+        args_block = args_block_match.group(1)
+        keys = [match.group(1) for match in re.finditer(r'"(\w+)":', args_block)]
+        for key in keys:
+            args_pattern = r'"' + re.escape(key) + r'":\s*"(.*?)"(?:,|$)'
+            args_matches = re.findall(args_pattern, args_block, re.DOTALL)
+            for value in args_matches:
+                args_dict[key] = value.replace('\\n', '\n')
+
+    return {
         'thoughts': {
             'text': thoughts_text,
             'plan': thoughts_plan,
@@ -51,38 +66,43 @@ def extract_using_regex(text):
             'args': args_dict
         }
     }
-    return result
 
 
-def unpack_json(json_data: str | dict, message_key=None):
+def _old_extract_json(json_data, message_key=None):
+    pattern = r'```json(.*)```'
+    matches = re.findall(pattern, json_data, re.DOTALL)
+    if matches:
+        json_str = matches[0].strip()
+        text = json_data.replace(f'```json{json_str}```', '').strip()
+        res = json.loads(json_str)
+        if message_key and text:
+            txt = "\n".join([match.value for match in message_key.find(res)])
+            message_key.update(res, txt + text)
+        return res
+
+
+def _unpack_json(json_data: str | dict, **kwargs) -> dict:
     if isinstance(json_data, str):
         try:
-            if '```json' in json_data:
-                pattern = r'```json(.*)```'
-                matches = re.findall(pattern, json_data, re.DOTALL)
-                if matches:
-                    text = json_data.replace(f'{matches[0]}', '').replace('```json', '').replace('```', '').strip()
-                    res = json.loads(matches[0])
-                    if message_key and text:
-                        txt = "\n".join([match.value for match in message_key.find(res)])
-                        message_key.update(res, txt + text)
-                    return res
-            elif json_data.strip().startswith("{") and json_data.strip().endswith("}"):
-                return json.loads(json_data)
-            else:
-                match = re.search(r"\{.*\}", json_data, re.DOTALL)
-                if match:
-                    return json.loads(match.group(0))
-                else:
-                    raise IndexError("No match found")
-        except (json.decoder.JSONDecodeError, IndexError) as e:
-            _json_data = extract_using_regex(json_data)
-            if _json_data.get('thoughts', {}).get("text", None) or _json_data.get('tool', {}).get("name", None):
+            # if '```json' in json_data:
+            #     return _old_extract_json(json_data, message_key=message_key)
+            # else:
+            return _extract_json(json_data)
+        except (json.JSONDecodeError, ValueError):
+            _json_data = _extract_using_regex(json_data)
+            if _json_data.get('thoughts', {}).get("text") or _json_data.get('tool', {}).get("name"):
                 return _json_data
-            else:
-                logger.error(f"Error in unpacking json with regex: {json_data}")
-                return json_data
     elif isinstance(json_data, dict):
         return json_data
     else:
-        raise ValueError("Wrong type of json_data")
+        raise ValueError('Wrong type of json_data')
+
+
+def unpack_json(json_data: str | dict, **kwargs) -> dict:
+    try:
+        return _unpack_json(json_data, **kwargs)
+    except json.JSONDecodeError:
+        logger.error(f"Error in unpacking json with regex: {json_data}")
+        if isinstance(json_data, str):
+            return _unpack_json(json_data.replace("\n", "\\n"), **kwargs)
+        raise json.JSONDecodeError

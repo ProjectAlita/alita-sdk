@@ -37,16 +37,12 @@ class MixedAgentOutputParser(AgentOutputParser):
     def parse(self, text: str) -> Union[AgentAction, AgentFinish]:
         try:
             response = unpack_json(text)
-        except json.decoder.JSONDecodeError:
-            text.replace("\n", "\\n")
-            response = unpack_json(text)
-        if not isinstance(response, dict):
-            return AgentAction("echo", 
-                               json.dumps({"text": response}), 
-                               log=f"Echoing: {response}")
-        tool: dict | str | None = response.get("tool", None)
-        action = None
-        tool_input = {}
+        except json.JSONDecodeError:
+            return AgentAction("echo", json.dumps({"text": text}), log=f"Echoing: {text}")
+
+        tool = response.get("tool")
+        action, tool_input = None, {}
+
         if tool:
             if isinstance(tool, dict):
                 action: str | None = tool.get("name")
@@ -56,20 +52,20 @@ class MixedAgentOutputParser(AgentOutputParser):
                 tool_input: dict = response.get("args", {})
             else:
                 raise UnexpectedResponseError(f'Unexpected response {response}')
+
         thoughts = response.get("thoughts", {})
+        log = json.dumps(response, indent=2)
+
         if not isinstance(thoughts, dict):
-            return AgentFinish({"output": f'Unexpected Format: {response}'}, log=response)
-        plan: list | str = thoughts.get("plan", [])
-        if isinstance(plan, list):
-            plan: str = "\n".join(plan)
-        txt: str = thoughts.get("text", '')
-        log: str = json.dumps(response, indent=2)
+            return AgentFinish({"output": f'Unexpected Format: {response}'}, log=log)
+
+        # plan: str = "\n".join(thoughts.get("plan", []))  # not used
+
+        txt = thoughts.get("text", '')
+
         if action in ['complete_task', 'respond', 'ask_user']:
-            try:
-                output: str = list(tool_input.values())[0]
-            except (AttributeError, IndexError):
-                output: str = tool_input
-            if output.strip() == "final_answer":
+            output = next(iter(tool_input.values()), tool_input)
+            if isinstance(output, str) and output.strip() == "final_answer":
                 output = txt
             return AgentFinish({"output": output}, log=log)
         elif action:
@@ -78,6 +74,7 @@ class MixedAgentOutputParser(AgentOutputParser):
             return AgentFinish({"output": txt}, log=log)
         else:
             return AgentFinish({"output": f"{response}. \n\n *NOTE: Response format wasn't followed*"}, log=log)
+
     @property
     def _type(self) -> str:
         return "mixed-agent-parser"
