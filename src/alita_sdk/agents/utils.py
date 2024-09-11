@@ -92,6 +92,8 @@ def _unpack_json(json_data: str | dict, **kwargs) -> dict:
             _json_data = _extract_using_regex(json_data)
             if _json_data.get('thoughts', {}).get("text") or _json_data.get('tool', {}).get("name"):
                 return _json_data
+            # throw the exception to upper level in case json is still malformed
+            return json.loads(json_data)
     elif isinstance(json_data, dict):
         return json_data
     else:

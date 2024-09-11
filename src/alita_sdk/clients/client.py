@@ -343,7 +343,7 @@ class AlitaClient:
 
         response = requests.post(self.predict_url, headers=self.headers, json=prompt_data, verify=False)
         if response.status_code != 200:
-            logger.error("Error in response of predict: {response.content}")
+            logger.error(f"Error in response of predict: {response.content}")
             raise requests.exceptions.HTTPError(response.content)
         try:
             response_data = response.json()
