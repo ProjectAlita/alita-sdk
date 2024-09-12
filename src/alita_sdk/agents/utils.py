@@ -84,20 +84,14 @@ def _old_extract_json(json_data, message_key=None):
 def _unpack_json(json_data: str | dict, **kwargs) -> dict:
     if isinstance(json_data, str):
         try:
-            # if '```json' in json_data:
-            #     return _old_extract_json(json_data, message_key=message_key)
-            # else:
             return _extract_json(json_data)
         except (json.JSONDecodeError, ValueError):
             _json_data = _extract_using_regex(json_data)
             if _json_data.get('thoughts', {}).get("text") or _json_data.get('tool', {}).get("name"):
                 return _json_data
-            # throw the exception to upper level in case json is still malformed
-            return json.loads(json_data)
     elif isinstance(json_data, dict):
         return json_data
-    else:
-        raise ValueError('Wrong type of json_data')
+    raise json.JSONDecodeError
 
 
 def unpack_json(json_data: str | dict, **kwargs) -> dict:
