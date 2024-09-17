@@ -86,19 +86,24 @@ def _unpack_json(json_data: str | dict, **kwargs) -> dict:
         try:
             return _extract_json(json_data)
         except (json.JSONDecodeError, ValueError):
-            _json_data = _extract_using_regex(json_data)
-            if _json_data.get('thoughts', {}).get("text") or _json_data.get('tool', {}).get("name"):
-                return _json_data
+            try:
+                _json_data = _extract_using_regex(json_data)
+                if _json_data.get('thoughts', {}).get("text") or _json_data.get('tool', {}).get("name"):
+                    return _json_data
+                else:
+                    raise json.JSONDecodeError(msg=f'Unable to parse json', pos=0, doc=str(json_data))
+            except json.JSONDecodeError as e:
+                raise e
     elif isinstance(json_data, dict):
         return json_data
-    raise json.JSONDecodeError
+    raise json.JSONDecodeError(msg=f'Unhandled type for decode {type(json_data)}', pos=0, doc=str(json_data))
 
 
 def unpack_json(json_data: str | dict, **kwargs) -> dict:
     try:
         return _unpack_json(json_data, **kwargs)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         logger.error(f"Error in unpacking json with regex: {json_data}")
         if isinstance(json_data, str):
             return _unpack_json(json_data.replace("\n", "\\n"), **kwargs)
-        raise json.JSONDecodeError
+        raise e
