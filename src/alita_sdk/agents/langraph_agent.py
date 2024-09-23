@@ -28,9 +28,7 @@ class LGAssistantRunnable(AlitaAssistantRunnable):
         assistant = create_message_graph(prompt, tools)
         return cls(client=client, assistant=assistant, agent_type='langgraph', chat_history=chat_history)
     
-    def _create_thread_and_run(self, messages: list[BaseMessage]) -> Any:
-        print("create_thread")
-        print(messages)
+    def _create_thread_and_run(self, messages: list[BaseMessage],  *args, **kwargs) -> Any:
         messages = convert_message_to_json(messages)
         return self.assistant.invoke({"messages": messages})
     
