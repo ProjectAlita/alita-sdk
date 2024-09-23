@@ -39,19 +39,18 @@ def create_message_graph(yaml_schema: str, tools: list[BaseTool]):
     schema = yaml.safe_load(yaml_schema)
     lg_builder = StateGraph(MessagesState)
     for node in schema['nodes']:
-        node_type = node.get('type', 'function')
-        if node_type == 'function':
-            for tool in tools:
-                node_id = clean_string(node['id'])
-                if tool.name == node_id:
-                    lg_builder.add_node(node_id, tool)
-                    if node.get('next'):
-                        next_step=clean_string(node['next'])
-                        if node.get('next') != 'END':
-                            lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
-                    elif node.get('condition'):
-                        lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
-    
+        for tool in tools:
+            node_id = clean_string(node['id'])
+            if tool.name == node_id:
+                lg_builder.add_node(node_id, tool)
+                if node.get('next'):
+                    next_step=clean_string(node['next'])
+                    if node.get('next') != 'END':
+                        lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
+                elif node.get('condition'):
+                    lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
+                break
+
     lg_builder.set_entry_point(clean_string(schema['entry_point']))
     
     return lg_builder.compile()
