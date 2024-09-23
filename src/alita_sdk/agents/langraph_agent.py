@@ -25,7 +25,7 @@ class LGAssistantRunnable(AlitaAssistantRunnable):
         chat_history: list[BaseMessage],
         *args, **kwargs
     ) -> RunnableSerializable:
-        assistant = create_message_graph(prompt, tools)
+        assistant = create_message_graph(client, prompt, tools)
         return cls(client=client, assistant=assistant, agent_type='langgraph', chat_history=chat_history)
     
     def _create_thread_and_run(self, messages: list[BaseMessage],  *args, **kwargs) -> Any:

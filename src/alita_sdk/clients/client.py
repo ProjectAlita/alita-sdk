@@ -116,7 +116,7 @@ class AlitaClient:
             tools = []
         data = self.get_app_version_details(application_id, application_version_id)
         if app_type == "langgraph":
-            return self.workflow(data, chat_history=chat_history)
+            return self.workflow(client, data, chat_history=chat_history)
         if not app_type:
             app_type = data.get("agent_type", "raw")
         if app_type == "react":
@@ -209,12 +209,12 @@ class AlitaClient:
         return AlitaDataSource(self, datasource_id, data["name"], data["description"],
                                datasource_model, chat_model)
 
-    def workflow(self, app_data, chat_history=None):
+    def workflow(self, client, app_data, chat_history=None):
         if chat_history is None:
             chat_history = []
         yaml_schema = app_data['instructions']
         tools = get_tools(app_data['tools'], self, True)
-        return Assistant(self, yaml_schema, tools, chat_history).getLGExecutor()
+        return Assistant(client, yaml_schema, tools, chat_history).getLGExecutor()
 
 
     def assistant(self, prompt_id: int, prompt_version_id: int,
