@@ -22,8 +22,7 @@ def get_tools(tools_list, alita, is_workflow=False):
             tools.extend(DatasourcesToolkit.get_toolkit(
                 alita,
                 datasource_ids=[int(tool['settings']['datasource_id'])],
-                selected_tools=tool['settings']['selected_tools'],
-                is_wf=is_workflow
+                selected_tools=tool['settings']['selected_tools']
             ).get_tools())
         elif tool['type'] == 'application':
             tools.extend(ApplicationToolkit.get_toolkit(

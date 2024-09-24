@@ -5,7 +5,6 @@ from pydantic.fields import FieldInfo
 from ..utils.utils import clean_string
 
 datasourceToolSchema = create_model("datasourceSchema", query = (str, FieldInfo(description="search query")))
-datasourceWFSchema = create_model("datasourceSchema", messages = (list, FieldInfo(description="conversation")))
 
 def get_query(args, kwargs):
     if len(args) > 0:

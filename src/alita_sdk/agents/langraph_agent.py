@@ -17,6 +17,7 @@ from langchain_core.callbacks import CallbackManager
 from langchain.agents.openai_assistant.base import OutputType
 from langchain_core.runnables import Runnable
 from .mixedAgentRenderes import convert_message_to_json, conversation_to_messages, format_to_langmessages
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from .alita_agent import AlitaAssistantRunnable
 from ..utils.evaluate import EvaluateTemplate
 from ..agents.utils import _extract_json
@@ -63,27 +64,32 @@ Answer only with step name, no need to add descrip in case none of the steps are
         return result 
         
 
-class ToolNode(Runnable):
+class ToolNode(BaseTool):
+    name: str = 'ToolNode'
+    description: str = 'This is tool node for tools'
+    client: Any = None
+    tool: BaseTool = None
     prompt: str = """Based on last message in chat history formulate arguments for the tool.
 Tool name: {tool_name}
-Expected arguments schema: {schema}
+Tool description: {tool_description}
+Tool arguments schema: {schema}
 
-Expected output is JSON that could be put as KWARGS to the tool {'key': 'value', 'key2': 'value2'}
-Anwer with JSON only to be able to put in in JSON.LOADS
+Expected output is JSON that to be used as a KWARGS for the tool call like {{"key": "value"}} 
+Tool won't have access to convesation so all keys and values need to be actual and independant. 
+Anwer must be JSON only extractable by JSON.LOADS.
 """
-    def __init__(self, client: Any, tool: BaseTool):
-        self.client = client
-        self.tool = tool
-    
-    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        print(config)
-        messages = messages['messages']
-        messages.append(
-            HumanMessage(self.prompt.format(tool_name=self.tool.name, schema=dumps(self.tool.args_schema.json())))
-        )
-        completion = self.client.completion_with_retry(messages)
-        result = completion[0].content.strip()
-        return self.tool.run(_extract_json(result))
+    def _run(self, messages, *args, **kwargs):
+        print(args)
+        params = convert_to_openai_tool(self.tool).get(
+            'function',{'parameters': {}}).get(
+                'parameters', {'properties': {}}).get('properties', {})
+        # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
+        input = messages + [
+            HumanMessage(self.prompt.format(tool_name=self.tool.name, tool_description=self.tool.description, schema=dumps(params)))
+        ]
+        completion = self.client.completion_with_retry(input)
+        result = _extract_json(completion[0].content.strip())
+        return {"messages": [AIMessage(str(self.tool.run(result)))]}
 
 
 class TransitionalEdge(Runnable):
@@ -91,6 +97,7 @@ class TransitionalEdge(Runnable):
         self.next_step = next_step
     
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
+        print('Transitioning to:', self.next_step)
         return self.next_step
     
 def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool]):
@@ -110,6 +117,7 @@ def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool]):
             if node.get('transition'):
                 next_step=clean_string(node['transition'])
                 if node.get('transition') != 'END':
+                    print('Adding transition:', next_step)
                     lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
             elif node.get('decision'):
                 lg_builder.add_conditional_edges(node_id, DecisionEdge(
@@ -119,7 +127,6 @@ def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool]):
                 lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
 
         lg_builder.set_entry_point(clean_string(schema['entry_point']))
-        
         return lg_builder.compile()
 
 class LGAssistantRunnable(AlitaAssistantRunnable):
@@ -137,6 +144,7 @@ class LGAssistantRunnable(AlitaAssistantRunnable):
         chat_history: list[BaseMessage],
         *args, **kwargs
     ) -> RunnableSerializable:
+        print(tools)
         assistant = create_message_graph(client, prompt, tools)
         return cls(client=client, assistant=assistant, agent_type='langgraph', chat_history=chat_history)
     
