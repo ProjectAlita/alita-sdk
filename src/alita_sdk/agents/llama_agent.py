@@ -82,7 +82,7 @@ class LLamaAssistantRunnable(RunnableSerializable):
             return response
         
     
-    def _create_thread_and_run(self, messages: list[BaseMessage]) -> Any:
+    def _create_thread_and_run(self, messages: list[BaseMessage], *args, **kwargs) -> Any:
         return self.client.completion_with_retry(messages)
     
     def _get_response(self, run: BaseMessage) -> Any:

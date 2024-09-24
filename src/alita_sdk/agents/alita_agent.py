@@ -65,7 +65,7 @@ class AlitaAssistantRunnable(RunnableSerializable):
                      user_messages + \
                         messages
             llm_manager = callback_manager.on_llm_start(dumpd(self), [msgs[-1].content], run_id=run_id)
-            run = self._create_thread_and_run(msgs)
+            run = self._create_thread_and_run(msgs, config=config)
             response = self._get_response(run)
             try:
                 log = response.log
@@ -85,7 +85,7 @@ class AlitaAssistantRunnable(RunnableSerializable):
             return response
         
     
-    def _create_thread_and_run(self, messages: list[BaseMessage]) -> Any:
+    def _create_thread_and_run(self, messages: list[BaseMessage], *args, **kwargs) -> Any:
         return self.client.completion_with_retry(messages)
     
     def _get_response(self, run: BaseMessage) -> Any:

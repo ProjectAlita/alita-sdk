@@ -1,14 +1,126 @@
+import yaml
+from uuid import uuid4
 from typing import Sequence, Union, Any, Optional
 from json import dumps
+from traceback import format_exc
+from langchain_core.load import dumpd
 from langchain_core.agents import AgentAction, AgentFinish
+from langgraph.graph import StateGraph, MessagesState
 from langchain_core.prompts import BasePromptTemplate
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-from langchain_core.runnables import RunnableSerializable
-from .mixedAgentRenderes import convert_message_to_json
+from langchain_core.runnables import RunnableConfig, RunnableSerializable, ensure_config
+from langchain_core.outputs import LLMResult, ChatGenerationChunk
+from langchain_core.outputs.run_info import RunInfo
+from langchain_core.outputs.generation import Generation
+from langchain_core.callbacks import CallbackManager
+from langchain.agents.openai_assistant.base import OutputType
+from langchain_core.runnables import Runnable
+from .mixedAgentRenderes import convert_message_to_json, conversation_to_messages, format_to_langmessages
 from .alita_agent import AlitaAssistantRunnable
-from ..clients.workflow import create_message_graph
+from ..utils.evaluate import EvaluateTemplate
+from ..agents.utils import _extract_json
+from ..utils.utils import clean_string
 
+class ConditionalEdge(Runnable):
+    def __init__(self, condition: str):
+        self.condition = condition
+    
+    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
+        print(config['callbacks'].handlers)
+        messages = messages['messages']
+        messages = convert_message_to_json(messages)
+        last_message = messages[-1]['content']
+        
+        # llm_manager, checkpoint_id = get_llm_manager(dumpd(self), config, last_message)
+        template = EvaluateTemplate(
+            self.condition, 
+            chat_history=dumps(messages), 
+            last_message=last_message)
+        result = template.evaluate()
+        if isinstance(result, str):
+            result = clean_string(result)
+        # wrap_message(llm_manager, result, checkpoint_id)
+        
+        return result 
+
+class DecisionEdge(Runnable):
+    prompt: str = """Based on chat history make a decision what step need to be next.
+Steps available: {steps}
+Explanation: {description}
+Answer only with step name, no need to add descrip in case none of the steps are applibcable answer with 'END'
+"""
+    def __init__(self, client, steps: str, description: str = ""):
+        self.client = client
+        self.steps = ",".join([clean_string(step) for step in steps])
+        self.description = description
+        
+    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
+        messages = messages['messages']
+        messages.append(HumanMessage(self.prompt.format(steps=self.steps, description=self.description)))
+        completion = self.client.completion_with_retry(messages)
+        result = completion[0].content.strip()
+        return result 
+        
+
+class ToolNode(Runnable):
+    prompt: str = """Based on last message in chat history formulate arguments for the tool.
+Tool name: {tool_name}
+Expected arguments schema: {schema}
+
+Expected output is JSON that could be put as KWARGS to the tool {'key': 'value', 'key2': 'value2'}
+Anwer with JSON only to be able to put in in JSON.LOADS
+"""
+    def __init__(self, client: Any, tool: BaseTool):
+        self.client = client
+        self.tool = tool
+    
+    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
+        print(config)
+        messages = messages['messages']
+        messages.append(
+            HumanMessage(self.prompt.format(tool_name=self.tool.name, schema=dumps(self.tool.args_schema.json())))
+        )
+        completion = self.client.completion_with_retry(messages)
+        result = completion[0].content.strip()
+        return self.tool.run(_extract_json(result))
+
+
+class TransitionalEdge(Runnable):
+    def __init__(self, next_step: str):
+        self.next_step = next_step
+    
+    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
+        return self.next_step
+    
+def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool]):
+        """ Create a message graph from a yaml schema """
+        schema = yaml.safe_load(yaml_schema)
+        lg_builder = StateGraph(MessagesState)
+        for node in schema['nodes']:
+            node_type = node.get('type', 'function')
+            node_id = clean_string(node['id'])
+            if node_type in ['function', 'tool']:
+                for tool in tools:
+                    if tool.name == node_id:
+                        if node_type == 'function':
+                            lg_builder.add_node(node_id, tool)
+                        else:
+                            lg_builder.add_node(node_id, ToolNode(client=client, tool=tool))
+            if node.get('transition'):
+                next_step=clean_string(node['transition'])
+                if node.get('transition') != 'END':
+                    lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
+            elif node.get('decision'):
+                lg_builder.add_conditional_edges(node_id, DecisionEdge(
+                    client, node['decision']['nodes'], 
+                    node['decision'].get('description', "")))
+            elif node.get('condition'):
+                lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
+
+        lg_builder.set_entry_point(clean_string(schema['entry_point']))
+        
+        return lg_builder.compile()
 
 class LGAssistantRunnable(AlitaAssistantRunnable):
     client: Optional[Any]
@@ -28,14 +140,12 @@ class LGAssistantRunnable(AlitaAssistantRunnable):
         assistant = create_message_graph(client, prompt, tools)
         return cls(client=client, assistant=assistant, agent_type='langgraph', chat_history=chat_history)
     
-    def _create_thread_and_run(self, messages: list[BaseMessage],  *args, **kwargs) -> Any:
+    def _create_thread_and_run(self, messages: list[BaseMessage], config, *args, **kwargs) -> Any:
         messages = convert_message_to_json(messages)
-        return self.assistant.invoke({"messages": messages})
+        return self.assistant.invoke({"messages": messages}, config=config)
     
     def _get_response(self, run: Union[str, dict]) -> Any:
-        print(run)
         response = run.get("messages", [])
         if len(response) > 0:
-            return AgentFinish({"output": response[-1].content}, 
-                               log=dumps(convert_message_to_json(response)))
+            return AgentFinish({"output": response[-1].content}, log=response[-1].content)
         return AgentFinish({"output": "No reponse from chain"}, log=dumps(run))

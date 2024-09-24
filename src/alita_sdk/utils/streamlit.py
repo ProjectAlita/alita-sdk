@@ -22,10 +22,36 @@ def decode_img(msg):
     img = Image.open(buf)
     return img
 
+
+from typing import Callable, TypeVar
+import inspect
+
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+from streamlit.delta_generator import DeltaGenerator
+
+from langchain_core.callbacks.base import BaseCallbackHandler
+from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+
+def get_streamlit_cb(parent_container: DeltaGenerator) -> BaseCallbackHandler:
+    fn_return_type = TypeVar('fn_return_type')
+    def add_streamlit_context(fn: Callable[..., fn_return_type]) -> Callable[..., fn_return_type]:
+        ctx = get_script_run_ctx()
+
+        def wrapper(*args, **kwargs) -> fn_return_type:
+            add_script_run_ctx(ctx=ctx)
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    st_cb = StreamlitCallbackHandler(parent_container)
+
+    for method_name, method_func in inspect.getmembers(st_cb, predicate=inspect.ismethod):
+        if method_name.startswith('on_'):
+            setattr(st_cb, method_name, add_streamlit_context(method_func))
+    return st_cb
+
 def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
-    from langchain_community.callbacks.streamlit import (
-        StreamlitCallbackHandler,
-    )
+    
     st.set_page_config(
         page_title='Alita Assistants', 
         page_icon = ai_icon, 
@@ -36,7 +62,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             "About": "https://alita.lab.epam.com"
         }
     )
-    st_callback = StreamlitCallbackHandler(st.container())
+    # st_callback = StreamlitCallbackHandler(st.container())
 
     st.markdown(
         r"""
@@ -55,9 +81,9 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
     if prompt := st.chat_input():
         st.chat_message("user", avatar=user_icon).write(prompt)
         with st.chat_message("assistant", avatar=ai_icon):
-            st_callback = StreamlitCallbackHandler(st.container())
+            # st_callback = StreamlitCallbackHandler(st.container())
             response = st.session_state.agent_executor.invoke(
-                {"input": prompt, "chat_history": st.session_state.messages}, {"callbacks": [st_callback]}
+                {"input": prompt, "chat_history": st.session_state.messages}, {"callbacks": [get_streamlit_cb(st.empty())]}
             )
             st.write(response["output"])
             st.session_state.messages.append({"role": "user", "content": prompt})

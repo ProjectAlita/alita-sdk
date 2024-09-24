@@ -42,7 +42,7 @@ class AutoGenAssistantRunnable(AlitaAssistantRunnable):
         )
         return cls(client=client, assistant=assistant, agent_type='autogen', chat_history=[])
     
-    def _create_thread_and_run(self, messages: list[BaseMessage]) -> Any:
+    def _create_thread_and_run(self, messages: list[BaseMessage], *args, **kwargs) -> Any:
         messages = convert_message_to_json(messages)
         return self.assistant.generate_reply(messages=messages)
     
