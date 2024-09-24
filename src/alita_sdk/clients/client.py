@@ -115,10 +115,10 @@ class AlitaClient:
         if tools is None:
             tools = []
         data = self.get_app_version_details(application_id, application_version_id)
-        if app_type == "pipeline":
-            return self.workflow(client, data, chat_history=chat_history)
         if not app_type:
             app_type = data.get("agent_type", "raw")
+        if app_type == "pipeline":
+            return self.workflow(client, data, chat_history=chat_history)
         if app_type == "react":
             data['instructions'] += REACT_ADDON
         elif app_type == "alita":
