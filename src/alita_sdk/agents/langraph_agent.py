@@ -147,7 +147,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 for tool in tools:
                     if tool.name == node_id:
                         if node_type == 'function':
-                            lg_builder.add_node(node_id, tool, name=node['id'])
+                            lg_builder.add_node(node_id, tool)
                         elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(client=client, tool=tool, name=node['id']))
                         elif node_type == 'llm':
