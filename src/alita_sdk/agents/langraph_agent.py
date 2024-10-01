@@ -68,6 +68,8 @@ Tool name: {tool_name}
 Tool description: {tool_description}
 Tool arguments schema: {schema}
 
+What user want to achieve: {last_message}
+
 Expected output is JSON that to be used as a KWARGS for the tool call like {{"key": "value"}} 
 Tool won't have access to convesation so all keys and values need to be actual and independant. 
 Anwer must be JSON only extractable by JSON.LOADS.
@@ -78,12 +80,35 @@ Anwer must be JSON only extractable by JSON.LOADS.
                 'parameters', {'properties': {}}).get('properties', {})
         # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
         input = messages + [
-            HumanMessage(self.prompt.format(tool_name=self.tool.name, tool_description=self.tool.description, schema=dumps(params)))
+            HumanMessage(self.prompt.format(
+                tool_name=self.tool.name, 
+                tool_description=self.tool.description, 
+                schema=dumps(params),
+                last_message=messages[-1].content))
         ]
+        print(input)
         completion = self.client.completion_with_retry(input)
         result = _extract_json(completion[0].content.strip())
+        print("This is message for tool node")
+        print(result)
         return {"messages": [AIMessage(str(self.tool.run(result)))]}
 
+
+class LLMNode(BaseTool):
+    name: str = 'LLMNode'
+    prompt: str
+    description: str = 'This is tool node for LLM'
+    client: Any = None
+    
+    def __init__(self, client, prompt: str):
+        self.client = client
+        self.prompt = prompt
+        
+    def _run(self, messages, *args, **kwargs):
+        input = messages + [HumanMessage(self.prompt)]
+        
+        completion = self.client.completion_with_retry(input)
+        return {"messages": [AIMessage(completion[0].content.strip())]}
 
 class TransitionalEdge(Runnable):
     def __init__(self, next_step: str):
@@ -126,8 +151,10 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     if tool.name == node_id:
                         if node_type == 'function':
                             lg_builder.add_node(node_id, tool)
-                        else:
+                        elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(client=client, tool=tool))
+                        elif node_type == 'llm':
+                            lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', "")))
             if node.get('transition'):
                 next_step=clean_string(node['transition'])
                 if node.get('transition') != 'END':
@@ -215,13 +242,17 @@ class LangGraphAgentRunnable(CompiledStateGraph):
     def invoke(self, input: Union[dict[str, Any], Any], 
                config: Optional[RunnableConfig] = None, 
                *args, **kwargs):
+        
         if not config.get("configurable", {}).get("thread_id"):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")       
         if self.checkpointer.get_tuple(config):
-            self.update_state(config, {'messages': input['messages'][-1]})
+            self.update_state(config, {'messages': input['input']})
             output = super().invoke(None, config=config, *args, **kwargs)['messages'][-1].content
         else:
+            input = {
+                "messages": input.get('chat_history', []) + [{"role": "user", "content": input.get('input')}]
+            }
             output = super().invoke(input, config=config, *args, **kwargs)['messages'][-1].content
         thread_id = None
         if self.get_state(config).next:
