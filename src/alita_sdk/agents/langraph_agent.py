@@ -1,34 +1,28 @@
 import yaml
 from uuid import uuid4
-from typing import Sequence, Union, Any, Optional
+from typing import Union, Any, Optional
 from json import dumps
-from traceback import format_exc
-from langchain_core.load import dumpd
-from langchain_core.agents import AgentAction, AgentFinish
+from langgraph.graph.graph import END, START
 from langgraph.graph import StateGraph, MessagesState
-from langchain_core.prompts import BasePromptTemplate
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from langgraph.store.base import BaseStore
+from langgraph.channels.ephemeral_value import EphemeralValue
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
-from langchain_core.runnables import RunnableConfig, RunnableSerializable, ensure_config
-from langchain_core.outputs import LLMResult, ChatGenerationChunk
-from langchain_core.outputs.run_info import RunInfo
-from langchain_core.outputs.generation import Generation
-from langchain_core.callbacks import CallbackManager
-from langchain.agents.openai_assistant.base import OutputType
+from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables import Runnable
-from .mixedAgentRenderes import convert_message_to_json, conversation_to_messages, format_to_langmessages
+from .mixedAgentRenderes import convert_message_to_json
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from .alita_agent import AlitaAssistantRunnable
 from ..utils.evaluate import EvaluateTemplate
 from ..agents.utils import _extract_json
 from ..utils.utils import clean_string
+from langgraph.managed.base import is_managed_value
+
 
 class ConditionalEdge(Runnable):
     def __init__(self, condition: str):
         self.condition = condition
     
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        print(config['callbacks'].handlers)
         messages = messages['messages']
         messages = convert_message_to_json(messages)
         last_message = messages[-1]['content']
@@ -79,7 +73,6 @@ Tool won't have access to convesation so all keys and values need to be actual a
 Anwer must be JSON only extractable by JSON.LOADS.
 """
     def _run(self, messages, *args, **kwargs):
-        print(args)
         params = convert_to_openai_tool(self.tool).get(
             'function',{'parameters': {}}).get(
                 'parameters', {'properties': {}}).get('properties', {})
@@ -99,11 +92,32 @@ class TransitionalEdge(Runnable):
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
         print('Transitioning to:', self.next_step)
         return self.next_step
+
+# def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool], memory: Optional[Any] = None):
+     
+from langgraph.graph.state import CompiledStateGraph
+       
+class LangGraphAgentRunnable(CompiledStateGraph):
+    builder: CompiledStateGraph
     
-def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool]):
+    @classmethod
+    def create_graph(
+        cls,
+        client: Any, 
+        yaml_schema: str, 
+        tools: list[BaseTool], 
+        *args,
+        memory: Optional[Any] = None,
+        store: Optional[BaseStore] = None,
+        debug: bool = False,
+        **kwargs
+    ):
         """ Create a message graph from a yaml schema """
         schema = yaml.safe_load(yaml_schema)
         lg_builder = StateGraph(MessagesState)
+        interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
+        interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
+
         for node in schema['nodes']:
             node_type = node.get('type', 'function')
             node_id = clean_string(node['id'])
@@ -127,33 +141,92 @@ def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool]):
                 lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
 
         lg_builder.set_entry_point(clean_string(schema['entry_point']))
-        return lg_builder.compile()
+        
+        # assign default values
+        interrupt_before = interrupt_before or []
+        interrupt_after = interrupt_after or []
 
-class LGAssistantRunnable(AlitaAssistantRunnable):
-    client: Optional[Any]
-    assistant: Optional[Any]
-    chat_history: list[BaseMessage] = []
-    agent_type:str = "langgraph"
+        # validate the graph
+        lg_builder.validate(
+            interrupt=(
+                (interrupt_before if interrupt_before != "*" else []) + interrupt_after
+                if interrupt_after != "*"
+                else []
+            )
+        )
 
-    @classmethod
-    def create_assistant(
-        cls,
-        client: Any,
-        prompt: BasePromptTemplate,
-        tools: Sequence[Union[BaseTool, dict]],
-        chat_history: list[BaseMessage],
-        *args, **kwargs
-    ) -> RunnableSerializable:
-        print(tools)
-        assistant = create_message_graph(client, prompt, tools)
-        return cls(client=client, assistant=assistant, agent_type='langgraph', chat_history=chat_history)
+        # prepare output channels
+        output_channels = (
+            "__root__"
+            if len(lg_builder.schemas[lg_builder.output]) == 1
+            and "__root__" in lg_builder.schemas[lg_builder.output]
+            else [
+                key
+                for key, val in lg_builder.schemas[lg_builder.output].items()
+                if not is_managed_value(val)
+            ]
+        )
+        stream_channels = (
+            "__root__"
+            if len(lg_builder.channels) == 1 and "__root__" in lg_builder.channels
+            else [
+                key for key, val in lg_builder.channels.items() if not is_managed_value(val)
+            ]
+        )
+        
+        compiled = cls(
+            builder=lg_builder,
+            config_type=lg_builder.config_schema,
+            nodes={},
+            channels={
+                **lg_builder.channels,
+                **lg_builder.managed,
+                START: EphemeralValue(lg_builder.input),
+            },
+            input_channels=START,
+            stream_mode="updates",
+            output_channels=output_channels,
+            stream_channels=stream_channels,
+            checkpointer=memory,
+            interrupt_before_nodes=interrupt_before,
+            interrupt_after_nodes=interrupt_after,
+            auto_validate=False,
+            debug=debug,
+            store=store,
+        )
+
+        compiled.attach_node(START, None)
+        for key, node in lg_builder.nodes.items():
+            compiled.attach_node(key, node)
+
+        for start, end in lg_builder.edges:
+            compiled.attach_edge(start, end)
+
+        for starts, end in lg_builder.waiting_edges:
+            compiled.attach_edge(starts, end)
+
+        for start, branches in lg_builder.branches.items():
+            for name, branch in branches.items():
+                compiled.attach_branch(start, name, branch)
+
+        return compiled.validate()
+        
     
-    def _create_thread_and_run(self, messages: list[BaseMessage], config, *args, **kwargs) -> Any:
-        messages = convert_message_to_json(messages)
-        return self.assistant.invoke({"messages": messages}, config=config)
-    
-    def _get_response(self, run: Union[str, dict]) -> Any:
-        response = run.get("messages", [])
-        if len(response) > 0:
-            return AgentFinish({"output": response[-1].content}, log=response[-1].content)
-        return AgentFinish({"output": "No reponse from chain"}, log=dumps(run))
+    def invoke(self, input: Union[dict[str, Any], Any], 
+               config: Optional[RunnableConfig] = None, 
+               *args, **kwargs):
+        if not config.get("configurable", {}).get("thread_id"):
+            config["configurable"] = {"thread_id": str(uuid4())}
+        thread_id = config.get("configurable", {}).get("thread_id")       
+        if self.checkpointer.get_tuple(config):
+            self.update_state(config, {'messages': input['messages'][-1]})
+            output = super().invoke(None, config=config, *args, **kwargs)['messages'][-1].content
+        else:
+            output = super().invoke(input, config=config, *args, **kwargs)['messages'][-1].content
+        thread_id = None
+        if self.get_state(config).next:
+            thread_id = config['configurable']['thread_id']
+        return {
+            "output": output,
+            "thread_id": thread_id
+        }

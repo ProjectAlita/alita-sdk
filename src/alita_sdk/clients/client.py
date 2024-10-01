@@ -214,7 +214,7 @@ class AlitaClient:
             chat_history = []
         yaml_schema = app_data['instructions']
         tools = get_tools(app_data['tools'], self, True)
-        return Assistant(client, yaml_schema, tools, chat_history).getLGExecutor()
+        return Assistant(client, yaml_schema, tools, chat_history, memory='sqlite').getLGExecutor()
 
 
     def assistant(self, prompt_id: int, prompt_version_id: int,
@@ -348,7 +348,6 @@ class AlitaClient:
         try:
             response_data = response.json()
             response_messages = []
-            print(response_data['messages'])
             for message in response_data['messages']:
                 if message.get('type') == 'user':
                     response_messages.append(HumanMessage(content=message['content']))

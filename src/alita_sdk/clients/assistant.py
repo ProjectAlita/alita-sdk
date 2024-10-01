@@ -1,5 +1,5 @@
 
-from typing import Any
+from typing import Any, Optional
 from langchain.agents import (
     AgentExecutor, create_react_agent, 
     create_openai_tools_agent, 
@@ -9,22 +9,27 @@ from ..agents.llama_agent import LLamaAssistantRunnable
 from ..agents.autogen_agent import AutoGenAssistantRunnable
 from ..agents.mixedAgentRenderes import render_react_text_description_and_args
 from ..agents.alita_agent import AlitaAssistantRunnable
-from ..agents.langraph_agent import LGAssistantRunnable
+from ..agents.langraph_agent import LangGraphAgentRunnable
 from langchain_core.messages import (
     BaseMessage,
 )
 from langchain_core.prompts import ChatPromptTemplate
 
+
 class Assistant:
     def __init__(self, client: Any, 
                  prompt: ChatPromptTemplate, 
                  tools: list, 
-                 chat_history: list[BaseMessage] = []):
+                 chat_history: list[BaseMessage] = [],
+                 memory: Optional[str] = None,
+                 connection_str: Optional[str] = None):
         self.prompt = prompt
         self.client = client
         self.tools = tools
         self.chat_history = chat_history
-
+        self.memory = memory
+        self.connection_str = connection_str
+        
     def _agent_executor(self, agent: Any):
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
                                                   verbose=True, handle_parsing_errors=True,
@@ -59,12 +64,26 @@ class Assistant:
                                                   return_intermediate_steps=True)
     
     def getLGExecutor(self):
-        agent = LGAssistantRunnable.create_assistant(
-            client=self.client, 
-            tools=self.tools, 
-            prompt=self.prompt,
-            chat_history=self.chat_history)
-        return self._agent_executor(agent)
+        if self.memory == 'sqlite':
+            import sqlite3
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            try:
+                memory = SqliteSaver(sqlite3.connect('/data/cache/memory.db', check_same_thread=False))
+            except sqlite3.OperationalError:
+                memory = SqliteSaver(sqlite3.connect('memory.db', check_same_thread=False))
+        elif self.memory == 'postgres':
+            from langgraph.checkpoint.postgres import PostgresSaver
+            memory = PostgresSaver()
+        elif self.memory:
+            from langgraph.checkpoint.memory import MemorySaver
+            memory = MemorySaver()
+        else:
+            memory = None
+        agent = LangGraphAgentRunnable.create_graph(
+            client=self.client, tools=self.tools,
+            yaml_schema=self.prompt, memory=memory
+        )
+        return agent
     
     def getAutoGenExecutor(self):
         agent = AutoGenAssistantRunnable.create_assistant(client=self.client, tools=self.tools, prompt=self.prompt)

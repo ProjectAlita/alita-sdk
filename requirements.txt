@@ -13,3 +13,5 @@ pydantic~=1.10
 chardet==5.2.0
 pyautogen~=0.2.33
 langgraph~=0.2.4
+langgraph-checkpoint-sqlite~=1.0.4
+langgraph-checkpoint-postgres~=1.0.9

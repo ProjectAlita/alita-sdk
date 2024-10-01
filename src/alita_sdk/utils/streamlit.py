@@ -58,8 +58,8 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
         layout = 'wide', 
         initial_sidebar_state = 'auto',
         menu_items={
-            "Get help" : "https://projectalita.ai",
-            "About": "https://alita.lab.epam.com"
+            "Get help" : "https://elitea.ai",
+            "About": "https://elitea.ai/docs"
         }
     )
     # st_callback = StreamlitCallbackHandler(st.container())
@@ -83,8 +83,11 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
         with st.chat_message("assistant", avatar=ai_icon):
             # st_callback = StreamlitCallbackHandler(st.container())
             response = st.session_state.agent_executor.invoke(
-                {"input": prompt, "chat_history": st.session_state.messages}, {"callbacks": [get_streamlit_cb(st.empty())]}
-            )
+                {"input": prompt, "chat_history": st.session_state.messages}, 
+                {
+                    'callbacks': [get_streamlit_cb(st.empty())],
+                    'configurable': {"thread_id": st.session_state.thread_id}
+                })
             st.write(response["output"])
-            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.thread_id = response["thread_id"]
             st.session_state.messages.append({"role": "assistant", "content": response["output"]})
