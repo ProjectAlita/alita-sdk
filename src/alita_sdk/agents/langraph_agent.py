@@ -86,11 +86,8 @@ Anwer must be JSON only extractable by JSON.LOADS.
                 schema=dumps(params),
                 last_message=messages[-1].content))
         ]
-        print(input)
         completion = self.client.completion_with_retry(input)
         result = _extract_json(completion[0].content.strip())
-        print("This is message for tool node")
-        print(result)
         return {"messages": [AIMessage(str(self.tool.run(result)))]}
 
 
@@ -150,11 +147,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 for tool in tools:
                     if tool.name == node_id:
                         if node_type == 'function':
-                            lg_builder.add_node(node_id, tool)
+                            lg_builder.add_node(node_id, tool, name=node['id'])
                         elif node_type == 'tool':
-                            lg_builder.add_node(node_id, ToolNode(client=client, tool=tool))
+                            lg_builder.add_node(node_id, ToolNode(client=client, tool=tool, name=node['id']))
                         elif node_type == 'llm':
-                            lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', "")))
+                            lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', ""), name=node['id']))
             if node.get('transition'):
                 next_step=clean_string(node['transition'])
                 if node.get('transition') != 'END':
