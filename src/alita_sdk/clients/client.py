@@ -96,7 +96,10 @@ class AlitaClient:
 
     def get_app_version_details(self, application_id: int, application_version_id: int):
         url = f"{self.application_versions}/{application_id}/{application_version_id}"
-        data = requests.get(url, headers=self.headers, verify=False).json()
+        params = {
+            "expand_integrations": 'true'
+        }
+        data = requests.get(url, headers=self.headers, params=params, verify=False).json()
         return data
 
     def get_integration_details(self, integration_id: str, format_for_model: bool = False):
