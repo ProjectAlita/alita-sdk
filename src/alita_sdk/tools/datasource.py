@@ -1,4 +1,4 @@
-from typing import Any, Type
+from typing import Any, Type, Dict
 from langchain_core.tools import BaseTool
 from pydantic import create_model, validator, BaseModel
 from pydantic.fields import FieldInfo
@@ -28,6 +28,12 @@ class DatasourcePredict(BaseTool):
     args_schema: Type[BaseModel] = datasourceToolSchema
     return_type: str = "str"
     
+    @validator('query', pre=True, allow_reuse=True)
+    def remove_spaces(cls, v):
+        if isinstance(v, Dict):
+            return " ".join(list(v.values()))
+        return v
+    
     @validator('name', pre=True, allow_reuse=True)
     def remove_spaces(cls, v):
         return v.replace(' ', '')
@@ -44,6 +50,12 @@ class DatasourceSearch(BaseTool):
     datasource: Any
     args_schema: Type[BaseModel] = datasourceToolSchema
     return_type: str = "str"
+    
+    @validator('query', pre=True, allow_reuse=True)
+    def remove_spaces(cls, v):
+        if isinstance(v, Dict):
+            return " ".join(list(v.values()))
+        return v
     
     @validator('name', pre=True, allow_reuse=True)
     def remove_spaces(cls, v):

@@ -15,7 +15,9 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from ..utils.evaluate import EvaluateTemplate
 from ..agents.utils import _extract_json
 from ..utils.utils import clean_string
+from pydantic.error_wrappers import ValidationError
 from langgraph.managed.base import is_managed_value
+from langgraph.errors import NodeInterrupt
 
 
 class ConditionalEdge(Runnable):
@@ -79,16 +81,18 @@ Anwer must be JSON only extractable by JSON.LOADS.
             'function',{'parameters': {}}).get(
                 'parameters', {'properties': {}}).get('properties', {})
         # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
-        input = messages + [
-            HumanMessage(self.prompt.format(
+        prompt = self.prompt.format(
                 tool_name=self.tool.name, 
                 tool_description=self.tool.description, 
                 schema=dumps(params),
-                last_message=messages[-1].content))
-        ]
+                last_message=messages[-1].content)
+        input = messages[:-1] + [HumanMessage(prompt)]
         completion = self.client.completion_with_retry(input)
         result = _extract_json(completion[0].content.strip())
-        return {"messages": [AIMessage(str(self.tool.run(result)))]}
+        try:
+            return {"messages": [AIMessage(str(self.tool.run(result)))]}
+        except ValidationError:
+            raise NodeInterrupt(f"Tool input to the {self.tool.name} with value {result} raised ValidationError. \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {prompt}")
 
 
 class LLMNode(BaseTool):
