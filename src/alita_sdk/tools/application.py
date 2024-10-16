@@ -1,6 +1,7 @@
 from ..utils.utils import clean_string
+from json import dumps
 from langchain_core.tools import BaseTool
-from typing import Any, Type
+from typing import Any, Type, Dict
 from pydantic import create_model, validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..agents.mixedAgentRenderes import convert_message_to_json
@@ -17,9 +18,17 @@ applicationWFSchema = create_model(
 )
 
 def formulate_query(args, kwargs):
+    print(kwargs)
     if kwargs.get('messages'):
-        task = kwargs.get('messages')[-1].content
-        chat_history = convert_message_to_json(kwargs.get('messages')[:-1])
+        try:
+            task = kwargs.get('messages')[-1].content
+            chat_history = convert_message_to_json(kwargs.get('messages')[:-1])
+        except AttributeError:
+            try:
+                task = kwargs.get('messages')[-1]['content']
+            except KeyError:
+                task = dumps(kwargs.get('messages')[-1])
+            chat_history = kwargs.get('messages')[:-1]
         return {"input": task, "chat_history": chat_history}
     else:
         task = kwargs.get('task')

@@ -1,4 +1,5 @@
 import yaml
+import logging
 from uuid import uuid4
 from typing import Union, Any, Optional
 from json import dumps
@@ -19,6 +20,7 @@ from pydantic.error_wrappers import ValidationError
 from langgraph.managed.base import is_managed_value
 from langgraph.errors import NodeInterrupt
 
+logger = logging.getLogger(__name__)
 
 class ConditionalEdge(Runnable):
     def __init__(self, condition: str):
@@ -95,18 +97,19 @@ Anwer must be JSON only extractable by JSON.LOADS.
             raise NodeInterrupt(f"Tool input to the {self.tool.name} with value {result} raised ValidationError. \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {prompt}")
 
 
-class LLMNode(BaseTool):
+class LLMNode(Runnable):
     name: str = 'LLMNode'
     prompt: str
     description: str = 'This is tool node for LLM'
     client: Any = None
     
-    def __init__(self, client, prompt: str):
+    def __init__(self, client, prompt: str, name: str = 'LLMNode'):
         self.client = client
         self.prompt = prompt
+        self.name = name
         
-    def _run(self, messages, *args, **kwargs):
-        input = messages + [HumanMessage(self.prompt)]
+    def invoke(self, messages, *args, **kwargs):
+        input = messages.get("messages")[:-1] + [HumanMessage(self.prompt)]
         
         completion = self.client.completion_with_retry(input)
         return {"messages": [AIMessage(completion[0].content.strip())]}
@@ -116,7 +119,7 @@ class TransitionalEdge(Runnable):
         self.next_step = next_step
     
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        print('Transitioning to:', self.next_step)
+        logger.debug('Transitioning to:', self.next_step)
         return self.next_step
 
 # def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool], memory: Optional[Any] = None):
@@ -143,45 +146,51 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         lg_builder = StateGraph(MessagesState)
         interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
         interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
+        try:
+            for node in schema['nodes']:
+                
+                node_type = node.get('type', 'function')
+                node_id = clean_string(node['id'])
+                tool_name = clean_string(node.get('tool', node_id))
+                logger.debug("Node:", node_id, node_type, tool_name)
+                if node_type in ['function', 'tool']:
+                    for tool in tools:
+                        if tool.name == tool_name:
+                            if node_type == 'function':
+                                lg_builder.add_node(node_id, tool)
+                            elif node_type == 'tool':
+                                lg_builder.add_node(node_id, ToolNode(client=client, tool=tool, name=node_id))
+                elif node_type == 'llm':
+                    lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', ""), name=node_id))
+                if node.get('transition'):
+                    next_step=clean_string(node['transition'])
+                    if node.get('transition') != 'END':
+                        logger.debug('Adding transition:', next_step)
+                        lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
+                elif node.get('decision'):
+                    lg_builder.add_conditional_edges(node_id, DecisionEdge(
+                        client, node['decision']['nodes'], 
+                        node['decision'].get('description', "")))
+                elif node.get('condition'):
+                    lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
 
-        for node in schema['nodes']:
-            node_type = node.get('type', 'function')
-            node_id = clean_string(node['id'])
-            if node_type in ['function', 'tool', 'llm']:
-                for tool in tools:
-                    if tool.name == node_id:
-                        if node_type == 'function':
-                            lg_builder.add_node(node_id, tool)
-                        elif node_type == 'tool':
-                            lg_builder.add_node(node_id, ToolNode(client=client, tool=tool, name=node['id']))
-                        elif node_type == 'llm':
-                            lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', ""), name=node['id']))
-            if node.get('transition'):
-                next_step=clean_string(node['transition'])
-                if node.get('transition') != 'END':
-                    print('Adding transition:', next_step)
-                    lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
-            elif node.get('decision'):
-                lg_builder.add_conditional_edges(node_id, DecisionEdge(
-                    client, node['decision']['nodes'], 
-                    node['decision'].get('description', "")))
-            elif node.get('condition'):
-                lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
-
-        lg_builder.set_entry_point(clean_string(schema['entry_point']))
-        
-        # assign default values
-        interrupt_before = interrupt_before or []
-        interrupt_after = interrupt_after or []
+            lg_builder.set_entry_point(clean_string(schema['entry_point']))
+            
+            # assign default values
+            interrupt_before = interrupt_before or []
+            interrupt_after = interrupt_after or []
 
         # validate the graph
-        lg_builder.validate(
-            interrupt=(
-                (interrupt_before if interrupt_before != "*" else []) + interrupt_after
-                if interrupt_after != "*"
-                else []
+            lg_builder.validate(
+                interrupt=(
+                    (interrupt_before if interrupt_before != "*" else []) + interrupt_after
+                    if interrupt_after != "*"
+                    else []
+                )
             )
-        )
+        except ValueError as e:
+            # todo: raise a better error for the user
+            raise e
 
         # prepare output channels
         output_channels = (
