@@ -147,7 +147,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         for node in schema['nodes']:
             node_type = node.get('type', 'function')
             node_id = clean_string(node['id'])
-            if node_type in ['function', 'tool']:
+            if node_type in ['function', 'tool', 'llm']:
                 for tool in tools:
                     if tool.name == node_id:
                         if node_type == 'function':
