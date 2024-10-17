@@ -13,11 +13,13 @@ def process_response(response, return_type):
     if return_type == "str":
         return response
     else:
-        return {
-            "messages": [
-                {"role": "assistant", "content": response}
-            ]
-        }
+        if isinstance(response, str):
+            return { "messages": [ {"role": "assistant", "content": response} ] }
+        else:
+            if response.get('messages'):
+                return response
+            else:
+                return { "messages": [ {"role": "assistant", "content": response} ] }
 
 
 class ToolNode(BaseTool):
