@@ -35,6 +35,7 @@ Tool arguments schema:
 Last message from user: {last_message}
 
 Expected output is JSON that to be used as a KWARGS for the tool call like {{"key": "value"}} 
+in case your key is "messages" value should be a list of messages with roles like {{"messages": [{{"role": "user", "content": "input"}}, {{"role": "assistant", "content": "output"}}]}}.
 Tool won't have access to convesation so all keys and values need to be actual and independant. 
 Anwer must be JSON only extractable by JSON.LOADS.
 """
