@@ -7,18 +7,16 @@ from langgraph.graph.graph import END, START
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.store.base import BaseStore
 from langgraph.channels.ephemeral_value import EphemeralValue
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables import Runnable
 from .mixedAgentRenderes import convert_message_to_json
-from langchain_core.utils.function_calling import convert_to_openai_tool
 from ..utils.evaluate import EvaluateTemplate
-from ..agents.utils import _extract_json
+from ..tools.llm import LLMNode
+from ..tools.tool import ToolNode
 from ..utils.utils import clean_string
-from pydantic.error_wrappers import ValidationError
 from langgraph.managed.base import is_managed_value
-from langgraph.errors import NodeInterrupt
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +25,17 @@ class ConditionalEdge(Runnable):
         self.condition = condition
     
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        messages = messages['messages']
-        messages = convert_message_to_json(messages)
-        last_message = messages[-1]['content']
-        
-        # llm_manager, checkpoint_id = get_llm_manager(dumpd(self), config, last_message)
+        input = convert_message_to_json(messages['messages'][:-1])
+        last_message = messages[-1].content
         template = EvaluateTemplate(
             self.condition, 
-            chat_history=dumps(messages), 
+            chat_history=dumps(input), 
             last_message=last_message)
         result = template.evaluate()
         if isinstance(result, str):
             result = clean_string(result)
-        # wrap_message(llm_manager, result, checkpoint_id)
-        if 'END' in result:
-            return END
+        if result == 'END':
+            result = END
         return result 
 
 class DecisionEdge(Runnable):
@@ -56,77 +50,24 @@ Answer only with step name, no need to add descrip in case none of the steps are
         self.description = description
         
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        messages = messages['messages']
-        messages.append(HumanMessage(self.prompt.format(steps=self.steps, description=self.description)))
-        completion = self.client.completion_with_retry(messages)
-        result = completion[0].content.strip()
-        if 'END' in result:
-            return END
-        return result 
-        
-
-class ToolNode(BaseTool):
-    name: str = 'ToolNode'
-    description: str = 'This is tool node for tools'
-    client: Any = None
-    tool: BaseTool = None
-    prompt: str = """You are tasked to formulate arguments for the tool according to user task and conversation history.
-Tool name: {tool_name}
-Tool description: {tool_description}
-Tool arguments schema: 
-{schema}
-
-Last message from user: {last_message}
-
-Expected output is JSON that to be used as a KWARGS for the tool call like {{"key": "value"}} 
-Tool won't have access to convesation so all keys and values need to be actual and independant. 
-Anwer must be JSON only extractable by JSON.LOADS.
-"""
-    def _run(self, messages, *args, **kwargs):
-        
-        params = convert_to_openai_tool(self.tool).get(
-            'function',{'parameters': {}}).get(
-                'parameters', {'properties': {}}).get('properties', {})
-        parameters = ''
-        for key in params.keys():
-            parameters += f"{key} [{params[key].get('type', 'str')}]: {params[key].get('description', '')}\n"
-        # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
-        prompt = self.prompt.format(
-                tool_name=self.tool.name, 
-                tool_description=self.tool.description, 
-                schema=parameters,
-                last_message=messages[-1].content)
-        
-        input = messages[:-1] + [HumanMessage(prompt)]
+        input = messages['messages'][:]
+        # Message are shared between all tools so we need to make sure that we are not modifying it
+        input.append(HumanMessage(self.prompt.format(steps=self.steps, description=self.description)))
+        print(input)
         completion = self.client.completion_with_retry(input)
-        result = _extract_json(completion[0].content.strip())
-        
-        try:
-            return {"messages": [AIMessage(str(self.tool.run(result)))]}
-        except ValidationError:
-            raise NodeInterrupt(f"Tool input to the {self.tool.name} with value {result} raised ValidationError. \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {prompt}")
-
-
-class LLMNode(BaseTool):
-    name: str = 'LLMNode'
-    prompt: str
-    description: str = 'This is tool node for LLM'
-    client: Any = None
-        
-    def _run(self, messages, *args, **kwargs):
-        input = messages.get("messages")[:-1] + [HumanMessage(self.prompt)]
-        completion = self.client.completion_with_retry(input)
-        return {"messages": [AIMessage(completion[0].content.strip())]}
+        result = clean_string(completion[0].content.strip())
+        logger.info(f"Plan to transition to: {result}")
+        if result not in self.steps or result == 'END':
+            result = END
+        return result
 
 class TransitionalEdge(Runnable):
     def __init__(self, next_step: str):
         self.next_step = next_step
     
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        logger.debug('Transitioning to:', self.next_step)
-        if 'END' in self.next_step:
-            return END
-        return self.next_step
+        logger.info(f'Transitioning to: {self.next_step}')
+        return self.next_step if self.next_step != 'END' else END
 
 # def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool], memory: Optional[Any] = None):
      
@@ -157,28 +98,29 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 node_type = node.get('type', 'function')
                 node_id = clean_string(node['id'])
                 tool_name = clean_string(node.get('tool', node_id))
-                logger.debug("Node:", node_id, node_type, tool_name)
+                logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
                 if node_type in ['function', 'tool']:
                     for tool in tools:
                         if tool.name == tool_name:
                             if node_type == 'function':
                                 lg_builder.add_node(node_id, tool)
                             elif node_type == 'tool':
-                                lg_builder.add_node(node_id, ToolNode(client=client, tool=tool, name=node_id))
-                            break
+                                lg_builder.add_node(node_id, 
+                                                    ToolNode(client=client, tool=tool, name=node['id'], return_type='dict'))
                 elif node_type == 'llm':
-                    lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', ""), name=node_id))
-                    
+                    lg_builder.add_node(node_id, 
+                                        LLMNode(client=client, prompt=node.get('prompt', ""), name=node['id'], return_type='dict'))
                 if node.get('transition'):
                     next_step=clean_string(node['transition'])
-                    if node.get('transition') != 'END':
-                        logger.debug('Adding transition:', next_step)
-                        lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
+                    logger.info(f'Adding transition: {next_step}')
+                    lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
                 elif node.get('decision'):
+                    logger.info(f'Adding decision: {node["decision"]["nodes"]}')
                     lg_builder.add_conditional_edges(node_id, DecisionEdge(
                         client, node['decision']['nodes'], 
                         node['decision'].get('description', "")))
                 elif node.get('condition'):
+                    logger.info(f'Adding condition: {node["condition"]}')
                     lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
 
             lg_builder.set_entry_point(clean_string(schema['entry_point']))
@@ -187,7 +129,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             interrupt_before = interrupt_before or []
             interrupt_after = interrupt_after or []
 
-        # validate the graph
+            # validate the graph
             lg_builder.validate(
                 interrupt=(
                     (interrupt_before if interrupt_before != "*" else []) + interrupt_after
@@ -252,7 +194,8 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         for start, branches in lg_builder.branches.items():
             for name, branch in branches.items():
                 compiled.attach_branch(start, name, branch)
-
+                
+        logger.info(compiled.get_graph().draw_mermaid())
         return compiled.validate()
         
     
