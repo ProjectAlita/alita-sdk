@@ -1,12 +1,12 @@
 import logging
-from json import dumps
+from json import dumps, loads
 from langchain_core.tools import BaseTool
 from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 from ..agents.utils import _extract_json
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic.error_wrappers import ValidationError
-
+from traceback import format_exc
 logger = logging.getLogger(__name__)
 
 def process_response(response, return_type):
@@ -15,12 +15,13 @@ def process_response(response, return_type):
     else:
         if isinstance(response, str):
             return { "messages": [ {"role": "assistant", "content": response} ] }
-        else:
+        elif isinstance(response, dict):
             if response.get('messages'):
                 return response
             else:
-                return { "messages": [ {"role": "assistant", "content": response} ] }
-
+                return { "messages": [ {"role": "assistant", "content": dumps(response)} ] }
+        else:
+            return { "messages": [ {"role": "assistant", "content": str(response)} ] }
 
 class ToolNode(BaseTool):
     name: str = 'ToolNode'
@@ -56,10 +57,13 @@ Anwer must be JSON only extractable by JSON.LOADS.
                 schema=parameters,
                 last_message=messages[-1].content))
         ]
+        logger.info(f"ToolNode input: {input}")
         completion = self.client.completion_with_retry(input)
         result = _extract_json(completion[0].content.strip())
         try:
-            return process_response(str(self.tool.run(result)), self.return_type)
+            response = process_response(self.tool.run(result), self.return_type)
+            logger.info(f"ToolNode response: {response}")
+            return response
         except ValidationError:
             return process_response(f"""Tool input to the {self.tool.name} with value {result} raised ValidationError. 
 \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
