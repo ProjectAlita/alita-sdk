@@ -28,6 +28,7 @@ def _extract_json(json_string: str) -> dict:
     json_start, json_end = _find_json_bounds(json_string)
 
     if json_start is None or json_end is None:
+        logger.error(f'Cannot parse json string: {json_string}')
         raise ValueError('Cannot parse json string')
 
     json_str = json_string[json_start:json_end]
@@ -79,6 +80,8 @@ def _old_extract_json(json_data, message_key=None):
             txt = "\n".join([match.value for match in message_key.find(res)])
             message_key.update(res, txt + text)
         return res
+    else:
+        return json.loads(json_data)
 
 
 def _unpack_json(json_data: str | dict, **kwargs) -> dict:

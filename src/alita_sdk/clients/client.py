@@ -118,6 +118,12 @@ class AlitaClient:
         if not app_type:
             app_type = data.get("agent_type", "raw")
         if app_type == "pipeline":
+            client.max_tokens = data['llm_settings']['max_tokens']
+            client.temperature = data['llm_settings']['temperature']
+            client.top_p = data['llm_settings']['top_p']
+            client.top_k = data['llm_settings']['top_k']
+            client.model_name = data['llm_settings']['model_name']
+            client.integration_uid = data['llm_settings']['integration_uid']
             return self.workflow(client, data, chat_history=chat_history)
         if app_type == "react":
             data['instructions'] += REACT_ADDON
@@ -340,8 +346,9 @@ class AlitaClient:
 
     def predict(self, messages: list[BaseMessage], model_settings: dict, variables: list[dict] = None):
         prompt_data = self._prepare_payload(messages, model_settings, variables)
-
+        
         response = requests.post(self.predict_url, headers=self.headers, json=prompt_data, verify=False)
+        
         if response.status_code != 200:
             logger.error(f"Error in response of predict: {response.content}")
             raise requests.exceptions.HTTPError(response.content)

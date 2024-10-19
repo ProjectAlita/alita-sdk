@@ -15,6 +15,7 @@ from .mixedAgentRenderes import convert_message_to_json
 from ..utils.evaluate import EvaluateTemplate
 from ..tools.llm import LLMNode
 from ..tools.tool import ToolNode
+from ..tools.loop import LoopNode
 from ..utils.utils import clean_string
 from langgraph.managed.base import is_managed_value
 
@@ -99,14 +100,20 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 node_id = clean_string(node['id'])
                 tool_name = clean_string(node.get('tool', node_id))
                 logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-                if node_type in ['function', 'tool']:
+                if node_type in ['function', 'tool', 'loop']:
                     for tool in tools:
                         if tool.name == tool_name:
                             if node_type == 'function':
                                 lg_builder.add_node(node_id, tool)
                             elif node_type == 'tool':
                                 lg_builder.add_node(node_id, 
-                                                    ToolNode(client=client, tool=tool, name=node['id'], return_type='dict'))
+                                                    ToolNode(client=client, tool=tool, 
+                                                             name=node['id'], return_type='dict'))
+                            elif node_type == 'loop':
+                                lg_builder.add_node(node_id, 
+                                                    LoopNode(client=client, tool=tool, task=node.get('task', ""),
+                                                             name=node['id'], return_type='dict'))
+                            break
                 elif node_type == 'llm':
                     lg_builder.add_node(node_id, 
                                         LLMNode(client=client, prompt=node.get('prompt', ""), name=node['id'], return_type='dict'))

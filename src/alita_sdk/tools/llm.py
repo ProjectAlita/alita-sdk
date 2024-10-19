@@ -1,7 +1,7 @@
 import logging
 from langchain_core.tools import BaseTool
 from typing import Any
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 
 logger = logging.getLogger(__name__)
@@ -25,9 +25,9 @@ class LLMNode(BaseTool):
         
     def _run(self, messages, *args, **kwargs):
         if isinstance(messages, list):
-            input = messages + [SystemMessage(self.prompt)]
+            input = messages + [HumanMessage(self.prompt)]
         else:
-            input = messages.get("messages") + [SystemMessage(self.prompt)]
+            input = messages.get("messages") + [HumanMessage(self.prompt)]
         try:
             logger.info(f"LLM Node input: {input}")
             completion = self.client.completion_with_retry(input)
