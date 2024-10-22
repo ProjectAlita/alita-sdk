@@ -74,7 +74,7 @@ class AlitaChatModel(BaseChatModel):
         values['client'] = AlitaClient(
             values['deployment'], 
             values['project_id'], 
-            values['api_token'],
+            values['api_token'], 
             api_extra_headers=values.get('api_extra_headers')
         )
         if values["tiktoken_model_name"]:

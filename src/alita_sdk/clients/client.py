@@ -1,5 +1,6 @@
 import logging
 import importlib
+from copy import deepcopy as copy
 
 import requests
 
@@ -114,17 +115,18 @@ class AlitaClient:
                     app_type=None):
         if tools is None:
             tools = []
+        client_fork = copy(client)
         data = self.get_app_version_details(application_id, application_version_id)
+        client_fork.max_tokens = data['llm_settings']['max_tokens']
+        client_fork.temperature = data['llm_settings']['temperature']
+        client_fork.top_p = data['llm_settings']['top_p']
+        client_fork.top_k = data['llm_settings']['top_k']
+        client_fork.model_name = data['llm_settings']['model_name']
+        client_fork.integration_uid = data['llm_settings']['integration_uid']
         if not app_type:
             app_type = data.get("agent_type", "raw")
         if app_type == "pipeline":
-            client.max_tokens = data['llm_settings']['max_tokens']
-            client.temperature = data['llm_settings']['temperature']
-            client.top_p = data['llm_settings']['top_p']
-            client.top_k = data['llm_settings']['top_k']
-            client.model_name = data['llm_settings']['model_name']
-            client.integration_uid = data['llm_settings']['integration_uid']
-            return self.workflow(client, data, chat_history=chat_history)
+            return self.workflow(client_fork, data, chat_history=chat_history)
         if app_type == "react":
             data['instructions'] += REACT_ADDON
         elif app_type == "alita":
@@ -197,12 +199,12 @@ class AlitaClient:
             return Assistant(client_config, template, tools).getAutoGenExecutor()
         elif app_type == "alita":
             tools = [EchoTool()] + tools
-            return Assistant(client, template, tools).getAlitaExecutor()
+            return Assistant(client_fork, template, tools).getAlitaExecutor()
         elif app_type == "llama":
-            return Assistant(client, template, tools).getLLamaAgentExecutor()
+            return Assistant(client_fork, template, tools).getLLamaAgentExecutor()
         else:
             tools = [EchoTool()] + tools
-            return Assistant(client, template, tools).getAgentExecutor()
+            return Assistant(client_fork, template, tools).getAgentExecutor()
 
     def datasource(self, datasource_id: int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"

@@ -1,4 +1,5 @@
 
+import logging
 from typing import Any, Optional
 from langchain.agents import (
     AgentExecutor, create_react_agent, 
@@ -15,6 +16,7 @@ from langchain_core.messages import (
 )
 from langchain_core.prompts import ChatPromptTemplate
 
+logger = logging.getLogger(__name__)
 
 class Assistant:
     def __init__(self, client: Any, 
@@ -29,6 +31,10 @@ class Assistant:
         self.chat_history = chat_history
         self.memory = memory
         self.connection_str = connection_str
+        try:
+            logger.info(f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
+        except Exception as e:
+            logger.info(f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
         
     def _agent_executor(self, agent: Any):
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
