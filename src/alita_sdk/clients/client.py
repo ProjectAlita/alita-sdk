@@ -119,7 +119,7 @@ class AlitaClient:
         else:
             configs = self.fetch_available_configurations()
 
-        resp = requests.patch(url, headers=self.headers, verify=False, json=configs)
+        resp = requests.patch(url, headers=self.headers, verify=False, json={'configurations': configs})
         if resp.ok:
             return resp.json()
         raise ApiDetailsRequestError
