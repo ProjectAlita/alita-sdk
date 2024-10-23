@@ -27,7 +27,7 @@ class ConditionalEdge(Runnable):
     
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
         input = convert_message_to_json(messages['messages'][:-1])
-        last_message = messages[-1].content
+        last_message = messages['messages'][-1].content
         template = EvaluateTemplate(
             self.condition, 
             chat_history=dumps(input), 
