@@ -68,6 +68,7 @@ class AlitaChatModel(BaseChatModel):
     top_k: Optional[int] = 20
     stream_response: Optional[bool] = Field(default=False, alias="stream")
     api_extra_headers: Optional[dict] = Field(default_factory=dict)
+    configurations: Optional[list] = Field(default_factory=list)
     
     @root_validator()
     def validate_environment(cls, values: Dict) -> Dict:
@@ -75,7 +76,8 @@ class AlitaChatModel(BaseChatModel):
             values['deployment'], 
             values['project_id'], 
             values['api_token'], 
-            api_extra_headers=values.get('api_extra_headers')
+            api_extra_headers=values.get('api_extra_headers'),
+            configurations=values.get('configurations', [])
         )
         if values["tiktoken_model_name"]:
             values["encoding"] = encoding_for_model(values["tiktoken_model_name"])

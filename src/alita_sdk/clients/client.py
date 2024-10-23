@@ -28,8 +28,17 @@ from ..tools.echo import EchoTool
 logger = logging.getLogger(__name__)
 
 
+class ApiDetailsRequestError(Exception):
+    ...
+
+
 class AlitaClient:
-    def __init__(self, base_url: str, project_id: int, auth_token: str, api_extra_headers: Optional[dict] = None,
+    def __init__(self,
+                 base_url: str,
+                 project_id: int,
+                 auth_token: str,
+                 api_extra_headers: Optional[dict] = None,
+                 configurations: Optional[list] = None,
                  **kwargs):
 
         self.base_url = base_url.rstrip('/')
@@ -55,6 +64,7 @@ class AlitaClient:
         self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/{self.project_id}"
         self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/{self.project_id}"
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
+        self.configurations: list = configurations or []
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -95,10 +105,24 @@ class AlitaClient:
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
 
-    def get_app_version_details(self, application_id: int, application_version_id: int):
+    def fetch_available_configurations(self) -> list:
+        url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
+        resp = requests.get(url, headers=self.headers, verify=False)
+        if resp.ok:
+            return resp.json()
+        return []
+
+    def get_app_version_details(self, application_id: int, application_version_id: int) -> dict:
         url = f"{self.application_versions}/{application_id}/{application_version_id}"
-        data = requests.get(url, headers=self.headers, verify=False).json()
-        return data
+        if self.configurations:
+            configs = self.configurations
+        else:
+            configs = self.fetch_available_configurations()
+
+        resp = requests.patch(url, headers=self.headers, verify=False, json=configs)
+        if resp.ok:
+            return resp.json()
+        raise ApiDetailsRequestError
 
     def get_integration_details(self, integration_id: str, format_for_model: bool = False):
         url = f"{self.integration_details}/{integration_id}"
@@ -180,7 +204,8 @@ class AlitaClient:
                     openai_api_version=integration_details['settings']['api_version'],
                     openai_api_key=integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
                     temperature=data['llm_settings']['temperature'],
-                    max_tokens=data['llm_settings']['max_tokens']
+                    max_tokens=data['llm_settings']['max_tokens'],
+                    # timeout=600,
                 )
             #
             if app_type == 'dial':
