@@ -64,7 +64,7 @@ class AlitaClient:
         self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/{self.project_id}"
         self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/{self.project_id}"
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
-        self.configurations = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
+        self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.configurations: list = configurations or []
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
@@ -107,7 +107,7 @@ class AlitaClient:
         return data
 
     def fetch_available_configurations(self) -> list:
-        resp = requests.get(self.configurations, headers=self.headers, verify=False)
+        resp = requests.get(self.configurations_url, headers=self.headers, verify=False)
         if resp.ok:
             return resp.json()
         return []
