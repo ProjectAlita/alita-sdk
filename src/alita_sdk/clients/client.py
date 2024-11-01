@@ -136,7 +136,7 @@ class AlitaClient:
 
     def application(self, client: Any, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
-                    app_type=None):
+                    app_type=None, memory=None):
         if tools is None:
             tools = []
         client_fork = copy(client)
@@ -150,7 +150,7 @@ class AlitaClient:
         if not app_type:
             app_type = data.get("agent_type", "raw")
         if app_type == "pipeline":
-            return self.workflow(client_fork, data, chat_history=chat_history)
+            return self.workflow(client_fork, data, chat_history=chat_history, memory=memory)
         if app_type == "react":
             data['instructions'] += REACT_ADDON
         elif app_type == "alita":
@@ -242,12 +242,12 @@ class AlitaClient:
         return AlitaDataSource(self, datasource_id, data["name"], data["description"],
                                datasource_model, chat_model)
 
-    def workflow(self, client, app_data, chat_history=None):
+    def workflow(self, client, app_data, chat_history=None, memory={"type": 'sqlite'}):
         if chat_history is None:
             chat_history = []
         yaml_schema = app_data['instructions']
         tools = get_tools(app_data['tools'], self, True)
-        return Assistant(client, yaml_schema, tools, chat_history, memory='sqlite').getLGExecutor()
+        return Assistant(client, yaml_schema, tools, chat_history, memory=memory).getLGExecutor()
 
 
     def assistant(self, prompt_id: int, prompt_version_id: int,

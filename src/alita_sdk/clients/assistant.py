@@ -23,14 +23,12 @@ class Assistant:
                  prompt: ChatPromptTemplate, 
                  tools: list, 
                  chat_history: list[BaseMessage] = [],
-                 memory: Optional[str] = None,
-                 connection_str: Optional[str] = None):
+                 memory: Optional[dict] = {}):
         self.prompt = prompt
         self.client = client
         self.tools = tools
         self.chat_history = chat_history
         self.memory = memory
-        self.connection_str = connection_str
         try:
             logger.info(f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
         except Exception as e:
@@ -70,16 +68,18 @@ class Assistant:
                                                   return_intermediate_steps=True)
     
     def getLGExecutor(self):
-        if self.memory == 'sqlite':
+        if self.memory.get('type') == 'sqlite':
             import sqlite3
             from langgraph.checkpoint.sqlite import SqliteSaver
             try:
                 memory = SqliteSaver(sqlite3.connect('/data/cache/memory.db', check_same_thread=False))
             except sqlite3.OperationalError:
                 memory = SqliteSaver(sqlite3.connect('memory.db', check_same_thread=False))
-        elif self.memory == 'postgres':
+        elif self.memory.get('type') == 'postgres':
+            from psycopg import Connection
             from langgraph.checkpoint.postgres import PostgresSaver
-            memory = PostgresSaver()
+            with Connection.connect(memory["connection_string"], **memory["connection_kwargs"]) as conn:
+                memory = PostgresSaver(conn)
         elif self.memory:
             from langgraph.checkpoint.memory import MemorySaver
             memory = MemorySaver()
