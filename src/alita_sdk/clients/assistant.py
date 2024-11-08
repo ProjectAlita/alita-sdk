@@ -68,23 +68,30 @@ class Assistant:
                                                   return_intermediate_steps=True)
     
     def getLGExecutor(self):
-        if self.memory.get('type') == 'sqlite':
+        if self.memory:
+            if isinstance(self.memory, dict):
+                if self.memory.get('type') == 'postgres':
+                    from psycopg import Connection
+                    from langgraph.checkpoint.postgres import PostgresSaver
+                    with Connection.connect(memory["connection_string"], **memory["connection_kwargs"]) as conn:
+                        memory = PostgresSaver(conn)
+                else:
+                    import sqlite3
+                    from langgraph.checkpoint.sqlite import SqliteSaver
+                    try:
+                        memory = SqliteSaver(sqlite3.connect('/data/cache/memory.db', check_same_thread=False))
+                    except sqlite3.OperationalError:
+                        memory = SqliteSaver(sqlite3.connect('memory.db', check_same_thread=False))
+            elif self.memory:
+                from langgraph.checkpoint.memory import MemorySaver
+                memory = MemorySaver()
+        else:
             import sqlite3
             from langgraph.checkpoint.sqlite import SqliteSaver
             try:
                 memory = SqliteSaver(sqlite3.connect('/data/cache/memory.db', check_same_thread=False))
             except sqlite3.OperationalError:
                 memory = SqliteSaver(sqlite3.connect('memory.db', check_same_thread=False))
-        elif self.memory.get('type') == 'postgres':
-            from psycopg import Connection
-            from langgraph.checkpoint.postgres import PostgresSaver
-            with Connection.connect(memory["connection_string"], **memory["connection_kwargs"]) as conn:
-                memory = PostgresSaver(conn)
-        elif self.memory:
-            from langgraph.checkpoint.memory import MemorySaver
-            memory = MemorySaver()
-        else:
-            memory = None
         agent = LangGraphAgentRunnable.create_graph(
             client=self.client, tools=self.tools,
             yaml_schema=self.prompt, memory=memory

@@ -59,6 +59,7 @@ class AlitaClient:
         self.datasources_search = f"{self.base_url}{self.api_path}/datasources/search/prompt_lib/{self.project_id}"
         self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
+        self.list_apps_url = f"{self.base_url}{self.api_path}/applications/applications/prompt_lib/{self.project_id}"
         self.integration_details = f"{self.base_url}{self.api_path}/integrations/integration/{self.project_id}"
         self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/{self.project_id}"
         self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/{self.project_id}"
@@ -106,6 +107,12 @@ class AlitaClient:
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
 
+    def get_list_of_apps(self):
+        resp = requests.get(self.list_apps_url, headers=self.headers, verify=False)
+        if resp.ok:
+            return [{"name": app['name'], "id": app['id']} for app in resp.json().get('rows', [])]
+            
+    
     def fetch_available_configurations(self) -> list:
         resp = requests.get(self.configurations_url, headers=self.headers, verify=False)
         if resp.ok:

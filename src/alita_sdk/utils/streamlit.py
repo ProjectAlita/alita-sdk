@@ -23,32 +23,9 @@ def decode_img(msg):
     return img
 
 
-from typing import Callable, TypeVar
-import inspect
-
-from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-from streamlit.delta_generator import DeltaGenerator
-
-from langchain_core.callbacks.base import BaseCallbackHandler
+from src.alita_sdk.llms.alita import AlitaChatModel
 from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 
-def get_streamlit_cb(parent_container: DeltaGenerator) -> BaseCallbackHandler:
-    fn_return_type = TypeVar('fn_return_type')
-    def add_streamlit_context(fn: Callable[..., fn_return_type]) -> Callable[..., fn_return_type]:
-        ctx = get_script_run_ctx()
-
-        def wrapper(*args, **kwargs) -> fn_return_type:
-            add_script_run_ctx(ctx=ctx)
-            return fn(*args, **kwargs)
-
-        return wrapper
-
-    st_cb = StreamlitCallbackHandler(parent_container)
-
-    for method_name, method_func in inspect.getmembers(st_cb, predicate=inspect.ismethod):
-        if method_name.startswith('on_'):
-            setattr(st_cb, method_name, add_streamlit_context(method_func))
-    return st_cb
 
 def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
     
@@ -62,32 +39,121 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             "About": "https://elitea.ai/docs"
         }
     )
-    # st_callback = StreamlitCallbackHandler(st.container())
+    
 
     st.markdown(
         r"""
         <style>
         [data-testid="stStatusWidget"] { display: none; }
         .stDeployButton { display: none; }
+        section[data-testid="stSidebarContent"] { width: 400px !important; }
         </style>
         """, unsafe_allow_html=True
     )
+    
+    with st.sidebar:
+        clear_chat = st.button("Clear Chat")
+        if clear_chat:
+            st.session_state.messages = []
+            st.session_state.thread_id = None
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"], avatar=ai_icon if message["role"] == "assistant" else user_icon):
-            st.markdown(message["content"])
+        llmconfig, agentconfig = st.tabs(["Alita Settings", "Agent Configuration"])
+        with llmconfig:
+            st.title("Elitea Settings Form")
+            deployment_value = None
+            model_value = None
+            api_key_value = None
+            project_id_value = None
+            integration_uid_value = None
+            temperature_value = None
+            max_tokens_value = None
+            if st.session_state.llm:
+                deployment_value = st.session_state.llm.deployment
+                model_value = st.session_state.llm.model_name
+                api_key_value = st.session_state.llm.api_token
+                project_id_value = st.session_state.llm.project_id
+                integration_uid_value = st.session_state.llm.integration_uid
+                temperature_value = st.session_state.llm.temperature
+                max_tokens_value = st.session_state.llm.max_tokens
+            with st.form("settings_form", clear_on_submit=False):
+                deployment = st.text_input("Deployment URL", placeholder="Enter Deployment URL", value=deployment_value)
+                model = st.text_input("Model", placeholder="Enter Model Name", value=model_value)
+                api_key = st.text_input("API Key", placeholder="Enter API Key", value=api_key_value)
+                project_id = st.number_input("Project ID", format="%d", min_value=1, value=project_id_value, placeholder="Enter Project ID")
+                integration_uid = st.text_input("Integration UID", placeholder="Enter Integration UID", value=integration_uid_value)
+                temperature = st.number_input("Temperature", format="%f", min_value=0.0, value=temperature_value, placeholder="Enter Temperature")
+                max_tokens = st.number_input("Max Tokens", format="%d", min_value=1, value=max_tokens_value, placeholder="Enter Max Tokens")
+                submitted = st.form_submit_button("Submit")
+                if submitted:
+                    with st.spinner("Loading Alita..."):
+                        settings = {
+                            "deployment": deployment,
+                            "model": model,
+                            "api_key": api_key,
+                            "project_id": project_id,
+                            "integration_uid": integration_uid,
+                            "max_tokens": max_tokens,
+                            "temperature": temperature
+                        }
+                        st.session_state.llm = AlitaChatModel(**settings)
+            load_agents = st.button("Load Agents")
+            if load_agents:
+                with st.spinner("Loading Agents..."):
+                    st.session_state.agents = st.session_state.llm.client.get_list_of_apps()
+            try:
+                st.title("Agents")
+                with st.form("agents_form", clear_on_submit=False):
+                    options = st.selectbox("Select an agent to load", (agent['name'] for agent in st.session_state.agents))
+                    submitted = st.form_submit_button("Load Agent")
+                    if submitted:
+                        with st.spinner("Loading Agent..."):
+                            agent = next((a for a in st.session_state.agents if a['name'] == options), None)
+                            if agent:
+                                agent_id = agent['id']
+                                agent_details = st.session_state.llm.client.get_app_details(agent_id)
+                                latest_version = next((v for v in agent_details['versions'] if v['name'] == "latest"), None)
+                                if latest_version:
+                                    agent_version_id = latest_version['id']
+                                    st.session_state.agent_executor = st.session_state.llm.client.application(
+                                        st.session_state.llm, agent_id, agent_version_id)
+            except:
+                pass
+            st.title("Remote Agent Manual")
+            with st.form("remote_agent", clear_on_submit=False):
+                if st.session_state.llm:
+                    agent_id = st.text_input("Agent ID", placeholder="Enter Agent ID")
+                    agent_version_id = st.text_input("Agent Version ID", placeholder="Enter Version ID")
+                    agent_type = st.selectbox("Agent Type", ["", "pipeline", "react", "llama", "openai", "dial", "autogen"])
+                    submitted = st.form_submit_button("Load New Agent")
+                    if submitted:
+                        with st.spinner("Loading Agent..."):
+                            st.session_state.agent_executor = st.session_state.llm.client.application(
+                                st.session_state.llm, agent_id, agent_version_id, agent_type if agent_type else None)
+        with agentconfig:
+            st.title("Agent")
+            with st.form("agent_config", clear_on_submit=False):
+                context = st.text_area("Context", placeholder="Enter Context")
+                tools = st.text_area("Tools", placeholder="Enter Tools in JSON format")
+                submitted = st.form_submit_button("Submit")
+                if submitted:
+                    pass
+    if st.session_state.llm and st.session_state.agent_executor:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"], avatar=ai_icon if message["role"] == "assistant" else user_icon):
+                st.markdown(message["content"])
+                            
+        if prompt := st.chat_input():
+            st.chat_message("user", avatar=user_icon).write(prompt)
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("assistant", avatar=ai_icon):
+                st_cb = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
+                response = st.session_state.agent_executor.invoke(
+                    {"input": prompt, "chat_history": st.session_state.messages}, 
+                    { 'callbacks': [st_cb], 'configurable': {"thread_id": st.session_state.thread_id}}
+                )
+                st.write(response["output"])
+                st.session_state.thread_id = response.get("thread_id", None)
+                st.session_state.messages.append({"role": "assistant", "content": response["output"]})
+    else:
+        st.write("Please select an agent and a remote to start the conversation.")    
 
-
-    if prompt := st.chat_input():
-        st.chat_message("user", avatar=user_icon).write(prompt)
-        with st.chat_message("assistant", avatar=ai_icon):
-            # st_callback = StreamlitCallbackHandler(st.container())
-            response = st.session_state.agent_executor.invoke(
-                {"input": prompt, "chat_history": st.session_state.messages}, 
-                {
-                    'callbacks': [get_streamlit_cb(st.empty())],
-                    'configurable': {"thread_id": st.session_state.thread_id}
-                })
-            st.write(response["output"])
-            st.session_state.thread_id = response["thread_id"]
-            st.session_state.messages.append({"role": "assistant", "content": response["output"]})

@@ -16,7 +16,7 @@ def process_response(response, return_type, accumulated_response):
             accumulated_response['messages'][-1]["content"] += '{response}\n\n'
         elif isinstance(response, dict):
             if response.get('messages'):
-                accumulated_response['messages'][-1]["content"] += "\n\n".join([{message['content']} for message in response['messages']])
+                accumulated_response['messages'][-1]["content"] += "\n\n".join([message['content'] for message in response['messages']])
             else:
                 accumulated_response['messages'][-1]['content'] += f"{dumps(response)}\n\n"
         else:
@@ -30,7 +30,7 @@ class LoopNode(BaseTool):
     tool: BaseTool = None
     task: str = ""
     return_type: str = "str"
-    prompt: str = """You are tasked to formulate an LIST of ALLinputs for the tool according to user task and conversation history."
+    prompt: str = """You are tasked to formulate an LIST of ALL inputs for the tool according to user task. Use only chat_history and not this message."
 Tool name: {tool_name}
 Tool description: {tool_description}
 Tool arguments schema: 
@@ -60,7 +60,10 @@ Anwer must be LIST OF JSON only extractable by JSON.LOADS.
                 task=self.task))
         ]
         completion = self.client.completion_with_retry(input)
+        print(f"Loop data: {completion[0].content.strip()}")
+    
         loop_data = _old_extract_json(completion[0].content.strip())
+        
         if self.return_type == "str":
             accumulated_response = ''
         else:
