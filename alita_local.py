@@ -1,9 +1,6 @@
 import logging
-from os import environ
-from dotenv import load_dotenv
  
 logging.basicConfig(level=logging.INFO)
-load_dotenv('.env')
 logger = logging.getLogger(__name__)
  
 from src.alita_sdk.utils.streamlit import run_streamlit
@@ -19,6 +16,8 @@ if 'messages' not in st.session_state:
     st.session_state.thread_id = None
     st.session_state.agent_executor = None
     st.session_state.llm = None
+    st.session_state.agent_name = "Load agent using config"
     st.session_state.agents = []
+    st.session_state.models = []
 
 run_streamlit(st)

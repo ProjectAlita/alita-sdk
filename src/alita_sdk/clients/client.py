@@ -47,7 +47,7 @@ class AlitaClient:
         self.auth_token = auth_token
         self.headers = {
             "Authorization": f"Bearer {auth_token}",
-            'X-SECRET': 'secret'
+            'X-SECRET': kwargs.get('XSECRET', 'secret')
         }
         if api_extra_headers is not None:
             self.headers.update(api_extra_headers)
@@ -66,6 +66,7 @@ class AlitaClient:
         self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/{self.project_id}"
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
+        self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.configurations: list = configurations or []
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
@@ -112,9 +113,14 @@ class AlitaClient:
         if resp.ok:
             return [{"name": app['name'], "id": app['id']} for app in resp.json().get('rows', [])]
             
-    
     def fetch_available_configurations(self) -> list:
         resp = requests.get(self.configurations_url, headers=self.headers, verify=False)
+        if resp.ok:
+            return resp.json()
+        return []
+
+    def all_models_and_integrations(self):
+        resp = requests.get(self.ai_section_url, headers=self.headers, verify=False)
         if resp.ok:
             return resp.json()
         return []
