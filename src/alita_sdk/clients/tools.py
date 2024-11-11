@@ -8,6 +8,15 @@ from ..toolkits.application import ApplicationToolkit
 from ..toolkits.artifact import ArtifactToolkit
 
 logger = logging.getLogger(__name__)
+    
+
+def get_toolkits():
+    return [
+        PromptToolkit.toolkit_config_schema(),
+        DatasourcesToolkit.toolkit_config_schema(),
+        ApplicationToolkit.toolkit_config_schema(),
+        ArtifactToolkit.toolkit_config_schema()
+    ]
 
 def get_tools(tools_list, alita, is_workflow=False):
     prompts = []

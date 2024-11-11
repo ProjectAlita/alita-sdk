@@ -33,7 +33,7 @@ def decode_img(msg):
 
 from src.alita_sdk.llms.alita import AlitaChatModel
 from src.alita_sdk.utils.AlitaCallback import AlitaStreamlitCallback
-from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+from src.alita_sdk.clients.tools import get_toolkits
 
 
 def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
@@ -41,6 +41,15 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
     def clear_chat_history():
         st.session_state.messages = []
         st.session_state.thread_id = None
+        
+    
+    def create_tooklit_schema(tkit_schema):
+        schema = {}
+        for key, value in tkit_schema.get('properties', {}).items():
+            if value.get('autopopulate'):
+                continue
+            schema[key] = value
+        return schema
     
     st.set_page_config(
         page_title='Alita Assistants', 
@@ -52,6 +61,12 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             "About": "https://elitea.ai/docs"
         }
     )
+    
+    if not(st.session_state.tooklit_configs and len(st.session_state.tooklit_configs) > 0):
+        for tkit_pd in get_toolkits():
+            ktit_sch = tkit_pd.schema()
+            st.session_state.tooklit_configs.append(ktit_sch)
+            st.session_state.tooklit_names.append(ktit_sch['title'])
     
     st.markdown(
         r"""
@@ -142,8 +157,15 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                     st.error("Agent version not found")
                             
         with agentconfig:
-            st.title("Agent")
+            st.title("Local Agent")
+            with st.form("add_tkit", clear_on_submit=False):
+                options = st.selectbox("Add toolkit", st.session_state.tooklit_names)
+                submitted = st.form_submit_button("Add Toolkit")
+                if submitted:
+                    pass
+            
             with st.form("agent_config", clear_on_submit=False):
+                
                 context = st.text_area("Context", placeholder="Enter Context")
                 tools = st.text_area("Tools", placeholder="Enter Tools in JSON format")
                 submitted = st.form_submit_button("Submit")
