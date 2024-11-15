@@ -8,7 +8,7 @@ from ..toolkits.application import ApplicationToolkit
 from ..toolkits.artifact import ArtifactToolkit
 
 logger = logging.getLogger(__name__)
-    
+
 
 def get_toolkits():
     return [
@@ -18,7 +18,8 @@ def get_toolkits():
         ArtifactToolkit.toolkit_config_schema()
     ]
 
-def get_tools(tools_list, alita, is_workflow=False):
+
+def get_tools(tools_list: list, alita: 'AlitaClient', is_workflow: bool = False) -> list:
     prompts = []
     tools = []
     for tool in tools_list:
@@ -32,7 +33,7 @@ def get_tools(tools_list, alita, is_workflow=False):
                 alita,
                 datasource_ids=[int(tool['settings']['datasource_id'])],
                 selected_tools=tool['settings']['selected_tools'],
-                is_workflow=True
+                is_workflow=is_workflow
             ).get_tools())
         elif tool['type'] == 'application':
             tools.extend(ApplicationToolkit.get_toolkit(
@@ -41,7 +42,7 @@ def get_tools(tools_list, alita, is_workflow=False):
                 application_version_id=int(tool['settings']['application_version_id']),
                 app_api_key=alita.auth_token,
                 selected_tools=[],
-                is_workflow=True
+                is_workflow=is_workflow
             ).get_tools())
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
