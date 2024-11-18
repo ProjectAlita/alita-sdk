@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alita_sdk"
-version = "0.2.5"
+version = "0.2.6"
 authors = [
   { name="Artem Rozumenko", email="artyom.rozumenko@gmail.com" },
 ]
