@@ -9,8 +9,8 @@ from langchain_core.runnables import RunnableSerializable, ensure_config
 from .llamaAgentParser import LlamaAgentOutputParser
 from langchain_core.tools.render import ToolsRenderer
 from langchain_core.load import dumpd
-from .mixedAgentRenderes import render_llama_text_description_and_args
-from .mixedAgentRenderes import conversation_to_messages, format_to_langmessages
+from ..langchain.mixedAgentRenderes import render_llama_text_description_and_args
+from ..langchain.mixedAgentRenderes import conversation_to_messages, format_to_langmessages
 from langchain_core.callbacks import CallbackManager
 from langchain_core.runnables import RunnableConfig, RunnableSerializable, ensure_config
 from uuid import uuid4
@@ -52,7 +52,6 @@ class LLamaAssistantRunnable(RunnableSerializable):
         messages = []
         if input.get("intermediate_steps"):
             messages = format_to_langmessages(input["intermediate_steps"])
-        
         try:
             user_messages = []
             if input.get('input', input.get('content')):

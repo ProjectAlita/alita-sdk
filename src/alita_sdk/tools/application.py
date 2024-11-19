@@ -5,7 +5,7 @@ from langchain_core.messages import BaseMessage, AIMessage
 from typing import Any, Type, Dict
 from pydantic import create_model, validator, BaseModel
 from pydantic.fields import FieldInfo
-from ..agents.mixedAgentRenderes import convert_message_to_json
+from ..langchain.mixedAgentRenderes import convert_message_to_json
 
 applicationToolSchema = create_model(
     "applicatrionSchema", 

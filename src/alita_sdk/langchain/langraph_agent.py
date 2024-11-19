@@ -18,6 +18,7 @@ from ..tools.tool import ToolNode
 from ..tools.loop import LoopNode
 from ..utils.utils import clean_string
 from langgraph.managed.base import is_managed_value
+from langgraph.prebuilt import ToolNode as ToolsNode
 
 logger = logging.getLogger(__name__)
 
@@ -69,17 +70,101 @@ class TransitionalEdge(Runnable):
     def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
         logger.info(f'Transitioning to: {self.next_step}')
         return self.next_step if self.next_step != 'END' else END
-
-# def create_message_graph(client: Any, yaml_schema: str, tools: list[BaseTool], memory: Optional[Any] = None):
      
 from langgraph.graph.state import CompiledStateGraph
-       
-class LangGraphAgentRunnable(CompiledStateGraph):
-    builder: CompiledStateGraph
+
+def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=[], interrupt_after=[]):
+    # prepare output channels
+        output_channels = (
+            "__root__"
+            if len(lg_builder.schemas[lg_builder.output]) == 1
+            and "__root__" in lg_builder.schemas[lg_builder.output]
+            else [
+                key
+                for key, val in lg_builder.schemas[lg_builder.output].items()
+                if not is_managed_value(val)
+            ]
+        )
+        stream_channels = (
+            "__root__"
+            if len(lg_builder.channels) == 1 and "__root__" in lg_builder.channels
+            else [
+                key for key, val in lg_builder.channels.items() if not is_managed_value(val)
+            ]
+        )
+        
+        compiled = LangGraphAgentRunnable(
+            builder=lg_builder,
+            config_type=lg_builder.config_schema,
+            nodes={},
+            channels={
+                **lg_builder.channels,
+                **lg_builder.managed,
+                START: EphemeralValue(lg_builder.input),
+            },
+            input_channels=START,
+            stream_mode="updates",
+            output_channels=output_channels,
+            stream_channels=stream_channels,
+            checkpointer=memory,
+            interrupt_before_nodes=interrupt_before,
+            interrupt_after_nodes=interrupt_after,
+            auto_validate=False,
+            debug=debug,
+            store=store,
+        )
+
+        compiled.attach_node(START, None)
+        for key, node in lg_builder.nodes.items():
+            compiled.attach_node(key, node)
+
+        for start, end in lg_builder.edges:
+            compiled.attach_edge(start, end)
+
+        for starts, end in lg_builder.waiting_edges:
+            compiled.attach_edge(starts, end)
+
+        for start, branches in lg_builder.branches.items():
+            for name, branch in branches.items():
+                compiled.attach_branch(start, name, branch)
+                
+        logger.info(compiled.get_graph().draw_mermaid())
+        return compiled
+
+# def create_react_agent(
+#     client: Any,
+#     prompt: Any,
+#     tools: list[BaseTool],
+#     *args,
+#     memory: Optional[Any] = None,
+#     store: Optional[BaseStore] = None,
+#     debug: bool = False,
+#     **kwargs
+# ):
+#     lg_builder = StateGraph(MessagesState)
     
-    @classmethod
-    def create_graph(
-        cls,
+#     def should_continue(state: MessagesState):
+#         messages = state["messages"]
+#         last_message = messages[-1]
+#         if last_message.tool_calls:
+#             return "tools"
+#         return END
+    
+#     def call_model(state: MessagesState):
+#         messages = state["messages"]
+#         response = ( prompt | client ).invoke(messages)
+#         return {"messages": [response]}
+    
+#     lg_builder.add_node("agent", call_model)
+#     lg_builder.add_node('tools', ToolsNode(tools))
+#     lg_builder.add_edge(START, "agent")
+#     lg_builder.add_conditional_edges("agent", should_continue, ["tools", END])
+#     lg_builder.add_edge("tools", "agent")
+#     lg_builder.validate()
+#     compiled = prepare_output_schema(lg_builder, memory, store, debug)
+#     return compiled.validate()
+
+def create_graph(
         client: Any, 
         yaml_schema: str, 
         tools: list[BaseTool], 
@@ -147,64 +232,12 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         except ValueError as e:
             # todo: raise a better error for the user
             raise e
-
-        # prepare output channels
-        output_channels = (
-            "__root__"
-            if len(lg_builder.schemas[lg_builder.output]) == 1
-            and "__root__" in lg_builder.schemas[lg_builder.output]
-            else [
-                key
-                for key, val in lg_builder.schemas[lg_builder.output].items()
-                if not is_managed_value(val)
-            ]
-        )
-        stream_channels = (
-            "__root__"
-            if len(lg_builder.channels) == 1 and "__root__" in lg_builder.channels
-            else [
-                key for key, val in lg_builder.channels.items() if not is_managed_value(val)
-            ]
-        )
-        
-        compiled = cls(
-            builder=lg_builder,
-            config_type=lg_builder.config_schema,
-            nodes={},
-            channels={
-                **lg_builder.channels,
-                **lg_builder.managed,
-                START: EphemeralValue(lg_builder.input),
-            },
-            input_channels=START,
-            stream_mode="updates",
-            output_channels=output_channels,
-            stream_channels=stream_channels,
-            checkpointer=memory,
-            interrupt_before_nodes=interrupt_before,
-            interrupt_after_nodes=interrupt_after,
-            auto_validate=False,
-            debug=debug,
-            store=store,
-        )
-
-        compiled.attach_node(START, None)
-        for key, node in lg_builder.nodes.items():
-            compiled.attach_node(key, node)
-
-        for start, end in lg_builder.edges:
-            compiled.attach_edge(start, end)
-
-        for starts, end in lg_builder.waiting_edges:
-            compiled.attach_edge(starts, end)
-
-        for start, branches in lg_builder.branches.items():
-            for name, branch in branches.items():
-                compiled.attach_branch(start, name, branch)
-                
-        logger.info(compiled.get_graph().draw_mermaid())
+        compiled = prepare_output_schema(lg_builder, memory, store, debug)
         return compiled.validate()
-        
+
+
+class LangGraphAgentRunnable(CompiledStateGraph):
+    builder: CompiledStateGraph
     
     def invoke(self, input: Union[dict[str, Any], Any], 
                config: Optional[RunnableConfig] = None, 
@@ -213,13 +246,14 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if not config.get("configurable", {}).get("thread_id"):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")       
-        if self.checkpointer.get_tuple(config):
+        if self.checkpointer and self.checkpointer.get_tuple(config):
             self.update_state(config, {'messages': input['input']})
             output = super().invoke(None, config=config, *args, **kwargs)['messages'][-1].content
         else:
             input = {
                 "messages": input.get('chat_history', []) + [{"role": "user", "content": input.get('input')}]
             }
+            print(input)
             output = super().invoke(input, config=config, *args, **kwargs)['messages'][-1].content
         thread_id = None
         if self.get_state(config).next:

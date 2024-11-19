@@ -4,7 +4,7 @@ from langchain_core.tools import BaseTool
 from typing import Any
 from langchain_core.messages import HumanMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from ..agents.utils import _old_extract_json
+from ..langchain.utils import _old_extract_json
 from pydantic.error_wrappers import ValidationError
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ def process_response(response, return_type, accumulated_response):
             accumulated_response['messages'][-1]["content"] += '{response}\n\n'
         elif isinstance(response, dict):
             if response.get('messages'):
-                accumulated_response['messages'][-1]["content"] += "\n\n".join([message['content'] for message in response['messages']])
+                accumulated_response['messages'][-1]["content"] += "\n\n".join([message['content'] for message in response['messages']]) + "\n\n"
             else:
                 accumulated_response['messages'][-1]['content'] += f"{dumps(response)}\n\n"
         else:
@@ -76,6 +76,7 @@ Anwer must be LIST OF JSON only extractable by JSON.LOADS.
                     accumulated_response = process_response(f"""Tool input to the {self.tool.name} with value {loop_data} raised ValidationError.                                             
                                                             \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
                                                             {input[-1].content}""", self.return_type, accumulated_response)
+                logger.info(f"LoopNode response: {accumulated_response}")
         elif isinstance(loop_data, dict):
             try:
                 accumulated_response = process_response(self.tool.run(loop_data), self.return_type, accumulated_response)

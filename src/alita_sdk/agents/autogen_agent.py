@@ -8,9 +8,9 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain.agents.output_parsers.openai_tools import ToolAgentAction
 from langchain_core.runnables import RunnableSerializable
 from langchain_core.tools.render import ToolsRenderer
-from .mixedAgentRenderes import render_react_text_description_and_args
-from .mixedAgentRenderes import convert_message_to_json
-from .alita_agent import AlitaAssistantRunnable
+from ..langchain.mixedAgentRenderes import render_react_text_description_and_args
+from ..langchain.mixedAgentRenderes import convert_message_to_json
+from ..langchain.alita_agent import AlitaAssistantRunnable
         
 from autogen import ConversableAgent
 

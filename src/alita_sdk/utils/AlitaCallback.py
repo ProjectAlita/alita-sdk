@@ -74,11 +74,11 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
             log.info("on_tool_end(%s, %s)", args, kwargs)
         tool_run_id = str(run_id)
         tool_output = args[0]
-        
-        self.callback_state[tool_run_id].write(f"Tool output: {tool_output}")
-        self.callback_state[tool_run_id].update(label=f"Completed {kwargs.get('name')}", state="complete", expanded=False)
-        self.callback_state.pop(tool_run_id, None)
-        del self.callback_state[run_id]
+        if self.callback_state[tool_run_id]:
+            self.callback_state[tool_run_id].write(f"Tool output: {tool_output}")
+            self.callback_state[tool_run_id].update(label=f"Completed {kwargs.get('name')}", state="complete", expanded=False)
+            self.callback_state.pop(tool_run_id, None)
+            del self.callback_state[run_id]
 
     def on_tool_error(self, *args, run_id: UUID, **kwargs):
         """ Callback """

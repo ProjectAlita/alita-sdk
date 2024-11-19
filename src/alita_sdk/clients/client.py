@@ -18,7 +18,7 @@ from langchain_core.prompts import MessagesPlaceholder
 
 from .tools import get_tools
 from .constants import REACT_ADDON, REACT_VARS, ALITA_ADDON, ALITA_VARS, LLAMA_ADDON, LLAMA_VARS
-from .assistant import Assistant
+from ..langchain.assistant import Assistant as LangChainAssistant
 from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
@@ -149,7 +149,7 @@ class AlitaClient:
 
     def application(self, client: Any, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
-                    app_type=None, memory=None):
+                    app_type=None, memory=None, runtime='langchain'):
         if tools is None:
             tools = []
         client_fork = copy(client)
@@ -162,14 +162,20 @@ class AlitaClient:
         client_fork.integration_uid = data['llm_settings']['integration_uid']
         if not app_type:
             app_type = data.get("agent_type", "raw")
+        # TODO: Remove it from here, once we create a pipeline interface
         if app_type == "pipeline":
             return self.workflow(client_fork, data, chat_history=chat_history, memory=memory)
+        if app_type == "alita":
+            app_type = "react"
+        elif app_type == "dial":
+            app_type = "openai"
         if app_type == "react":
             data['instructions'] += REACT_ADDON
-        elif app_type == "alita":
-            data['instructions'] += ALITA_ADDON
         elif app_type == 'llama':
+            runtime = 'llama-index'
             data['instructions'] += LLAMA_ADDON
+        elif app_type == 'autogen':
+            runtime = 'autogen'
         messages = [SystemMessage(content=data['instructions'])]
         if app_type in ['openai', 'dial']:
             messages.append(MessagesPlaceholder("chat_history"))
@@ -184,8 +190,6 @@ class AlitaClient:
                 input_variables.append(variable['name'])
         if app_type == "react":
             input_variables = list(set(input_variables + REACT_VARS))
-        elif app_type == "alita":
-            input_variables = list(set(input_variables + ALITA_VARS))
         elif app_type == "llama":
             input_variables = list(set(input_variables + LLAMA_VARS))
         if chat_history and isinstance(chat_history, list):
@@ -196,7 +200,7 @@ class AlitaClient:
         if variables:
             template.partial_variables = variables
         tools = get_tools(data['tools'], self) + tools
-        if app_type == "dial" or app_type == "openai":
+        if runtime == 'langchain':
             if "indexer_config" in data["llm_settings"]:
                 model_type = data["llm_settings"]["indexer_config"]["ai_model"]
                 model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
@@ -221,11 +225,12 @@ class AlitaClient:
                     # timeout=600,
                 )
             #
-            if app_type == 'dial':
-                return Assistant(llm_client, template, tools).getOpenAIFunctionsAgentExecutor()
+            if app_type == 'openai':
+                return LangChainAssistant(llm_client, template, tools).getOpenAIToolsAgentExecutor()
             else:
-                return Assistant(llm_client, template, tools).getOpenAIToolsAgentExecutor()
-        elif app_type == 'autogen':
+                tools = [EchoTool()] + tools
+                return LangChainAssistant(client_fork, template, tools).getAgentExecutor()
+        elif runtime == 'autogen':
             integration_details = data['llm_settings']['integration_details']
             client_config = {
                 "model": data['llm_settings']['model_name'],
@@ -234,15 +239,10 @@ class AlitaClient:
                 'api_type': 'azure',
                 'api_version': integration_details['settings']['api_version'],
             }
-            return Assistant(client_config, template, tools).getAutoGenExecutor()
-        elif app_type == "alita":
-            tools = [EchoTool()] + tools
-            return Assistant(client_fork, template, tools).getAlitaExecutor()
-        elif app_type == "llama":
-            return Assistant(client_fork, template, tools).getLLamaAgentExecutor()
-        else:
-            tools = [EchoTool()] + tools
-            return Assistant(client_fork, template, tools).getAgentExecutor()
+            return LangChainAssistant(client_config, template, tools).getAutoGenExecutor()
+        elif runtime == "llama-index":
+            return LangChainAssistant(client_fork, template, tools).getLLamaAgentExecutor()
+        
 
     def datasource(self, datasource_id: int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"
@@ -260,14 +260,14 @@ class AlitaClient:
             chat_history = []
         yaml_schema = app_data['instructions']
         tools = get_tools(app_data['tools'], self, True)
-        return Assistant(client, yaml_schema, tools, chat_history, memory=memory).getLGExecutor()
+        return LangChainAssistant(client, yaml_schema, tools, chat_history, memory=memory).getLGExecutor()
 
 
     def assistant(self, prompt_id: int, prompt_version_id: int,
                   tools: list, openai_tools: Optional[Dict] = None,
                   client: Optional[Any] = None, chat_history: Optional[list] = None):
         prompt = self.prompt(prompt_id=prompt_id, prompt_version_id=prompt_version_id, chat_history=chat_history)
-        return Assistant(client, prompt, tools, openai_tools)
+        return LangChainAssistant(client, prompt, tools, openai_tools)
 
     def artifact(self, bucket_name):
         return Artifact(self, bucket_name)

@@ -5,12 +5,12 @@ from langchain.agents import (
     AgentExecutor, create_react_agent, 
     create_openai_tools_agent, 
     create_openai_functions_agent)
-from ..agents.mixedAgentParser import MixedAgentOutputParser
+from ..langchain.mixedAgentRenderes import render_react_text_description_and_args
+from ..langchain.mixedAgentParser import MixedAgentOutputParser
 from ..agents.llama_agent import LLamaAssistantRunnable
 from ..agents.autogen_agent import AutoGenAssistantRunnable
-from ..agents.mixedAgentRenderes import render_react_text_description_and_args
-from ..agents.alita_agent import AlitaAssistantRunnable
-from ..agents.langraph_agent import LangGraphAgentRunnable
+from .alita_agent import AlitaAssistantRunnable
+from .langraph_agent import create_graph
 from langchain_core.messages import (
     BaseMessage,
 )
@@ -44,7 +44,8 @@ class Assistant:
                                    output_parser=MixedAgentOutputParser(), 
                                    tools_renderer=render_react_text_description_and_args)
         return self._agent_executor(agent)
-        
+    
+    
     def getOpenAIToolsAgentExecutor(self):
         agent = create_openai_tools_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
         return self._agent_executor(agent)
@@ -55,6 +56,7 @@ class Assistant:
         return self._agent_executor(agent)
 
     def getOpenAIFunctionsAgentExecutor(self):
+        logger.warning("OpenAI Functions Agent is deprecated. Please use OpenAI Tools Agent instead.")
         agent = create_openai_functions_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
         return self._agent_executor(agent)
     
@@ -92,7 +94,7 @@ class Assistant:
                 memory = SqliteSaver(sqlite3.connect('/data/cache/memory.db', check_same_thread=False))
             except sqlite3.OperationalError:
                 memory = SqliteSaver(sqlite3.connect('memory.db', check_same_thread=False))
-        agent = LangGraphAgentRunnable.create_graph(
+        agent = create_graph(
             client=self.client, tools=self.tools,
             yaml_schema=self.prompt, memory=memory
         )

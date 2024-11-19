@@ -89,7 +89,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             deployment_value = environ.get('DEPLOYMENT_URL', None)
             deployment_secret = environ.get('XSECRET', 'secret')
             api_key_value = environ.get('API_KEY', None)
-            project_id_value = int(environ.get('PROJECT_ID', None))
+            project_id_value = int(environ.get('PROJECT_ID', 0))
             if st.session_state.llm:
                 deployment_value = st.session_state.llm.deployment
                 api_key_value = st.session_state.llm.api_token
@@ -98,7 +98,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             with st.form("settings_form", clear_on_submit=False):
                 deployment = st.text_input("Deployment URL", placeholder="Enter Deployment URL", value=deployment_value)
                 api_key = st.text_input("API Key", placeholder="Enter API Key", value=api_key_value, type="password")
-                project_id = st.number_input("Project ID", format="%d", min_value=1, value=project_id_value, placeholder="Enter Project ID")
+                project_id = st.number_input("Project ID", format="%d", min_value=0, value=project_id_value, placeholder="Enter Project ID")
                 deployment_secret = st.text_input("Deployment Secret", placeholder="Enter Deployment Secret", value=deployment_secret)
                 submitted = st.form_submit_button("Login")
                 if submitted:
@@ -185,7 +185,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             with st.chat_message("assistant", avatar=ai_icon):
                 st_cb = AlitaStreamlitCallback(st)
                 response = st.session_state.agent_executor.invoke(
-                    {"input": prompt, "chat_history": st.session_state.messages}, 
+                    {"input": prompt, "chat_history": st.session_state.messages[:-1]}, 
                     { 'callbacks': [st_cb], 'configurable': {"thread_id": st.session_state.thread_id}}
                 )
                 st.write(response["output"])

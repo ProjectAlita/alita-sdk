@@ -3,7 +3,7 @@ from json import dumps, loads
 from langchain_core.tools import BaseTool
 from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
-from ..agents.utils import _extract_json
+from ..langchain.utils import _extract_json
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic.error_wrappers import ValidationError
 from traceback import format_exc
