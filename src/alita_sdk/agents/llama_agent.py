@@ -17,7 +17,6 @@ from uuid import uuid4
 from langchain_core.outputs import LLMResult, ChatGenerationChunk
 from langchain_core.outputs.run_info import RunInfo
 from langchain_core.outputs.generation import Generation
-from ..clients.constants import LLAMA_ADDON
 
 class LLamaAssistantRunnable(RunnableSerializable):
     client: Optional[Any]

@@ -2,10 +2,10 @@ import logging
 
 from alita_tools import get_tools as alita_tools
 
-from ..toolkits.prompt import PromptToolkit
-from ..toolkits.datasource import DatasourcesToolkit
-from ..toolkits.application import ApplicationToolkit
-from ..toolkits.artifact import ArtifactToolkit
+from .prompt import PromptToolkit
+from .datasource import DatasourcesToolkit
+from .application import ApplicationToolkit
+from .artifact import ArtifactToolkit
 
 logger = logging.getLogger(__name__)
 

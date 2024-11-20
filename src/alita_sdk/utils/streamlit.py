@@ -33,7 +33,7 @@ def decode_img(msg):
 
 from src.alita_sdk.llms.alita import AlitaChatModel
 from src.alita_sdk.utils.AlitaCallback import AlitaStreamlitCallback
-from src.alita_sdk.clients.tools import get_toolkits
+from src.alita_sdk.toolkits.tools import get_toolkits
 
 
 def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
@@ -82,7 +82,6 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
         clear_chat = st.button("Clear Chat")
         if clear_chat:
             clear_chat_history()
-
         llmconfig, agentconfig = st.tabs(["Alita Settings", "Local Runtime"])
         with llmconfig:
             st.title("Elitea Login Form")
@@ -152,7 +151,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                     clear_chat_history()
                                 else:
                                     st.session_state.agent_executor = None
-                                    st.session_state.agent_name = "Load agent using config"
+                                    st.session_state.agent_name = None
                                     clear_chat_history()
                                     st.error("Agent version not found")
                             
@@ -171,14 +170,15 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                 submitted = st.form_submit_button("Submit")
                 if submitted:
                     pass
+        
     if st.session_state.llm and st.session_state.agent_executor:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"], avatar=ai_icon if message["role"] == "assistant" else user_icon):
-                st.markdown(message["content"])
         try:
             st.title(st.session_state.agent_name)
         except:
-            st.title("Login to ELITEA and load your agent")
+            st.title("Login to Elitea to load an agent")
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"], avatar=ai_icon if message["role"] == "assistant" else user_icon):
+                st.markdown(message["content"])
         if prompt := st.chat_input():
             st.chat_message("user", avatar=user_icon).write(prompt)
             st.session_state.messages.append({"role": "user", "content": prompt})

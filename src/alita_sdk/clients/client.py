@@ -1,29 +1,20 @@
 import logging
-import importlib
-from copy import deepcopy as copy
-
 import requests
 
-from os import environ
 from typing import Dict, List, Any, Optional
 
 from langchain_core.messages import (
-    AIMessage,
-    HumanMessage,
-    SystemMessage,
-    BaseMessage,
+    AIMessage, HumanMessage,
+    SystemMessage, BaseMessage,
 )
 
-from langchain_core.prompts import MessagesPlaceholder
-
-from .tools import get_tools
-from .constants import REACT_ADDON, REACT_VARS, ALITA_ADDON, ALITA_VARS, LLAMA_ADDON, LLAMA_VARS
 from ..langchain.assistant import Assistant as LangChainAssistant
+# from ..llamaindex.assistant import Assistant as LLamaAssistant
 from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
-from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
-from ..tools.echo import EchoTool
+from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
+
 
 logger = logging.getLogger(__name__)
 
@@ -152,96 +143,43 @@ class AlitaClient:
                     app_type=None, memory=None, runtime='langchain'):
         if tools is None:
             tools = []
-        client_fork = copy(client)
+        if chat_history is None:
+            chat_history = []
+        
         data = self.get_app_version_details(application_id, application_version_id)
-        client_fork.max_tokens = data['llm_settings']['max_tokens']
-        client_fork.temperature = data['llm_settings']['temperature']
-        client_fork.top_p = data['llm_settings']['top_p']
-        client_fork.top_k = data['llm_settings']['top_k']
-        client_fork.model_name = data['llm_settings']['model_name']
-        client_fork.integration_uid = data['llm_settings']['integration_uid']
         if not app_type:
             app_type = data.get("agent_type", "raw")
-        # TODO: Remove it from here, once we create a pipeline interface
-        if app_type == "pipeline":
-            return self.workflow(client_fork, data, chat_history=chat_history, memory=memory)
         if app_type == "alita":
+            app_type = "react"
+        elif app_type == "llama":
             app_type = "react"
         elif app_type == "dial":
             app_type = "openai"
-        if app_type == "react":
-            data['instructions'] += REACT_ADDON
-        elif app_type == 'llama':
-            runtime = 'llama-index'
-            data['instructions'] += LLAMA_ADDON
         elif app_type == 'autogen':
-            runtime = 'autogen'
-        messages = [SystemMessage(content=data['instructions'])]
-        if app_type in ['openai', 'dial']:
-            messages.append(MessagesPlaceholder("chat_history"))
-            messages.append(HumanMessage("{{input}}"))
-            messages.append(MessagesPlaceholder("agent_scratchpad"))
-        variables = {}
-        input_variables = []
-        for variable in data['variables']:
-            if variable['value'] != "":
-                variables[variable['name']] = variable['value']
-            else:
-                input_variables.append(variable['name'])
-        if app_type == "react":
-            input_variables = list(set(input_variables + REACT_VARS))
-        elif app_type == "llama":
-            input_variables = list(set(input_variables + LLAMA_VARS))
-        if chat_history and isinstance(chat_history, list):
-            messages.extend(chat_history)
-        template = Jinja2TemplatedChatMessagesTemplate(messages=messages)
-        if input_variables and not variables:
-            template.input_variables = input_variables
-        if variables:
-            template.partial_variables = variables
-        tools = get_tools(data['tools'], self) + tools
+            app_type = "openai"
         if runtime == 'langchain':
-            if "indexer_config" in data["llm_settings"]:
-                model_type = data["llm_settings"]["indexer_config"]["ai_model"]
-                model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
-                #
-                target_pkg, target_name = model_type.rsplit(".", 1)
-                target_cls = getattr(
-                    importlib.import_module(target_pkg),
-                    target_name
-                )
-                llm_client = target_cls(**model_params)
-            else:
-                integration_details = data['llm_settings']['integration_details']
-                #
-                from langchain_openai import AzureChatOpenAI
-                llm_client = AzureChatOpenAI(
-                    azure_endpoint=integration_details['settings']['api_base'],
-                    deployment_name=data['llm_settings']['model_name'],
-                    openai_api_version=integration_details['settings']['api_version'],
-                    openai_api_key=integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
-                    temperature=data['llm_settings']['temperature'],
-                    max_tokens=data['llm_settings']['max_tokens'],
-                    # timeout=600,
-                )
-            #
-            if app_type == 'openai':
-                return LangChainAssistant(llm_client, template, tools).getOpenAIToolsAgentExecutor()
-            else:
-                tools = [EchoTool()] + tools
-                return LangChainAssistant(client_fork, template, tools).getAgentExecutor()
-        elif runtime == 'autogen':
-            integration_details = data['llm_settings']['integration_details']
-            client_config = {
-                "model": data['llm_settings']['model_name'],
-                "api_key": integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
-                "base_url": integration_details['settings']['api_base'],
-                'api_type': 'azure',
-                'api_version': integration_details['settings']['api_version'],
-            }
-            return LangChainAssistant(client_config, template, tools).getAutoGenExecutor()
-        elif runtime == "llama-index":
-            return LangChainAssistant(client_fork, template, tools).getLLamaAgentExecutor()
+            return LangChainAssistant(self, data, client, 
+                                      chat_history, app_type, 
+                                      tools=tools, memory=memory).runnable()
+        elif runtime == 'llama':
+            raise NotImplementedError("LLama runtime is not supported")
+            # return LLamaAssistant(data, client_fork,
+            #                       chat_history, app_type,
+            #                       tools=tools, memory=memory).reActAgent()
+        
+        
+        # elif runtime == 'autogen':
+        #     integration_details = data['llm_settings']['integration_details']
+        #     client_config = {
+        #         "model": data['llm_settings']['model_name'],
+        #         "api_key": integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
+        #         "base_url": integration_details['settings']['api_base'],
+        #         'api_type': 'azure',
+        #         'api_version': integration_details['settings']['api_version'],
+        #     }
+        #     return LangChainAssistant(client_config, template, tools).getAutoGenExecutor()
+        # elif runtime == "llama-index":
+        #     return LangChainAssistant(client_fork, template, tools).getLLamaAgentExecutor()
         
 
     def datasource(self, datasource_id: int) -> AlitaDataSource:
@@ -254,14 +192,6 @@ class AlitaClient:
         chat_model = data['version_details']['datasource_settings']['chat']['chat_settings_ai']
         return AlitaDataSource(self, datasource_id, data["name"], data["description"],
                                datasource_model, chat_model)
-
-    def workflow(self, client, app_data, chat_history=None, memory={"type": 'sqlite'}):
-        if chat_history is None:
-            chat_history = []
-        yaml_schema = app_data['instructions']
-        tools = get_tools(app_data['tools'], self, True)
-        return LangChainAssistant(client, yaml_schema, tools, chat_history, memory=memory).getLGExecutor()
-
 
     def assistant(self, prompt_id: int, prompt_version_id: int,
                   tools: list, openai_tools: Optional[Dict] = None,

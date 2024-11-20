@@ -131,39 +131,6 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         logger.info(compiled.get_graph().draw_mermaid())
         return compiled
 
-# def create_react_agent(
-#     client: Any,
-#     prompt: Any,
-#     tools: list[BaseTool],
-#     *args,
-#     memory: Optional[Any] = None,
-#     store: Optional[BaseStore] = None,
-#     debug: bool = False,
-#     **kwargs
-# ):
-#     lg_builder = StateGraph(MessagesState)
-    
-#     def should_continue(state: MessagesState):
-#         messages = state["messages"]
-#         last_message = messages[-1]
-#         if last_message.tool_calls:
-#             return "tools"
-#         return END
-    
-#     def call_model(state: MessagesState):
-#         messages = state["messages"]
-#         response = ( prompt | client ).invoke(messages)
-#         return {"messages": [response]}
-    
-#     lg_builder.add_node("agent", call_model)
-#     lg_builder.add_node('tools', ToolsNode(tools))
-#     lg_builder.add_edge(START, "agent")
-#     lg_builder.add_conditional_edges("agent", should_continue, ["tools", END])
-#     lg_builder.add_edge("tools", "agent")
-#     lg_builder.validate()
-#     compiled = prepare_output_schema(lg_builder, memory, store, debug)
-#     return compiled.validate()
-
 def create_graph(
         client: Any, 
         yaml_schema: str, 
@@ -200,8 +167,8 @@ def create_graph(
                                                              name=node['id'], return_type='dict'))
                             break
                 elif node_type == 'llm':
-                    lg_builder.add_node(node_id, 
-                                        LLMNode(client=client, prompt=node.get('prompt', ""), name=node['id'], return_type='dict'))
+                    lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', ""), 
+                                                         name=node['id'], return_type='dict'))
                 if node.get('transition'):
                     next_step=clean_string(node['transition'])
                     logger.info(f'Adding transition: {next_step}')

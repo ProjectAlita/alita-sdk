@@ -17,7 +17,6 @@ from uuid import uuid4
 from langchain_core.outputs import LLMResult, ChatGenerationChunk
 from langchain_core.outputs.run_info import RunInfo
 from langchain_core.outputs.generation import Generation
-from ..clients.constants import ALITA_OUTPUT_FORMAT
 
 class AlitaAssistantRunnable(RunnableSerializable):
     client: Optional[Any]
@@ -56,8 +55,6 @@ class AlitaAssistantRunnable(RunnableSerializable):
         
         try:
             user_messages = [] 
-            if self.agent_type == "alita":
-                messages.append(SystemMessage(content=ALITA_OUTPUT_FORMAT))
             if input.get('input', input.get('content')):
                 user_messages.append(HumanMessage(content=input.get('input', input.get('content'))))
             msgs = self.chat_history + \
