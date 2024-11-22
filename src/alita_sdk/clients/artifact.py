@@ -31,7 +31,8 @@ class Artifact:
         data = self.get(artifact_name)
         if data == "Could not detect encoding":
             return data
-        self.client.update_artifact(self.bucket_name, artifact_name, data + additional_data)
+        data += f"\n{additional_data}"
+        self.client.create_artifact(self.bucket_name, artifact_name, data)
         return "Data appended successfully"
     
     def overwrite(self, artifact_name: str, new_data: Any):
