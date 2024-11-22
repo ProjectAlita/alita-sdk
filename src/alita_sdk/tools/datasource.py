@@ -1,6 +1,6 @@
 from typing import Any, Type, Dict
 from langchain_core.tools import BaseTool
-from pydantic import create_model, validator, BaseModel
+from pydantic import create_model, field_validator, BaseModel, ValidationInfo
 from pydantic.fields import FieldInfo
 from ..utils.utils import clean_string
 
@@ -28,14 +28,16 @@ class DatasourcePredict(BaseTool):
     args_schema: Type[BaseModel] = datasourceToolSchema
     return_type: str = "str"
     
-    @validator('query', pre=True, allow_reuse=True)
-    def remove_spaces(cls, v):
+    @field_validator('query', mode='before', check_fields=False)
+    @classmethod
+    def remove_spaces_query(cls, v: str, info: ValidationInfo) -> str:
         if isinstance(v, Dict):
             return " ".join(list(v.values()))
         return v
     
-    @validator('name', pre=True, allow_reuse=True)
-    def remove_spaces(cls, v):
+    @field_validator('name', mode='before')
+    @classmethod
+    def remove_spaces_name(cls, v: str, info: ValidationInfo) -> str:
         return v.replace(' ', '')
     
     def _run(self, *args, **kwargs):
@@ -51,14 +53,16 @@ class DatasourceSearch(BaseTool):
     args_schema: Type[BaseModel] = datasourceToolSchema
     return_type: str = "str"
     
-    @validator('query', pre=True, allow_reuse=True)
-    def remove_spaces(cls, v):
+    @field_validator('query', mode='before', check_fields=False)
+    @classmethod
+    def remove_spaces_query(cls, v):
         if isinstance(v, Dict):
             return " ".join(list(v.values()))
         return v
     
-    @validator('name', pre=True, allow_reuse=True)
-    def remove_spaces(cls, v):
+    @field_validator('name', mode='before')
+    @classmethod
+    def remove_spaces_name(cls, v):
         return clean_string(v)
     
     def _run(self, *args, **kwargs):

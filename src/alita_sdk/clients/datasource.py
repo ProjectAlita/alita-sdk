@@ -3,7 +3,6 @@ from typing import Any, Optional
 from langchain_core.messages import (
     HumanMessage,
 )
-from pydantic import create_model
 
 class AlitaDataSource:
     def __init__(self, alita: Any, datasource_id: int, name: str, description: str,

@@ -4,7 +4,7 @@ import base64
 import io
 from PIL import Image
 import logging
- 
+from traceback import format_exc
 logging.basicConfig(level=logging.INFO)
 from os import environ
 from dotenv import load_dotenv
@@ -105,7 +105,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                         try:
                             st.session_state.llm = AlitaChatModel(**{
                                     "deployment": deployment,
-                                    "api_key": api_key,
+                                    "api_token": api_key,
                                     "project_id": project_id,
                                 })
                             client = st.session_state.llm.client
@@ -122,6 +122,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                             st.session_state.models = models_list
                             clear_chat_history()
                         except Exception as e:
+                            logger.error(f"Error loggin to ELITEA: {format_exc()}")
                             st.session_state.agents = None
                             st.session_state.models = None
                             st.session_state.llm = None

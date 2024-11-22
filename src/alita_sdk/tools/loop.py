@@ -5,7 +5,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from ..langchain.utils import _old_extract_json
-from pydantic.error_wrappers import ValidationError
+from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 def process_response(response, return_type, accumulated_response):

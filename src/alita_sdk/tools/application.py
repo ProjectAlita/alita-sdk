@@ -3,7 +3,7 @@ from json import dumps
 from langchain_core.tools import BaseTool
 from langchain_core.messages import BaseMessage, AIMessage
 from typing import Any, Type, Dict
-from pydantic import create_model, validator, BaseModel
+from pydantic import create_model, field_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
 
@@ -48,7 +48,8 @@ class Application(BaseTool):
     args_schema: Type[BaseModel] = applicationToolSchema
     return_type: str = "str"
     
-    @validator('name', pre=True, allow_reuse=True)
+    @field_validator('name', mode='before')
+    @classmethod
     def remove_spaces(cls, v):
         return clean_string(v)
         

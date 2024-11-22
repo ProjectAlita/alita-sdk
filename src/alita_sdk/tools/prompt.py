@@ -1,5 +1,5 @@
 from langchain_core.tools import BaseTool
-from pydantic import validator
+from pydantic import field_validator
 from typing import Any
 from ..utils.utils import clean_string
 
@@ -16,7 +16,8 @@ class Prompt(BaseTool):
     prompt: Any
     return_type: str = "str"
     
-    @validator('name', pre=True, allow_reuse=True)
+    @field_validator('name', mode='before')
+    @classmethod
     def remove_spaces(cls, v):
         return clean_string(v)
     

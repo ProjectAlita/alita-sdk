@@ -33,9 +33,9 @@ from langchain_core.messages import (AIMessageChunk, BaseMessage, HumanMessage, 
                                      FunctionMessageChunk, SystemMessageChunk, ToolMessageChunk, BaseMessageChunk)
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import run_in_executor
-from langchain_core.pydantic_v1 import Field, root_validator
 from langchain_community.chat_models.openai import generate_from_stream, _convert_delta_to_message_chunk
 from ..clients import AlitaClient
+from pydantic import Field, model_validator, field_validator, ValidationInfo
 
 logger = logging.getLogger(__name__)
 
@@ -54,24 +54,25 @@ class AlitaChatModel(BaseChatModel):
 
     client: Any  #: :meta private:
     encoding: Any  #: :meta private:
-    model_name: str = Field(default="gpt-35-turbo", alias="model")
     deployment: str = Field(default="https://eye.projectalita.ai", alias="base_url")
     api_token: str = Field(default=None, alias="api_key")
     project_id: int = None
-    integration_uid: str = None
+    model_name: Optional[str] = Field(default="gpt-35-turbo", alias="model")
+    integration_uid: Optional[str] = None
     max_tokens: Optional[int] = 512
     tiktoken_model_name: Optional[str] = None
     tiktoken_encoding_name: Optional[str] = 'cl100k_base'
-    max_retries: int = 2
-    temperature: float = 0.7
+    max_retries: Optional[int] = 2
+    temperature: Optional[float] = 0.7
     top_p: Optional[float] = 0.9
     top_k: Optional[int] = 20
     stream_response: Optional[bool] = Field(default=False, alias="stream")
     api_extra_headers: Optional[dict] = Field(default_factory=dict)
     configurations: Optional[list] = Field(default_factory=list)
     
-    @root_validator()
-    def validate_environment(cls, values: Dict) -> Dict:
+    @model_validator(mode="before")
+    @classmethod
+    def validate_env(cls, values: dict) -> Dict:
         values['client'] = AlitaClient(
             values['deployment'], 
             values['project_id'], 
@@ -79,10 +80,10 @@ class AlitaChatModel(BaseChatModel):
             api_extra_headers=values.get('api_extra_headers'),
             configurations=values.get('configurations', [])
         )
-        if values["tiktoken_model_name"]:
+        if values.get("tiktoken_model_name"):
             values["encoding"] = encoding_for_model(values["tiktoken_model_name"])
         else:
-            values["encoding"] = get_encoding(values["tiktoken_encoding_name"])
+            values['encoding'] = get_encoding('cl100k_base')
         return values
     
     def _generate(
