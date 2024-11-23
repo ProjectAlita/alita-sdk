@@ -192,6 +192,13 @@ class AlitaChatModel(BaseChatModel):
                 raise MaxRetriesExceededError(format_exc())
             return self.completion_with_retry(messages, retry_count+1)
     
+    
+    # def _call(self, prompt:str, **kwargs: Any):
+    #     """
+    #     This is the main method that will be called when we run our LLM.
+    #     """
+    #     return self.client.predict([HumanMessage(content=prompt)], self._get_model_default_parameters)
+    
     @property
     def _llm_type(self) -> str:
         """
