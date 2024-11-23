@@ -74,10 +74,10 @@ class AlitaChatModel(BaseChatModel):
     @classmethod
     def validate_env(cls, values: dict) -> Dict:
         values['client'] = AlitaClient(
-            values['deployment'], 
+            values.get('deployment', values.get('base_url', "https://eye.projectalita.ai")), 
             values['project_id'], 
-            values['api_token'], 
-            api_extra_headers=values.get('api_extra_headers'),
+            values.get('api_token', values.get('api_key')),
+            api_extra_headers=values.get('api_extra_headers', {}),
             configurations=values.get('configurations', [])
         )
         if values.get("tiktoken_model_name"):

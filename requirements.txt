@@ -14,18 +14,18 @@ fastapi==0.115.5
 httpcore==1.0.7
 
 #Langchain-runtime
-langchain~=0.3.0
-langchain_community~=0.3.0
+langchain_core~=0.3.19
+langchain~=0.3.7
+langchain_community~=0.3.7
 langchain-openai~=0.2.9
 langgraph-checkpoint-sqlite~=2.0.0
 langgraph-checkpoint-postgres~=2.0.1
-langchain_core~=0.3.0
 langsmith==0.1.144
-langgraph~=0.2.38
-
-## Indexer
+langgraph~=0.2.53
 langchain_chroma~=0.1.0
 langchain-unstructured~=0.1.2
+
+## Indexer
 keybert==0.8.3
 charset_normalizer==3.3.2
 unstructured[local-inference]==0.15.9
