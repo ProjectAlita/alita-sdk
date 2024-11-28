@@ -23,6 +23,7 @@ from langgraph.prebuilt import ToolNode as ToolsNode
 logger = logging.getLogger(__name__)
 
 class ConditionalEdge(Runnable):
+    name = "ConditionalEdge"
     def __init__(self, condition: str):
         self.condition = condition
     
@@ -41,6 +42,7 @@ class ConditionalEdge(Runnable):
         return result 
 
 class DecisionEdge(Runnable):
+    name = "DecisionEdge"
     prompt: str = """Based on chat history make a decision what step need to be next.
 Steps available: {steps}
 Explanation: {description}
@@ -64,6 +66,7 @@ Answer only with step name, no need to add descrip in case none of the steps are
         return result
 
 class TransitionalEdge(Runnable):
+    name = "TransitionalEdge"
     def __init__(self, next_step: str):
         self.next_step = next_step
     
@@ -187,7 +190,7 @@ def create_graph(
             # assign default values
             interrupt_before = interrupt_before or []
             interrupt_after = interrupt_after or []
-
+            
             # validate the graph
             lg_builder.validate(
                 interrupt=(
@@ -199,7 +202,9 @@ def create_graph(
         except ValueError as e:
             # todo: raise a better error for the user
             raise e
-        compiled = prepare_output_schema(lg_builder, memory, store, debug)
+        compiled = prepare_output_schema(lg_builder, memory, store, debug, 
+                                         interrupt_before=interrupt_before, 
+                                         interrupt_after=interrupt_after)
         return compiled.validate()
 
 
