@@ -242,7 +242,7 @@ class AlitaClient:
         return self._process_requst(data)
 
     def create_artifact(self, bucket_name, artifact_name, artifact_data):
-        url = f'{self.artifacts_url}/{bucket_name}'
+        url = f'{self.artifacts_url}/{bucket_name.lower()}'
         data = requests.post(url, headers=self.headers, files={
             'file': (artifact_name, artifact_data)
         }, verify=False)

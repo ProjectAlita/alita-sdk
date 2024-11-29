@@ -30,7 +30,8 @@ from langchain_core.callbacks import (
 )
 from langchain_core.language_models import BaseChatModel, SimpleChatModel
 from langchain_core.messages import (AIMessageChunk, BaseMessage, HumanMessage, HumanMessageChunk, ChatMessageChunk, 
-                                     FunctionMessageChunk, SystemMessageChunk, ToolMessageChunk, BaseMessageChunk)
+                                     FunctionMessageChunk, SystemMessageChunk, ToolMessageChunk, BaseMessageChunk,
+                                     AIMessage)
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import run_in_executor
 from langchain_community.chat_models.openai import generate_from_stream, _convert_delta_to_message_chunk
@@ -179,14 +180,15 @@ class AlitaChatModel(BaseChatModel):
         try:
             return self.client.predict(messages, self._get_model_default_parameters)
         except requests.exceptions.HTTPError as e:
-            logger.error(f"ERROR: Error in completion_with_retry: {e}, retry_count: {retry_count}")
+            from json import loads
+            logger.error(f"ERROR: HTTPError in completion_with_retry: {e}, retry_count: {retry_count}")
             sleep(60)
             if retry_count >= self.max_retries:
                 logger.error(f"ERROR: Retry count exceeded: {format_exc()}")
                 raise MaxRetriesExceededError(format_exc())
             return self.completion_with_retry(messages, retry_count+1)
         except Exception as e:
-            logger.error(f"ERROR: Error in completion_with_retry: {e}, retry_count: {retry_count}")
+            logger.error(f"ERROR: Exception in completion_with_retry: {e}, retry_count: {retry_count}")
             if retry_count >= self.max_retries:
                 logger.error(f"ERROR: Retry count exceeded: {format_exc()}")
                 raise MaxRetriesExceededError(format_exc())

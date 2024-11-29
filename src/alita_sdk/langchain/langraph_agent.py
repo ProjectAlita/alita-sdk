@@ -162,8 +162,10 @@ def create_graph(
                                 lg_builder.add_node(node_id, tool)
                             elif node_type == 'tool':
                                 lg_builder.add_node(node_id, 
-                                                    ToolNode(client=client, tool=tool, 
-                                                             name=node['id'], return_type='dict'))
+                                                    ToolNode(
+                                                        client=client, tool=tool, 
+                                                        name=node['id'], return_type='dict'
+                                                    ))
                             elif node_type == 'loop':
                                 lg_builder.add_node(node_id, 
                                                     LoopNode(client=client, tool=tool, task=node.get('task', ""),

@@ -2,6 +2,8 @@
 from typing import Any
 from json import dumps
 import chardet
+import logging
+logger = logging.getLogger(__name__)
 
 class Artifact:
     def __init__(self, client: Any, bucket_name: str):
@@ -11,7 +13,11 @@ class Artifact:
             self.client.create_bucket(bucket_name)
     
     def create(self, artifact_name: str, artifact_data: Any):
-        return dumps(self.client.create_artifact(self.bucket_name, artifact_name, artifact_data))
+        try:
+            return dumps(self.client.create_artifact(self.bucket_name, artifact_name, artifact_data))
+        except Exception as e:
+            logger.error(f"Error: {e}")
+            return f"Error: {e}"
     
     def get(self, artifact_name: str):
         data = self.client.download_artifact(self.bucket_name, artifact_name)

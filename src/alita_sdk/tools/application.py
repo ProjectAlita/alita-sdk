@@ -6,6 +6,8 @@ from typing import Any, Type, Dict
 from pydantic import create_model, field_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
+from logging import getLogger
+logger = getLogger(__name__)
 
 applicationToolSchema = create_model(
     "applicatrionSchema", 
@@ -19,7 +21,6 @@ applicationWFSchema = create_model(
 )
 
 def formulate_query(args, kwargs):
-    print(kwargs)
     if kwargs.get('messages'):
         if isinstance(kwargs.get('messages')[-1], BaseMessage):
             task = kwargs.get('messages')[-1].content
@@ -33,12 +34,16 @@ def formulate_query(args, kwargs):
             for each in kwargs.get('messages')[:-1]:
                 chat_history.append(AIMessage(each))
         return {"input": task, "chat_history": chat_history}
-    else:
+    elif kwargs.get('task'):
         task = kwargs.get('task')
         chat_history = kwargs.get('chat_history', '')        
         if chat_history:
             task = "Task: " + task + "\nAdditional context: " + chat_history
         return {"input": task, "chat_history": []}
+    else:
+        chat_history = kwargs.get('chat_history', '')    
+        return {"input": args[0], "chat_history": chat_history}
+    
     
 
 class Application(BaseTool):
