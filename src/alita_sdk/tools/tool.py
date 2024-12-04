@@ -9,19 +9,22 @@ from pydantic.error_wrappers import ValidationError
 from traceback import format_exc
 logger = logging.getLogger(__name__)
 
-def process_response(response, return_type):
+def process_response(response, messages, return_type):
     if return_type == "str":
         return response
     else:
         if isinstance(response, str):
-            return { "messages": [ {"role": "assistant", "content": response} ] }
+            messages.append({"role": "assistant", "content": response})
+            return { "messages": messages }
         elif isinstance(response, dict):
             if response.get('messages'):
                 return response
             else:
-                return { "messages": [ {"role": "assistant", "content": dumps(response)} ] }
+                messages.append({"role": "assistant", "content": dumps(response)})
+                return { "messages": messages }
         else:
-            return { "messages": [ {"role": "assistant", "content": str(response)} ] }
+            messages.append({"role": "assistant", "content": str(response)})
+            return { "messages": messages }
 
 class ToolNode(BaseTool):
     name: str = 'ToolNode'
@@ -61,11 +64,11 @@ Anwer must be JSON only extractable by JSON.LOADS.
         completion = self.client.completion_with_retry(input)
         result = _extract_json(completion[0].content.strip())
         try:
-            response = process_response(self.tool.run(result), self.return_type)
+            response = process_response(self.tool.run(result), messages, self.return_type)
             logger.info(f"ToolNode response: {response}")
             return response
         except ValidationError:
             return process_response(f"""Tool input to the {self.tool.name} with value {result} raised ValidationError. 
 \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
-{input[-1].content}""", self.return_type)
+{input[-1].content}""", messages, self.return_type)
 
