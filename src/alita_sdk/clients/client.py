@@ -99,8 +99,9 @@ class AlitaClient:
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
 
-    def get_list_of_apps(self):
-        resp = requests.get(self.list_apps_url, headers=self.headers, verify=False)
+    def get_list_of_apps(self, limit = 20):
+        params = {'limit': limit}
+        resp = requests.get(self.list_apps_url, params=params, headers=self.headers, verify=False)
         if resp.ok:
             return [{"name": app['name'], "id": app['id']} for app in resp.json().get('rows', [])]
             

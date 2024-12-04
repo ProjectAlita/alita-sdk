@@ -88,7 +88,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             deployment_value = environ.get('DEPLOYMENT_URL', None)
             deployment_secret = environ.get('XSECRET', 'secret')
             api_key_value = environ.get('API_KEY', None)
-            project_id_value = int(environ.get('PROJECT_ID', 0))
+            project_id_value = int(environ.get('PROJECT_ID', None))
             if st.session_state.llm:
                 deployment_value = st.session_state.llm.deployment
                 api_key_value = st.session_state.llm.api_token
@@ -97,7 +97,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             with st.form("settings_form", clear_on_submit=False):
                 deployment = st.text_input("Deployment URL", placeholder="Enter Deployment URL", value=deployment_value)
                 api_key = st.text_input("API Key", placeholder="Enter API Key", value=api_key_value, type="password")
-                project_id = st.number_input("Project ID", format="%d", min_value=0, value=project_id_value, placeholder="Enter Project ID")
+                project_id = st.number_input("Project ID", format="%d", min_value=1, value=project_id_value, placeholder="Enter Project ID")
                 deployment_secret = st.text_input("Deployment Secret", placeholder="Enter Deployment Secret", value=deployment_secret)
                 submitted = st.form_submit_button("Login")
                 if submitted:
@@ -118,7 +118,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                     if model.get('capabilities', {}).get('chat_completion') and model['name'] not in unique_models:
                                         unique_models.add(model['name'])
                                         models_list.append({model['name']: entry['uid']})
-                            st.session_state.agents = client.get_list_of_apps()
+                            st.session_state.agents = client.get_list_of_apps(limit=100)
                             st.session_state.models = models_list
                             clear_chat_history()
                         except Exception as e:
@@ -147,7 +147,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                     agent_version_id = latest_version['id']
                                     st.session_state.agent_executor = st.session_state.llm.client.application(
                                         st.session_state.llm, agent_id, agent_version_id,
-                                        agent_type if agent_type else None)
+                                        agent_type if agent_type else None, memory={"type": 'sqlite'})
                                     st.session_state.agent_name = options
                                     clear_chat_history()
                                 else:
