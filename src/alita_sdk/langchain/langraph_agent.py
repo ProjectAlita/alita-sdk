@@ -214,7 +214,9 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")       
         if self.checkpointer and self.checkpointer.get_tuple(config):
-            self.update_state(config, input)
+            self.update_state(config, {
+                "messages": input.get('chat_history', []) + [{"role": "user", "content": input.get('input')}]
+            })
             output = super().invoke(None, config=config, *args, **kwargs)['messages'][-1].content
         else:
             input = {
