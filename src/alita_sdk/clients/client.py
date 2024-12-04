@@ -100,9 +100,24 @@ class AlitaClient:
         return data
 
     def get_list_of_apps(self):
-        resp = requests.get(self.list_apps_url, headers=self.headers, verify=False)
-        if resp.ok:
-            return [{"name": app['name'], "id": app['id']} for app in resp.json().get('rows', [])]
+        apps = []
+        limit = 10
+        offset = 0
+        total_count = None
+
+        while total_count is None or offset < total_count:
+            params = {'offset': offset, 'limit': limit}
+            resp = requests.get(self.list_apps_url, headers=self.headers, params=params, verify=False)
+
+            if resp.ok:
+                data = resp.json()
+                total_count = data.get('total')
+                apps.extend([{"name": app['name'], "id": app['id']} for app in data.get('rows', [])])
+                offset += limit
+            else:
+                break
+
+        return apps
             
     def fetch_available_configurations(self) -> list:
         resp = requests.get(self.configurations_url, headers=self.headers, verify=False)
