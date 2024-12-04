@@ -199,7 +199,9 @@ def create_graph(
         except ValueError as e:
             # todo: raise a better error for the user
             raise e
-        compiled = prepare_output_schema(lg_builder, memory, store, debug)
+        compiled = prepare_output_schema(lg_builder, memory, store, debug,
+                                         interrupt_before=interrupt_before,
+                                         interrupt_after=interrupt_after)
         return compiled.validate()
 
 
@@ -216,13 +218,14 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if self.checkpointer and self.checkpointer.get_tuple(config):
             self.update_state(config, {
                 "messages": input.get('chat_history', []) + [{"role": "user", "content": input.get('input')}]
+                # "messages": [{"role": "user", "content": input.get('input')}]
             })
             output = super().invoke(None, config=config, *args, **kwargs)['messages'][-1].content
         else:
             input = {
-                "messages": input.get('chat_history', []) + [{"role": "user", "content": input.get('input')}]
+                "messages": [{"role": "user", "content": input.get('input')}]
+                # "messages": input.get('chat_history', []) + [{"role": "user", "content": input.get('input')}]
             }
-            print(input)
             output = super().invoke(input, config=config, *args, **kwargs)['messages'][-1].content
         thread_id = None
         if self.get_state(config).next:
