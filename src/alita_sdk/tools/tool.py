@@ -56,7 +56,7 @@ Anwer must be JSON only extractable by JSON.LOADS.
         last_message = {}
         for var in self.input_variables:
             if 'messages' in self.input_variables:
-                messages = kwargs.get('messages', [])
+                messages = kwargs.get('messages', [])[:]
                 input = messages[:-1]
                 last_message["user_input"] = messages[-1].content
             else:
