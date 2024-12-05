@@ -32,7 +32,10 @@ class LLMNode(BaseTool):
             else:
                 params[var] = kwargs.get(var, "")
         if '{' in self.prompt and '}' in self.prompt:
-            llm_input += [HumanMessage(self.prompt.format(**params))]
+            try:
+                llm_input += [HumanMessage(self.prompt.format(**params))]
+            except KeyError:
+                llm_input += [HumanMessage(self.prompt + 'State: ' + dumps(params))]
         elif params:
             llm_input += [HumanMessage(self.prompt + 'State: ' + dumps(params))]
         else:
