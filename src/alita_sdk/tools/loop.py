@@ -26,7 +26,7 @@ def process_response(response, return_type, accumulated_response):
     return accumulated_response
 
 class LoopNode(BaseTool):
-    name: str = 'ToolNode'
+    name: str = 'LoopNode'
     description: str = 'This is tool node for tools'
     client: Any = None
     tool: BaseTool = None

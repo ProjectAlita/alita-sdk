@@ -1,7 +1,11 @@
 import logging
+import builtins
 import json
 import re
-from typing import Tuple
+from typing import Tuple, TypedDict, Any, Optional, Annotated
+from langgraph.graph import MessagesState, add_messages
+from langchain_core.messages import AnyMessage
+
 
 logger = logging.getLogger(__name__)
 
@@ -110,3 +114,34 @@ def unpack_json(json_data: str | dict, **kwargs) -> dict:
         if isinstance(json_data, str):
             return _unpack_json(json_data.replace("\n", "\\n"), **kwargs)
         raise e
+
+
+def parse_type(type_str):
+    """Parse a type string into an actual Python type."""
+    try:
+        # Evaluate the type string using builtins and imported modules
+        return eval(type_str, {**vars(builtins), **globals()})
+    except Exception as e:
+        print(f"Error parsing type: {e}")
+        return Any
+
+
+def create_state(data: Optional[dict] = None):
+    if not data:
+        return MessagesState
+    state_dict = {'input': str,}
+    for key, value in data.items():
+        if key == 'messages':
+            state_dict[key] = Annotated[list[AnyMessage], add_messages]
+        elif value in ['str', 'int', 'float', 'bool', 'list', 'dict']:
+            state_dict[key] = parse_type(value)
+    return TypedDict('State', state_dict)
+
+def create_typed_dict_from_yaml(data):
+    # Extract class name and attributes
+    class_name, attributes = next(iter(data.items()))
+
+    # Create a TypedDict class
+    cls = TypedDict(class_name, {attr: parse_type(attr_type) for attr, attr_type in attributes.items()})
+    
+    return cls

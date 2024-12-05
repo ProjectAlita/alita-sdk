@@ -1,6 +1,7 @@
 import logging
+from json import dumps
 from langchain_core.tools import BaseTool
-from typing import Any
+from typing import Any, Optional
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 
@@ -10,11 +11,7 @@ def process_response(response, return_type):
     if return_type == "str":
         return response[0].content.strip()
     else:
-        return {
-            "messages": [
-                {"role": "assistant", "content": response[0].content.strip()}
-            ]
-        }
+        return [{"role": "assistant", "content": response[0].content.strip()}]
 
 class LLMNode(BaseTool):
     name: str = 'LLMNode'
@@ -22,17 +19,33 @@ class LLMNode(BaseTool):
     description: str = 'This is tool node for LLM'
     client: Any = None
     return_type: str = "str"
+    output_variables: Optional[list] = None
+    input_variables: Optional[list] = None
         
-    def _run(self, messages, *args, **kwargs):
-        if isinstance(messages, list):
-            input = messages + [HumanMessage(self.prompt)]
+    def _run(self, *args, **kwargs):
+        params = {}
+        llm_input = []
+        
+        for var in self.input_variables:
+            if var == 'messages':
+                llm_input = kwargs.get("messages")
+            else:
+                params[var] = kwargs.get(var, "")
+        if '{' in self.prompt and '}' in self.prompt:
+            llm_input += [HumanMessage(self.prompt.format(**params))]
+        elif params:
+            llm_input += [HumanMessage(self.prompt + 'State: ' + dumps(params))]
         else:
-            input = messages.get("messages") + [HumanMessage(self.prompt)]
+            llm_input += [HumanMessage(self.prompt)]
         try:
-            logger.info(f"LLM Node input: {input}")
-            completion = self.client.completion_with_retry(input)
+            logger.info(f"LLM Node input: {llm_input}")
+            completion = self.client.completion_with_retry(llm_input)
             logger.info(f"LLM Node completion: {completion}")
-            return process_response(completion, self.return_type)
+            
+            if not self.output_variables or 'messages' in self.output_variables:
+                return {"messages": kwargs.get('messages', []) + process_response(completion, self.return_type)}
+            else:
+                return { self.output_variables[0]: process_response(completion, 'str') }
         except Exception as e:
             return process_response([AIMessage(f"Error: {e}")], self.return_type)
 
