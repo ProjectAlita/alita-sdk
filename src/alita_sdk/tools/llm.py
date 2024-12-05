@@ -3,7 +3,7 @@ from json import dumps
 from langchain_core.tools import BaseTool
 from typing import Any, Optional
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
-
+from ..langchain.utils import _extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,15 @@ class LLMNode(BaseTool):
             if not self.output_variables or 'messages' in self.output_variables:
                 return {"messages": kwargs.get('messages', []) + process_response(completion, self.return_type)}
             else:
-                return { self.output_variables[0]: process_response(completion, 'str') }
+                try:
+                    response = _extract_json(completion[0].content.strip())
+                    resp = {}
+                    for key in response.keys():
+                        if key in self.output_variables:
+                            resp[key] = response[key]
+                    return resp
+                except ValueError:
+                    return { self.output_variables[0]: process_response(completion, 'str') }
         except Exception as e:
             return process_response([AIMessage(f"Error: {e}")], self.return_type)
 
