@@ -198,6 +198,7 @@ def create_graph(
                     lg_builder.add_node(node_id, LLMNode(
                         client=client, prompt=node.get('prompt', ""),
                         name=node['id'], return_type='dict',
+                        response_key=node.get('response_key', 'messages'),
                         output_variables=node.get('output', []),
                         input_variables=node.get('input', ['messages'])))
                 if node.get('transition'):
@@ -250,14 +251,16 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if not config.get("configurable", {}).get("thread_id"):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")
-        if input.get('chat_history'):
+        if input.get('chat_history') and not input.get('messages'):
             input['messages'] = input.pop('chat_history')
-            input['messages']
         if input.get('input'):
             if input.get('messages'):
-                input['messages'].append({"role": "user", "content": input.pop('input')})
+                input['messages'].append({"role": "user", "content": input.get('input')})
             else:
-                input['messages'] = [{"role": "user", "content": input.pop('input')}]
+                input['messages'] = [{"role": "user", "content": input.get('input')}]
+        
+        logging.info(f"Input: {thread_id} - {input}")
+        
         if self.checkpointer and self.checkpointer.get_tuple(config):
             self.update_state(config, input)
             input = None

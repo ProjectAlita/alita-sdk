@@ -42,7 +42,6 @@ class EvaluateTemplate(metaclass=MyABC):
             template = environment.from_string(self.query)
             logger.info(f"Condition context: {self.context}")
             result = template.render(**self.context)
-            print(result)
         except (TemplateSyntaxError, UndefinedError):
             logger.critical(format_exc())
             logger.info('Template str: %s', self.query)
