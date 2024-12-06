@@ -1,11 +1,11 @@
-import logging
 import builtins
 import json
+import logging
 import re
 from typing import Tuple, TypedDict, Any, Optional, Annotated
-from langgraph.graph import MessagesState, add_messages
 from langchain_core.messages import AnyMessage
-
+from langchain_core.prompts import PromptTemplate
+from langgraph.graph import MessagesState, add_messages
 
 logger = logging.getLogger(__name__)
 
@@ -145,3 +145,16 @@ def create_typed_dict_from_yaml(data):
     cls = TypedDict(class_name, {attr: parse_type(attr_type) for attr, attr_type in attributes.items()})
     
     return cls
+
+def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables: list[str], state: dict) -> dict:
+    input_data = {}
+    for key, value in input_mapping.items():
+        if key == 'chat_history':
+            input_data[key] = state.get('messages', [])
+        elif value['type'] == 'fstring':
+            var_dict = {var: state.get(var, "") for var in input_variables}
+            input_data[key] = PromptTemplate.from_template(value['value']).partial(**var_dict).format(**var_dict)
+        else:
+            input_data[key] = state.get(value['value'], "")
+    return input_data
+

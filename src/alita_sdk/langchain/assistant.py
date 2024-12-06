@@ -42,7 +42,9 @@ class Assistant:
         self.memory = memory
         
         if app_type == "pipeline":
-            self.tools = get_tools(data['tools'], alita, True)
+            self.tools = get_tools(data['tools'], alita,
+                                   # True
+                                   )
             self.prompt = data['instructions']
         else:
             self.tools = get_tools(data['tools'], alita) + tools

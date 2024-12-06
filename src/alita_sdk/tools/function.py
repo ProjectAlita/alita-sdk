@@ -5,6 +5,7 @@ from typing import Any, Optional
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 from .tool import process_response
+from ..langchain.utils import propagate_the_input_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ class FunctionTool(BaseTool):
     tool: BaseTool = None
     return_type: str = "str"
     input_variables: Optional[list[str]] = None
-    input_mapping: Optional[dict[str, str]] = None
+    input_mapping: Optional[dict[str, dict]] = None
     output_variables: Optional[list[str]] = None
 
     def _run(self, *args, **kwargs):
@@ -22,9 +23,10 @@ class FunctionTool(BaseTool):
             'function',{'parameters': {}}).get(
                 'parameters', {'properties': {}}).get('properties', {})
         
-        func_args = {}
-        for var in self.input_variables:
-            func_args[self.input_mapping[var]] = kwargs.get(var, "")
+        func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables, state=kwargs)
+        # for var in self.input_variables:
+        #     func_args[self.input_mapping[var]] = kwargs.get(var, "")
+        # handle fstring if it is available in mapping
         try:
             tool_result = self.tool.run(func_args)
             logger.info(f"ToolNode response: {tool_result}")
@@ -35,5 +37,5 @@ class FunctionTool(BaseTool):
         except ValidationError:
             return process_response(f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
 \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
-{input[-1].content}""", self.return_type)
+{func_args}""", self.return_type)
 

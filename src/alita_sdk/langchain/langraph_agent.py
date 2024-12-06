@@ -2,13 +2,10 @@ import yaml
 import logging
 from uuid import uuid4
 from typing import Union, Any, Optional, Annotated
-from json import dumps
 from langgraph.graph.graph import END, START
-from langgraph.graph import StateGraph, MessagesState
-from langgraph.store.base import BaseStore
+from langgraph.graph import StateGraph
 from langgraph.channels.ephemeral_value import EphemeralValue
 from langgraph.managed.base import is_managed_value
-from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 from langgraph.graph.state import CompiledStateGraph
@@ -181,7 +178,7 @@ def create_graph(
                                 lg_builder.add_node(node_id, FunctionTool(
                                     tool=tool, name=node['id'], return_type='dict',
                                     output_variables=node.get('output', []),
-                                    input_mapping=node.get('input_mapping', {'messages': 'messages'}),
+                                    input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
                                     input_variables=node.get('input', ['messages'])))
                             elif node_type == 'tool':
                                 lg_builder.add_node(node_id, ToolNode(
