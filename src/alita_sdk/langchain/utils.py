@@ -2,6 +2,7 @@ import builtins
 import json
 import logging
 import re
+from pydantic import create_model, Field
 from typing import Tuple, TypedDict, Any, Optional, Annotated
 from langchain_core.messages import AnyMessage
 from langchain_core.prompts import PromptTemplate
@@ -158,3 +159,9 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
             input_data[key] = state.get(value['value'], "")
     return input_data
 
+
+def create_pydantic_model(model_name: str, variables: dict[str, dict]):
+    fields = {}
+    for var_name, var_data in variables.items():
+        fields[var_name] = (parse_type(var_data['type']), Field(description=var_data.get('description', None)))
+    return create_model(model_name, **fields)

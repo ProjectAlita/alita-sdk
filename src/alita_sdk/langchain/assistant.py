@@ -17,10 +17,10 @@ from .constants import REACT_ADDON, REACT_VARS
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from ..toolkits.tools import get_tools
+
 logger = logging.getLogger(__name__)
 
 class Assistant:
-    
     def __init__(self, 
                  alita: 'AlitaClient',
                  data: dict, 
@@ -40,6 +40,18 @@ class Assistant:
         
         self.app_type = app_type
         self.memory = memory
+        
+        logger.debug("Data for agent creation: %s", data)
+        
+        model_type = data["llm_settings"]["indexer_config"]["ai_model"]
+        model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
+        #
+        target_pkg, target_name = model_type.rsplit(".", 1)
+        target_cls = getattr(
+            importlib.import_module(target_pkg),
+            target_name
+        )
+        self.client = target_cls(**model_params)
         
         if app_type == "pipeline":
             self.tools = get_tools(data['tools'], alita
@@ -71,29 +83,6 @@ class Assistant:
                 self.prompt.input_variables = input_variables
             if variables:
                 self.prompt.partial_variables = variables
-            if "indexer_config" in data["llm_settings"]:
-                model_type = data["llm_settings"]["indexer_config"]["ai_model"]
-                model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
-                #
-                target_pkg, target_name = model_type.rsplit(".", 1)
-                target_cls = getattr(
-                    importlib.import_module(target_pkg),
-                    target_name
-                )
-                self.client = target_cls(**model_params)
-            else:
-                integration_details = data['llm_settings']['integration_details']
-                #
-                from langchain_openai import AzureChatOpenAI
-                self.client = AzureChatOpenAI(
-                    azure_endpoint=integration_details['settings']['api_base'],
-                    deployment_name=data['llm_settings']['model_name'],
-                    openai_api_version=integration_details['settings']['api_version'],
-                    openai_api_key=integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
-                    temperature=data['llm_settings']['temperature'],
-                    max_tokens=data['llm_settings']['max_tokens'],
-                    # timeout=600,
-                )
             try:
                 logger.info(f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
             except Exception as e:

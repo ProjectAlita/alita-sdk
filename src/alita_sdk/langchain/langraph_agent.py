@@ -75,8 +75,8 @@ Answer only with step name, no need to add descrip in case none of the steps are
                     additional_info = """### Additoinal info: """
                 additional_info += "{field}: {value}\n".format(field=field, value=state.get(field, ""))
         decision_input.append(HumanMessage(self.prompt.format(steps=self.steps, description=self.description, additional_info=additional_info)))
-        completion = self.client.completion_with_retry(decision_input)
-        result = clean_string(completion[0].content.strip())
+        completion = self.client.invoke(decision_input)
+        result = clean_string(completion.content.strip())
         logger.info(f"Plan to transition to: {result}")
         if result not in self.steps or result == 'END':
             result = END
@@ -185,11 +185,13 @@ def create_graph(
                                     client=client, tool=tool,
                                     name=node['id'], return_type='dict',
                                     output_variables=node.get('output', []),
-                                    input_variables=node.get('input', ['messages'])))
+                                    input_variables=node.get('input', ['messages']),
+                                    structured_output=node.get('structured_output', False)))
                             elif node_type == 'loop':
                                 lg_builder.add_node(node_id, LoopNode(
                                     client=client, tool=tool, task=node.get('task', ""),
-                                    name=node['id'], return_type='dict'))
+                                    name=node['id'], return_type='dict',
+                                    structured_output=node.get('structured_output', False)))
                             break
                 elif node_type == 'llm':
                     lg_builder.add_node(node_id, LLMNode(
@@ -197,7 +199,8 @@ def create_graph(
                         name=node['id'], return_type='dict',
                         response_key=node.get('response_key', 'messages'),
                         output_variables=node.get('output', []),
-                        input_variables=node.get('input', ['messages'])))
+                        input_variables=node.get('input', ['messages']),
+                        structured_output=node.get('structured_output', False)))
                 if node.get('transition'):
                     next_step=clean_string(node['transition'])
                     logger.info(f'Adding transition: {next_step}')

@@ -1,17 +1,12 @@
 import logging
-from json import dumps
+from traceback import format_exc
 from langchain_core.tools import BaseTool
 from typing import Any, Optional
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
-from ..langchain.utils import _extract_json
+from ..langchain.utils import _extract_json, create_pydantic_model
 
 logger = logging.getLogger(__name__)
 
-def process_response(response, return_type):
-    if return_type == "str":
-        return response[0].content.strip()
-    else:
-        return [{"role": "assistant", "content": response[0].content.strip()}]
 
 class LLMNode(BaseTool):
     name: str = 'LLMNode'
@@ -22,6 +17,7 @@ class LLMNode(BaseTool):
     response_key: str = "messages"
     output_variables: Optional[list] = None
     input_variables: Optional[list] = None
+    structured_output: Optional[bool] = False
         
     def _run(self, *args, **kwargs):
         params = {}
@@ -46,27 +42,34 @@ class LLMNode(BaseTool):
         else:
             llm_input += [HumanMessage(self.prompt)]
         try:
-            logger.info(f"LLM Node input: {llm_input}")
-            completion = self.client.completion_with_retry(llm_input)
-            logger.info(f"LLM Node completion: {completion}")
-            resp = {}
-            if not self.output_variables or 'messages' in self.output_variables:
-                return {"messages": kwargs.get('messages', []) + process_response(completion, self.return_type)}
+            if self.structured_output and len(self.output_variables) > 1:
+                struct_params = {}
+                for var in self.output_variables:
+                    struct_params[var] = {"type": "str", "description": ""}
+                stuct_model = create_pydantic_model(f"LLMOutput", struct_params)
+                llm = self.client.with_structured_output(stuct_model)
+                completion = llm.invoke(llm_input)
+                result = completion.model_dump()
+                return result
             else:
-                try:
-                    og_response = completion[0].content.strip()
-                    response = _extract_json(og_response)
-                    logger.info(f"LLM Node response: {response}")
-                    
-                    for key in response.keys():
-                        if key in self.output_variables:
-                            resp[key] = response[key]
-                    if not resp.get('messages'):
-                        resp['messages'] = [{"role": "assistant", "content": resp.get(self.response_key) or og_response}]
-                    return resp
-                except ValueError:
-                    resp = process_response(completion, 'str')
-                    return { self.output_variables[0]: resp, "messages": {"role": "assistant", "content": resp}}
+                completion = self.client.invoke(llm_input)
+                result = completion.content.strip()
+                if self.output_variables:
+                    try:
+                        resp = {}
+                        response = _extract_json(result)
+                        logger.info(f"LLM Node response: {response}")
+                        for key in response.keys():
+                            if key in self.output_variables:
+                                resp[key] = response[key]
+                        if not resp.get('messages'):
+                            resp['messages'] = [{"role": "assistant", "content": resp.get(self.response_key) or result}]
+                        return resp
+                    except ValueError:
+                        return { self.output_variables[0]: result, "messages": {"role": "assistant", "content": result}}
+            if not self.output_variables:
+                return {"messages": {"role": "assistant", "content": result}}        
         except Exception as e:
-            return process_response([AIMessage(f"Error: {e}")], self.return_type)
+            logger.error(f"Error in LLM Node: {format_exc()}")
+            return {"messages": [{"role": "assistant", "content": f"Error: {e}"}]}
 
