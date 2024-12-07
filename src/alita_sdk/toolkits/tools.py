@@ -19,7 +19,7 @@ def get_toolkits():
     ]
 
 
-def get_tools(tools_list: list, alita: 'AlitaClient', is_workflow: bool = False) -> list:
+def get_tools(tools_list: list, alita: 'AlitaClient') -> list:
     prompts = []
     tools = []
     for tool in tools_list:
@@ -33,7 +33,7 @@ def get_tools(tools_list: list, alita: 'AlitaClient', is_workflow: bool = False)
                 alita,
                 datasource_ids=[int(tool['settings']['datasource_id'])],
                 selected_tools=tool['settings']['selected_tools'],
-                is_workflow=is_workflow
+                # is_workflow=is_workflow
             ).get_tools())
         elif tool['type'] == 'application':
             tools.extend(ApplicationToolkit.get_toolkit(
@@ -42,7 +42,7 @@ def get_tools(tools_list: list, alita: 'AlitaClient', is_workflow: bool = False)
                 application_version_id=int(tool['settings']['application_version_id']),
                 app_api_key=alita.auth_token,
                 selected_tools=[],
-                is_workflow=is_workflow
+                # is_workflow=is_workflow
             ).get_tools())
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
@@ -51,6 +51,8 @@ def get_tools(tools_list: list, alita: 'AlitaClient', is_workflow: bool = False)
                 selected_tools=tool['settings'].get('selected_tools', [])
             ).get_tools())
     if len(prompts) > 0:
-        tools += PromptToolkit.get_toolkit(alita, prompts, is_workflow=True).get_tools()
+        tools += PromptToolkit.get_toolkit(alita, prompts
+                                           # is_workflow=True
+                                           ).get_tools()
     tools += alita_tools(tools_list)
     return tools

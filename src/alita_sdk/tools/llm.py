@@ -1,20 +1,12 @@
 import logging
+from traceback import format_exc
 from langchain_core.tools import BaseTool
-from typing import Any
+from typing import Any, Optional
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
-
+from ..langchain.utils import _extract_json, create_pydantic_model
 
 logger = logging.getLogger(__name__)
 
-def process_response(response, return_type):
-    if return_type == "str":
-        return response[0].content.strip()
-    else:
-        return {
-            "messages": [
-                {"role": "assistant", "content": response[0].content.strip()}
-            ]
-        }
 
 class LLMNode(BaseTool):
     name: str = 'LLMNode'
@@ -22,17 +14,62 @@ class LLMNode(BaseTool):
     description: str = 'This is tool node for LLM'
     client: Any = None
     return_type: str = "str"
+    response_key: str = "messages"
+    output_variables: Optional[list] = None
+    input_variables: Optional[list] = None
+    structured_output: Optional[bool] = False
         
-    def _run(self, messages, *args, **kwargs):
-        if isinstance(messages, list):
-            input = messages + [HumanMessage(self.prompt)]
+    def _run(self, *args, **kwargs):
+        params = {}
+        llm_input = []
+        
+        for var in self.input_variables:
+            if var == 'messages':
+                llm_input = kwargs.get("messages")[:]
+            else:
+                params[var] = kwargs.get(var, "")
+        logger.info(f"LLM Node params: {params}")
+        if '{' in self.prompt and '}' in self.prompt:
+            try:
+                llm_input += [HumanMessage(self.prompt.format(**params))]
+            except KeyError:
+                if params:
+                    llm_input += [HumanMessage(f"Current User Input:\n{kwargs['input']}\nLast LLM Output:\n{params}\nPrompt:\n{self.prompt}")]
+                else:
+                    llm_input += [HumanMessage(self.prompt)]
+        elif params:
+            llm_input += [HumanMessage(f"Current User Input:\n{kwargs['input']}\nLast LLM Output:\n{params}\nPrompt:\n{self.prompt}")]
         else:
-            input = messages.get("messages") + [HumanMessage(self.prompt)]
+            llm_input += [HumanMessage(self.prompt)]
         try:
-            logger.info(f"LLM Node input: {input}")
-            completion = self.client.completion_with_retry(input)
-            logger.info(f"LLM Node completion: {completion}")
-            return process_response(completion, self.return_type)
+            if self.structured_output and len(self.output_variables) > 1:
+                struct_params = {}
+                for var in self.output_variables:
+                    struct_params[var] = {"type": "str", "description": ""}
+                stuct_model = create_pydantic_model(f"LLMOutput", struct_params)
+                llm = self.client.with_structured_output(stuct_model)
+                completion = llm.invoke(llm_input)
+                result = completion.model_dump()
+                return result
+            else:
+                completion = self.client.invoke(llm_input)
+                result = completion.content.strip()
+                if self.output_variables:
+                    try:
+                        resp = {}
+                        response = _extract_json(result)
+                        logger.info(f"LLM Node response: {response}")
+                        for key in response.keys():
+                            if key in self.output_variables:
+                                resp[key] = response[key]
+                        if not resp.get('messages'):
+                            resp['messages'] = [{"role": "assistant", "content": resp.get(self.response_key) or result}]
+                        return resp
+                    except ValueError:
+                        return { self.output_variables[0]: result, "messages": {"role": "assistant", "content": result}}
+            if not self.output_variables:
+                return {"messages": {"role": "assistant", "content": result}}        
         except Exception as e:
-            return process_response([AIMessage(f"Error: {e}")], self.return_type)
+            logger.error(f"Error in LLM Node: {format_exc()}")
+            return {"messages": [{"role": "assistant", "content": f"Error: {e}"}]}
 

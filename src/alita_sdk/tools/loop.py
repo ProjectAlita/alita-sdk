@@ -26,7 +26,7 @@ def process_response(response, return_type, accumulated_response):
     return accumulated_response
 
 class LoopNode(BaseTool):
-    name: str = 'ToolNode'
+    name: str = 'LoopNode'
     description: str = 'This is tool node for tools'
     client: Any = None
     tool: BaseTool = None
@@ -66,9 +66,8 @@ EXPETED OUTPUT FORMAT:
                 schema=parameters,
                 task=self.task))
         ]
-        completion = self.client.completion_with_retry(input)
-    
-        loop_data = _old_extract_json(completion[0].content.strip())  
+        completion = self.client.invoke(input)
+        loop_data = _old_extract_json(completion.content.strip())  
         if self.return_type == "str":
             accumulated_response = ''
         else:
