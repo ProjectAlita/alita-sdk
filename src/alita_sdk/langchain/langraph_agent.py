@@ -1,12 +1,14 @@
 import yaml
 import logging
 from uuid import uuid4
-from typing import Union, Any, Optional
-from json import dumps
+from typing import Union, Any, Optional, Annotated
 from langgraph.graph.graph import END, START
-from langgraph.graph import StateGraph, MessagesState
-from langgraph.store.base import BaseStore
+from langgraph.graph import StateGraph
 from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.managed.base import is_managed_value
+from langgraph.prebuilt import InjectedStore
+from langgraph.store.base import BaseStore
+from langgraph.graph.state import CompiledStateGraph
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
@@ -16,24 +18,28 @@ from ..utils.evaluate import EvaluateTemplate
 from ..tools.llm import LLMNode
 from ..tools.tool import ToolNode
 from ..tools.loop import LoopNode
+from ..tools.function import FunctionTool
 from ..utils.utils import clean_string
-from langgraph.managed.base import is_managed_value
-from langgraph.prebuilt import ToolNode as ToolsNode
+
+from .utils import create_state
 
 logger = logging.getLogger(__name__)
 
 class ConditionalEdge(Runnable):
     name = "ConditionalEdge"
-    def __init__(self, condition: str):
+    def __init__(self, condition: str, condition_inputs: Optional[list[str]] = []):
         self.condition = condition
+        self.condition_inputs = condition_inputs
     
-    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        input = convert_message_to_json(messages['messages'][:-1])
-        last_message = messages['messages'][-1].content
-        template = EvaluateTemplate(
-            self.condition, 
-            chat_history=dumps(input), 
-            last_message=last_message)
+    def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
+        logger.info(f"Current state in condition edge - {state}")
+        input_data = {}
+        for field in self.condition_inputs:
+            if field == 'messages':
+                input_data['messages'] = convert_message_to_json(state.get('messages', []))
+            else:
+                input_data[field] = state.get(field, "")    
+        template = EvaluateTemplate(self.condition, input_data)
         result = template.evaluate()
         if isinstance(result, str):
             result = clean_string(result)
@@ -43,23 +49,34 @@ class ConditionalEdge(Runnable):
 
 class DecisionEdge(Runnable):
     name = "DecisionEdge"
-    prompt: str = """Based on chat history make a decision what step need to be next.
+    prompt: str = """Based on chat history and additional_info make a decision what step need to be next.
 Steps available: {steps}
 Explanation: {description}
+
+{additional_info}
+
+### Expected output:
 Answer only with step name, no need to add descrip in case none of the steps are applibcable answer with 'END'
 """
-    def __init__(self, client, steps: str, description: str = ""):
+    def __init__(self, client, steps: str, description: str = "", decisional_inputs: Optional[list[str]] = []):
         self.client = client
         self.steps = ",".join([clean_string(step) for step in steps])
         self.description = description
+        self.decisional_inputs = decisional_inputs
         
-    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
-        input = messages['messages'][:]
-        # Message are shared between all tools so we need to make sure that we are not modifying it
-        input.append(HumanMessage(self.prompt.format(steps=self.steps, description=self.description)))
-        print(input)
-        completion = self.client.completion_with_retry(input)
-        result = clean_string(completion[0].content.strip())
+    def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
+        additional_info = ""
+        decision_input = []
+        for field in self.decisional_inputs:
+            if field == 'messages':
+                decision_input = state.get('messages', [])[:]
+            else:
+                if len(additional_info) == 0:
+                    additional_info = """### Additoinal info: """
+                additional_info += "{field}: {value}\n".format(field=field, value=state.get(field, ""))
+        decision_input.append(HumanMessage(self.prompt.format(steps=self.steps, description=self.description, additional_info=additional_info)))
+        completion = self.client.invoke(decision_input)
+        result = clean_string(completion.content.strip())
         logger.info(f"Plan to transition to: {result}")
         if result not in self.steps or result == 'END':
             result = END
@@ -70,12 +87,10 @@ class TransitionalEdge(Runnable):
     def __init__(self, next_step: str):
         self.next_step = next_step
     
-    def invoke(self, messages, config: RunnableConfig, *args, **kwargs):
+    def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: RunnableConfig, *args, **kwargs):
         logger.info(f'Transitioning to: {self.next_step}')
         return self.next_step if self.next_step != 'END' else END
      
-from langgraph.graph.state import CompiledStateGraph
-
 def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=[], interrupt_after=[]):
     # prepare output channels
         output_channels = (
@@ -146,7 +161,8 @@ def create_graph(
     ):
         """ Create a message graph from a yaml schema """
         schema = yaml.safe_load(yaml_schema)
-        lg_builder = StateGraph(MessagesState)
+        state_class = create_state(schema.get('state', {}))
+        lg_builder = StateGraph(state_class)
         interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
         interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
         try:
@@ -159,21 +175,33 @@ def create_graph(
                     for tool in tools:
                         if tool.name == tool_name:
                             if node_type == 'function':
-                                lg_builder.add_node(node_id, tool)
+                                lg_builder.add_node(node_id, FunctionTool(
+                                    tool=tool, name=node['id'], return_type='dict',
+                                    output_variables=node.get('output', []),
+                                    input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
+                                    input_variables=node.get('input', ['messages'])))
                             elif node_type == 'tool':
-                                lg_builder.add_node(node_id, 
-                                                    ToolNode(
-                                                        client=client, tool=tool, 
-                                                        name=node['id'], return_type='dict'
-                                                    ))
+                                lg_builder.add_node(node_id, ToolNode(
+                                    client=client, tool=tool,
+                                    name=node['id'], return_type='dict',
+                                    output_variables=node.get('output', []),
+                                    input_variables=node.get('input', ['messages']),
+                                    structured_output=node.get('structured_output', False)))
                             elif node_type == 'loop':
-                                lg_builder.add_node(node_id, 
-                                                    LoopNode(client=client, tool=tool, task=node.get('task', ""),
-                                                             name=node['id'], return_type='dict'))
+                                lg_builder.add_node(node_id, LoopNode(
+                                    client=client, tool=tool, task=node.get('task', ""),
+                                    name=node['id'], return_type='dict',
+                                    output_variables=node.get('output', []),
+                                    input_variables=node.get('input', ['messages'])))
                             break
                 elif node_type == 'llm':
-                    lg_builder.add_node(node_id, LLMNode(client=client, prompt=node.get('prompt', ""), 
-                                                         name=node['id'], return_type='dict'))
+                    lg_builder.add_node(node_id, LLMNode(
+                        client=client, prompt=node.get('prompt', {}),
+                        name=node['id'], return_type='dict',
+                        response_key=node.get('response_key', 'messages'),
+                        output_variables=node.get('output', []),
+                        input_variables=node.get('input', ['messages']),
+                        structured_output=node.get('structured_output', False)))
                 if node.get('transition'):
                     next_step=clean_string(node['transition'])
                     logger.info(f'Adding transition: {next_step}')
@@ -182,10 +210,14 @@ def create_graph(
                     logger.info(f'Adding decision: {node["decision"]["nodes"]}')
                     lg_builder.add_conditional_edges(node_id, DecisionEdge(
                         client, node['decision']['nodes'], 
-                        node['decision'].get('description', "")))
+                        node['decision'].get('description', ""),
+                        decisional_inputs=node['decision'].get('decisional_inputs', ['messages'])))
                 elif node.get('condition'):
                     logger.info(f'Adding condition: {node["condition"]}')
-                    lg_builder.add_conditional_edges(node_id, ConditionalEdge(node['condition']))
+                    condition_input = node['condition'].get('condition_input', ['messages'])
+                    condition_definition = node['condition'].get('condition_definition', '')
+                    lg_builder.add_conditional_edges(node_id, ConditionalEdge(
+                        condition=condition_definition, condition_inputs=condition_input))
 
             lg_builder.set_entry_point(clean_string(schema['entry_point']))
             
@@ -219,16 +251,25 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         
         if not config.get("configurable", {}).get("thread_id"):
             config["configurable"] = {"thread_id": str(uuid4())}
-        thread_id = config.get("configurable", {}).get("thread_id")       
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if input.get('chat_history') and not input.get('messages'):
+            input['messages'] = input.pop('chat_history')
+        if input.get('input'):
+            if input.get('messages'):
+                input['messages'].append({"role": "user", "content": input.get('input')})
+            else:
+                input['messages'] = [{"role": "user", "content": input.get('input')}]
+        
+        logging.info(f"Input: {thread_id} - {input}")
+        
         if self.checkpointer and self.checkpointer.get_tuple(config):
-            self.update_state(config, {'messages': input['input']})
-            output = super().invoke(None, config=config, *args, **kwargs)['messages'][-1].content
-        else:
-            input = {
-                "messages": input.get('chat_history', []) + [{"role": "user", "content": input.get('input')}]
-            }
-            print(input)
-            output = super().invoke(input, config=config, *args, **kwargs)['messages'][-1].content
+            self.update_state(config, input)
+            input = None
+        result = super().invoke(input, config=config, *args, **kwargs)
+        try:
+            output = result['messages'][-1].content
+        except:
+            output =list(result.values())[-1]
         thread_id = None
         if self.get_state(config).next:
             thread_id = config['configurable']['thread_id']

@@ -2,7 +2,7 @@ from ..utils.utils import clean_string
 from json import dumps
 from langchain_core.tools import BaseTool
 from langchain_core.messages import BaseMessage, AIMessage
-from typing import Any, Type, Dict
+from typing import Any, Type, Optional
 from pydantic import create_model, field_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
@@ -12,37 +12,21 @@ logger = getLogger(__name__)
 applicationToolSchema = create_model(
     "applicatrionSchema", 
     task = (str, FieldInfo(description="Task for Application")), 
-    chat_history = (str, FieldInfo(description="Chat History relevant for Application"))
-)
-
-applicationWFSchema = create_model(
-    "applicatrionSchema", 
-    messages = (list, FieldInfo(description="conversation"))
+    chat_history = (Optional[list], FieldInfo(description="Chat History relevant for Application", default=[]))
 )
 
 def formulate_query(args, kwargs):
-    if kwargs.get('messages'):
-        if isinstance(kwargs.get('messages')[-1], BaseMessage):
-            task = kwargs.get('messages')[-1].content
-            chat_history = convert_message_to_json(kwargs.get('messages')[:-1])
-        elif isinstance(kwargs.get('messages')[-1], dict):
-            task = kwargs.get('messages')[-1]['content']
-            chat_history = kwargs.get('messages')[:-1]
-        elif isinstance(kwargs.get('messages')[-1], str):
-            task = kwargs.get('messages')[-1]
+    chat_history = []
+    if kwargs.get('chat_history'):
+        if isinstance(kwargs.get('chat_history')[-1], BaseMessage):
+            chat_history = convert_message_to_json(kwargs.get('chat_history')[:])
+        elif isinstance(kwargs.get('chat_history')[-1], dict):
+            chat_history = kwargs.get('chat_history')[:]
+        elif isinstance(kwargs.get('chat_history')[-1], str):
             chat_history = []
-            for each in kwargs.get('messages')[:-1]:
+            for each in kwargs.get('chat_history')[:]:
                 chat_history.append(AIMessage(each))
-        return {"input": task, "chat_history": chat_history}
-    elif kwargs.get('task'):
-        task = kwargs.get('task')
-        chat_history = kwargs.get('chat_history', '')        
-        if chat_history:
-            task = "Task: " + task + "\nAdditional context: " + chat_history
-        return {"input": task, "chat_history": []}
-    else:
-        chat_history = kwargs.get('chat_history', '')    
-        return {"input": args[0], "chat_history": chat_history}
+    return {"input": kwargs.get('task'), "chat_history": chat_history}
     
     
 
