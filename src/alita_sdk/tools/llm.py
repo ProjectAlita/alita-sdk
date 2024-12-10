@@ -1,5 +1,7 @@
 import logging
 from traceback import format_exc
+
+from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import BaseTool
 from typing import Any, Optional
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
@@ -7,10 +9,19 @@ from ..langchain.utils import _extract_json, create_pydantic_model
 
 logger = logging.getLogger(__name__)
 
+def create_llm_input(prompt: dict[str, str], params: dict, kwargs) -> list[HumanMessage]:
+    if prompt.get('type') == 'fstring' and params:
+        return [HumanMessage(content=PromptTemplate.from_template(prompt['value']).partial(**params).format(**params))]
+    elif prompt.get('type') == 'string' and params:
+        return [HumanMessage(
+            content=f"Current User Input:\n{kwargs['input']}\nLast LLM Output:\n{params}\nPrompt:\n{prompt['value']}")]
+    else:
+        return [HumanMessage(content=prompt['value'])]
+
 
 class LLMNode(BaseTool):
     name: str = 'LLMNode'
-    prompt: str
+    prompt: dict[str, str]
     description: str = 'This is tool node for LLM'
     client: Any = None
     return_type: str = "str"
@@ -29,18 +40,7 @@ class LLMNode(BaseTool):
             else:
                 params[var] = kwargs.get(var, "")
         logger.info(f"LLM Node params: {params}")
-        if '{' in self.prompt and '}' in self.prompt:
-            try:
-                llm_input += [HumanMessage(self.prompt.format(**params))]
-            except KeyError:
-                if params:
-                    llm_input += [HumanMessage(f"Current User Input:\n{kwargs['input']}\nLast LLM Output:\n{params}\nPrompt:\n{self.prompt}")]
-                else:
-                    llm_input += [HumanMessage(self.prompt)]
-        elif params:
-            llm_input += [HumanMessage(f"Current User Input:\n{kwargs['input']}\nLast LLM Output:\n{params}\nPrompt:\n{self.prompt}")]
-        else:
-            llm_input += [HumanMessage(self.prompt)]
+        llm_input = create_llm_input(self.prompt, params, kwargs)
         try:
             if self.structured_output and len(self.output_variables) > 1:
                 struct_params = {}

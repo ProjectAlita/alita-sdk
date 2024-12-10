@@ -196,7 +196,7 @@ def create_graph(
                             break
                 elif node_type == 'llm':
                     lg_builder.add_node(node_id, LLMNode(
-                        client=client, prompt=node.get('prompt', ""),
+                        client=client, prompt=node.get('prompt', {}),
                         name=node['id'], return_type='dict',
                         response_key=node.get('response_key', 'messages'),
                         output_variables=node.get('output', []),
