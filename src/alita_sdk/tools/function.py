@@ -4,7 +4,6 @@ from langchain_core.tools import BaseTool
 from typing import Any, Optional
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
-from .tool import process_response
 from ..langchain.utils import propagate_the_input_mapping
 
 logger = logging.getLogger(__name__)
@@ -24,18 +23,18 @@ class FunctionTool(BaseTool):
                 'parameters', {'properties': {}}).get('properties', {})
         
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables, state=kwargs)
-        # for var in self.input_variables:
-        #     func_args[self.input_mapping[var]] = kwargs.get(var, "")
-        # handle fstring if it is available in mapping
         try:
             tool_result = self.tool.run(func_args)
             logger.info(f"ToolNode response: {tool_result}")
-            if not self.output_variables or 'messages' in self.output_variables:
-                return {"messages": kwargs.get('messages', []) + process_response(tool_result, self.return_type)}
+            if not self.output_variables:
+                return {"messages": [{"role": "assistant", "content": tool_result}]}
             else:
-                return { self.output_variables[0]: tool_result }
+                return { 
+                        self.output_variables[0]: tool_result, 
+                        "messages": [{"role": "assistant", "content": tool_result}] 
+                    }
         except ValidationError:
-            return process_response(f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
+            return {"messages": [{"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
 \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
-{func_args}""", self.return_type)
+{func_args}"""}]}
 

@@ -29,7 +29,7 @@ Input from user: {last_message}
 
 """
     unstructured_output: str = """Expected output is JSON that to be used as a KWARGS for the tool call like {{"key": "value"}} 
-in case your key is "messages" value should be a list of messages with roles like {{"messages": [{{"role": "user", "content": "input"}}, {{"role": "assistant", "content": "output"}}]}}.
+in case your key is "chat_history" value should be a list of messages with roles like {{"chat_history": [{{"role": "user", "content": "input"}}, {{"role": "assistant", "content": "output"}}]}}.
 Tool won't have access to convesation so all keys and values need to be actual and independant. 
 Anwer must be JSON only extractable by JSON.LOADS."""
 
@@ -45,6 +45,8 @@ Anwer must be JSON only extractable by JSON.LOADS."""
         # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
         input = []
         last_message = {}
+        logger.info(f"ToolNode input: {self.input_variables}")
+        logger.info(f"Output variables: {self.output_variables}")
         for var in self.input_variables:
             if 'messages' in self.input_variables:
                 messages = kwargs.get('messages', [])[:]
@@ -69,6 +71,7 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             input[-1].content += self.unstructured_output
             completion = self.client.invoke(input)
             result = _extract_json(completion.content.strip())
+            logger.info(f"ToolNode tool params: {result}")
         try:
             tool_result = self.tool.run(result)
             logger.info(f"ToolNode response: {tool_result}")

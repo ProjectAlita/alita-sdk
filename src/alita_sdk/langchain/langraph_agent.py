@@ -191,7 +191,8 @@ def create_graph(
                                 lg_builder.add_node(node_id, LoopNode(
                                     client=client, tool=tool, task=node.get('task', ""),
                                     name=node['id'], return_type='dict',
-                                    structured_output=node.get('structured_output', False)))
+                                    output_variables=node.get('output', []),
+                                    input_variables=node.get('input', ['messages'])))
                             break
                 elif node_type == 'llm':
                     lg_builder.add_node(node_id, LLMNode(
