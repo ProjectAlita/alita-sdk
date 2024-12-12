@@ -1,7 +1,12 @@
-import logging
+import builtins
 import json
+import logging
 import re
-from typing import Tuple
+from pydantic import create_model, Field
+from typing import Tuple, TypedDict, Any, Optional, Annotated
+from langchain_core.messages import AnyMessage
+from langchain_core.prompts import PromptTemplate
+from langgraph.graph import MessagesState, add_messages
 
 logger = logging.getLogger(__name__)
 
@@ -110,3 +115,55 @@ def unpack_json(json_data: str | dict, **kwargs) -> dict:
         if isinstance(json_data, str):
             return _unpack_json(json_data.replace("\n", "\\n"), **kwargs)
         raise e
+
+
+def parse_type(type_str):
+    """Parse a type string into an actual Python type."""
+    try:
+        # Evaluate the type string using builtins and imported modules
+        return eval(type_str, {**vars(builtins), **globals()})
+    except Exception as e:
+        print(f"Error parsing type: {e}")
+        return Any
+
+
+def create_state(data: Optional[dict] = None):
+    if not data:
+        return MessagesState
+    state_dict = {'input': str,}
+    for key, value in data.items():
+        if key == 'messages':
+            state_dict[key] = Annotated[list[AnyMessage], add_messages]
+        elif value in ['str', 'int', 'float', 'bool', 'list', 'dict']:
+            state_dict[key] = parse_type(value)
+    return TypedDict('State', state_dict)
+
+def create_typed_dict_from_yaml(data):
+    # Extract class name and attributes
+    class_name, attributes = next(iter(data.items()))
+
+    # Create a TypedDict class
+    cls = TypedDict(class_name, {attr: parse_type(attr_type) for attr, attr_type in attributes.items()})
+    
+    return cls
+
+def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables: list[str], state: dict) -> dict:
+    input_data = {}
+    for key, value in input_mapping.items():
+        if key == 'chat_history':
+            input_data[key] = state.get('messages', [])
+        elif value['type'] == 'fstring':
+            var_dict = {var: state.get(var, "") for var in input_variables}
+            input_data[key] = PromptTemplate.from_template(value['value']).partial(**var_dict).format(**var_dict)
+        elif value['type'] == 'fixed':
+            input_data[key] = value['value']
+        else:
+            input_data[key] = state.get(value['value'], "")
+    return input_data
+
+
+def create_pydantic_model(model_name: str, variables: dict[str, dict]):
+    fields = {}
+    for var_name, var_data in variables.items():
+        fields[var_name] = (parse_type(var_data['type']), Field(description=var_data.get('description', None)))
+    return create_model(model_name, **fields)

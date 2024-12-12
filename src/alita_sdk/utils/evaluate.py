@@ -24,10 +24,9 @@ class MyABC(ABCMeta):
 
 
 class EvaluateTemplate(metaclass=MyABC):
-    def __init__(self, query: str,  chat_history: str, last_message: str):
+    def __init__(self, query: str, context: Dict):
         self.query = query
-        self.chat_history = chat_history
-        self.last_message = last_message
+        self.context = context
 
     def extract(self):
         environment = Environment()
@@ -41,10 +40,8 @@ class EvaluateTemplate(metaclass=MyABC):
         environment.filters['json_loads'] = json_loads_filter
         try:
             template = environment.from_string(self.query)
-            print("Last message: ", self.last_message)
-            print(self.chat_history)
-            result = template.render(chat_history=self.chat_history, last_message=self.last_message)
-            print(result)
+            logger.info(f"Condition context: {self.context}")
+            result = template.render(**self.context)
         except (TemplateSyntaxError, UndefinedError):
             logger.critical(format_exc())
             logger.info('Template str: %s', self.query)
