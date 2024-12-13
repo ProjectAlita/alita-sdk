@@ -27,9 +27,12 @@ logger = logging.getLogger(__name__)
 
 class ConditionalEdge(Runnable):
     name = "ConditionalEdge"
-    def __init__(self, condition: str, condition_inputs: Optional[list[str]] = []):
+    def __init__(self, condition: str, condition_inputs: Optional[list[str]] = [], 
+                 conditional_outputs: Optional[list[str]] = [], default_output: str = 'END'):
         self.condition = condition
         self.condition_inputs = condition_inputs
+        self.conditional_outputs = conditional_outputs
+        self.default_output = default_output
     
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
         logger.info(f"Current state in condition edge - {state}")
@@ -43,9 +46,14 @@ class ConditionalEdge(Runnable):
         result = template.evaluate()
         if isinstance(result, str):
             result = clean_string(result)
+            if len(self.conditional_outputs) > 0:
+                if result in self.conditional_outputs:
+                    return result
+                else:
+                    return self.default_output
         if result == 'END':
             result = END
-        return result 
+        return result
 
 class DecisionEdge(Runnable):
     name = "DecisionEdge"
@@ -58,11 +66,13 @@ Explanation: {description}
 ### Expected output:
 Answer only with step name, no need to add descrip in case none of the steps are applibcable answer with 'END'
 """
-    def __init__(self, client, steps: str, description: str = "", decisional_inputs: Optional[list[str]] = []):
+    def __init__(self, client, steps: str, description: str = "", decisional_inputs: Optional[list[str]] = [],
+                 default_output: str = 'END'):
         self.client = client
         self.steps = ",".join([clean_string(step) for step in steps])
         self.description = description
         self.decisional_inputs = decisional_inputs
+        self.default_output = default_output if default_output != 'END' else END
         
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
         additional_info = ""
@@ -79,7 +89,7 @@ Answer only with step name, no need to add descrip in case none of the steps are
         result = clean_string(completion.content.strip())
         logger.info(f"Plan to transition to: {result}")
         if result not in self.steps or result == 'END':
-            result = END
+            result = self.default_output
         return result
 
 class TransitionalEdge(Runnable):
@@ -211,13 +221,16 @@ def create_graph(
                     lg_builder.add_conditional_edges(node_id, DecisionEdge(
                         client, node['decision']['nodes'], 
                         node['decision'].get('description', ""),
-                        decisional_inputs=node['decision'].get('decisional_inputs', ['messages'])))
+                        decisional_inputs=node['decision'].get('decisional_inputs', ['messages']),
+                        default_output=node['decision'].get('default_output', 'END')))
                 elif node.get('condition'):
                     logger.info(f'Adding condition: {node["condition"]}')
                     condition_input = node['condition'].get('condition_input', ['messages'])
                     condition_definition = node['condition'].get('condition_definition', '')
                     lg_builder.add_conditional_edges(node_id, ConditionalEdge(
-                        condition=condition_definition, condition_inputs=condition_input))
+                        condition=condition_definition, condition_inputs=condition_input,
+                        conditional_outputs=node['condition'].get('conditional_outputs', []),
+                        default_output=node['condition'].get('default_output', 'END')))
 
             lg_builder.set_entry_point(clean_string(schema['entry_point']))
             
