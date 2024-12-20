@@ -13,7 +13,11 @@ def create_llm_input(prompt: dict[str, str], params: dict[str, Any], kwargs: dic
     logger.info(f"Creating LLM input with prompt: {prompt}, params: {params}, kwargs: {kwargs}")
     if prompt.get('type') == 'fstring' and params:
         return [HumanMessage(content=PromptTemplate.from_template(prompt['value']).partial(**params).format(**params))]
-    return [HumanMessage(content=prompt['value'])]
+    elif prompt.get('type') == 'string' and params:
+        return [HumanMessage(
+            content=f"Current User Input:\n{kwargs['input']}\nLast LLM Output:\n{params}\nPrompt:\n{prompt['value']}")]
+    else:
+        return [HumanMessage(content=prompt['value'])]
 
 
 class LLMNode(BaseTool):
