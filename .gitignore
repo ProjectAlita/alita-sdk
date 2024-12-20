@@ -165,3 +165,4 @@ test.py
 memory.*
 docs/
 settings.json
+.idea/
