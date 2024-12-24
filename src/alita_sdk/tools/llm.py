@@ -1,16 +1,18 @@
 import json
 import logging
 from traceback import format_exc
+from typing import Any, Optional, Dict, List
 
+from langchain_core.messages import HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import BaseTool
-from typing import Any, Optional, Dict, List
-from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
+
 from ..langchain.utils import _extract_json, create_pydantic_model
 
 logger = logging.getLogger(__name__)
 
-def create_llm_input(prompt: dict[str, str], params: dict[str, Any], kwargs: dict[str, Any]) -> list[HumanMessage]:
+
+def create_llm_input(prompt: Dict[str, str], params: Dict[str, Any], kwargs: Dict[str, Any]) -> list[HumanMessage]:
     logger.info(f"Creating LLM input with prompt: {prompt}, params: {params}, kwargs: {kwargs}")
     if prompt.get('type') == 'fstring' and params:
         return [HumanMessage(content=PromptTemplate.from_template(prompt['value']).partial(**params).format(**params))]
@@ -23,7 +25,7 @@ def create_llm_input(prompt: dict[str, str], params: dict[str, Any], kwargs: dic
 
 class LLMNode(BaseTool):
     name: str = 'LLMNode'
-    prompt: dict[str, str]
+    prompt: Dict[str, str]
     description: str = 'This is tool node for LLM'
     client: Any = None
     return_type: str = "str"
@@ -31,7 +33,7 @@ class LLMNode(BaseTool):
     output_variables: Optional[List[str]] = None
     input_variables: Optional[List[str]] = None
     structured_output: Optional[bool] = False
-        
+
     def _run(self, *args, **kwargs):
         params = {var: kwargs.get(var, "") for var in self.input_variables if var != 'messages'}
         logger.info(f"LLM Node params: {params}")
@@ -55,7 +57,8 @@ class LLMNode(BaseTool):
                 response = _extract_json(result) or {}
                 response_data = {key: response[key] for key in response if key in self.output_variables}
                 if not response_data.get('messages'):
-                    response_data['messages'] = [{"role": "assistant", "content": response_data.get(self.response_key) or result}]
+                    response_data['messages'] = [
+                        {"role": "assistant", "content": response_data.get(self.response_key) or result}]
                 return response_data
         except ValueError:
             return {self.output_variables[0]: result, "messages": [{"role": "assistant", "content": result}]}
