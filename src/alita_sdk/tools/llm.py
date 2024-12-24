@@ -1,3 +1,4 @@
+import json
 import logging
 from traceback import format_exc
 
@@ -15,7 +16,7 @@ def create_llm_input(prompt: dict[str, str], params: dict[str, Any], kwargs: dic
         return [HumanMessage(content=PromptTemplate.from_template(prompt['value']).partial(**params).format(**params))]
     elif prompt.get('type') == 'string' and params:
         return [HumanMessage(
-            content=f"Current User Input:\n{kwargs['input']}\nLast LLM Output:\n{params}\nPrompt:\n{prompt['value']}")]
+            content=f"Current User Input:\n{kwargs['input']}\nPrompt:\n{prompt['value']}")]
     else:
         return [HumanMessage(content=prompt['value'])]
 
@@ -42,6 +43,11 @@ class LLMNode(BaseTool):
                 llm = self.client.with_structured_output(stuct_model)
                 completion = llm.invoke(llm_input)
                 result = completion.model_dump()
+                if not result.get('messages'):
+                    result['messages'] = [{"role": "assistant", "content": f"""
+                    ```json
+                    {json.dumps(result, indent=4)}
+                    """}]
                 return result
             else:
                 completion = self.client.invoke(llm_input)
