@@ -34,7 +34,7 @@ class LoopNode(BaseTool):
     output_variables: Optional[list] = None
     input_variables: Optional[list] = None
     return_type: str = "str"
-    prompt: str = """You are tasked to formulate an LIST of ALL inputs for the tool according to user task and derived solely from the provided chat_history. Do not include this message as part of the inputs."
+    prompt: str = """You are tasked to formulate an LIST of ALL inputs for the tool according to instrcutions and derived solely from the conversation history. Do not include this message as part of the inputs."
 
 Input data:
 - Tool name: {tool_name}
@@ -44,13 +44,13 @@ Input data:
 
 {context}
 
-Task from user: 
+Instructions to create the input for the tool: 
 {task}
 
 Expected output:
 - COMLETE LIST OF JSON to be used as sequential kwargs for the tool call. 
 - You must provide all inputs wthin one LIST OF JSONS, avoid providing them one by one.
-- Anwer must be LIST OF JSON only extractable by JSON.LOADS.
+- Anwer must be  LIST OF JSON only extractable by JSON.LOADS.
 
 EXPETED OUTPUT FORMAT: 
 - [{{"arg1": "input1", "arg2": "input2"}}, {{"arg1": "input3", "arg2": "input4"}}, ...]
@@ -70,21 +70,21 @@ EXPETED OUTPUT FORMAT:
             else:
                 if not context:
                     context += 'Context of the conversation:\n'
-                context += f'{params[var]}: {kwargs.get(var, "")}\n'
+                context += f'{var}: {kwargs.get(var, "")}\n'
         logger.info(f"LLM Node params: {params}")
         
-        input = llm_input[:] + [
+        predict_input = llm_input[:] + [
             HumanMessage(self.prompt.format(
                 tool_name=self.tool.name, 
                 tool_description=self.tool.description, 
                 context = context,
                 schema=parameters,
-                task=self.task))
-        ]
-        logger.info(f"LoopNode input: {input[-1].content}")
-        completion = self.client.invoke(input)
+                task=self.task))]
+        logger.debug(f"LoopNode input: {predict_input}")
+        completion = self.client.invoke(predict_input)
+        logger.debug(f"LoopNode pure output: {completion}")
         loop_data = _old_extract_json(completion.content.strip())  
-        logger.info(f"LoopNode input: {loop_data}")
+        logger.debug(f"LoopNode output: {loop_data}")
         if self.return_type == "str":
             accumulated_response = ''
         else:
@@ -93,6 +93,7 @@ EXPETED OUTPUT FORMAT:
             output_varibles = {self.output_variables[0]}
         if isinstance(loop_data, list):
             for each in loop_data:
+                logger.debug(f"LoopNode step input: {each}")
                 try:
                     tool_run = self.tool.run(tool_input=each)
                     if len(self.output_variables) > 0:
@@ -108,7 +109,7 @@ EXPETED OUTPUT FORMAT:
                     
                 except Exception as e:
                     resp = f"""Tool input to the {self.tool.name} with value {loop_data} raised an exception: {e}.                                             
-                        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {input[-1].content}\n\n"""
+                        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {predict_input[-1].content}\n\n"""
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += resp
                     accumulated_response = process_response(resp, self.return_type, accumulated_response)
@@ -122,18 +123,18 @@ EXPETED OUTPUT FORMAT:
                         output_varibles[self.output_variables[0]] += f'{tool_run}\n\n'
             except ValidationError:
                 resp = f"""Tool input to the {self.tool.name} with value {loop_data} raised ValidationError.                                             
-                    \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {input[-1].content}\n\n"""
+                    \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {predict_input[-1].content}\n\n"""
                 if len(self.output_variables) > 0:
                     output_varibles[self.output_variables[0]] += resp
                 accumulated_response =  process_response(resp, self.return_type, accumulated_response)
         else:
             resp = f"""Tool input to the {self.tool.name} with value {loop_data} is not a valid JSON. 
-                \n\nTool schema is {dumps(params)} \n\nand the input to LLM was  {input[-1].content}\n\n"""
+                \n\nTool schema is {dumps(params)} \n\nand the input to LLM was  {predict_input[-1].content}\n\n"""
             if len(self.output_variables) > 0:
                 output_varibles[self.output_variables[0]] += resp
             accumulated_response = process_response(f"""Tool input to the {self.tool.name} with value {loop_data} is not a valid JSON. 
                                                     \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
-                                                    {input[-1].content}""", self.return_type, accumulated_response)
+                                                    {predict_input[-1].content}""", self.return_type, accumulated_response)
         if len(self.output_variables) > 0:
             accumulated_response[self.output_variables[0]] = output_varibles[self.output_variables[0]]
         return accumulated_response

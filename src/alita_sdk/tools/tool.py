@@ -74,11 +74,14 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             logger.info(f"ToolNode tool params: {result}")
         try:
             tool_result = self.tool.run(result)
+            message_result = tool_result
+            if isinstance(tool_result, dict) or isinstance(tool_result, list):
+                message_result = dumps(tool_result)
             logger.info(f"ToolNode response: {tool_result}")
             if not self.output_variables:
-                return {"messages": [{"role": "assistant", "content": tool_result}]}
+                return {"messages": [{"role": "assistant", "content": message_result}]}
             else:
-                return { self.output_variables[0]: tool_result, "messages": [{"role": "assistant", "content": tool_result}] }
+                return { self.output_variables[0]: tool_result, "messages": [{"role": "assistant", "content": message_result}] }
         except ValidationError:
             logger.error(f"ValidationError: {format_exc()}")
             return {"messages":[{"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {result} raised ValidationError. 

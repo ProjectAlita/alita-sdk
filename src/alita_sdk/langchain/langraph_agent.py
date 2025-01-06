@@ -267,12 +267,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         thread_id = config.get("configurable", {}).get("thread_id")
         if input.get('chat_history') and not input.get('messages'):
             input['messages'] = input.pop('chat_history')
-        # if input.get('input'):
-        #     if input.get('messages'):
-        #         input['messages'].append({"role": "user", "content": input.get('input')})
-        #     else:
-        #         input['messages'] = [{"role": "user", "content": input.get('input')}]
-        
+        if input.get('input') and not input.get('messages'):
+            input['messages'] = [{"role": "user", "content": input.get('input')}]
+        elif input.get('input') and input.get('messages'):
+            if input.get('messages')[-1].get('content') != input.get('input'):
+                input['messages'].append({"role": "user", "content": input.get('input')})
         logging.info(f"Input: {thread_id} - {input}")
         
         if self.checkpointer and self.checkpointer.get_tuple(config):

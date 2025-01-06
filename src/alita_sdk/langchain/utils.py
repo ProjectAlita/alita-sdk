@@ -128,9 +128,9 @@ def parse_type(type_str):
 
 
 def create_state(data: Optional[dict] = None):
-    if not data:
-        return MessagesState
     state_dict = {'input': str,}
+    if not data:
+        data = {'messages': 'list[str]'}
     for key, value in data.items():
         if key == 'messages':
             state_dict[key] = Annotated[list[AnyMessage], add_messages]
