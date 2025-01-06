@@ -18,6 +18,7 @@ from ..utils.evaluate import EvaluateTemplate
 from ..tools.llm import LLMNode
 from ..tools.tool import ToolNode
 from ..tools.loop import LoopNode
+from ..tools.loop_output import LoopToolNode
 from ..tools.function import FunctionTool
 from ..utils.utils import clean_string
 
@@ -171,6 +172,7 @@ def create_graph(
     ):
         """ Create a message graph from a yaml schema """
         schema = yaml.safe_load(yaml_schema)
+        logger.info(f"Schema: {schema}")
         state_class = create_state(schema.get('state', {}))
         lg_builder = StateGraph(state_class)
         interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
@@ -181,7 +183,7 @@ def create_graph(
                 node_id = clean_string(node['id'])
                 tool_name = clean_string(node.get('tool', node_id))
                 logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-                if node_type in ['function', 'tool', 'loop']:
+                if node_type in ['function', 'tool', 'loop', 'loop_from_tool']:
                     for tool in tools:
                         if tool.name == tool_name:
                             if node_type == 'function':
@@ -203,6 +205,22 @@ def create_graph(
                                     name=node['id'], return_type='dict',
                                     output_variables=node.get('output', []),
                                     input_variables=node.get('input', ['messages'])))
+                            elif node_type == 'loop_from_tool':
+                                loop_tool = None
+                                loop_tool_name = clean_string(node.get('loop_tool', 'None'))
+                                for t in tools:
+                                    logger.info(f"Tool: {t.name}")
+                                    if t.name == loop_tool_name:
+                                        loop_tool = t
+                                if loop_tool:
+                                    lg_builder.add_node(node_id, LoopToolNode(
+                                        client=client, tool=tool,
+                                        name=node['id'], return_type='dict',
+                                        loop_tool=loop_tool,
+                                        variables_mapping = node.get('variables_mapping', {}),
+                                        output_variables=node.get('output', []),
+                                        input_variables=node.get('input', ['messages']),
+                                        structured_output=node.get('structured_output', False)))
                             break
                 elif node_type == 'llm':
                     lg_builder.add_node(node_id, LLMNode(

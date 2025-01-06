@@ -91,6 +91,8 @@ EXPETED OUTPUT FORMAT:
             accumulated_response = {"messages": [{"role": "assistant", "content": ""}]}
         if len(self.output_variables) > 0:
             output_varibles = {self.output_variables[0]}
+        if isinstance(loop_data, dict):
+            loop_data = [loop_data]
         if isinstance(loop_data, list):
             for each in loop_data:
                 logger.debug(f"LoopNode step input: {each}")
@@ -101,12 +103,11 @@ EXPETED OUTPUT FORMAT:
                     accumulated_response = process_response(tool_run, self.return_type, accumulated_response)
                 except ValidationError:
                     resp = f"""Tool input to the {self.tool.name} with value {loop_data} raised ValidationError.
-                        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {input[-1].content}\n\n"""
+                        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {predict_input[-1].content}\n\n"""
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += resp
                     accumulated_response = process_response(resp, self.return_type, accumulated_response)
                     logger.error(f"ValidationError: {format_exc()}")
-                    
                 except Exception as e:
                     resp = f"""Tool input to the {self.tool.name} with value {loop_data} raised an exception: {e}.                                             
                         \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {predict_input[-1].content}\n\n"""
@@ -115,18 +116,6 @@ EXPETED OUTPUT FORMAT:
                     accumulated_response = process_response(resp, self.return_type, accumulated_response)
                     logger.error(f"Exception: {format_exc()}")
                 logger.info(f"LoopNode response: {accumulated_response}")
-        elif isinstance(loop_data, dict):
-            try:
-                tool_run = self.tool.run(loop_data)
-                accumulated_response = process_response(tool_run, self.return_type, accumulated_response)
-                if len(self.output_variables) > 0:
-                        output_varibles[self.output_variables[0]] += f'{tool_run}\n\n'
-            except ValidationError:
-                resp = f"""Tool input to the {self.tool.name} with value {loop_data} raised ValidationError.                                             
-                    \n\nTool schema is {dumps(params)} \n\nand the input to LLM was {predict_input[-1].content}\n\n"""
-                if len(self.output_variables) > 0:
-                    output_varibles[self.output_variables[0]] += resp
-                accumulated_response =  process_response(resp, self.return_type, accumulated_response)
         else:
             resp = f"""Tool input to the {self.tool.name} with value {loop_data} is not a valid JSON. 
                 \n\nTool schema is {dumps(params)} \n\nand the input to LLM was  {predict_input[-1].content}\n\n"""
