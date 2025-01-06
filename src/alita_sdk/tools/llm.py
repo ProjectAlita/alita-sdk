@@ -20,7 +20,7 @@ def create_llm_input(prompt: Dict[str, str], params: Dict[str, Any], kwargs: Dic
         return [HumanMessage(
             content=f"Current User Input:\n{kwargs['input']}\nPrompt:\n{prompt['value']}")]
     else:
-        return [HumanMessage(content=prompt['value'])]
+        return kwargs.get("messages") + [HumanMessage(prompt['value'])]
 
 
 class LLMNode(BaseTool):
@@ -45,11 +45,6 @@ class LLMNode(BaseTool):
                 llm = self.client.with_structured_output(stuct_model)
                 completion = llm.invoke(llm_input)
                 result = completion.model_dump()
-                if not result.get('messages'):
-                    result['messages'] = [{"role": "assistant", "content": f"""
-                    ```json
-                    {json.dumps(result, indent=4)}
-                    """}]
                 return result
             else:
                 completion = self.client.invoke(llm_input)
@@ -61,7 +56,10 @@ class LLMNode(BaseTool):
                         {"role": "assistant", "content": response_data.get(self.response_key) or result}]
                 return response_data
         except ValueError:
-            return {self.output_variables[0]: result, "messages": [{"role": "assistant", "content": result}]}
+            if self.output_variables:
+                return {self.output_variables[0]: result, "messages": [{"role": "assistant", "content": result}]}
+            else:
+                return {"messages": [{"role": "assistant", "content": result}]}
         except Exception as e:
             logger.error(f"Error in LLM Node: {format_exc()}")
             return {"messages": [{"role": "assistant", "content": f"Error: {e}"}]}
