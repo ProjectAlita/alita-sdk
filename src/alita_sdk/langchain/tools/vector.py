@@ -137,7 +137,7 @@ class VectorAdapter:
         """Delete documents in batches by their hashes"""
         if not doc_hashes:
             return
-        
+
         for i in range(0, len(doc_hashes), batch_size):
             batch = doc_hashes[i:i + batch_size]
             where_clause = {
@@ -155,7 +155,7 @@ class VectorAdapter:
         """Optimized batch deletion"""
         if not ids:
             return
-        
+
         if self._vs_cls_name == "Chroma":
             # Use single deletion operation
             self._vectorstore._collection.delete(ids=ids)
@@ -237,7 +237,7 @@ class VectorAdapter:
     def _pgvector_delete_by_ids(self, ids):
         """Optimized batch deletion by IDs for PGVector"""
         from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
-        
+
         with Session(self._vectorstore._bind) as session:  # pylint: disable=W0212
             # Single query to delete all matching documents
             session.query(self._vectorstore.EmbeddingStore).filter(
@@ -248,12 +248,12 @@ class VectorAdapter:
     def _pgvector_delete_by_filter(self, where):
         """Optimized filter-based deletion for PGVector"""
         from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
-        
+
         with Session(self._vectorstore._bind) as session:  # pylint: disable=W0212
             collection = self._vectorstore.get_collection(session)
             if not collection:
                 raise ValueError("Collection not found")
-            
+
             filter_by = [self._vectorstore.EmbeddingStore.collection_id == collection.uuid]
             if where:
                 if self._vectorstore.use_jsonb:
@@ -263,7 +263,7 @@ class VectorAdapter:
                 else:
                     filter_clauses = self._vectorstore._create_filter_clause_json_deprecated(where)  # pylint: disable=W0212
                     filter_by.extend(filter_clauses)
-            
+
             # Single query to delete all matching documents
             session.query(self._vectorstore.EmbeddingStore).filter(
                 *filter_by
@@ -307,12 +307,12 @@ class VectorAdapter:
         #
         if "metadatas" in include:
             data_result["metadatas"] = []
-        
+
         with Session(self._vectorstore._bind) as session:
             collection = self._vectorstore.get_collection(session)
             if not collection:
                 raise ValueError("Collection not found")
-                
+
             stmt = select(self._vectorstore.EmbeddingStore).where(
                 self._vectorstore.EmbeddingStore.collection_id == collection.uuid
             )
@@ -328,7 +328,7 @@ class VectorAdapter:
 
             # Execute optimized query
             results = session.execute(stmt).fetchall()
-            
+
             # Format results efficiently
             for result in results:
                 data_result["documents"].append(result.document)

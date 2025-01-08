@@ -96,7 +96,7 @@ def main(
     if bins_with_llm:
             loader_params['bins_with_llm'] = True
             loader_params['llm'] = llmodel
-    
+
     if chunk_processing_prompt:
         artifact_tmp = tempfile.mkdtemp()
         target_path = os.path.join(artifact_tmp, "Metadataextract.txt")
@@ -110,7 +110,7 @@ def main(
 
     def process_document(document):
         replace_source(document, source_replacers, keys=["source", "table_source"])
-        
+
         if document_processing_prompt and llmodel:
             try:
                 document = summarize(llmodel, document, document_processing_prompt)
@@ -146,11 +146,11 @@ def main(
             library=library,
         )
         existing_keys = set(existing_docs.keys())
-        
+
         # Handle documents without hash
         if docs_without_hash:
             docs_to_delete.extend([doc["id"] for doc in docs_without_hash])
-            
+
         def process_and_check_document(doc):
             try:
                 for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
@@ -186,7 +186,7 @@ def main(
     else:
         # Base logic with batching
         vectoradapter.delete_dataset(dataset)
-        
+
         quota_result = vectoradapter.quota_check(
             enforce=True,
             tag="Quota (after cleanup)",
@@ -200,14 +200,14 @@ def main(
         # Process all documents and their chunks
         documents_to_add = []
         splitter = Splitter(**splitter_params)
-        
+
         for doc in processed_docs:
             try:
                 for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
                     chunk_hash = hashlib.sha256(
                         chunk.page_content.encode()
                     ).hexdigest()
-                        
+
                     documents_to_add.extend(prepare_chunk_documents(
                         chunk, chunk_idx, chunk_hash, library, loader_name, dataset
                     ))
@@ -221,7 +221,7 @@ def main(
     # Final operations
     vectoradapter.vacuum()
     final_quota = vectoradapter.quota_check(enforce=True, tag="Quota (final)", verbose=True)
-    
+
     if not final_quota["ok"]:
         return {"ok": False, "error": "Storage quota exceeded"}
 
@@ -230,7 +230,7 @@ def main(
 def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, dataset, og_keywords_set_for_source):
     """Helper to prepare document list for a chunk"""
     chunk_docs = []
-    
+
     # Add keywords document if present
     if chunk.metadata.get('keywords'):
         chunk_docs.append(Document(
@@ -245,7 +245,7 @@ def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, 
             }
         ))
 
-    # Add summary document if present  
+    # Add summary document if present
     if chunk.metadata.get('document_summary'):
         chunk_docs.append(Document(
             page_content=chunk.metadata['document_summary'],
@@ -253,7 +253,7 @@ def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, 
                 'source': chunk.metadata['source'],
                 'type': 'document_summary',
                 'library': library,
-                'source_type': loader_name, 
+                'source_type': loader_name,
                 'dataset': dataset,
                 'chunk_hash': chunk_hash,
             }
