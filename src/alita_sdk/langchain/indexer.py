@@ -65,6 +65,8 @@ def main(
         quota_params=None,
         bins_with_llm = False,
         max_docs_per_add=None,
+        incremental=False,
+        batch_size=100,
 ):
     #
     # Logic is the following:
@@ -74,205 +76,199 @@ def main(
     # 4. Keyword extractor and its params to get keywords (for the splitted data)
     # 5. Embedder and its params to get embeddings (for the splitted data)
     #
+
+    # Initialize components
     embedding = get_embeddings(embedding_model, embedding_model_params)
     vectorstore = get_vectorstore(vectorstore, vectorstore_params, embedding_func=embedding)
-    #
     vectoradapter = VectorAdapter(
         vectorstore=vectorstore,
         embeddings=embedding,
         quota_params=quota_params,
     )
-    #
+
+    # Initial quota check
+    vectoradapter.quota_check(enforce=False, tag="Quota (initial)", verbose=True)
+
+    # Setup LLM if needed
+    llmodel = None
+    if document_processing_prompt or chunk_processing_prompt or (bins_with_llm and ai_model):
+        llmodel = get_model(ai_model, ai_model_params)
+        if bins_with_llm:
+            loader_params['bins_with_llm'] = True
+            loader_params['llm'] = llmodel
+
+    # Setup keyword extractor if needed
     kw_extractor = None
     if kw_for_document and kw_plan:
         kw_extractor = KWextractor(kw_plan, kw_args)
-    llmodel = get_model(ai_model, ai_model_params)
-    #
-    vectoradapter.quota_check(
-        enforce=False,
-        tag="Quota (before pre-cleanup)",
-        verbose=True,
-    )
 
-    if bins_with_llm and llmodel is not None:
-        loader_params['bins_with_llm'] = bins_with_llm
-        loader_params['llm'] = llmodel
-
-    #
-    # Delete stale 'dataset' documents from vectorstore before (re-)indexing
-    vectoradapter.delete_dataset(dataset)
-    vectoradapter.persist()
-    #
-    vectoradapter.vacuum()
-    #
-    quota_result = vectoradapter.quota_check(
-        enforce=True,
-        tag="Quota (after pre-cleanup)",
-        verbose=True,
-    )
-    #
-    if not quota_result["ok"]:
-        return {
-            "ok": False,
-            "error": "Storage quota exceeded",
-        }
-    #
-    og_keywords_set_for_source = set()
-    #
-    target_path = None
-    if chunk_processing_prompt:
-        artifact_tmp = tempfile.mkdtemp()
-        target_path = os.path.join(artifact_tmp, "Metadataextract.txt")
+    # Load and process all documents first to minimize LLM API calls
+    processed_docs = []
     for document in loader(loader_name, loader_params, load_params):
         replace_source(document, source_replacers, keys=["source", "table_source"])
-        #
-        # Add: two records/placeholders here - summary + keywords
-        if document_processing_prompt:
+        
+        if document_processing_prompt and llmodel:
             try:
                 document = summarize(llmodel, document, document_processing_prompt)
-                if document_debug:
-                    print_log("Summary: ", document.metadata.get('document_summary', ''))
             except Exception as e:
                 print_log("Failed to generate document summary", str(e))
-        if kw_for_document and kw_extractor.extractor:
-            if len(document.metadata.get('keywords', [])) == 0 and \
-                    len(document.page_content) > 1000:
-                #
-                document.metadata['keywords'] = kw_extractor.extract_keywords(
-                    document.metadata.get('document_summary', '') + '\n' + document.page_content
-                )
-                if document_debug:
-                    print_log("Keywords: ", document.metadata['keywords'])
-        #
-        if chunk_processing_prompt:
-            try:
-                result = llm_predict(llmodel, chunk_processing_prompt, document.metadata.get('document_summary', '') + '\n' + document.page_content)
-                with open(target_path, "a") as f:
-                    f.write(result + "\n")
-            except Exception as e:
-                print_log("Failed to generate document metadata", str(e))
-        splitter = Splitter(**splitter_params)
-        for index, document in enumerate(splitter.split(document, splitter_name)):
-            #
-            _documents = []
-            #
-            if document.metadata.get('keywords'):
-                _documents.append(
-                    Document(
-                        page_content=', '.join(document.metadata['keywords']),
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'keywords',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                        }
-                    )
-                )
-            #
-            if document.metadata.get('document_summary'):
-                _documents.append(
-                    Document(
-                        page_content=document.metadata['document_summary'],
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'document_summary',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                        }
-                    )
-                )
-            #
-            # og_data is only set by TableLoader
-            #
-            if document.metadata.get('og_data'):
-                _documents.append(
-                    Document(
-                        page_content=document.page_content,  # cleansed_data
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'data',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                            'chunk_index': index,
-                            'data': document.metadata['og_data'],
-                        }
-                    )
-                )
-                # Only save columns (=file keywords) once per source
-                if document.metadata['table_source'] not in og_keywords_set_for_source:
-                    og_keywords_set_for_source.add(document.metadata['table_source'])
-                    _documents.append(
-                        Document(
-                            page_content=', '.join(document.metadata['columns']),
-                            metadata={
-                                'source': document.metadata['table_source'],
-                                'type': 'keywords',
-                                'library': library,
-                                'source_type': loader_name,
-                                'dataset': dataset,
-                            }
-                        )
-                    )
-            #
-            else:
-                _documents.append(
-                    Document(
-                        page_content=document.page_content,
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'data',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                            'chunk_index': index,
-                        }
-                    )
-                )
-            #
-            if document_debug:
-                print_log(_documents)
-            #
-            for _document in _documents:
-                if "\x00" in _document.page_content:
-                    _document.page_content = _document.page_content.replace("\x00", "")
-            #
-            if max_docs_per_add is None:
-                add_documents(vectorstore=vectoradapter.vectorstore, documents=_documents)
-            else:
-                for idx in range(0, len(_documents), max_docs_per_add):
-                    _docs_add_chunk = _documents[idx:idx+max_docs_per_add]
-                    add_documents(vectorstore=vectoradapter.vectorstore, documents=_docs_add_chunk)
-            #
-            quota_result = vectoradapter.quota_check(
-                enforce=True,
-                tag="Quota (docs added)",
-                verbose=document_debug,
+
+        if kw_extractor and len(document.metadata.get('keywords', [])) == 0 and len(document.page_content) > 1000:
+            document.metadata['keywords'] = kw_extractor.extract_keywords(
+                document.metadata.get('document_summary', '') + '\n' + document.page_content
             )
-            #
-            if not quota_result["ok"]:
-                return {
-                    "ok": False,
-                    "error": "Storage quota exceeded",
-                }
-        #
-        vectoradapter.persist()
-        #
-        quota_result = vectoradapter.quota_check(
-            enforce=True,
-            tag="Quota (doc done)",
-            verbose=document_debug,
+
+        processed_docs.append(document)
+
+    if incremental:
+        # Incremental update logic
+        existing_docs = vectoradapter.get_data_efficient(
+            where={"$and": [{"dataset": dataset}, {"library": library}]},
+            include=["documents", "metadatas"]
         )
-        #
+
+        documents_to_add = []
+        doc_hashes_seen = set()
+        docs_to_delete = []
+
+        # Process existing documents
+        existing_map = {}
+        for idx, metadata in enumerate(existing_docs.get("metadatas", [])):
+            if metadata.get("chunk_hash"):
+                existing_map[metadata["chunk_hash"]] = {
+                    "id": existing_docs["ids"][idx],
+                    "content": existing_docs["documents"][idx]
+                }
+
+        # Process all documents and their chunks
+        splitter = Splitter(**splitter_params)
+        for doc in processed_docs:
+            for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
+                chunk_hash = hashlib.sha256(
+                    (chunk.page_content + str(chunk.metadata)).encode()
+                ).hexdigest()
+
+                if chunk_hash in existing_map:
+                    doc_hashes_seen.add(chunk_hash)
+                    continue
+
+                documents_to_add.extend(prepare_chunk_documents(
+                    chunk, chunk_idx, chunk_hash, library, loader_name, dataset
+                ))
+
+        # Identify documents to delete
+        docs_to_delete = [
+            doc_info["id"] 
+            for doc_hash, doc_info in existing_map.items() 
+            if doc_hash not in doc_hashes_seen
+        ]
+
+        # Perform deletions if needed
+        if docs_to_delete:
+            vectoradapter.batch_delete_by_ids(docs_to_delete)
+            vectoradapter.quota_check(enforce=True, tag="Quota (after deletions)", verbose=True)
+
+    else:
+        # Base logic with batching
+        vectoradapter.delete_dataset(dataset)
+        vectoradapter.persist()
+        vectoradapter.vacuum()
+        
+        quota_result = vectoradapter.quota_check(
+            enforce=True, 
+            tag="Quota (after cleanup)", 
+            verbose=True
+        )
         if not quota_result["ok"]:
-            return {
-                "ok": False,
-                "error": "Storage quota exceeded",
+            return {"ok": False, "error": "Storage quota exceeded"}
+
+        # Process all documents and their chunks
+        documents_to_add = []
+        splitter = Splitter(**splitter_params)
+        
+        for doc in processed_docs:
+            for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
+                chunk_hash = hashlib.sha256(
+                    (chunk.page_content + str(chunk.metadata)).encode()
+                ).hexdigest()
+                    
+                documents_to_add.extend(prepare_chunk_documents(
+                    chunk, chunk_idx, chunk_hash, library, loader_name, dataset
+                ))
+
+    # Add documents in optimized batches
+    if documents_to_add:
+        vectoradapter.batch_add_documents(documents_to_add, batch_size)
+
+    # Final operations
+    vectoradapter.vacuum()
+    final_quota = vectoradapter.quota_check(enforce=True, tag="Quota (final)", verbose=True)
+    
+    if not final_quota["ok"]:
+        return {"ok": False, "error": "Storage quota exceeded"}
+
+    return {"ok": True}
+
+def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, dataset):
+    """Helper to prepare document list for a chunk"""
+    chunk_docs = []
+    
+    # Add keywords document if present
+    if chunk.metadata.get('keywords'):
+        chunk_docs.append(Document(
+            page_content=', '.join(chunk.metadata['keywords']),
+            metadata={
+                'source': chunk.metadata['source'],
+                'type': 'keywords',
+                'library': library,
+                'source_type': loader_name,
+                'dataset': dataset,
+                'chunk_hash': chunk_hash,
             }
-    #
-    return {"ok": True, "target_path": target_path}
+        ))
+
+    # Add summary document if present  
+    if chunk.metadata.get('document_summary'):
+        chunk_docs.append(Document(
+            page_content=chunk.metadata['document_summary'],
+            metadata={
+                'source': chunk.metadata['source'],
+                'type': 'document_summary',
+                'library': library,
+                'source_type': loader_name, 
+                'dataset': dataset,
+                'chunk_hash': chunk_hash,
+            }
+        ))
+
+    # Add main document
+    base_metadata = {
+        'source': chunk.metadata['source'],
+        'type': 'data',
+        'library': library,
+        'source_type': loader_name,
+        'dataset': dataset,
+        'chunk_index': chunk_idx,
+        'chunk_hash': chunk_hash,
+    }
+
+    if chunk.metadata.get('og_data'):
+        chunk_docs.append(Document(
+            page_content=chunk.page_content,
+            metadata={**base_metadata, 'data': chunk.metadata['og_data']}
+        ))
+    else:
+        chunk_docs.append(Document(
+            page_content=chunk.page_content,
+            metadata=base_metadata
+        ))
+
+    # Clean null bytes
+    for doc in chunk_docs:
+        if "\x00" in doc.page_content:
+            doc.page_content = doc.page_content.replace("\x00", "")
+
+    return chunk_docs
 
 
 def index(
