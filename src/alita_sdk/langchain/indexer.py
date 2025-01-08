@@ -121,13 +121,9 @@ def main(
         processed_docs.append(document)
 
     if incremental:
-        # Get source key metadata values for incremental update
-        source_keys = {key for doc in processed_docs for key in doc.metadata if key == 'source' or key == 'table_source'}
-        # Incremental update logic begins here
-
-        # Get existing documents for the dataset and source keys
+        # Incremental update logic
         existing_docs = vectoradapter.get_data_efficient(
-            where={"$and": [{"dataset": dataset}, {"$in": [source for source in source_keys]}]},
+            where={"$and": [{"dataset": dataset}, {"library": library}]},
             include=["documents", "metadatas"]
         )
 
@@ -140,8 +136,8 @@ def main(
         for idx, metadata in enumerate(existing_docs.get("metadatas", [])):
             if metadata.get("chunk_hash"):
                 existing_map[metadata["chunk_hash"]] = {
-                    "id": existing_docs["metadatas"][idx]['id'],
-                    "content": existing_docs["documents"][idx].content,
+                    "id": existing_docs["ids"][idx],
+                    "content": existing_docs["documents"][idx]
                 }
 
         # Process all documents and their chunks
