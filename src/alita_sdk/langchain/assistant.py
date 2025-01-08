@@ -4,16 +4,16 @@ import importlib
 from copy import deepcopy as copy
 from typing import Any, Optional
 from langchain.agents import (
-    AgentExecutor, create_react_agent, 
-    create_openai_tools_agent)
-from ..langchain.mixedAgentRenderes import render_react_text_description_and_args
-from ..langchain.mixedAgentParser import MixedAgentOutputParser
+    AgentExecutor, create_openai_tools_agent, 
+    create_json_chat_agent)
+from .agents.xml_chat import create_xml_chat_agent
+# from ..langchain.mixedAgentRenderes import render_react_text_description_and_args
 from .langraph_agent import create_graph
 from langchain_core.messages import (
     BaseMessage, SystemMessage, HumanMessage
 )
 from langchain_core.prompts import MessagesPlaceholder
-from .constants import REACT_ADDON, REACT_VARS
+from .constants import REACT_ADDON, REACT_VARS, XML_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from ..toolkits.tools import get_tools
@@ -42,6 +42,7 @@ class Assistant:
         self.memory = memory
         
         logger.debug("Data for agent creation: %s", data)
+        logger.info("App type: %s", app_type)
         
         model_type = data["llm_settings"]["indexer_config"]["ai_model"]
         model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
@@ -52,21 +53,20 @@ class Assistant:
             target_name
         )
         self.client = target_cls(**model_params)
-        
+        self.tools = get_tools(data['tools'], alita)
         if app_type == "pipeline":
-            self.tools = get_tools(data['tools'], alita
-                                   # True
-                                   )
             self.prompt = data['instructions']
         else:
-            self.tools = get_tools(data['tools'], alita) + tools
-            if app_type == "react":
-                data['instructions'] += REACT_ADDON
+            self.tools += tools
             messages = [SystemMessage(content=data['instructions'])]
-            if app_type in ['openai', 'dial']:
-                messages.append(MessagesPlaceholder("chat_history"))
+            messages.append(MessagesPlaceholder("chat_history"))
+            if app_type == "react":
+                messages.append(HumanMessage(REACT_ADDON))
+            elif app_type == "xml":
+                messages.append(HumanMessage(XML_ADDON))
+            elif app_type in ['openai', 'dial']:
                 messages.append(HumanMessage("{{input}}"))
-                messages.append(MessagesPlaceholder("agent_scratchpad"))
+            messages.append(MessagesPlaceholder("agent_scratchpad"))
             variables = {}
             input_variables = []
             for variable in data['variables']:
@@ -74,8 +74,9 @@ class Assistant:
                     variables[variable['name']] = variable['value']
                 else:
                     input_variables.append(variable['name'])
-            if app_type == "react":
+            if app_type in ["react", "xml"]:
                 input_variables = list(set(input_variables + REACT_VARS))
+            
             if chat_history and isinstance(chat_history, list):
                 messages.extend(chat_history)
             self.prompt = Jinja2TemplatedChatMessagesTemplate(messages=messages)
@@ -93,9 +94,11 @@ class Assistant:
             return self.pipeline()
         elif self.app_type == 'openai':
             return self.getOpenAIToolsAgentExecutor()
+        elif self.app_type == 'xml':
+            return self.getXMLAgentExecutor()
         else:
             self.tools = [EchoTool()] + self.tools
-            return self.getAgentExecutor()    
+            return self.getAgentExecutor()
         
     def _agent_executor(self, agent: Any):
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
@@ -103,11 +106,15 @@ class Assistant:
                                                   max_execution_time=None, return_intermediate_steps=True)
 
     def getAgentExecutor(self):
-        agent = create_react_agent(llm=self.client, tools=self.tools, prompt=self.prompt,
-                                   output_parser=MixedAgentOutputParser(), 
-                                   tools_renderer=render_react_text_description_and_args)
+        agent = create_json_chat_agent(llm=self.client, tools=self.tools, prompt=self.prompt,
+                                       #tools_renderer=render_react_text_description_and_args
+                                       )
         return self._agent_executor(agent)
     
+    
+    def getXMLAgentExecutor(self):
+        agent = create_xml_chat_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
+        return self._agent_executor(agent)
     
     def getOpenAIToolsAgentExecutor(self):
         agent = create_openai_tools_agent(llm=self.client, tools=self.tools, prompt=self.prompt)

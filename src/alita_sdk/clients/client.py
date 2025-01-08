@@ -163,7 +163,7 @@ class AlitaClient:
         
         data = self.get_app_version_details(application_id, application_version_id)
         if not app_type:
-            app_type = data.get("agent_type", "raw")
+            app_type = data.get("agent_type", "react")
         if app_type == "alita":
             app_type = "react"
         elif app_type == "llama":
@@ -178,23 +178,6 @@ class AlitaClient:
                                       tools=tools, memory=memory).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
-            # return LLamaAssistant(data, client_fork,
-            #                       chat_history, app_type,
-            #                       tools=tools, memory=memory).reActAgent()
-        
-        
-        # elif runtime == 'autogen':
-        #     integration_details = data['llm_settings']['integration_details']
-        #     client_config = {
-        #         "model": data['llm_settings']['model_name'],
-        #         "api_key": integration_details['settings']['api_token'] if isinstance(integration_details['settings']['api_token'], str) else integration_details['settings']['api_token']['value'],
-        #         "base_url": integration_details['settings']['api_base'],
-        #         'api_type': 'azure',
-        #         'api_version': integration_details['settings']['api_version'],
-        #     }
-        #     return LangChainAssistant(client_config, template, tools).getAutoGenExecutor()
-        # elif runtime == "llama-index":
-        #     return LangChainAssistant(client_fork, template, tools).getLLamaAgentExecutor()
         
 
     def datasource(self, datasource_id: int) -> AlitaDataSource:
