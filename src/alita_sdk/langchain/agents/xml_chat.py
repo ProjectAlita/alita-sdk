@@ -1,118 +1,126 @@
-from typing import List, Sequence, Union
+from typing import Any, List, Sequence, Union, List, Tuple
 
+from langchain_core._api import deprecated
 from langchain_core.language_models import BaseLanguageModel
-from langchain_core.prompts.chat import ChatPromptTemplate
+from langchain_core.prompts.base import BasePromptTemplate
 from langchain_core.runnables import Runnable, RunnablePassthrough
 from langchain_core.tools import BaseTool
 from langchain_core.tools.render import ToolsRenderer, render_text_description
-
-from langchain.agents.format_scratchpad import format_log_to_messages
-from langchain.agents.json_chat.prompt import TEMPLATE_TOOL_RESPONSE
 from langchain.agents.output_parsers import XMLAgentOutputParser
+
+
+from langchain_core.agents import AgentAction
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+
+def format_xml_messages(
+    intermediate_steps: List[Tuple[AgentAction, str]],
+) -> str:
+    """Format the intermediate steps as XML.
+
+    Args:
+        intermediate_steps: The intermediate steps.
+
+    Returns:
+        The intermediate steps as XML.
+    """
+    thoughts: List[BaseMessage] = []
+    for action, observation in intermediate_steps:
+        log = (
+            f"<tool>{action.tool}</tool><tool_input>{action.tool_input}</tool_input>"
+        )
+        thoughts.append(AIMessage(content=log))
+        human_message = HumanMessage(f"""
+TOOL RESPONSE: 
+---------------------
+{observation}
+
+USER'S INPUT
+--------------------
+Okay, so what is the response to my last comment? 
+If using information obtained from the tools you must mention it explicitly without mentioning the tool names 
+- I have forgotten all TOOL RESPONSES! 
+Remember to respond with a XML blob with a single action or final_answer with nice markdown; and NOTHING else - even if you just want to respond to the user. Do NOT respond with anything except a XML snippet no matter what!""")
+        thoughts.append(human_message)
+    return thoughts
+
 
 
 def create_xml_chat_agent(
     llm: BaseLanguageModel,
     tools: Sequence[BaseTool],
-    prompt: ChatPromptTemplate,
-    stop_sequence: Union[bool, List[str]] = True,
+    prompt: BasePromptTemplate,
     tools_renderer: ToolsRenderer = render_text_description,
-    template_tool_response: str = TEMPLATE_TOOL_RESPONSE,
+    *,
+    stop_sequence: Union[bool, List[str]] = True,
 ) -> Runnable:
-    """Create an agent that uses JSON to format its logic, build for Chat Models.
+    """Create an agent that uses XML to format its logic.
 
     Args:
         llm: LLM to use as the agent.
         tools: Tools this agent has access to.
-        prompt: The prompt to use. See Prompt section below for more.
-        stop_sequence: bool or list of str.
-            If True, adds a stop token of "Observation:" to avoid hallucinates. 
-            If False, does not add a stop token.
-            If a list of str, uses the provided list as the stop tokens.
-            
-            Default is True. You may to set this to False if the LLM you are using
-            does not support stop sequences.
+        prompt: The prompt to use, must have input keys
+            `tools`: contains descriptions for each tool.
+            `agent_scratchpad`: contains previous agent actions and tool outputs.
         tools_renderer: This controls how the tools are converted into a string and
             then passed into the LLM. Default is `render_text_description`.
-        template_tool_response: Template prompt that uses the tool response (observation)
-            to make the LLM generate the next action to take.
-            Default is TEMPLATE_TOOL_RESPONSE.
+        stop_sequence: bool or list of str.
+            If True, adds a stop token of "</tool_input>" to avoid hallucinates.
+            If False, does not add a stop token.
+            If a list of str, uses the provided list as the stop tokens.
+
+            Default is True. You may to set this to False if the LLM you are using
+            does not support stop sequences.
 
     Returns:
         A Runnable sequence representing an agent. It takes as input all the same input
         variables as the prompt passed in does. It returns as output either an
         AgentAction or AgentFinish.
-        
-    Raises:
-        ValueError: If the prompt is missing required variables.
-        ValueError: If the template_tool_response is missing
-            the required variable 'observation'.
 
     Example:
 
         .. code-block:: python
 
             from langchain import hub
-            from langchain_community.chat_models import ChatOpenAI
-            from langchain.agents import AgentExecutor, create_json_chat_agent
+            from langchain_community.chat_models import ChatAnthropic
+            from langchain.agents import AgentExecutor, create_xml_agent
 
-            prompt = hub.pull("hwchase17/react-chat-json")
-            model = ChatOpenAI()
+            prompt = hub.pull("hwchase17/xml-agent-convo")
+            model = ChatAnthropic(model="claude-3-haiku-20240307")
             tools = ...
 
-            agent = create_json_chat_agent(model, tools, prompt)
+            agent = create_xml_agent(model, tools, prompt)
             agent_executor = AgentExecutor(agent=agent, tools=tools)
 
             agent_executor.invoke({"input": "hi"})
 
-            # Using with chat history
+            # Use with chat history
             from langchain_core.messages import AIMessage, HumanMessage
             agent_executor.invoke(
                 {
                     "input": "what's my name?",
-                    "chat_history": [
-                        HumanMessage(content="hi! my name is bob"),
-                        AIMessage(content="Hello Bob! How can I assist you today?"),
-                    ],
+                    # Notice that chat_history is a string
+                    # since this prompt is aimed at LLMs, not chat models
+                    "chat_history": "Human: My name is Bob\\nAI: Hello Bob!",
                 }
             )
 
     Prompt:
-    
+
         The prompt must have input keys:
-            * `tools`: contains descriptions and arguments for each tool.
-            * `tool_names`: contains all tool names.
-            * `agent_scratchpad`: must be a MessagesPlaceholder. Contains previous agent actions and tool outputs as messages.
-        
+            * `tools`: contains descriptions for each tool.
+            * `agent_scratchpad`: contains previous agent actions and tool outputs as an XML string.
+
         Here's an example:
 
         .. code-block:: python
 
-            from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-            
-            system = '''Assistant is a large language model trained by OpenAI.
+            from langchain_core.prompts import PromptTemplate
 
-            Assistant is designed to be able to assist with a wide range of tasks, from answering \
-            simple questions to providing in-depth explanations and discussions on a wide range of \
-            topics. As a language model, Assistant is able to generate human-like text based on \
-            the input it receives, allowing it to engage in natural-sounding conversations and \
-            provide responses that are coherent and relevant to the topic at hand.
+            template = '''You are a helpful assistant. Help the user answer any questions.
 
-            Assistant is constantly learning and improving, and its capabilities are constantly \
-            evolving. It is able to process and understand large amounts of text, and can use this \
-            knowledge to provide accurate and informative responses to a wide range of questions. \
-            Additionally, Assistant is able to generate its own text based on the input it \
-            receives, allowing it to engage in discussions and provide explanations and \
-            descriptions on a wide range of topics.
+            You have access to the following tools:
 
-            Overall, Assistant is a powerful system that can help with a wide range of tasks \
-            and provide valuable insights and information on a wide range of topics. Whether \
-            you need help with a specific question or just want to have a conversation about \
-            a particular topic, Assistant is here to assist.'''
-            
-            human = '''You have access to the following tools:
-
-            {{tools}}
+            {tools}
 
             In order to use a tool, you can use <tool></tool> and <tool_input></tool_input> tags. You will then get back a response in the form <observation></observation>
             For example, if you have a tool called 'search' that could run a google search, in order to search for the weather in SF you would respond:
@@ -124,50 +132,37 @@ def create_xml_chat_agent(
 
             <final_answer>The weather in SF is 64 degrees</final_answer>
 
+            Begin!
 
+            Previous Conversation:
+            {chat_history}
 
-            User's input
-            --------------------
-            {{input}}'''
-            
-            prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", system),
-                    MessagesPlaceholder("chat_history", optional=True),
-                    ("human", human),
-                    MessagesPlaceholder("agent_scratchpad"),
-                ]
-            )
+            Question: {input}
+            {agent_scratchpad}'''
+            prompt = PromptTemplate.from_template(template)
     """  # noqa: E501
     missing_vars = {"tools", "tool_names", "agent_scratchpad"}.difference(
         prompt.input_variables + list(prompt.partial_variables)
     )
     if missing_vars:
         raise ValueError(f"Prompt missing required variables: {missing_vars}")
-
-    if "{observation}" not in template_tool_response:
-        raise ValueError(
-            "Template tool response missing required variable 'observation'"
-        )
-
+    
     prompt = prompt.partial(
         tools=tools_renderer(list(tools)),
-        tool_names=", ".join([t.name for t in tools]),
     )
+
     if stop_sequence:
         stop = ["\nObservation"] if stop_sequence is True else stop_sequence
-        llm_to_use = llm.bind(stop=stop)
+        llm_with_stop = llm.bind(stop=stop)
     else:
-        llm_to_use = llm
+        llm_with_stop = llm
 
     agent = (
         RunnablePassthrough.assign(
-            agent_scratchpad=lambda x: format_log_to_messages(
-                x["intermediate_steps"], template_tool_response=template_tool_response
-            )
+            agent_scratchpad=lambda x: format_xml_messages(x["intermediate_steps"])
         )
         | prompt
-        | llm_to_use
+        | llm_with_stop
         | XMLAgentOutputParser()
     )
     return agent
