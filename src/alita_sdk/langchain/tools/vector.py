@@ -104,23 +104,22 @@ class VectorAdapter:
 
     def get_existing_documents(self, dataset, library):
         """ Get existing documents and their hashes from store """
-        data = self.get_data(
+        data = self.get_data_efficient(
             where={"$and": [
-                {"dataset": dataset}, 
+                {"dataset": dataset},
                 {"library": library},
-                {"type": "data"}
             ]},
-            include=["documents", "metadatas"]
+            include=["metadatas"]
         )
-        
+
         existing_docs = {}
-        for idx, metadata in enumerate(data["metadatas"]):
+        for metadata in data["metadatas"]:
             doc_hash = metadata.get("chunk_hash")
-            if doc_hash:
-                existing_docs[doc_hash] = {
-                    "content": data["documents"][idx],
-                    "metadata": metadata,
-                    "id": metadata['id']  # Store document ID
+            source = metadata.get("source")
+            key = (doc_hash, source)
+            if doc_hash and source:
+                existing_docs[key] = {
+                    "id": metadata['id'],
                 }
         return existing_docs
 
@@ -129,10 +128,12 @@ class VectorAdapter:
         for i in range(0, len(documents), batch_size):
             batch = documents[i:i + batch_size]
             add_documents(vectorstore=self.vectorstore, documents=batch)
-        self.persist()
 
     def batch_delete_documents(self, dataset, doc_hashes, batch_size=100):
         """Delete documents in batches by their hashes"""
+        if not doc_hashes:
+            return
+        
         for i in range(0, len(doc_hashes), batch_size):
             batch = doc_hashes[i:i + batch_size]
             where_clause = {
@@ -145,7 +146,6 @@ class VectorAdapter:
                 self._vectorstore._collection.delete(where=where_clause)  # pylint: disable=W0212
             elif self._vs_cls_name == "PGVector":
                 self._pgvector_delete_by_filter(where=where_clause)
-            self.persist()
 
     def batch_delete_by_ids(self, ids):
         """Delete documents by IDs directly (most efficient)"""
