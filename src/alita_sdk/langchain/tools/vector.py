@@ -114,11 +114,11 @@ class VectorAdapter:
         docs_without_hash = []
         for metadata in data["metadatas"]:
             doc_hash = metadata.get("chunk_hash")
-            source = metadata.get("source")
-            key = (doc_hash, source)
-            if doc_hash and source:
-                existing_docs[key] = {
-                    "id": metadata['id'],
+            if doc_hash:
+                existing_docs[doc_hash] = {
+                    "content": data["documents"][idx],
+                    "metadata": metadata,
+                    "id": metadata['id']  # Store document ID
                 }
             else:
                 docs_without_hash.append({
