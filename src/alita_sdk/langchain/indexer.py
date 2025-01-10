@@ -96,6 +96,8 @@ def main(
         if bins_with_llm:
             loader_params['bins_with_llm'] = True
             loader_params['llm'] = llmodel
+        artifact_tmp = tempfile.mkdtemp()
+        target_path = os.path.join(artifact_tmp, "Metadataextract.txt")
 
     # Setup keyword extractor if needed
     kw_extractor = None
@@ -118,53 +120,63 @@ def main(
                 document.metadata.get('document_summary', '') + '\n' + document.page_content
             )
 
+        if chunk_processing_prompt and llmodel:
+            try:
+                result = llm_predict(llmodel, chunk_processing_prompt, document.metadata.get('document_summary', '') + '\n' + document.page_content)
+                with open(target_path, "a") as f:
+                    f.write(result + "\n")
+            except Exception as e:
+                print_log("Failed to generate document metadata", str(e))
+
         processed_docs.append(document)
 
     if incremental:
         # Get source key metadata values for incremental update
-        source_keys = {key for doc in processed_docs for key in doc.metadata if key == 'source' or key == 'table_source'}
+        # source_keys = set()
+        # for doc in processed_docs:
+        #     if 'source' in doc.metadata:
+        #         source_keys.add(doc.metadata['source'])
+        #     if 'table_source' in doc.metadata:
+        #         source_keys.add(doc.metadata['table_source'])
+
         # Incremental update logic begins here
 
         # Get existing documents for the dataset and source keys
-        existing_docs = vectoradapter.get_data_efficient(
-            where={"$and": [{"dataset": dataset}, {"$in": [source for source in source_keys]}]},
-            include=["documents", "metadatas"]
+        existing_docs = vectoradapter.get_existing_documents(
+            dataset=dataset,
+            library=library,
         )
 
         documents_to_add = []
-        doc_hashes_seen = set()
         docs_to_delete = []
-
-        # Process existing documents
-        existing_map = {}
-        for idx, metadata in enumerate(existing_docs.get("metadatas", [])):
-            if metadata.get("chunk_hash"):
-                existing_map[metadata["chunk_hash"]] = {
-                    "id": existing_docs["metadatas"][idx]['id'],
-                    "content": existing_docs["documents"][idx].content,
-                }
-
-        # Process all documents and their chunks
+        
         splitter = Splitter(**splitter_params)
+        
+        # Create a set of existing document keys for efficient lookup
+        existing_keys = set(existing_docs.keys())
+
         for doc in processed_docs:
-            for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
-                chunk_hash = hashlib.sha256(
-                    (chunk.page_content + str(chunk.metadata)).encode()
-                ).hexdigest()
-
-                if chunk_hash in existing_map:
-                    doc_hashes_seen.add(chunk_hash)
-                    continue
-
-                documents_to_add.extend(prepare_chunk_documents(
-                    chunk, chunk_idx, chunk_hash, library, loader_name, dataset
-                ))
+            try:
+                for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
+                    chunk_hash = hashlib.sha256(
+                        chunk.page_content.encode()
+                    ).hexdigest()
+                    key = (chunk_hash, chunk.metadata.get("source"))
+                    
+                    if key not in existing_keys:
+                        documents_to_add.extend(prepare_chunk_documents(
+                            chunk, chunk_idx, chunk_hash, library, loader_name, dataset
+                        ))
+                    else:
+                        existing_keys.remove(key) # Remove existing key from set
+            except Exception as e:
+                print_log("Failed to process document", str(e))
 
         # Identify documents to delete
         docs_to_delete = [
             doc_info["id"] 
-            for doc_hash, doc_info in existing_map.items() 
-            if doc_hash not in doc_hashes_seen
+            for key, doc_info in existing_docs.items()
+            if key in existing_keys
         ]
 
         # Perform deletions if needed
@@ -175,30 +187,33 @@ def main(
     else:
         # Base logic with batching
         vectoradapter.delete_dataset(dataset)
-        vectoradapter.persist()
-        vectoradapter.vacuum()
         
         quota_result = vectoradapter.quota_check(
-            enforce=True, 
-            tag="Quota (after cleanup)", 
+            enforce=True,
+            tag="Quota (after cleanup)",
             verbose=True
         )
         if not quota_result["ok"]:
             return {"ok": False, "error": "Storage quota exceeded"}
+        vectoradapter.persist()
+        vectoradapter.vacuum()
 
         # Process all documents and their chunks
         documents_to_add = []
         splitter = Splitter(**splitter_params)
         
         for doc in processed_docs:
-            for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
-                chunk_hash = hashlib.sha256(
-                    (chunk.page_content + str(chunk.metadata)).encode()
-                ).hexdigest()
-                    
-                documents_to_add.extend(prepare_chunk_documents(
-                    chunk, chunk_idx, chunk_hash, library, loader_name, dataset
-                ))
+            try:
+                for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
+                    chunk_hash = hashlib.sha256(
+                        chunk.page_content.encode()
+                    ).hexdigest()
+                        
+                    documents_to_add.extend(prepare_chunk_documents(
+                        chunk, chunk_idx, chunk_hash, library, loader_name, dataset
+                    ))
+            except Exception as e:
+                print_log("Failed to process document", str(e))
 
     # Add documents in optimized batches
     if documents_to_add:
@@ -211,7 +226,7 @@ def main(
     if not final_quota["ok"]:
         return {"ok": False, "error": "Storage quota exceeded"}
 
-    return {"ok": True}
+    return {"ok": True, "target_path": target_path}
 
 def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, dataset):
     """Helper to prepare document list for a chunk"""
