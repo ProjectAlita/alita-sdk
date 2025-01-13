@@ -26,11 +26,9 @@ class VectorAdapter:
     def embeddings(self):
         """ Get embeddings if present """
         result = self._vectorstore.embeddings
-        #
-        if result is not None:
-            return result
-        #
-        return self._embeddings
+        if result is None:
+            return self._embeddings
+        return result
 
     def persist(self):
         """ Save/sync/checkpoint vectorstore (if needed/supported) """
@@ -71,7 +69,7 @@ class VectorAdapter:
     def delete_library(self, library):
         """ Delete datasource (library) documents """
         if self._vs_cls_name == "Chroma":
-            if library == self._vectorstore._collection.name:  # pylint: disable=W0212
+            if (library == self._vectorstore._collection.name):  # pylint: disable=W0212
                 self._vectorstore._client.delete_collection(self._vectorstore._collection.name)  # pylint: disable=W0212
             else:
                 self._vectorstore._collection.delete(where={"library": library})  # pylint: disable=W0212
@@ -148,14 +146,13 @@ class VectorAdapter:
                 self._pgvector_delete_by_filter(where=where_clause)
 
     def batch_delete_by_ids(self, ids):
-        """Delete documents by IDs directly (most efficient)"""
+        """Optimized batch deletion"""
         if not ids:
             return
-            
+        
         if self._vs_cls_name == "Chroma":
-            self._vectorstore._collection.delete(
-                ids=ids
-            )
+            # Use single deletion operation
+            self._vectorstore._collection.delete(ids=ids)
         elif self._vs_cls_name == "PGVector":
             self._pgvector_delete_by_ids(ids)
 
@@ -233,7 +230,6 @@ class VectorAdapter:
 
     def _pgvector_delete_by_ids(self, ids):
         """Optimized batch deletion by IDs for PGVector"""
-        from sqlalchemy import and_, or_  # pylint: disable=C0415,E0401
         from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
         
         with Session(self._vectorstore._bind) as session:  # pylint: disable=W0212
@@ -283,11 +279,30 @@ class VectorAdapter:
             return self.get_data(where, include)
 
     def _pgvector_get_data_optimized(self, where, include):
-        """Optimized data retrieval for PGVector"""
-        from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
-        from sqlalchemy import select
+        """
+        Optimized data retrieval for PGVector using a single query.
+        Fetches both documents and metadatas in one database call.
+        """
+        from sqlalchemy.orm import Session
+        from sqlalchemy import select, and_
+        #
+        if not isinstance(include, list):
+            raise ValueError("Unsupported include type")
+        #
+        supported_includes = ["documents", "metadatas"]
+        for item in include:
+            if item not in supported_includes:
+                raise ValueError(f"Unsupported include value: {item}")
+        #
+        data_result = {}
+        #
+        if "documents" in include:
+            data_result["documents"] = []
+        #
+        if "metadatas" in include:
+            data_result["metadatas"] = []
         
-        with Session(self._vectorstore._bind) as session:  # pylint: disable=W0212
+        with Session(self._vectorstore._bind) as session:
             collection = self._vectorstore.get_collection(session)
             if not collection:
                 raise ValueError("Collection not found")
@@ -296,24 +311,20 @@ class VectorAdapter:
                 self._vectorstore.EmbeddingStore.collection_id == collection.uuid
             )
 
-            # Add filters
             if where:
                 if self._vectorstore.use_jsonb:
-                    filter_clause = self._vectorstore._create_filter_clause(where)  # pylint: disable=W0212
+                    filter_clause = self._vectorstore._create_filter_clause(where)
                     if filter_clause is not None:
                         stmt = stmt.where(filter_clause)
                 else:
-                    filter_clauses = self._vectorstore._create_filter_clause_json_deprecated(where)  # pylint: disable=W0212
-                    for clause in filter_clauses:
-                        stmt = stmt.where(clause)
+                    filter_clauses = self._vectorstore._create_filter_clause_json_deprecated(where)
+                    stmt = stmt.where(and_(*filter_clauses))
 
-            # Execute single optimized query
+            # Execute optimized query
             results = session.execute(stmt).fetchall()
-
-            # Format results
-            data_result = {key: [] for key in include}
-            for row in results:
-                for idx, key in enumerate(include):
-                    data_result[key].append(row[idx])
-
+            
+            # Format results efficiently
+            for result in results:
+                data_result["documents"].append(result.document)
+                data_result["metadatas"].append(result.cmetadata)
             return data_result
