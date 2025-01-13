@@ -90,12 +90,14 @@ def main(
     vectoradapter.quota_check(enforce=False, tag="Quota (initial)", verbose=True)
 
     # Setup LLM if needed
-    llmodel = None
-    if document_processing_prompt or chunk_processing_prompt or (bins_with_llm and ai_model):
-        llmodel = get_model(ai_model, ai_model_params)
-        if bins_with_llm:
+    llmodel = get_model(ai_model, ai_model_params)
+
+    # Setup processing of images
+    if bins_with_llm:
             loader_params['bins_with_llm'] = True
             loader_params['llm'] = llmodel
+    
+    if chunk_processing_prompt:
         artifact_tmp = tempfile.mkdtemp()
         target_path = os.path.join(artifact_tmp, "Metadataextract.txt")
 
@@ -104,16 +106,16 @@ def main(
     if kw_for_document and kw_plan:
         kw_extractor = KWextractor(kw_plan, kw_args)
 
-    # Load and process all documents first to minimize LLM API calls
-    processed_docs = []
-    for document in loader(loader_name, loader_params, load_params):
+    og_keywords_set_for_source = set()
+
+    def process_document(document):
         replace_source(document, source_replacers, keys=["source", "table_source"])
         
         if document_processing_prompt and llmodel:
             try:
                 document = summarize(llmodel, document, document_processing_prompt)
             except Exception as e:
-                print_log("Failed to generate document summary", str(e))
+                print_log(f"Failed to generate document summary for source: {document.metadata.get('source')}", str(e))
 
         if kw_extractor and len(document.metadata.get('keywords', [])) == 0 and len(document.page_content) > 1000:
             document.metadata['keywords'] = kw_extractor.extract_keywords(
@@ -126,55 +128,48 @@ def main(
                 with open(target_path, "a") as f:
                     f.write(result + "\n")
             except Exception as e:
-                print_log("Failed to generate document metadata", str(e))
+                print_log(f"Failed to generate document metadata for source: {document.metadata.get('source')}", str(e))
+        return document
 
-        processed_docs.append(document)
+    # Load and process documents one by one
+    processed_docs = (process_document(doc) for doc in loader(loader_name, loader_params, load_params))
 
     if incremental:
-        # Get source key metadata values for incremental update
-        # source_keys = set()
-        # for doc in processed_docs:
-        #     if 'source' in doc.metadata:
-        #         source_keys.add(doc.metadata['source'])
-        #     if 'table_source' in doc.metadata:
-        #         source_keys.add(doc.metadata['table_source'])
-
         # Incremental update logic begins here
+        documents_to_add = []
+        docs_to_delete = []
+        splitter = Splitter(**splitter_params)
 
         # Get existing documents for the dataset and source keys
         existing_docs = vectoradapter.get_existing_documents(
             dataset=dataset,
             library=library,
         )
-
-        documents_to_add = []
-        docs_to_delete = []
-        
-        splitter = Splitter(**splitter_params)
-        
-        # Create a set of existing document keys for efficient lookup
         existing_keys = set(existing_docs.keys())
 
-        for doc in processed_docs:
+        def process_and_check_document(doc):
             try:
                 for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
                     chunk_hash = hashlib.sha256(
                         chunk.page_content.encode()
                     ).hexdigest()
                     key = (chunk_hash, chunk.metadata.get("source"))
-                    
+
                     if key not in existing_keys:
                         documents_to_add.extend(prepare_chunk_documents(
-                            chunk, chunk_idx, chunk_hash, library, loader_name, dataset
+                            chunk, chunk_idx, chunk_hash, library, loader_name, dataset, og_keywords_set_for_source
                         ))
                     else:
-                        existing_keys.remove(key) # Remove existing key from set
+                        existing_keys.remove(key)  # Remove existing key from set
             except Exception as e:
                 print_log("Failed to process document", str(e))
 
+        for doc in processed_docs:
+            process_and_check_document(doc)
+
         # Identify documents to delete
         docs_to_delete = [
-            doc_info["id"] 
+            doc_info["id"]
             for key, doc_info in existing_docs.items()
             if key in existing_keys
         ]
@@ -217,7 +212,7 @@ def main(
 
     # Add documents in optimized batches
     if documents_to_add:
-        vectoradapter.batch_add_documents(documents_to_add, batch_size)
+        vectoradapter.batch_add_documents(documents_to_add, batch_size=batch_size)
 
     # Final operations
     vectoradapter.vacuum()
@@ -228,7 +223,7 @@ def main(
 
     return {"ok": True, "target_path": target_path}
 
-def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, dataset):
+def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, dataset, og_keywords_set_for_source):
     """Helper to prepare document list for a chunk"""
     chunk_docs = []
     
@@ -276,6 +271,21 @@ def prepare_chunk_documents(chunk, chunk_idx, chunk_hash, library, loader_name, 
             page_content=chunk.page_content,
             metadata={**base_metadata, 'data': chunk.metadata['og_data']}
         ))
+        # Only save columns (=file keywords) once per source
+        if chunk.metadata['table_source'] not in og_keywords_set_for_source:
+            og_keywords_set_for_source.add(chunk.metadata['table_source'])
+            chunk_docs.append(
+                        Document(
+                            page_content=', '.join(chunk.metadata['columns']),
+                            metadata={
+                                'source': chunk.metadata['table_source'],
+                                'type': 'keywords',
+                                'library': library,
+                                'source_type': loader_name,
+                                'dataset': dataset,
+                            }
+                        )
+                    )
     else:
         chunk_docs.append(Document(
             page_content=chunk.page_content,
