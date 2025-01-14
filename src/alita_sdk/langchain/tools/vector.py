@@ -111,6 +111,7 @@ class VectorAdapter:
         )
 
         existing_docs = {}
+        docs_without_hash = []
         for metadata in data["metadatas"]:
             doc_hash = metadata.get("chunk_hash")
             source = metadata.get("source")
@@ -119,7 +120,12 @@ class VectorAdapter:
                 existing_docs[key] = {
                     "id": metadata['id'],
                 }
-        return existing_docs
+            else:
+                docs_without_hash.append({
+                    "id": metadata['id'],
+                    "source": source,
+                })
+        return existing_docs, docs_without_hash
 
     def batch_add_documents(self, documents, batch_size=100):
         """Add documents in batches"""
