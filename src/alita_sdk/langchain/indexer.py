@@ -141,12 +141,16 @@ def main(
         splitter = Splitter(**splitter_params)
 
         # Get existing documents for the dataset and source keys
-        existing_docs = vectoradapter.get_existing_documents(
+        existing_docs, docs_without_hash = vectoradapter.get_existing_documents(
             dataset=dataset,
             library=library,
         )
         existing_keys = set(existing_docs.keys())
-
+        
+        # Handle documents without hash
+        if docs_without_hash:
+            docs_to_delete.extend([doc["id"] for doc in docs_without_hash])
+            
         def process_and_check_document(doc):
             try:
                 for chunk_idx, chunk in enumerate(splitter.split(doc, splitter_name)):
@@ -168,11 +172,11 @@ def main(
             process_and_check_document(doc)
 
         # Identify documents to delete
-        docs_to_delete = [
+        docs_to_delete.extend([
             doc_info["id"]
             for key, doc_info in existing_docs.items()
             if key in existing_keys
-        ]
+        ])
 
         # Perform deletions if needed
         if docs_to_delete:
