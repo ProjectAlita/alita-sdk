@@ -174,7 +174,8 @@ def create_graph(
     ):
         """ Create a message graph from a yaml schema """
         schema = yaml.safe_load(yaml_schema)
-        logger.info(f"Schema: {schema}")
+        logger.debug(f"Schema: {schema}")
+        logger.debug(f"Tools: {tools}")
         state_class = create_state(schema.get('state', {}))
         lg_builder = StateGraph(state_class)
         interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
@@ -267,8 +268,7 @@ def create_graph(
                 )
             )
         except ValueError as e:
-            # todo: raise a better error for the user
-            raise e
+            raise ValueError(f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n{lg_builder.nodes}\n\n**Schema Enges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{tools}") 
         compiled = prepare_output_schema(lg_builder, memory, store, debug, 
                                          interrupt_before=interrupt_before, 
                                          interrupt_after=interrupt_after)
