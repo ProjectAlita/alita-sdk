@@ -21,6 +21,9 @@ class Artifact:
     
     def get(self, artifact_name: str):
         data = self.client.download_artifact(self.bucket_name, artifact_name)
+        if len(data) == 0:
+            # empty file might be created
+            return ""
         detected = chardet.detect(data)
         if detected['encoding'] is not None:
             return data.decode(detected['encoding'])
@@ -37,7 +40,7 @@ class Artifact:
         data = self.get(artifact_name)
         if data == "Could not detect encoding":
             return data
-        data += f"\n{additional_data}"
+        data += f"\n{additional_data}" if len(data) > 0 else additional_data
         self.client.create_artifact(self.bucket_name, artifact_name, data)
         return "Data appended successfully"
     
