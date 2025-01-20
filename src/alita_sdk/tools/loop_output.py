@@ -2,6 +2,7 @@ import logging
 from json import dumps
 from traceback import format_exc
 from langchain_core.tools import BaseTool
+from langchain_core.callbacks import dispatch_custom_event
 from typing import Any, Optional
 from langchain_core.messages import  HumanMessage
 from ..langchain.utils import _extract_json, create_pydantic_model
@@ -80,6 +81,13 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             result = _extract_json(completion.content.strip())
         try:
             tool_result = self.tool.run(result)
+            dispatch_custom_event(
+                "on_loop_tool_node", {
+                    "input_variables": self.input_variables,
+                    "tool_result": tool_result,
+                    "state": kwargs,
+                }
+            )
             tool_inputs = []
             if isinstance(tool_result, dict):
                 tool_result = [tool_result]

@@ -1,6 +1,7 @@
 import logging
 from json import dumps, loads
 from langchain_core.tools import BaseTool
+from langchain_core.callbacks import dispatch_custom_event
 from typing import Any, Optional
 from langchain_core.messages import HumanMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -126,5 +127,12 @@ EXPETED OUTPUT FORMAT:
                                                     {predict_input[-1].content}""", self.return_type, accumulated_response)
         if len(self.output_variables) > 0:
             accumulated_response[self.output_variables[0]] = output_varibles[self.output_variables[0]]
+        dispatch_custom_event(
+            "on_loop_node", {
+                "input_variables": self.input_variables,
+                "accumulated_response": accumulated_response,
+                "state": kwargs,
+            }
+        )
         return accumulated_response
 

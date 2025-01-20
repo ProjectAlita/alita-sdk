@@ -4,6 +4,7 @@ from traceback import format_exc
 from langchain_core.tools import BaseTool
 from typing import Any, Optional
 from langchain_core.messages import  HumanMessage
+from langchain_core.callbacks import dispatch_custom_event
 from ..langchain.utils import _extract_json, create_pydantic_model
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
@@ -74,6 +75,13 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             logger.info(f"ToolNode tool params: {result}")
         try:
             tool_result = self.tool.run(result)
+            dispatch_custom_event(
+                "on_tool_node", {
+                    "input_variables": self.input_variables,
+                    "tool_result": tool_result,
+                    "state": kwargs
+                }
+            )
             message_result = tool_result
             if isinstance(tool_result, dict) or isinstance(tool_result, list):
                 message_result = dumps(tool_result)

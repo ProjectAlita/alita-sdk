@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables import Runnable
+from langchain_core.callbacks import dispatch_custom_event
 from .mixedAgentRenderes import convert_message_to_json
 from ..utils.evaluate import EvaluateTemplate
 from ..tools.llm import LLMNode
@@ -56,6 +57,9 @@ class ConditionalEdge(Runnable):
                     return self.default_output
         if result == 'END':
             result = END
+        dispatch_custom_event(
+            "on_conditional_edge", {"condition": self.condition, "state": state}
+        )
         return result
 
 class DecisionEdge(Runnable):
@@ -93,6 +97,9 @@ Answer only with step name, no need to add descrip in case none of the steps are
         logger.info(f"Plan to transition to: {result}")
         if result not in self.steps or result == 'END':
             result = self.default_output
+        dispatch_custom_event(
+            "on_decision_edge", {"decisional_inputs": self.decisional_inputs, "state": state}
+        )
         return result
 
 class TransitionalEdge(Runnable):
@@ -102,6 +109,9 @@ class TransitionalEdge(Runnable):
     
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: RunnableConfig, *args, **kwargs):
         logger.info(f'Transitioning to: {self.next_step}')
+        dispatch_custom_event(
+            "on_transitional_edge", {"next_step": self.next_step, "state": state}
+        )
         return self.next_step if self.next_step != 'END' else END
      
 def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=[], interrupt_after=[]):
