@@ -26,12 +26,14 @@ class FunctionTool(BaseTool):
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables, state=kwargs)
         try:
             tool_result = self.tool.run(func_args)
-            dispatch_custom_event("on_function_tool_node", {
-                "input_mapping": self.input_mapping,
-                "input_variables": self.input_variables,
-                "state": kwargs,
-                "tool_result": tool_result,
-            })
+            dispatch_custom_event(
+                "on_function_tool_node", {
+                    "input_mapping": self.input_mapping,
+                    "input_variables": self.input_variables,
+                    "state": kwargs,
+                    "tool_result": tool_result,
+                }
+            )
             logger.info(f"ToolNode response: {tool_result}")
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": tool_result}]}
