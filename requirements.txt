@@ -42,7 +42,7 @@ python-docx==1.1.2
 openpyxl==3.1.2
 markdown==3.5.1
 beautifulsoup4==4.12.2
-gensim==4.3.2
+gensim==4.3.3
 chromadb==0.5.20
 pgvector==0.2.5
 atlassian-python-api~=3.41
