@@ -37,26 +37,31 @@ class LoopNode(BaseTool):
     output_variables: Optional[list] = None
     input_variables: Optional[list] = None
     return_type: str = "str"
-    prompt: str = """You are tasked to formulate an LIST of ALL inputs for the tool according to instrcutions and derived solely from the conversation history. Do not include this message as part of the inputs."
+    prompt: str = """Formulate a JSON LIST of inputs for the tool based *solely* on the conversation history and provided information.
 
-Input data:
-- Tool name: {tool_name}
-- Tool description: {tool_description}
-- Tool arguments schema: 
-{schema}
+Input Data:
+- Tool Name: {tool_name}
+- Tool Description: {tool_description}
+- Tool Arguments Schema: {schema}
+- Context: {context}
+- Instructions: {task}
 
-{context}
+Output Requirements:
+- Generate a COMPLETE LIST of JSON objects, each representing kwargs for a tool call.
+- Provide ALL inputs within a SINGLE JSON LIST. Do not output inputs individually.
+- Output MUST be a JSON LIST directly extractable by `JSON.loads`.
 
-Instructions to create the input for the tool: 
-{task}
+Output Format:
+- `[{{"arg1": "input1", "arg2": "input2"}}, {{"arg1": "input3", "arg2": "input4"}}, ...]`
 
-Expected output:
-- COMLETE LIST OF JSON to be used as sequential kwargs for the tool call. 
-- You must provide all inputs wthin one LIST OF JSONS, avoid providing them one by one.
-- Anwer must be  LIST OF JSON only extractable by JSON.LOADS.
+Conditional `chat_history` Integration:
+- IF the `Tool Arguments Schema` contains a `chat_history` key, include it in the generated JSON objects.
+- The value for `chat_history` should be a list of messages with "role" and "content": `{{"chat_history": [{{"role": "user", "content": "input"}}, {{"role": "assistant", "content": "output"}}]}}`.
+- Ensure all keys and values required by the `Tool Arguments Schema` are present in each generated JSON object. `chat_history` is an additional key when specified in the schema.
+- All keys and values must be self-contained and independent, as the tool has no access to the conversation history.
 
-EXPETED OUTPUT FORMAT: 
-- [{{"arg1": "input1", "arg2": "input2"}}, {{"arg1": "input3", "arg2": "input4"}}, ...]
+JSON Output Constraint:
+- The final answer MUST be valid JSON extractable by `JSON.loads`.
 """
 
     def invoke(
