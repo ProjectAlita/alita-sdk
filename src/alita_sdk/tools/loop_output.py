@@ -80,11 +80,11 @@ Anwer must be JSON only extractable by JSON.LOADS."""
         if self.structured_output:
             stuct_model = create_pydantic_model(f"{self.tool.name}Output", struct_params)
             llm = self.client.with_structured_output(stuct_model)
-            completion = llm.invoke(input)
+            completion = llm.invoke(input, config=config)
             result = completion.model_dump()
         else:
             input[-1].content += self.unstructured_output
-            completion = self.client.invoke(input)
+            completion = self.client.invoke(input, config=config)
             result = _extract_json(completion.content.strip())
         try:
             tool_result = self.tool.run(result, config=config)

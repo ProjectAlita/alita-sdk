@@ -90,7 +90,7 @@ EXPETED OUTPUT FORMAT:
                 schema=parameters,
                 task=self.task))]
         logger.debug(f"LoopNode input: {predict_input}")
-        completion = self.client.invoke(predict_input)
+        completion = self.client.invoke(predict_input, config=config)
         logger.debug(f"LoopNode pure output: {completion}")
         loop_data = _old_extract_json(completion.content.strip())
         logger.debug(f"LoopNode output: {loop_data}")

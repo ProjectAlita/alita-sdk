@@ -39,7 +39,7 @@ class LLMNode(BaseTool):
         logger.info(f"LLM Node params: {params}")
         llm_input = create_llm_input(self.prompt, params, kwargs)
         try:
-            if self.structured_output and len(self.output_variables) > 1:
+            if self.structured_output and len(self.output_variables) > 0:
                 struct_params = {var: {"type": "str", "description": ""} for var in self.output_variables}
                 stuct_model = create_pydantic_model(f"LLMOutput", struct_params)
                 llm = self.client.with_structured_output(stuct_model)
