@@ -1,8 +1,11 @@
+import json
+
+from langchain_core.runnables import RunnableConfig
+
 from ..utils.utils import clean_string
-from json import dumps
 from langchain_core.tools import BaseTool
-from langchain_core.messages import BaseMessage, AIMessage
-from typing import Any, Type, Optional
+from langchain_core.messages import BaseMessage, AIMessage, ToolCall
+from typing import Any, Type, Optional, Union
 from pydantic import create_model, field_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
@@ -15,13 +18,17 @@ applicationToolSchema = create_model(
     chat_history = (Optional[list], FieldInfo(description="Chat History relevant for Application", default=[]))
 )
 
-def formulate_query(args, kwargs):
+def formulate_query(kwargs):
     chat_history = []
     if kwargs.get('chat_history'):
         if isinstance(kwargs.get('chat_history')[-1], BaseMessage):
             chat_history = convert_message_to_json(kwargs.get('chat_history')[:])
         elif isinstance(kwargs.get('chat_history')[-1], dict):
-            chat_history = kwargs.get('chat_history')[:]
+            if all([True if message.get('role') and message.get('content') else False for message in kwargs.get('chat_history')]):
+                chat_history = kwargs.get('chat_history')[:]
+            else:
+                for each in kwargs.get('chat_history')[:]:
+                    chat_history.append(AIMessage(json.dumps(each)))
         elif isinstance(kwargs.get('chat_history')[-1], str):
             chat_history = []
             for each in kwargs.get('chat_history')[:]:
@@ -41,10 +48,9 @@ class Application(BaseTool):
     @classmethod
     def remove_spaces(cls, v):
         return clean_string(v)
-        
     
     def _run(self, *args, **kwargs):
-        response = self.application.invoke(formulate_query(args, kwargs))
+        response = self.application.invoke(formulate_query(kwargs))
         if self.return_type == "str":
             return response["output"]
         else:

@@ -1,9 +1,12 @@
 import logging
 from json import dumps
 from traceback import format_exc
+
+from langchain_core.callbacks import dispatch_custom_event
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from typing import Any, Optional
-from langchain_core.messages import  HumanMessage
+from typing import Any, Optional, Union
+from langchain_core.messages import HumanMessage, ToolCall
 from ..langchain.utils import _extract_json, create_pydantic_model
 from .loop import process_response
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -36,15 +39,21 @@ in case your key is "chat_history" value should be a list of messages with roles
 Tool won't have access to convesation so all keys and values need to be actual and independant. 
 Anwer must be JSON only extractable by JSON.LOADS."""
 
-    def _run(self, *args, **kwargs):
+    def invoke(
+        self,
+        state: Union[str, dict, ToolCall],
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Any,
+    ) -> Any:
         params = convert_to_openai_tool(self.tool).get(
-            'function',{'parameters': {}}).get(
-                'parameters', {'properties': {}}).get('properties', {})
+            'function', {'parameters': {}}).get(
+            'parameters', {'properties': {}}).get('properties', {})
         parameters = ''
         struct_params = {}
         for key in params.keys():
             parameters += f"{key} [{params[key].get('type', 'str')}]: {params[key].get('description', '')}\n"
-            struct_params[key] = {"type": params[key].get('type', 'str'), "description": params[key].get('description', '')}
+            struct_params[key] = {"type": params[key].get('type', 'str'),
+                                  "description": params[key].get('description', '')}
         # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
         input = []
         last_message = {}
@@ -52,19 +61,19 @@ Anwer must be JSON only extractable by JSON.LOADS."""
         logger.info(f"Output variables: {self.output_variables}")
         for var in self.input_variables:
             if 'messages' in self.input_variables:
-                messages = kwargs.get('messages', [])[:]
+                messages = state.get('messages', [])[:]
                 input = messages[:-1]
                 last_message["user_input"] = messages[-1].content
             else:
-                last_message[var] = kwargs[var]
+                last_message[var] = state[var]
         logger.info(f"ToolNode input: {input}")
         input += [
-                HumanMessage(self.prompt.format(
-                    tool_name=self.tool.name, 
-                    tool_description=self.tool.description, 
-                    schema=parameters,
-                    last_message=dumps(last_message)))
-            ]
+            HumanMessage(self.prompt.format(
+                tool_name=self.tool.name,
+                tool_description=self.tool.description,
+                schema=parameters,
+                last_message=dumps(last_message)))
+        ]
         if self.return_type == "str":
             accumulated_response = ''
         else:
@@ -72,14 +81,21 @@ Anwer must be JSON only extractable by JSON.LOADS."""
         if self.structured_output:
             stuct_model = create_pydantic_model(f"{self.tool.name}Output", struct_params)
             llm = self.client.with_structured_output(stuct_model)
-            completion = llm.invoke(input)
+            completion = llm.invoke(input, config=config)
             result = completion.model_dump()
         else:
             input[-1].content += self.unstructured_output
-            completion = self.client.invoke(input)
+            completion = self.client.invoke(input, config=config)
             result = _extract_json(completion.content.strip())
         try:
-            tool_result = self.tool.run(result)
+            tool_result = self.tool.run(result, config=config)
+            dispatch_custom_event(
+                "on_loop_tool_node", {
+                    "input_variables": self.input_variables,
+                    "tool_result": tool_result,
+                    "state": state,
+                }, config=config
+            )
             tool_inputs = []
             if isinstance(tool_result, dict):
                 tool_result = [tool_result]
@@ -94,24 +110,24 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             else:
                 tool_inputs.append({list(self.variables_mapping.keys())[0]: tool_result})
             if len(self.output_variables) > 0:
-                output_varibles = {self.output_variables[0]}
+                output_varibles = {self.output_variables[0]: ""}
             for tool_input in tool_inputs:
                 logger.info(f"LoopToolNode step input: {tool_input}")
                 try:
-                    tool_run = self.loop_tool.run(tool_input=tool_input)
+                    tool_run = self.loop_tool.run(tool_input=tool_input, config=config)
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += f'{tool_run}\n\n'
                     accumulated_response = process_response(tool_run, self.return_type, accumulated_response)
                 except ValidationError:
                     resp = f"""Tool input to the {self.tool.name} with value {tool_input} raised ValidationError.
-                        \n\nTool schema is {dumps(params)}"""
+                                \n\nTool schema is {dumps(params)}"""
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += resp
                     accumulated_response = process_response(resp, self.return_type, accumulated_response)
                     logger.error(f"ValidationError: {format_exc()}")
                 except Exception as e:
                     resp = f"""Tool input to the {self.tool.name} with value {tool_input} raised an exception: {e}.                                             
-                        \n\nTool schema is {dumps(params)}"""
+                                \n\nTool schema is {dumps(params)}"""
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += resp
                     accumulated_response = process_response(resp, self.return_type, accumulated_response)
@@ -120,7 +136,11 @@ Anwer must be JSON only extractable by JSON.LOADS."""
 
         except ValidationError:
             logger.error(f"ValidationError: {format_exc()}")
-            return {"messages":[{"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {result} raised ValidationError. 
-\n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
-{input[-1].content}"""}]}
+            return {
+                "messages": [{"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {result} raised ValidationError. 
+        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
+        {input[-1].content}"""}]}
+
+    def _run(self, *args, **kwargs):
+        return self.invoke(**kwargs)
 

@@ -1,8 +1,11 @@
 import logging
 from json import dumps, loads
+
+from langchain_core.callbacks import dispatch_custom_event
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from typing import Any, Optional
-from langchain_core.messages import HumanMessage
+from typing import Any, Optional, Union
+from langchain_core.messages import HumanMessage, ToolCall
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from ..langchain.utils import _old_extract_json
 from pydantic import ValidationError
@@ -55,49 +58,56 @@ Expected output:
 EXPETED OUTPUT FORMAT: 
 - [{{"arg1": "input1", "arg2": "input2"}}, {{"arg1": "input3", "arg2": "input4"}}, ...]
 """
-    def _run(self, *args, **kwargs):
+
+    def invoke(
+        self,
+        state: Union[str, dict, ToolCall],
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Any,
+    ) -> Any:
         params = convert_to_openai_tool(self.tool).get(
-            'function',{'parameters': {}}).get(
-                'parameters', {'properties': {}}).get('properties', {})
+            'function', {'parameters': {}}).get(
+            'parameters', {'properties': {}}).get('properties', {})
         parameters = ''
         for key in params.keys():
             parameters += f"{key} [{params[key].get('type', 'str')}]: {params[key].get('description', '')}\n"
-        
+
         context = ''
+        llm_input = []
         for var in self.input_variables:
             if var == 'messages':
-                llm_input = kwargs.get("messages")[:]
+                llm_input = state.get("messages")[:]
             else:
                 if not context:
                     context += 'Context of the conversation:\n'
-                context += f'{var}: {kwargs.get(var, "")}\n'
+                context += f'{var}: {state.get(var, "")}\n'
         logger.info(f"LLM Node params: {params}")
-        
+
         predict_input = llm_input[:] + [
             HumanMessage(self.prompt.format(
-                tool_name=self.tool.name, 
-                tool_description=self.tool.description, 
-                context = context,
+                tool_name=self.tool.name,
+                tool_description=self.tool.description,
+                context=context,
                 schema=parameters,
                 task=self.task))]
         logger.debug(f"LoopNode input: {predict_input}")
-        completion = self.client.invoke(predict_input)
+        completion = self.client.invoke(predict_input, config=config)
         logger.debug(f"LoopNode pure output: {completion}")
-        loop_data = _old_extract_json(completion.content.strip())  
+        loop_data = _old_extract_json(completion.content.strip())
         logger.debug(f"LoopNode output: {loop_data}")
         if self.return_type == "str":
             accumulated_response = ''
         else:
             accumulated_response = {"messages": [{"role": "assistant", "content": ""}]}
         if len(self.output_variables) > 0:
-            output_varibles = {self.output_variables[0]}
+            output_varibles = {self.output_variables[0]: ""}
         if isinstance(loop_data, dict):
             loop_data = [loop_data]
         if isinstance(loop_data, list):
             for each in loop_data:
                 logger.debug(f"LoopNode step input: {each}")
                 try:
-                    tool_run = self.tool.run(tool_input=each)
+                    tool_run = self.tool.invoke(each, config=config)
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += f'{tool_run}\n\n'
                     accumulated_response = process_response(tool_run, self.return_type, accumulated_response)
@@ -123,8 +133,19 @@ EXPETED OUTPUT FORMAT:
                 output_varibles[self.output_variables[0]] += resp
             accumulated_response = process_response(f"""Tool input to the {self.tool.name} with value {loop_data} is not a valid JSON. 
                                                     \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
-                                                    {predict_input[-1].content}""", self.return_type, accumulated_response)
+                                                    {predict_input[-1].content}""", self.return_type,
+                                                    accumulated_response)
         if len(self.output_variables) > 0:
             accumulated_response[self.output_variables[0]] = output_varibles[self.output_variables[0]]
+        dispatch_custom_event(
+            "on_loop_node", {
+                "input_variables": self.input_variables,
+                "accumulated_response": accumulated_response,
+                "state": state,
+            }, config=config
+        )
         return accumulated_response
+
+    def _run(self, *args, **kwargs):
+        return self.invoke(**kwargs)
 
