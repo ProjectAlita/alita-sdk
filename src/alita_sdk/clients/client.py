@@ -295,7 +295,7 @@ class AlitaClient:
             "context": '',
             "model_settings": model_settings,
             "user_input": '',
-            "chat_history": chat_history,
+            "messages": chat_history,
             "variables": variables,
             "format_response": True
         }
@@ -314,7 +314,6 @@ class AlitaClient:
 
     def predict(self, messages: list[BaseMessage], model_settings: dict, variables: list[dict] = None):
         prompt_data = self._prepare_payload(messages, model_settings, variables)
-        
         response = requests.post(self.predict_url, headers=self.headers, json=prompt_data, verify=False)
         
         if response.status_code != 200:

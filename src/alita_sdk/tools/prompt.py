@@ -1,7 +1,11 @@
+import logging
+
 from langchain_core.tools import BaseTool
 from pydantic import field_validator
 from typing import Any
 from ..utils.utils import clean_string
+
+logger = logging.getLogger(__name__)
 
 def process_response(response, return_type):
     if return_type == "str":

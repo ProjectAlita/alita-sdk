@@ -1,10 +1,13 @@
 from typing import Any, Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import (
-    SystemMessage,
     HumanMessage,
 )
 from pydantic import create_model
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class AlitaPrompt:
     def __init__(self, alita: Any, prompt: ChatPromptTemplate, name: str, description: str, llm_settings: dict):
@@ -32,7 +35,8 @@ class AlitaPrompt:
                 "name": key,
                 "value": value
             })
-        messages = [SystemMessage(content=self.prompt.messages[0].content), HumanMessage(content=user_input)]
+            
+        messages = self.prompt.messages + [HumanMessage(content=user_input)]
         result = []
         for message in self.alita.predict(messages, self.llm_settings, variables=alita_vars):
             result.append(message.content)

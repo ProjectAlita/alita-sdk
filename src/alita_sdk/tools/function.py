@@ -33,7 +33,6 @@ class FunctionTool(BaseTool):
         params = convert_to_openai_tool(self.tool).get(
             'function', {'parameters': {}}).get(
             'parameters', {'properties': {}}).get('properties', {})
-
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
         try:

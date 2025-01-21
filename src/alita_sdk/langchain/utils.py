@@ -154,7 +154,9 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
             input_data[key] = state.get('messages', [])
         elif value['type'] == 'fstring':
             var_dict = {var: state.get(var, "") for var in input_variables}
-            input_data[key] = PromptTemplate.from_template(value['value']).partial(**var_dict).format(**var_dict)
+            if not isinstance(value['value'], str):
+                value['value'] = str(value['value'])
+            input_data[key] = value['value'].format(**var_dict)
         elif value['type'] == 'fixed':
             input_data[key] = value['value']
         else:
