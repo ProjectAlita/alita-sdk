@@ -1,9 +1,11 @@
 import logging
 from json import dumps
 from traceback import format_exc
+
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from typing import Any, Optional
-from langchain_core.messages import  HumanMessage
+from typing import Any, Optional, Union
+from langchain_core.messages import HumanMessage, ToolCall
 from ..langchain.utils import _extract_json, create_pydantic_model
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
@@ -33,15 +35,21 @@ in case your key is "chat_history" value should be a list of messages with roles
 Tool won't have access to convesation so all keys and values need to be actual and independant. 
 Anwer must be JSON only extractable by JSON.LOADS."""
 
-    def _run(self, *args, **kwargs):
+    def invoke(
+        self,
+        state: Union[str, dict, ToolCall],
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Any,
+    ) -> Any:
         params = convert_to_openai_tool(self.tool).get(
-            'function',{'parameters': {}}).get(
-                'parameters', {'properties': {}}).get('properties', {})
+            'function', {'parameters': {}}).get(
+            'parameters', {'properties': {}}).get('properties', {})
         parameters = ''
         struct_params = {}
         for key in params.keys():
             parameters += f"{key} [{params[key].get('type', 'str')}]: {params[key].get('description', '')}\n"
-            struct_params[key] = {"type": params[key].get('type', 'str'), "description": params[key].get('description', '')}
+            struct_params[key] = {"type": params[key].get('type', 'str'),
+                                  "description": params[key].get('description', '')}
         # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
         input = []
         last_message = {}
@@ -49,19 +57,19 @@ Anwer must be JSON only extractable by JSON.LOADS."""
         logger.info(f"Output variables: {self.output_variables}")
         for var in self.input_variables:
             if 'messages' in self.input_variables:
-                messages = kwargs.get('messages', [])[:]
+                messages = state.get('messages', [])[:]
                 input = messages[:-1]
                 last_message["user_input"] = messages[-1].content
             else:
-                last_message[var] = kwargs[var]
+                last_message[var] = state[var]
         logger.info(f"ToolNode input: {input}")
         input += [
-                HumanMessage(self.prompt.format(
-                    tool_name=self.tool.name, 
-                    tool_description=self.tool.description, 
-                    schema=parameters,
-                    last_message=dumps(last_message)))
-            ]
+            HumanMessage(self.prompt.format(
+                tool_name=self.tool.name,
+                tool_description=self.tool.description,
+                schema=parameters,
+                last_message=dumps(last_message)))
+        ]
         if self.structured_output:
             stuct_model = create_pydantic_model(f"{self.tool.name}Output", struct_params)
             llm = self.client.with_structured_output(stuct_model)
@@ -81,10 +89,14 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": message_result}]}
             else:
-                return { self.output_variables[0]: tool_result, "messages": [{"role": "assistant", "content": message_result}] }
+                return {self.output_variables[0]: tool_result,
+                        "messages": [{"role": "assistant", "content": message_result}]}
         except ValidationError:
             logger.error(f"ValidationError: {format_exc()}")
-            return {"messages":[{"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {result} raised ValidationError. 
-\n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
-{input[-1].content}"""}]}
+            return {
+                "messages": [{"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {result} raised ValidationError. 
+        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
+        {input[-1].content}"""}]}
 
+    def _run(self, *args, **kwargs):
+        return self.invoke(**kwargs)

@@ -1,8 +1,9 @@
+from langchain_core.runnables import RunnableConfig
+
 from ..utils.utils import clean_string
-from json import dumps
 from langchain_core.tools import BaseTool
-from langchain_core.messages import BaseMessage, AIMessage
-from typing import Any, Type, Optional
+from langchain_core.messages import BaseMessage, AIMessage, ToolCall
+from typing import Any, Type, Optional, Union
 from pydantic import create_model, field_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
@@ -15,7 +16,7 @@ applicationToolSchema = create_model(
     chat_history = (Optional[list], FieldInfo(description="Chat History relevant for Application", default=[]))
 )
 
-def formulate_query(args, kwargs):
+def formulate_query(kwargs):
     chat_history = []
     if kwargs.get('chat_history'):
         if isinstance(kwargs.get('chat_history')[-1], BaseMessage):
@@ -41,12 +42,20 @@ class Application(BaseTool):
     @classmethod
     def remove_spaces(cls, v):
         return clean_string(v)
-        
-    
-    def _run(self, *args, **kwargs):
-        response = self.application.invoke(formulate_query(args, kwargs))
+
+    def invoke(
+        self,
+        state: Union[str, dict, ToolCall],
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Any,
+    ) -> Any:
+        response = self.application.invoke(formulate_query(state), config=config, **kwargs)
         if self.return_type == "str":
             return response["output"]
         else:
             return {"messages": [{"role": "assistant", "content": response["output"]}]}
+    
+    def _run(self, *args, **kwargs):
+        return self.invoke(**kwargs)
+
     
