@@ -2,6 +2,7 @@ import logging
 from json import dumps
 from traceback import format_exc
 
+from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from typing import Any, Optional, Union
@@ -88,6 +89,13 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             result = _extract_json(completion.content.strip())
         try:
             tool_result = self.tool.run(result, config=config)
+            dispatch_custom_event(
+                "on_loop_tool_node", {
+                    "input_variables": self.input_variables,
+                    "tool_result": tool_result,
+                    "state": state,
+                }, config=config
+            )
             tool_inputs = []
             if isinstance(tool_result, dict):
                 tool_result = [tool_result]
@@ -102,7 +110,7 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             else:
                 tool_inputs.append({list(self.variables_mapping.keys())[0]: tool_result})
             if len(self.output_variables) > 0:
-                output_varibles = {self.output_variables[0]}
+                output_varibles = {self.output_variables[0]: ""}
             for tool_input in tool_inputs:
                 logger.info(f"LoopToolNode step input: {tool_input}")
                 try:

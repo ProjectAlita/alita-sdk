@@ -2,6 +2,8 @@ import yaml
 import logging
 from uuid import uuid4
 from typing import Union, Any, Optional, Annotated
+
+from langchain_core.callbacks import dispatch_custom_event
 from langgraph.graph.graph import END, START
 from langgraph.graph import StateGraph
 from langgraph.channels.ephemeral_value import EphemeralValue
@@ -56,6 +58,9 @@ class ConditionalEdge(Runnable):
                     return self.default_output
         if result == 'END':
             result = END
+        dispatch_custom_event(
+            "on_conditional_edge", {"condition": self.condition, "state": state}, config=config
+        )
         return result
 
 class DecisionEdge(Runnable):
@@ -93,6 +98,9 @@ Answer only with step name, no need to add descrip in case none of the steps are
         logger.info(f"Plan to transition to: {result}")
         if result not in self.steps or result == 'END':
             result = self.default_output
+        dispatch_custom_event(
+            "on_decision_edge", {"decisional_inputs": self.decisional_inputs, "state": state}, config=config
+        )
         return result
 
 class TransitionalEdge(Runnable):
@@ -102,6 +110,9 @@ class TransitionalEdge(Runnable):
     
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: RunnableConfig, *args, **kwargs):
         logger.info(f'Transitioning to: {self.next_step}')
+        dispatch_custom_event(
+            "on_transitional_edge", {"next_step": self.next_step, "state": state}, config=config
+        )
         return self.next_step if self.next_step != 'END' else END
      
 def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=[], interrupt_after=[]):

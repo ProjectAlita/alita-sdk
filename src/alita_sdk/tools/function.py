@@ -38,6 +38,14 @@ class FunctionTool(BaseTool):
                                                 state=state)
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
+            dispatch_custom_event(
+                "on_function_tool_node", {
+                    "input_mapping": self.input_mapping,
+                    "input_variables": self.input_variables,
+                    "state": state,
+                    "tool_result": tool_result,
+                }, config=config
+            )
             logger.info(f"ToolNode response: {tool_result}")
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": tool_result}]}

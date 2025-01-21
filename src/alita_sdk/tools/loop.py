@@ -1,6 +1,7 @@
 import logging
 from json import dumps, loads
 
+from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from typing import Any, Optional, Union
@@ -99,14 +100,14 @@ EXPETED OUTPUT FORMAT:
         else:
             accumulated_response = {"messages": [{"role": "assistant", "content": ""}]}
         if len(self.output_variables) > 0:
-            output_varibles = {self.output_variables[0]}
+            output_varibles = {self.output_variables[0]: ""}
         if isinstance(loop_data, dict):
             loop_data = [loop_data]
         if isinstance(loop_data, list):
             for each in loop_data:
                 logger.debug(f"LoopNode step input: {each}")
                 try:
-                    tool_run = self.tool.run(tool_input=each, config=config)
+                    tool_run = self.tool.invoke(each, config=config)
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += f'{tool_run}\n\n'
                     accumulated_response = process_response(tool_run, self.return_type, accumulated_response)
@@ -136,6 +137,13 @@ EXPETED OUTPUT FORMAT:
                                                     accumulated_response)
         if len(self.output_variables) > 0:
             accumulated_response[self.output_variables[0]] = output_varibles[self.output_variables[0]]
+        dispatch_custom_event(
+            "on_loop_node", {
+                "input_variables": self.input_variables,
+                "accumulated_response": accumulated_response,
+                "state": state,
+            }, config=config
+        )
         return accumulated_response
 
     def _run(self, *args, **kwargs):

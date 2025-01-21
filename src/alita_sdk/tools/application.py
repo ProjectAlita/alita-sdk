@@ -1,3 +1,5 @@
+import json
+
 from langchain_core.runnables import RunnableConfig
 
 from ..utils.utils import clean_string
@@ -22,7 +24,11 @@ def formulate_query(kwargs):
         if isinstance(kwargs.get('chat_history')[-1], BaseMessage):
             chat_history = convert_message_to_json(kwargs.get('chat_history')[:])
         elif isinstance(kwargs.get('chat_history')[-1], dict):
-            chat_history = kwargs.get('chat_history')[:]
+            if all([True if message.get('role') and message.get('content') else False for message in kwargs.get('chat_history')]):
+                chat_history = kwargs.get('chat_history')[:]
+            else:
+                for each in kwargs.get('chat_history')[:]:
+                    chat_history.append(AIMessage(json.dumps(each)))
         elif isinstance(kwargs.get('chat_history')[-1], str):
             chat_history = []
             for each in kwargs.get('chat_history')[:]:
@@ -42,20 +48,11 @@ class Application(BaseTool):
     @classmethod
     def remove_spaces(cls, v):
         return clean_string(v)
-
-    def invoke(
-        self,
-        state: Union[str, dict, ToolCall],
-        config: Optional[RunnableConfig] = None,
-        **kwargs: Any,
-    ) -> Any:
-        response = self.application.invoke(formulate_query(state), config=config, **kwargs)
+    
+    def _run(self, *args, **kwargs):
+        response = self.application.invoke(formulate_query(kwargs))
         if self.return_type == "str":
             return response["output"]
         else:
             return {"messages": [{"role": "assistant", "content": response["output"]}]}
-    
-    def _run(self, *args, **kwargs):
-        return self.invoke(**kwargs)
-
     
