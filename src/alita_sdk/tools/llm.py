@@ -1,10 +1,8 @@
-import json
 import logging
 from traceback import format_exc
 from typing import Any, Optional, Dict, List
 
-from langchain_core.messages import HumanMessage
-from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import HumanMessage, BaseMessage
 from langchain_core.tools import BaseTool
 
 from ..langchain.utils import _extract_json, create_pydantic_model
@@ -12,10 +10,10 @@ from ..langchain.utils import _extract_json, create_pydantic_model
 logger = logging.getLogger(__name__)
 
 
-def create_llm_input(prompt: Dict[str, str], params: Dict[str, Any], kwargs: Dict[str, Any]) -> list[HumanMessage]:
+def create_llm_input(prompt: Dict[str, str], params: Dict[str, Any], kwargs: Dict[str, Any]) -> list[BaseMessage]:
     logger.info(f"Creating LLM input with prompt: {prompt}, params: {params}, kwargs: {kwargs}")
     if prompt.get('type') == 'fstring' and params:
-        return [HumanMessage(content=PromptTemplate.from_template(prompt['value']).partial(**params).format(**params))]
+        return [HumanMessage(content=prompt['value'].format(**params))]
     elif prompt.get('type') == 'string' and params:
         return [HumanMessage(
             content=f"Current User Input:\n{kwargs['input']}\nPrompt:\n{prompt['value']}")]
@@ -35,7 +33,12 @@ class LLMNode(BaseTool):
     structured_output: Optional[bool] = False
 
     def _run(self, *args, **kwargs):
-        params = {var: kwargs.get(var, "") for var in self.input_variables if var != 'messages'}
+        params = {
+            var: '\n'.join(value.content for value in kwargs.get(var))
+            if var == 'messages'
+            else str(kwargs.get(var, ""))
+            for var in self.input_variables
+        }
         logger.info(f"LLM Node params: {params}")
         llm_input = create_llm_input(self.prompt, params, kwargs)
         try:
