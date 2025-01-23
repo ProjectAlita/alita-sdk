@@ -82,7 +82,7 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             result = _extract_json(completion.content.strip())
             logger.info(f"ToolNode tool params: {result}")
         try:
-            tool_result = self.tool.run(result, config=config)
+            tool_result = self.tool.invoke(result, config=config, kwargs=kwargs)
             dispatch_custom_event(
                 "on_tool_node", {
                     "input_variables": self.input_variables,
