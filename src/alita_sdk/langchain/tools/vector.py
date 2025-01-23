@@ -208,9 +208,9 @@ class VectorAdapter:
                 # Format batch results
                 batch = {"documents": [], "metadatas": []}
                 if "documents" in include:
-                    batch["documents"] = [result[0].document for result in batch_results]
+                    batch["documents"] = [result.document for result in batch_results]
                 if "metadatas" in include:
-                    batch["metadatas"] = [result[0].cmetadata for result in batch_results]
+                    batch["metadatas"] = [result.cmetadata for result in batch_results]
                 
                 yield batch
                 offset += batch_size
