@@ -5,7 +5,7 @@ from typing import Any, Optional, Dict, List
 from langchain_core.messages import HumanMessage, BaseMessage
 from langchain_core.tools import BaseTool
 
-from ..langchain.utils import _extract_json, create_pydantic_model
+from ..langchain.utils import _extract_json, create_pydantic_model, create_params
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +33,7 @@ class LLMNode(BaseTool):
     structured_output: Optional[bool] = False
 
     def _run(self, *args, **kwargs):
-        params = {
-            var: '\n'.join(value.content for value in kwargs.get(var))
-            if var == 'messages'
-            else str(kwargs.get(var, ""))
-            for var in self.input_variables
-        }
+        params = create_params(self.input_variables, kwargs)
         logger.info(f"LLM Node params: {params}")
         llm_input = create_llm_input(self.prompt, params, kwargs)
         try:
