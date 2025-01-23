@@ -100,31 +100,33 @@ class VectorAdapter:
         else:
             raise RuntimeError(f"Unsupported vectorstore: {self._vs_cls_name}")
 
-    def get_existing_documents(self, dataset, library):
-        """ Get existing documents and their hashes from store """
-        data = self.get_data_efficient(
+    def get_existing_documents(self, dataset, library, batch_size=1000):
+        """ Get existing documents and their hashes from store with streaming support """
+        existing_docs = {}
+        docs_without_hash = []
+
+        for metadata_batch in self.get_data_efficient_stream(
             where={"$and": [
                 {"dataset": dataset},
                 {"library": library},
             ]},
-            include=["metadatas"]
-        )
-
-        existing_docs = {}
-        docs_without_hash = []
-        for metadata in data["metadatas"]:
-            doc_hash = metadata.get("chunk_hash")
-            source = metadata.get("source")
-            key = (doc_hash, source)
-            if doc_hash and source:
-                existing_docs[key] = {
-                    "id": metadata['id'],
-                }
-            else:
-                docs_without_hash.append({
-                    "id": metadata['id'],
-                    "source": source,
-                })
+            include=["metadatas"],
+            batch_size=batch_size
+        ):
+            for metadata in metadata_batch["metadatas"]:
+                doc_hash = metadata.get("chunk_hash")
+                source = metadata.get("source")
+                key = (doc_hash, source)
+                if doc_hash and source:
+                    existing_docs[key] = {
+                        "id": metadata['id'],
+                    }
+                else:
+                    docs_without_hash.append({
+                        "id": metadata['id'],
+                        "source": source,
+                    })
+        
         return existing_docs, docs_without_hash
 
     def batch_add_documents(self, documents, batch_size=100):
@@ -132,6 +134,86 @@ class VectorAdapter:
         for i in range(0, len(documents), batch_size):
             batch = documents[i:i + batch_size]
             add_documents(vectorstore=self.vectorstore, documents=batch)
+
+    def get_data_efficient_stream(self, where, include, batch_size=1000):
+        """Stream data with minimal DB load"""
+        if self._vs_cls_name == "Chroma":
+            yield from self._chroma_get_data_stream(where, include, batch_size)
+        elif self._vs_cls_name == "PGVector":
+            yield from self._pgvector_get_data_stream(where, include, batch_size)
+        else:
+            # Fallback to non-streaming for unsupported stores
+            yield self.get_data(where, include)
+
+    def _chroma_get_data_stream(self, where, include, batch_size):
+        """Stream data from Chroma in batches"""
+        offset = 0
+        while True:
+            # Get data in batches using limit and offset
+            batch = self._vectorstore._collection.get(  # pylint: disable=W0212
+                where=where,
+                include=include,
+                limit=batch_size,
+                offset=offset
+            )
+            
+            if not batch.get("ids", []):  # No more data
+                break
+                
+            yield batch
+            offset += batch_size
+
+    def _pgvector_get_data_stream(self, where, include, batch_size):
+        """Stream data from PGVector in batches"""
+        from sqlalchemy.orm import Session
+        from sqlalchemy import select, and_
+
+        if not isinstance(include, list):
+            raise ValueError("Unsupported include type")
+
+        supported_includes = ["documents", "metadatas"]
+        for item in include:
+            if item not in supported_includes:
+                raise ValueError(f"Unsupported include value: {item}")
+
+        with Session(self._vectorstore._bind) as session:  # pylint: disable=W0212
+            collection = self._vectorstore.get_collection(session)
+            if not collection:
+                raise ValueError("Collection not found")
+
+            # Build base query
+            stmt = select(self._vectorstore.EmbeddingStore).where(
+                self._vectorstore.EmbeddingStore.collection_id == collection.uuid
+            )
+
+            if where:
+                if self._vectorstore.use_jsonb:
+                    filter_clause = self._vectorstore._create_filter_clause(where)  # pylint: disable=W0212
+                    if filter_clause is not None:
+                        stmt = stmt.where(filter_clause)
+                else:
+                    filter_clauses = self._vectorstore._create_filter_clause_json_deprecated(where)  # pylint: disable=W0212
+                    stmt = stmt.where(and_(*filter_clauses))
+
+            # Stream results in batches
+            offset = 0
+            while True:
+                batch_results = session.execute(
+                    stmt.limit(batch_size).offset(offset)
+                ).fetchall()
+                
+                if not batch_results:  # No more data
+                    break
+
+                # Format batch results
+                batch = {"documents": [], "metadatas": []}
+                if "documents" in include:
+                    batch["documents"] = [result[0].document for result in batch_results]
+                if "metadatas" in include:
+                    batch["metadatas"] = [result[0].cmetadata for result in batch_results]
+                
+                yield batch
+                offset += batch_size
 
     def batch_delete_documents(self, dataset, doc_hashes, batch_size=100):
         """Delete documents in batches by their hashes"""
