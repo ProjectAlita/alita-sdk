@@ -17,7 +17,7 @@ def embed_documents(self, texts):
     task_id = self.task_node.start_task(
         name="invoke_model",
         kwargs={
-            "routing_key": self.model_name,
+            "routing key": self.model_name,
             "method": "embed_documents",
             "method_args": [texts],
             "method_kwargs": {},
