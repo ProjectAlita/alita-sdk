@@ -88,7 +88,7 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             completion = self.client.invoke(input, config=config)
             result = _extract_json(completion.content.strip())
         try:
-            tool_result = self.tool.run(result, config=config)
+            tool_result = self.tool.invoke(result, config=config, kwargs=kwargs)
             dispatch_custom_event(
                 "on_loop_tool_node", {
                     "input_variables": self.input_variables,
@@ -104,17 +104,21 @@ Anwer must be JSON only extractable by JSON.LOADS."""
                     tool_inputs.append({})
                     if isinstance(each, dict):
                         for k in self.variables_mapping.keys():
-                            tool_inputs[-1][self.variables_mapping[k]] = each[k]
+                            if k == 'messages':
+                                tool_inputs[-1][self.variables_mapping[k]] = state.get(k, [])
+                            else:
+                                tool_inputs[-1][self.variables_mapping[k]] = each[k]
                     else:
                         tool_inputs[-1][list(self.variables_mapping.values())[0]] = each
             else:
                 tool_inputs.append({list(self.variables_mapping.keys())[0]: tool_result})
+            logger.info(f"Loop tool inputs: {tool_inputs}")
             if len(self.output_variables) > 0:
                 output_varibles = {self.output_variables[0]: ""}
             for tool_input in tool_inputs:
                 logger.info(f"LoopToolNode step input: {tool_input}")
                 try:
-                    tool_run = self.loop_tool.run(tool_input=tool_input, config=config)
+                    tool_run = self.loop_tool.invoke(tool_input, config=config, kwargs=kwargs)
                     if len(self.output_variables) > 0:
                         output_varibles[self.output_variables[0]] += f'{tool_run}\n\n'
                     accumulated_response = process_response(tool_run, self.return_type, accumulated_response)
