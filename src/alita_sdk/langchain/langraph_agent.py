@@ -242,7 +242,7 @@ def create_graph(
                         name=node['id'], return_type='dict',
                         response_key=node.get('response_key', 'messages'),
                         output_variables=node.get('output', []),
-                        input_variables=node.get('input', ['messages']),
+                        input_variables=node.get('input', []),
                         structured_output=node.get('structured_output', False)))
                 if node.get('transition'):
                     next_step=clean_string(node['transition'])
