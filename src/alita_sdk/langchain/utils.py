@@ -147,15 +147,21 @@ def create_typed_dict_from_yaml(data):
     
     return cls
 
+def create_params(input_variables: list[str], state: dict) -> dict:
+    return {
+        var: '\n'.join(message.content for message in state.get('messages', []))
+        if var == 'messages'
+        else str(state.get(var, ''))
+        for var in input_variables
+    }
+
 def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables: list[str], state: dict) -> dict:
     input_data = {}
     for key, value in input_mapping.items():
         if key == 'chat_history':
             input_data[key] = state.get('messages', [])
         elif value['type'] == 'fstring':
-            var_dict = {var: state.get(var, "") for var in input_variables}
-            if not isinstance(value['value'], str):
-                value['value'] = str(value['value'])
+            var_dict = create_params(input_variables, state)
             input_data[key] = value['value'].format(**var_dict)
         elif value['type'] == 'fixed':
             input_data[key] = value['value']
