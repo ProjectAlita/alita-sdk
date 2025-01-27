@@ -149,7 +149,7 @@ def create_typed_dict_from_yaml(data):
 
 def create_params(input_variables: list[str], state: dict) -> dict:
     return {
-        var: '\n'.join(message.content for message in state.get('messages'))
+        var: '\n'.join(message.content for message in state.get('messages', []))
         if var == 'messages'
         else str(state.get(var, ''))
         for var in input_variables
