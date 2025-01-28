@@ -14,9 +14,6 @@ def create_llm_input(prompt: Dict[str, str], params: Dict[str, Any], kwargs: Dic
     logger.info(f"Creating LLM input with prompt: {prompt}, params: {params}, kwargs: {kwargs}")
     if prompt.get('type') == 'fstring' and params:
         return [HumanMessage(content=prompt['value'].format(**params))]
-    elif prompt.get('type') == 'string' and params:
-        return [HumanMessage(
-            content=f"Current User Input:\n{kwargs['input']}\nPrompt:\n{prompt['value']}")]
     else:
         return kwargs.get("messages") + [HumanMessage(prompt['value'])]
 
