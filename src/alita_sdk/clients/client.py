@@ -200,7 +200,7 @@ class AlitaClient:
     def artifact(self, bucket_name):
         return Artifact(self, bucket_name)
 
-    def _process_requst(self, data):
+    def _process_requst(self, data: requests.Response) -> Dict[str, str]:
         if data.status_code == 403:
             return {"error": "You are not authorized to access this resource"}
         elif data.status_code == 404:
@@ -208,7 +208,7 @@ class AlitaClient:
         elif data.status_code != 200:
             return {
                 "error": "An error occurred while fetching the resource",
-                "content": data.content
+                "content": data.text
             }
         else:
             return data.json()
@@ -234,7 +234,7 @@ class AlitaClient:
         resp = requests.post(f'{self.bucket_url}', headers=self.headers, json=post_data, verify=False)
         return self._process_requst(resp)
 
-    def list_artifacts(self, bucket_name):
+    def list_artifacts(self, bucket_name: str):
         url = f'{self.artifacts_url}/{bucket_name}'
         data = requests.get(url, headers=self.headers, verify=False)
         return self._process_requst(data)

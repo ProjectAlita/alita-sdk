@@ -33,8 +33,9 @@ class Artifact:
     def delete(self, artifact_name: str):
         self.client.delete_artifact(self.bucket_name, artifact_name)
     
-    def list(self):
-        return dumps(self.client.list_artifacts(self.bucket_name))
+    def list(self) -> str:
+        data = self.client.list_artifacts(self.bucket_name)
+        return dumps(data, default=lambda o: str(o))
 
     def append(self, artifact_name: str, additional_data: Any):
         data = self.get(artifact_name)
