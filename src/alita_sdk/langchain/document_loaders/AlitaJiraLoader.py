@@ -1,9 +1,13 @@
+import os
+import tempfile
 from typing import Optional, Union, List, Iterator
 
 from atlassian import Jira
 from atlassian.errors import ApiError
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
+
+from src.alita_sdk.langchain.document_loaders.constants import loaders_map
 
 DEFAULT_FIELDS = 'status,summary,reporter'
 
@@ -21,7 +25,9 @@ class AlitaJiraLoader(BaseLoader):
                  fields_to_extract: Optional[str] = None,
                  fields_to_index: Optional[str] = None,
                  include_attachments: bool = False,
-                 max_total_issues: Optional[int] = 1000):
+                 max_total_issues: Optional[int] = 1000,
+                 skip_attachment_extensions: Optional[str] = None  # Comma separated list of extensions
+                 ):
         self.base_url = url
         self.api_key = api_key
         self.token = token
@@ -34,6 +40,7 @@ class AlitaJiraLoader(BaseLoader):
         self.fields_to_index = fields_to_index
         self.include_attachments = include_attachments
         self.max_total_issues = max_total_issues
+        self.skip_attachment_extensions = skip_attachment_extensions
 
         errors = AlitaJiraLoader.validate_init_args(url, api_key, username, token)
         if errors:
@@ -94,6 +101,9 @@ class AlitaJiraLoader(BaseLoader):
             fields += f',{self.fields_to_extract}'
         else:
             fields += ',description,comment'  # Fetch only necessary fields by default
+
+        if self.include_attachments:
+            fields += ',attachment'
 
         jql_query = ''
         if self.project:
@@ -175,6 +185,9 @@ class AlitaJiraLoader(BaseLoader):
                 if field in issue['fields']:
                     content += f"{issue['fields'][field]}\n"
 
+        if self.include_attachments and issue['fields'].get('attachment', {}):
+            print()
+
         metadata = {
             "issue_key": issue["key"],
             "source": f"{self.base_url}/browse/{issue['key']}",
@@ -182,6 +195,29 @@ class AlitaJiraLoader(BaseLoader):
             "status": issue["fields"].get("status", {}).get("name"),
         }
         return Document(page_content=content, metadata=metadata)
+
+    def _process_attachments_for_issue(self, issue: dict) -> str:
+        attachments = issue['fields'].get('attachments', {})
+        content = ''
+        for attachment in attachments:
+            filename = attachment['filename']
+            content = attachment['content']
+            _, extension = os.path.splitext(filename)
+            if self.skip_attachment_extensions and extension in self.skip_attachment_extensions:
+                continue
+            attachment_file = os.path.abspath(os.path.join(tempfile.TemporaryDirectory().name, f'{filename}'))
+            try:
+                response = self.jira._session.get(content)
+                with open(attachment_file, "wb") as f:
+                    f.write(response.content)
+            except ApiError as e:
+                error_message = f"Jira API error: {str(e)}"
+                raise ValueError(f"Failed to fetch attachment from Jira: {error_message}")
+            loader_cls = loaders_map[extension]['class'](attachment_file, **loaders_map[extension]['kwargs'])
+            content += f'{loader_cls.load()}\n'
+            os.remove(attachment_file)
+        return content
+
 
     def load(self) -> List[Document]:
         """Load jira issues documents."""
