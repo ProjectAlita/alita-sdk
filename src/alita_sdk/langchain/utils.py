@@ -158,9 +158,7 @@ def create_params(input_variables: list[str], state: dict) -> dict:
 def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables: list[str], state: dict) -> dict:
     input_data = {}
     for key, value in input_mapping.items():
-        if key == 'chat_history':
-            input_data[key] = state.get('messages', [])
-        elif value['type'] == 'fstring':
+        if value['type'] == 'fstring':
             var_dict = create_params(input_variables, state)
             input_data[key] = value['value'].format(**var_dict)
         elif value['type'] == 'fixed':
