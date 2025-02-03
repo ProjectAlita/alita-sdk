@@ -29,6 +29,18 @@ loaders_map = {
             'autodetect_encoding': True
         }
     },
+    '.yml': {
+        'class': TextLoader,
+        'kwargs': {
+            'autodetect_encoding': True
+        }
+    },
+    '.yaml': {
+        'class': TextLoader,
+        'kwargs': {
+            'autodetect_encoding': True
+        }
+    },
     '.md': {
         'class': UnstructuredMarkdownLoader,
         'kwargs': {}
