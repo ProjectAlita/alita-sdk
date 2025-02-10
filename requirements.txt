@@ -59,3 +59,4 @@ svglib==1.5.1
 rlpycairo==0.3.0
 cairocffi==1.7.1
 docx2txt==0.8
+mammoth==1.9.0

@@ -2,6 +2,7 @@ import os
 import tempfile
 from typing import Optional, Union, List, Iterator
 
+import requests
 from atlassian import Jira
 from atlassian.errors import ApiError
 from langchain_core.document_loaders import BaseLoader
@@ -14,35 +15,25 @@ DEFAULT_FIELDS = 'status,summary,reporter'
 
 class AlitaJiraLoader(BaseLoader):
 
-    def __init__(self, url: str,
-                 api_key: Optional[str] = None,
-                 token: Optional[str] = None,
-                 username: Optional[str] = None,
-                 cloud: bool = True,
-                 jql: Optional[str] = None,
-                 project: Optional[str] = None,
-                 epic_id: Optional[str] = None,
-                 fields_to_extract: Optional[str] = None,
-                 fields_to_index: Optional[str] = None,
-                 include_attachments: bool = False,
-                 max_total_issues: Optional[int] = 1000,
-                 skip_attachment_extensions: Optional[str] = None  # Comma separated list of extensions
-                 ):
-        self.base_url = url
-        self.api_key = api_key
-        self.token = token
-        self.username = username
-        self.cloud = cloud
-        self.jql = jql
-        self.project = project
-        self.epic_id = epic_id
-        self.fields_to_extract = fields_to_extract
-        self.fields_to_index = fields_to_index
-        self.include_attachments = include_attachments
-        self.max_total_issues = max_total_issues
-        self.skip_attachment_extensions = skip_attachment_extensions
+    def __init__(self, **kwargs):
+        self.base_url = kwargs.get("url")
+        if not self.base_url:
+            raise ValueError("URL parameter 'url' is required")
+        self.api_key = kwargs.get('api_key', None)
+        self.token = kwargs.get('token', None)
+        self.llm = kwargs.get('llm', None)
+        self.username = kwargs.get('username', None)
+        self.cloud = kwargs.get('cloud', True)
+        self.jql = kwargs.get('jql', None)
+        self.project = kwargs.get('project', None)
+        self.epic_id = kwargs.get('epic_id', None)
+        self.fields_to_extract = kwargs.get('fields_to_extract', None)
+        self.fields_to_index = kwargs.get('fields_to_index', None)
+        self.include_attachments = kwargs.get('include_attachments', False)
+        self.max_total_issues = kwargs.get('max_total_issues', 1000)
+        self.skip_attachment_extensions = kwargs.get('skip_attachment_extensions', None)
 
-        errors = AlitaJiraLoader.validate_init_args(url, api_key, username, token)
+        errors = AlitaJiraLoader.validate_init_args(self.base_url, self.api_key, self.username, self.token)
         if errors:
             raise ValueError(f"Error(s) while validating input: {errors}")
         try:
@@ -53,13 +44,13 @@ class AlitaJiraLoader(BaseLoader):
                 "`pip install atlassian-python-api`"
             )
 
-        if token:
+        if self.token:
             self.jira = Jira(
-                url=url, token=token, cloud=cloud
+                url=self.base_url, token=self.token, cloud=self.cloud
             )
         else:
             self.jira = Jira(
-                url=url, username=username, password=api_key, cloud=cloud
+                url=self.base_url, username=self.username, password=self.api_key, cloud=self.cloud
             )
 
     @staticmethod
@@ -154,7 +145,6 @@ class AlitaJiraLoader(BaseLoader):
                 error_message = f"Jira API error: {str(e)}"
                 raise ValueError(f"Failed to fetch issues from Jira: {error_message}")
 
-
             issues = response["issues"]
             yield issues
             if limit is not None and len(response["issues"]) + start >= limit:
@@ -169,7 +159,6 @@ class AlitaJiraLoader(BaseLoader):
         for issues_batch in issue_generator:
             for issue in issues_batch:
                 yield self.__process_issue(issue)
-
 
     def __process_issue(self, issue: dict) -> Document:
         content = f"{issue['fields']['summary']}\n"
@@ -186,7 +175,7 @@ class AlitaJiraLoader(BaseLoader):
                     content += f"{issue['fields'][field]}\n"
 
         if self.include_attachments and issue['fields'].get('attachment', {}):
-            print()
+            content += self._process_attachments_for_issue(issue)
 
         metadata = {
             "issue_key": issue["key"],
@@ -197,27 +186,83 @@ class AlitaJiraLoader(BaseLoader):
         return Document(page_content=content, metadata=metadata)
 
     def _process_attachments_for_issue(self, issue: dict) -> str:
-        attachments = issue['fields'].get('attachments', {})
-        content = ''
+        """Processes attachments for a given Jira issue."""
+        attachments = issue['fields'].get('attachment', [])
+        if not attachments:
+            return ""
+
+        processed_content = ""
+        skip_extensions = set(self.skip_attachment_extensions.split(',')) if self.skip_attachment_extensions else set()
+
         for attachment in attachments:
-            filename = attachment['filename']
-            content = attachment['content']
-            _, extension = os.path.splitext(filename)
-            if self.skip_attachment_extensions and extension in self.skip_attachment_extensions:
-                continue
-            attachment_file = os.path.abspath(os.path.join(tempfile.TemporaryDirectory().name, f'{filename}'))
-            try:
-                response = self.jira._session.get(content)
-                with open(attachment_file, "wb") as f:
-                    f.write(response.content)
-            except ApiError as e:
-                error_message = f"Jira API error: {str(e)}"
-                raise ValueError(f"Failed to fetch attachment from Jira: {error_message}")
-            loader_cls = loaders_map[extension]['class'](attachment_file, **loaders_map[extension]['kwargs'])
-            content += f'{loader_cls.load()}\n'
-            os.remove(attachment_file)
+            attachment_content = self._process_single_attachment(attachment, skip_extensions)
+            # attachment_content = self._process_single_attachment(attachment)
+            if attachment_content:
+                processed_content += attachment_content
+
+        return processed_content
+
+    def _process_single_attachment(self, attachment: dict, skip_extensions: set) -> str:
+        # def _process_single_attachment(self, attachment: dict) -> str:
+        """Processes a single attachment."""
+        filename = attachment['filename']
+        attachment_url = attachment['content']
+        _, extension = os.path.splitext(filename)
+        extension = extension.lower()
+
+        if extension in skip_extensions:
+            return ""
+
+        if extension not in loaders_map:
+            return ""  # Skip unsupported file types
+
+        attachment_file = self._download_attachment(filename, attachment_url)
+        if not attachment_file:
+            return ""
+
+        content = self._load_attachment_content(attachment_file, extension)
+        os.remove(attachment_file)  # Clean up temporary file
         return content
 
+    def _download_attachment(self, filename: str, attachment_url: str) -> Optional[str]:
+        """Downloads attachment content to a temporary file."""
+        temp_dir = os.path.join(tempfile.TemporaryDirectory().name)
+        attachment_file = os.path.abspath(os.path.join(temp_dir, filename))
+        os.makedirs(temp_dir, exist_ok=True)
+        try:
+            response = self.jira._session.get(attachment_url, stream=True)
+            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+            with open(attachment_file, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):  # 8KB chunks
+                    f.write(chunk)
+            return attachment_file
+        except ApiError as e:
+            error_message = f"Jira API error: {str(e)}"
+            raise ValueError(f"Failed to fetch attachment from Jira: {error_message}")
+        except requests.exceptions.RequestException as e:  # Catch network errors
+            error_message = f"Network error: {str(e)}"
+            raise ValueError(f"Failed to download attachment: {error_message}")
+
+    def _load_attachment_content(self, attachment_file: str, extension: str) -> str:
+        """Loads content from an attachment file using appropriate loader."""
+        try:
+            loader_config = loaders_map.get(extension)
+            if not loader_config:  # Should not happen as we check extension earlier, but for safety
+                return ""
+            loader_cls = loader_config['class']
+            loader_kwargs = loader_config['kwargs']
+            # Conditionally pass llm to multimodal loaders
+            if loader_config['is_multimodal_processing'] and self.llm:
+                loader_kwargs['llm'] = self.llm
+            loader = loader_cls(attachment_file, **loader_kwargs)
+            documents = loader.load()
+
+            page_contents = [doc.page_content for doc in documents]
+            return "\n".join(page_contents)
+        except Exception as e:
+            error_message = f"Error loading attachment: {str(e)}"
+            print(f"Warning: {error_message} for file {attachment_file}")
+            return ""
 
     def load(self) -> List[Document]:
         """Load jira issues documents."""

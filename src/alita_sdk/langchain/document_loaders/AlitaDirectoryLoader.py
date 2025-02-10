@@ -27,6 +27,7 @@ from langchain_unstructured import UnstructuredLoader
 from typing import Any, Iterator, List, Optional
 
 from .constants import loaders_map
+from ..constants import DEFAULT_MULTIMODAL_PROMPT
 from ..tools.log import print_log
 
 
@@ -53,7 +54,10 @@ class AlitaDirectoryLoader(DirectoryLoader):
             for ext in index_exclude_ext.split(",")
             if ext.strip()
         ]
-        for key in ['table_raw_content', 'docs_page_split', 'index_file_exts', 'index_exclude_file_exts']:
+        # llm setup for multimodal processing
+        self.llm = kwargs.get('llm', None)
+        self.prompt = kwargs.get('prompt', None)
+        for key in ['table_raw_content', 'docs_page_split', 'index_file_exts', 'index_exclude_file_exts', 'llm', 'prompt']:
             try:
                 del kwargs[key]
             except:
@@ -92,6 +96,9 @@ class AlitaDirectoryLoader(DirectoryLoader):
                             loaders_map[file_ext]['kwargs']['raw_content'] = self.raw_content
                         if 'page_split' in loaders_map[file_ext]['kwargs'].keys():
                             loaders_map[file_ext]['kwargs']['page_split'] = self.page_split
+                        if 'is_multimodal_processing' in loaders_map[file_ext].keys() and loaders_map[file_ext]['is_multimodal_processing'] and self.llm:
+                            loaders_map[file_ext]['kwargs']['llm'] = self.llm
+                            loaders_map[file_ext]['kwargs']['prompt'] = self.prompt if self.prompt is not None else DEFAULT_MULTIMODAL_PROMPT
                         try:
                             sub_docs = loaders_map[file_ext]['class'](_str_item, **loaders_map[file_ext]['kwargs']).load()
                             if not retval:
