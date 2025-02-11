@@ -19,6 +19,8 @@ class AlitaGitRepoLoader(AlitaDirectoryLoader):
         self.password = kwargs.get('password', None) # Git password
         self.key_filename = kwargs.get('key_filename', None) # Git key filename
         self.key_data = kwargs.get('key_data', None) # Git key data
+        self.llm = kwargs.get('llm', None) # get the llm if it was passed
+        self.prompt = kwargs.get('prompt', None)
 
         kwargs['path'] = self.path # this could happen and cause an exception that directory loader missing path
         for key in ['source', 'branch', 'depth', 'delete_git_dir', 'username', 'password', 'key_filename', 'key_data']:
