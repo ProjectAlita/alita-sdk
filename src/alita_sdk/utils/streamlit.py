@@ -37,12 +37,12 @@ from src.alita_sdk.toolkits.tools import get_toolkits
 
 
 def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
-    
+
     def clear_chat_history():
         st.session_state.messages = []
         st.session_state.thread_id = None
-        
-    
+
+
     def create_tooklit_schema(tkit_schema):
         schema = {}
         for key, value in tkit_schema.get('properties', {}).items():
@@ -50,24 +50,24 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                 continue
             schema[key] = value
         return schema
-    
+
     st.set_page_config(
-        page_title='Alita Assistants', 
-        page_icon = ai_icon, 
-        layout = 'wide', 
+        page_title='Alita Assistants',
+        page_icon = ai_icon,
+        layout = 'wide',
         initial_sidebar_state = 'auto',
         menu_items={
             "Get help" : "https://elitea.ai",
             "About": "https://elitea.ai/docs"
         }
     )
-    
+
     if not(st.session_state.tooklit_configs and len(st.session_state.tooklit_configs) > 0):
         for tkit_pd in get_toolkits():
             ktit_sch = tkit_pd.schema()
             st.session_state.tooklit_configs.append(ktit_sch)
             st.session_state.tooklit_names.append(ktit_sch['title'])
-    
+
     st.markdown(
         r"""
         <style>
@@ -77,7 +77,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
         </style>
         """, unsafe_allow_html=True
     )
-    
+
     with st.sidebar:
         clear_chat = st.button("Clear Chat")
         if clear_chat:
@@ -127,7 +127,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                             st.session_state.models = None
                             st.session_state.llm = None
                             st.error(f"Error loggin to ELITEA ")
-                        
+
             if st.session_state.llm:
                 st.title("Available Agents")
                 st.write("This one will load latest version of agent")
@@ -145,10 +145,22 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                 latest_version = next((v for v in agent_details['versions'] if v['name'] == agent_version_name), None)
                                 if latest_version:
                                     agent_version_id = latest_version['id']
+                                    #
+                                    import sqlite3
+                                    from langgraph.checkpoint.sqlite import SqliteSaver
+                                    #
+                                    memory = SqliteSaver(
+                                        sqlite3.connect("memory.db", check_same_thread=False)
+                                    )
+                                    #
                                     st.session_state.agent_executor = st.session_state.llm.client.application(
-                                        client=st.session_state.llm, application_id=agent_id, 
-                                        application_version_id=agent_version_id, 
-                                        app_type = agent_type if agent_type else None)
+                                        client=st.session_state.llm,
+                                        application_id=agent_id,
+                                        application_version_id=agent_version_id,
+                                        app_type=agent_type if agent_type else None,
+                                        memory=memory,
+                                    )
+                                    #
                                     st.session_state.agent_name = options
                                     clear_chat_history()
                                 else:
@@ -156,7 +168,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                     st.session_state.agent_name = None
                                     clear_chat_history()
                                     st.error("Agent version not found")
-                            
+
         with agentconfig:
             st.title("Local Agent")
             with st.form("add_tkit", clear_on_submit=False):
@@ -164,15 +176,15 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                 submitted = st.form_submit_button("Add Toolkit")
                 if submitted:
                     pass
-            
+
             with st.form("agent_config", clear_on_submit=False):
-                
+
                 context = st.text_area("Context", placeholder="Enter Context")
                 tools = st.text_area("Tools", placeholder="Enter Tools in JSON format")
                 submitted = st.form_submit_button("Submit")
                 if submitted:
                     pass
-        
+
     if st.session_state.llm and st.session_state.agent_executor:
         try:
             st.title(st.session_state.agent_name)
@@ -187,12 +199,11 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             with st.chat_message("assistant", avatar=ai_icon):
                 st_cb = AlitaStreamlitCallback(st)
                 response = st.session_state.agent_executor.invoke(
-                    {"input": prompt, "chat_history": st.session_state.messages[:-1]}, 
+                    {"input": prompt, "chat_history": st.session_state.messages[:-1]},
                     { 'callbacks': [st_cb], 'configurable': {"thread_id": st.session_state.thread_id}}
                 )
                 st.write(response["output"])
                 st.session_state.thread_id = response.get("thread_id", None)
                 st.session_state.messages.append({"role": "assistant", "content": response["output"]})
     else:
-        st.title("Please Load an Agent to Start Chatting")    
-
+        st.title("Please Load an Agent to Start Chatting")
