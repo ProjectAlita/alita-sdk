@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage
 from mammoth import convert_to_html
 from markdownify import markdownify
 
-from src.alita_sdk.langchain.constants import DEFAULT_MULTIMODAL_PROMPT
+from ..constants import DEFAULT_MULTIMODAL_PROMPT
 
 
 class AlitaDocxMammothLoader(BaseLoader):
@@ -111,4 +111,3 @@ class AlitaDocxMammothLoader(BaseLoader):
             result = convert_to_html(docx_file, convert_image=mammoth.images.img_element(self.__handle_image))
             return [Document(page_content=markdownify(result.value, heading_style="ATX"),
                              metadata={'source': str(self.path)})]
-
