@@ -1,5 +1,5 @@
 import base64
-import logging
+import re
 
 import mammoth.images
 import pytesseract
@@ -18,10 +18,7 @@ class AlitaDocxMammothLoader(BaseLoader):
     Loader for Docx files using Mammoth to convert to HTML, with image handling,
     and then Markdownify to convert HTML to markdown.
     """
-
-    logger = logging.getLogger(__name__)
-
-    def __init__(self, **kwargs):
+    def __init__(self, path: str, **kwargs):
         """
         Initializes AlitaDocxMammothLoader.
 
@@ -33,9 +30,7 @@ class AlitaDocxMammothLoader(BaseLoader):
         Raises:
             ValueError: If the 'path' parameter is not provided.
         """
-        self.path = kwargs.get("path")
-        if not self.path:
-            raise ValueError("Path parameter 'path' is required")
+        self.path = path
         self.llm = kwargs.get("llm")
         self.prompt = kwargs.get("prompt")
 
@@ -84,7 +79,6 @@ class AlitaDocxMammothLoader(BaseLoader):
             # This ensures robustness against various image format issues, OCR failures,
             # or LLM invocation problems. It prevents the loader from crashing due to
             # a single image processing failure and provides a default image representation.
-            self.logger.warning("Error processing image, falling back to default image handler.")
             return self.__default_image_handler(image)
 
     def __default_image_handler(self, image) -> dict:
@@ -99,6 +93,19 @@ class AlitaDocxMammothLoader(BaseLoader):
         """
         return {"src": "Transcript is not available"}
 
+
+    def __postprocess_original_md(self, original_md: str) -> str:
+        # Pattern to match placeholders like[image_1_1.png] or similar
+        pattern = re.compile(r'!\[([^\]]*)\]\(([^)]*)(\s\"([^"]*)\")?\)')
+
+        def replace_placeholder(match):
+            transcript = match.group(2)
+            # Return a markdown formatted transcript section.
+            return f"\n**Image Transcript:**\n{transcript}\n"
+
+        new_md = pattern.sub(replace_placeholder, original_md)
+        return new_md
+
     def load(self):
         """
         Loads and converts the Docx file to markdown format.
@@ -109,5 +116,7 @@ class AlitaDocxMammothLoader(BaseLoader):
         """
         with open(self.path, 'rb') as docx_file:
             result = convert_to_html(docx_file, convert_image=mammoth.images.img_element(self.__handle_image))
-            return [Document(page_content=markdownify(result.value, heading_style="ATX"),
-                             metadata={'source': str(self.path)})]
+            content = markdownify(result.value, heading_style="ATX")
+            result_content = self.__postprocess_original_md(content)
+            return [Document(page_content=result_content, metadata={'source': str(self.path)})]
+
