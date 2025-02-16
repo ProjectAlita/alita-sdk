@@ -2,6 +2,7 @@
 
 import base64
 import io
+import json
 from PIL import Image
 import logging
 from traceback import format_exc
@@ -135,6 +136,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                     options = st.selectbox("Select an agent to load", (agent['name'] for agent in st.session_state.agents))
                     agent_version_name = st.text_input("Agent Version Name", value='latest', placeholder="Enter Version ID")
                     agent_type = st.selectbox("Agent Type (leave brank for default)", [""] + agent_types)
+                    custom_tools = st.text_area("Custom Tools", placeholder="Enter Custom Tools in List Dict format")
                     submitted = st.form_submit_button("Load Agent")
                     if submitted:
                         with st.spinner("Loading Agent..."):
@@ -153,11 +155,18 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                         sqlite3.connect("memory.db", check_same_thread=False)
                                     )
                                     #
+                                    try:
+                                        custom_tools_json = json.loads(custom_tools)
+                                        if not isinstance(custom_tools_json, list):
+                                            raise ValueError("Custom tools should be a list of dictionaries")
+                                    except:
+                                        custom_tools_json = []
                                     st.session_state.agent_executor = st.session_state.llm.client.application(
                                         client=st.session_state.llm,
                                         application_id=agent_id,
                                         application_version_id=agent_version_id,
                                         app_type=agent_type if agent_type else None,
+                                        tools=custom_tools_json,
                                         memory=memory,
                                     )
                                     #

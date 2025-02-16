@@ -3,9 +3,8 @@ from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
 from pydantic import create_model, BaseModel
 from pydantic.fields import FieldInfo
-from ..tools.artifact import (
-    __all__ as artifact_tools
-)
+from ..tools.artifact import ArtifactWrapper
+from alita_tools.base.tool import BaseAction
 
 
 class ArtifactToolkit(BaseToolkit):
@@ -17,20 +16,26 @@ class ArtifactToolkit(BaseToolkit):
             "artifact",
             client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             bucket = (str, FieldInfo(description="Bucket name")),
-            selected_tools = (list, FieldInfo(description="List of selected tools", default=[list(tool.keys())[0] for tool in artifact_tools]))
+            selected_tools = (list, FieldInfo(description="List of selected tools", default=[]))
         )
     
     @classmethod
     def get_toolkit(cls, client: Any, bucket: str, selected_tools: list[str] = []):
         if selected_tools is None:
             selected_tools = []
-        artifact = client.artifact(bucket)
         tools = []
-        for tool in artifact_tools:
+        artifact_wrapper = ArtifactWrapper(client=client, bucket=bucket)
+        available_tools = artifact_wrapper.get_available_tools()
+        for tool in available_tools:
             if selected_tools:
-                if tool['name'] not in selected_tools:
+                if tool["name"] not in selected_tools:
                     continue
-            tools.append(tool['tool'](artifact=artifact))
+            tools.append(BaseAction(
+                api_wrapper=artifact_wrapper,
+                name=tool["name"],
+                description=tool["description"],
+                args_schema=tool["args_schema"]
+            ))
         return cls(tools=tools)
     
     def get_tools(self):

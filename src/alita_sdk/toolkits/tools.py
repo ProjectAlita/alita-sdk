@@ -7,6 +7,9 @@ from .datasource import DatasourcesToolkit
 from .application import ApplicationToolkit
 from .artifact import ArtifactToolkit
 
+## Community tools and toolkits
+from ..community.eda.jiratookit import AnalyseJira
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,7 +18,8 @@ def get_toolkits():
         PromptToolkit.toolkit_config_schema(),
         DatasourcesToolkit.toolkit_config_schema(),
         ApplicationToolkit.toolkit_config_schema(),
-        ArtifactToolkit.toolkit_config_schema()
+        ArtifactToolkit.toolkit_config_schema(),
+        AnalyseJira.toolkit_config_schema()
     ]
 
 
@@ -47,6 +51,10 @@ def get_tools(tools_list: list, alita: 'AlitaClient') -> list:
                 bucket=tool['settings']['bucket'],
                 selected_tools=tool['settings'].get('selected_tools', [])
             ).get_tools())
+        if tool['type'] == 'analyse_jira':
+            tools.extend(AnalyseJira.get_toolkit(
+                client=alita, 
+                **tool['settings']).get_tools())
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
     tools += alita_tools(tools_list)

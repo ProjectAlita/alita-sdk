@@ -9,6 +9,10 @@ requests~=2.3
 pydantic~=2.10.0
 chardet==5.2.0
 
+# Community EDA
+retry-extended==0.2.3
+jira==3.8.0
+
 # Garpbage to speedup the build
 fastapi==0.115.5
 httpcore==1.0.7

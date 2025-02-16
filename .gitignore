@@ -166,3 +166,4 @@ memory.*
 docs/
 settings.json
 .idea/
+raw_data/

@@ -1,107 +1,102 @@
-
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from typing import Any, Type
-from pydantic import create_model, BaseModel
-from pydantic.fields import FieldInfo
+from pydantic import create_model, BaseModel, Field, model_validator
 
-class ListFiles(BaseTool):
-    name: str = "listFiles"
-    description: str = "List all files in the artifact"
-    artifact: Any
-    args_schema: Type[BaseModel] = create_model( "listBucket")
+class ArtifactWrapper(BaseModel):
     
-    def _run(self):
+    client: Any
+    bucket: str
+    artifact: Any #: :meta private:
+    
+    @model_validator(mode='before')
+    @classmethod
+    def validate_toolkit(cls, values):
+        if not values.get('client'):
+            raise ValueError("Client is required.")
+        if not values.get('bucket'):
+            raise ValueError("Bucket is required.")
+        cls.artifact = values['client'].artifact(values['bucket'])
+        return values
+
+    def list_files(self):
         return self.artifact.list()
 
-
-class CreateFile(BaseTool):
-    name: str = "createFile"
-    description: str = "Create a file in the artifact"
-    artifact: Any
-    args_schema: Type[BaseModel] = create_model(
-        "createFile", 
-        filename = (str, FieldInfo(description="Filename")),
-        filedata = (str, FieldInfo(description="Stringified content of the file"))
-        )
-    
-    def _run(self, filename, filedata):
+    def create_file(self, filename: str, filedata: str):
         return self.artifact.create(filename, filedata)
 
-
-class ReadFile(BaseTool):
-    name: str = "readFile"
-    description: str = "Read a file in the artifact"
-    artifact: Any
-    args_schema: Type[BaseModel] = create_model(
-        "readFile", 
-        filename = (str, FieldInfo(description="Filename"))
-        )
-    
-    def _run(self, filename):
+    def read_file(self, filename: str):
         return self.artifact.get(filename)
 
-class DeleteFile(BaseTool):
-    name: str = "deleteFile"
-    description: str = "Delete a file in the artifact"
-    artifact: Any
-    args_schema: Type[BaseModel] = create_model(
-        "deleteFile", 
-        filename = (str, FieldInfo(description="Filename"))
-        )
-    
-    def _run(self, filename):
+    def delete_file(self, filename: str):
         return self.artifact.delete(filename)
 
-
-class AppendData(BaseTool):
-    name: str = "appendData"
-    description: str = "Append data to a file in the artifact"
-    artifact: Any
-    args_schema: Type[BaseModel] = create_model(
-        "appendData", 
-        filename = (str, FieldInfo(description="Filename")),
-        filedata = (str, FieldInfo(description="Stringified content to append"))
-        )
-    
-    def _run(self, filename, filedata):
+    def append_data(self, filename: str, filedata: str):
         return self.artifact.append(filename, filedata)
 
-class OverwriteData(BaseTool):
-    name: str = "overwriteData"
-    description: str = "Overwrite data in a file in the artifact"
-    artifact: Any
-    args_schema: Type[BaseModel] = create_model(
-        "overwriteData", 
-        filename = (str, FieldInfo(description="Filename")),
-        filedata = (str, FieldInfo(description="Stringified content to overwrite"))
-    )
-    
-    def _run(self, filename, filedata):
+    def overwrite_data(self, filename: str, filedata: str):
         return self.artifact.overwrite(filename, filedata)
-    
-__all__ = [
-    {
-        "name": "listFiles",
-        "tool": ListFiles
-    },
-    {
-        "name": "createFile",
-        "tool": CreateFile
-    },
-    {
-        "name": "readFile",
-        "tool": ReadFile
-    },
-    {
-        "name": "deleteFile",
-        "tool": DeleteFile
-    },
-    {
-        "name": "appendData",
-        "tool": AppendData
-    },
-    {
-        "name": "overwriteData",
-        "tool": OverwriteData
-    }
-]
+
+    def get_available_tools(self):
+        return [
+            {
+                "ref": self.list_files,
+                "name": "listFiles",
+                "description": "List all files in the artifact",
+                "args_schema": create_model("listBucket")
+            },
+            {
+                "ref": self.create_file,
+                "name": "createFile",
+                "description": "Create a file in the artifact",
+                "args_schema": create_model(
+                    "createFile", 
+                    filename=(str, Field(description="Filename")),
+                    filedata=(str, Field(description="Stringified content of the file"))
+                )
+            },
+            {
+                "ref": self.read_file,
+                "name": "readFile",
+                "description": "Read a file in the artifact",
+                "args_schema": create_model(
+                    "readFile", 
+                    filename=(str, Field(description="Filename"))
+                )
+            },
+            {
+                "ref": self.delete_file,
+                "name": "deleteFile",
+                "description": "Delete a file in the artifact",
+                "args_schema": create_model(
+                    "deleteFile", 
+                    filename=(str, Field(description="Filename"))
+                )
+            },
+            {
+                "ref": self.append_data,
+                "name": "appendData",
+                "description": "Append data to a file in the artifact",
+                "args_schema": create_model(
+                    "appendData", 
+                    filename=(str, Field(description="Filename")),
+                    filedata=(str, Field(description="Stringified content to append"))
+                )
+            },
+            {
+                "ref": self.overwrite_data,
+                "name": "overwriteData",
+                "description": "Overwrite data in a file in the artifact",
+                "args_schema": create_model(
+                    "overwriteData", 
+                    filename=(str, Field(description="Filename")),
+                    filedata=(str, Field(description="Stringified content to overwrite"))
+                )
+            }
+        ]
+
+    def run(self, name: str, *args: Any, **kwargs: Any):
+        for tool in self.get_available_tools():
+            if tool["name"] == name:
+                return tool["ref"](*args, **kwargs)
+        else:
+            raise ToolException(f"Unknown tool name: {name}")
