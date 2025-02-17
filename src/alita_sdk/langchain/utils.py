@@ -148,8 +148,9 @@ def create_typed_dict_from_yaml(data):
     return cls
 
 def create_params(input_variables: list[str], state: dict) -> dict:
+    # TODO: Roma to fix, as message content may be a list, or a base64 or some another type
     return {
-        var: '\n'.join(message.content for message in state.get('messages', []))
+        var: '\n'.join(str(message.content) for message in state.get('messages', []))
         if var == 'messages'
         else str(state.get(var, ''))
         for var in input_variables
