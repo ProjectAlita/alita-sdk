@@ -21,5 +21,6 @@ if 'messages' not in st.session_state:
     st.session_state.models = []
     st.session_state.tooklit_configs = []
     st.session_state.tooklit_names = []
+    st.session_state.toolkits = []
 
 run_streamlit(st)

@@ -180,16 +180,22 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
 
         with agentconfig:
             st.title("Local Agent")
+            clear_agent = st.button("Clear Config")
+            if clear_agent:
+                st.session_state.toolkits = []
+                
             with st.form("add_tkit", clear_on_submit=False):
                 options = st.selectbox("Add toolkit", st.session_state.tooklit_names)
                 submitted = st.form_submit_button("Add Toolkit")
                 if submitted:
-                    pass
+                    tkit_schema = st.session_state.tooklit_configs[st.session_state.tooklit_names.index(options)]
+                    schema = create_tooklit_schema(tkit_schema)
+                    st.session_state.toolkits.append(schema)
+                    
 
             with st.form("agent_config", clear_on_submit=False):
-
                 context = st.text_area("Context", placeholder="Enter Context")
-                tools = st.text_area("Tools", placeholder="Enter Tools in JSON format")
+                tools = st.text_area("Tools", placeholder="Enter Tools in JSON format", value=json.dumps(st.session_state.toolkits, indent=2))
                 submitted = st.form_submit_button("Submit")
                 if submitted:
                     pass

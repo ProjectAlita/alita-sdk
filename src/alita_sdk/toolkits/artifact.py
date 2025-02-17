@@ -1,7 +1,7 @@
-from typing import List, Any
+from typing import List, Any, Literal
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
-from pydantic import create_model, BaseModel
+from pydantic import create_model, BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 from ..tools.artifact import ArtifactWrapper
 from alita_tools.base.tool import BaseAction
@@ -12,11 +12,13 @@ class ArtifactToolkit(BaseToolkit):
     
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
+        selected_tools = {x['name']: x['args_schema'].schema() for x in ArtifactWrapper.model_construct().get_available_tools()}
         return create_model(
             "artifact",
             client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             bucket = (str, FieldInfo(description="Bucket name")),
-            selected_tools = (list, FieldInfo(description="List of selected tools", default=[]))
+            selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})
         )
     
     @classmethod

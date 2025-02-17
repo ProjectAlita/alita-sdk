@@ -18,7 +18,7 @@ class AnalyseJira(BaseToolkit):
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         return create_model(
-            "analyse_ira",
+            "analyse_jira",
             project_keys = (str, Field(description="Jira project keys separated by comma")),
             team_filed = (str, Field(description="Jira filed used as identifier for team")),
             envoironment_field = (str, Field(description="Jira filed used as identifier for environment")),

@@ -1,5 +1,5 @@
-from langchain_core.tools import BaseTool, ToolException
-from typing import Any, Type
+from langchain_core.tools import ToolException
+from typing import Any
 from pydantic import create_model, BaseModel, Field, model_validator
 
 class ArtifactWrapper(BaseModel):

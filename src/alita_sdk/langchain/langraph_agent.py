@@ -22,6 +22,7 @@ from ..tools.tool import ToolNode
 from ..tools.loop import LoopNode
 from ..tools.loop_output import LoopToolNode
 from ..tools.function import FunctionTool
+from ..tools.indexer_tool import IndexerNode
 from ..utils.utils import clean_string
 
 from .utils import create_state
@@ -197,7 +198,7 @@ def create_graph(
                 node_id = clean_string(node['id'])
                 tool_name = clean_string(node.get('tool', node_id))
                 logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-                if node_type in ['function', 'tool', 'loop', 'loop_from_tool']:
+                if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer']:
                     for tool in tools:
                         if tool.name == tool_name:
                             if node_type == 'function':
@@ -235,6 +236,21 @@ def create_graph(
                                         output_variables=node.get('output', []),
                                         input_variables=node.get('input', ['messages']),
                                         structured_output=node.get('structured_output', False)))
+                            elif node_type == 'indexer':
+                                indexer_tool = None
+                                indexer_tool_name = clean_string(node.get('indexer_tool', None))
+                                for t in tools:
+                                    if t.name == indexer_tool_name:
+                                        indexer_tool = t
+                                logger.info(f"Indexer tool: {indexer_tool}")
+                                lg_builder.add_node(node_id, IndexerNode(
+                                    client=client, tool=tool,
+                                    index_tool=indexer_tool,
+                                    input_mapping=node.get('input_mapping', {}),
+                                    name=node['id'], return_type='dict',
+                                    output_variables=node.get('output', []),
+                                    input_variables=node.get('input', ['messages']),
+                                    structured_output=node.get('structured_output', False)))
                             break
                 elif node_type == 'llm':
                     lg_builder.add_node(node_id, LLMNode(

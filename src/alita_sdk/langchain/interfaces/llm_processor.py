@@ -28,7 +28,6 @@ from langchain.prompts import PromptTemplate  # pylint: disable=E0401
 
 from langchain.schema import HumanMessage, SystemMessage
 
-from ...llms.alita import AlitaClient
 from ...llms.preloaded import PreloadedEmbeddings, PreloadedChatModel  # pylint: disable=E0401
 from ..retrievers.AlitaRetriever import AlitaRetriever
 from ..tools.log import print_log
@@ -50,6 +49,7 @@ def get_model(model_type: str, model_params: dict):
     if model_type == "PreloadedChatModel":
         return PreloadedChatModel(**model_params)
     if model_type == "Alita":
+        from ...llms.alita import AlitaClient
         return AlitaClient(**model_params)
     if model_type in chat_models:
         model = getattr(
