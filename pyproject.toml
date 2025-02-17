@@ -1,29 +1,34 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = [ "setuptools>=61.0",]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "alita_sdk"
-version = "0.3.22"
-authors = [
-  { name="Artem Rozumenko", email="artyom.rozumenko@gmail.com" },
-  { name="Mikalai Biazruchka", email="mikalai_biazruchka@epam.com" },
-  { name="Roman Mitusov", email="roman_mitusov@epam.com" },
-  { name="Ivan Krakhmaliuk", email="lifedjik@gmail.com" },
-]
+version = "0.3.23"
 description = "SDK for building langchain agents using resouces from Alita"
 readme = "README.md"
 requires-python = ">=3.10"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
-    "Operating System :: OS Independent",
-]
-dynamic = ["dependencies"]
+classifiers = [ "Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License", "Operating System :: OS Independent",]
+dynamic = [ "dependencies",]
+[[project.authors]]
+name = "Artem Rozumenko"
+email = "artyom.rozumenko@gmail.com"
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+[[project.authors]]
+name = "Mikalai Biazruchka"
+email = "mikalai_biazruchka@epam.com"
+
+[[project.authors]]
+name = "Roman Mitusov"
+email = "roman_mitusov@epam.com"
+
+[[project.authors]]
+name = "Ivan Krakhmaliuk"
+email = "lifedjik@gmail.com"
 
 [project.urls]
 Homepage = "https://projectalita.ai"
 Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
+
+[tool.setuptools.dynamic.dependencies]
+file = [ "requirements.txt",]
