@@ -27,7 +27,7 @@ def eda_api_wrapper():
         jira_api_key=os.getenv("JIRA_API_KEY"),
         jira_verify_ssl=False
     )
-    artifacts_wrapper = ArtifactWrapper(client=client, bucket=os.getenv("ARTIFACT_BUCKET_PATH"), artifact=None)
+    artifacts_wrapper = ArtifactWrapper(client=client, bucket=os.getenv("ARTIFACT_BUCKET_PATH"))
     
     check_schema(artifacts_wrapper)
     eda_wrapper = EDAApiWrapper(

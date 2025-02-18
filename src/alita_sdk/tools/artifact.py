@@ -1,12 +1,12 @@
 from langchain_core.tools import ToolException
 from typing import Any
 from pydantic import create_model, BaseModel, Field, model_validator
+from pydantic.fields import PrivateAttr
 
 class ArtifactWrapper(BaseModel):
-    
     client: Any
     bucket: str
-    artifact: Any #: :meta private:
+    _artifact: Any = PrivateAttr()
     
     @model_validator(mode='before')
     @classmethod
@@ -15,26 +15,26 @@ class ArtifactWrapper(BaseModel):
             raise ValueError("Client is required.")
         if not values.get('bucket'):
             raise ValueError("Bucket is required.")
-        cls.artifact = values['client'].artifact(values['bucket'])
+        cls._artifact = values['client'].artifact(values['bucket'])
         return values
 
     def list_files(self):
-        return self.artifact.list()
+        return self._artifact.list()
 
     def create_file(self, filename: str, filedata: str):
-        return self.artifact.create(filename, filedata)
+        return self._artifact.create(filename, filedata)
 
     def read_file(self, filename: str):
-        return self.artifact.get(filename)
+        return self._artifact.get(filename)
 
     def delete_file(self, filename: str):
-        return self.artifact.delete(filename)
+        return self._artifact.delete(filename)
 
     def append_data(self, filename: str, filedata: str):
-        return self.artifact.append(filename, filedata)
+        return self._artifact.append(filename, filedata)
 
     def overwrite_data(self, filename: str, filedata: str):
-        return self.artifact.overwrite(filename, filedata)
+        return self._artifact.overwrite(filename, filedata)
 
     def get_available_tools(self):
         return [
