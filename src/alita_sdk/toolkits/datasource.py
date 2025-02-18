@@ -12,7 +12,7 @@ class DatasourcesToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         return create_model(
             "datasource",
-            client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
+            # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             datasource_ids = (list, FieldInfo(description="List of datasource ids")),
             selected_tools = (list, FieldInfo(description="List of selected tools", default=['chat', 'search']))
         )

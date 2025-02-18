@@ -15,7 +15,7 @@ class ArtifactToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in ArtifactWrapper.model_construct().get_available_tools()}
         return create_model(
             "artifact",
-            client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
+            # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             bucket = (str, FieldInfo(description="Bucket name")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})

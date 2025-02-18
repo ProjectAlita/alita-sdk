@@ -12,7 +12,7 @@ class PromptToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         return create_model(
             "prompt",
-            client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
+            # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             prompts = (list, FieldInfo(description="List of lists for [[prompt_id, prompt_version_id]]"))
         )
     
