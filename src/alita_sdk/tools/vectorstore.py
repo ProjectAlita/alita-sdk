@@ -16,6 +16,9 @@ class IndexDocumentsModel(BaseModel):
 class SearchDocumentsModel(BaseModel):
     query: str = Field(description="Search query")
     doctype: str = Field(description="Document type")
+    filter: dict = Field(description='Filter for metadata of documents, Should be empty string if no filter required. In case needed i.e. " + \
+                        "({"id": {"$in": [1, 5, 2, 9]}, {"$and": [{"id": {"$in": [1, 5, 2, 9]}}, " + \
+                            "{"location": {"$in": ["pond", "market"]}}]}')
     search_top: int = Field(description="Number of search results")
 
 class VectorStoreWrapper(BaseModel):
@@ -78,9 +81,9 @@ class VectorStoreWrapper(BaseModel):
             self._vectoradapter.persist()
         return {"status": "success"}
         
-    def search_documents(self, query:str, doctype: str = 'code', search_top:int=10):
+    def search_documents(self, query:str, doctype: str = 'code', filter:dict={}, search_top:int=10):
         from alita_tools.code.loaders.codesearcher import search_format
-        items = self._vectorstore.similarity_search_with_score(query, k=search_top)
+        items = self._vectorstore.similarity_search_with_score(query, filter=filter, k=search_top)
         if doctype == 'code':
             return search_format(items)
 
