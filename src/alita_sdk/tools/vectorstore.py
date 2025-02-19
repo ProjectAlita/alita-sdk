@@ -1,9 +1,5 @@
-from typing import Any, Generator
-from pydantic import BaseModel, model_validator, Field, create_model, PrivateAttr
-from ..langchain.interfaces.llm_processor import (get_embeddings, summarize, 
-                                                  get_model, get_vectorstore, 
-                                                  add_documents, generateResponse, 
-                                                  llm_predict)
+from typing import Any
+from pydantic import BaseModel, model_validator, Field, PrivateAttr
 from langchain_core.tools import ToolException
 from ..langchain.tools.vector import VectorAdapter
 from logging import getLogger
@@ -30,11 +26,12 @@ class VectorStoreWrapper(BaseModel):
     _dataset: str = PrivateAttr()
     _embedding: Any = PrivateAttr()
     _vectorstore: Any = PrivateAttr()
-    _vectoradapter: Any= PrivateAttr()
+    _vectoradapter: Any = PrivateAttr()
     
     @model_validator(mode='before')
     @classmethod
     def validate_toolkit(cls, values):
+        from ..langchain.interfaces.llm_processor import get_embeddings,get_vectorstore
         logger.debug(f"Validating toolkit: {values}")
         if not values.get('vectorstore_type'):
             raise ValueError("Vectorstore type is required.")
@@ -57,6 +54,7 @@ class VectorStoreWrapper(BaseModel):
         return values
 
     def index_documents(self, documents):
+        from ..langchain.interfaces.llm_processor import add_documents
         logger.debug(f"Indexing documents: {documents}")
         self._vectoradapter.delete_dataset(self._dataset)
         self._vectoradapter.persist()
@@ -83,7 +81,7 @@ class VectorStoreWrapper(BaseModel):
         
     def search_documents(self, query:str, doctype: str = 'code', filter:dict={}, search_top:int=10):
         from alita_tools.code.loaders.codesearcher import search_format
-        items = self._vectorstore.similarity_search_with_score(query, filter=filter, k=search_top)
+        items = self._vectoradapter.vectorstore.similarity_search_with_score(query, filter=filter, k=search_top)
         if doctype == 'code':
             return search_format(items)
 
