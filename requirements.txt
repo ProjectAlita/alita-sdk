@@ -27,14 +27,14 @@ langgraph-checkpoint-postgres~=2.0.1
 langsmith==0.1.144
 langgraph~=0.2.53
 langchain_chroma~=0.1.0
-langchain-unstructured~=0.1.2
+langchain-unstructured~=0.1.6
 
 ## Indexer
 keybert==0.8.3
 charset_normalizer==3.3.2
-unstructured[local-inference]==0.15.9
+unstructured[local-inference]==0.16.23
 unstructured_pytesseract==0.3.13
-unstructured_inference==0.7.36
+unstructured_inference==0.8.7
 python-pptx==1.0.2
 pdf2image==1.16.3
 pikepdf==8.7.1
