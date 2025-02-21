@@ -1,5 +1,5 @@
 from langchain_core.tools import ToolException
-from typing import Any
+from typing import Any, Optional
 from pydantic import create_model, BaseModel, Field, model_validator
 from pydantic.fields import PrivateAttr
 
@@ -18,31 +18,39 @@ class ArtifactWrapper(BaseModel):
         cls._artifact = values['client'].artifact(values['bucket'])
         return values
 
-    def list_files(self):
-        return self._artifact.list()
+    def list_files(self, bucket_name = None):
+        return self._artifact.list(bucket_name)
 
-    def create_file(self, filename: str, filedata: str):
-        return self._artifact.create(filename, filedata)
+    def create_file(self, filename: str, filedata: str, bucket_name = None):
+        return self._artifact.create(filename, filedata, bucket_name)
 
-    def read_file(self, filename: str):
-        return self._artifact.get(filename)
+    def read_file(self, filename: str, bucket_name = None):
+        return self._artifact.get(filename, bucket_name)
 
-    def delete_file(self, filename: str):
-        return self._artifact.delete(filename)
+    def delete_file(self, filename: str, bucket_name = None):
+        return self._artifact.delete(filename, bucket_name)
 
-    def append_data(self, filename: str, filedata: str):
-        return self._artifact.append(filename, filedata)
+    def append_data(self, filename: str, filedata: str, bucket_name = None):
+        return self._artifact.append(filename, filedata, bucket_name)
 
-    def overwrite_data(self, filename: str, filedata: str):
-        return self._artifact.overwrite(filename, filedata)
+    def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
+        return self._artifact.overwrite(filename, filedata, bucket_name)
+
+    def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
+        return self._artifact.client.create_bucket(bucket_name, expiration_measure, expiration_value)
 
     def get_available_tools(self):
+        bucket_name = (Optional[str], Field(description="Name of the bucket to work with."
+                                                        "If bucket is not specified by user directly, the name should be taken from chat history."
+                                                        "If bucket never mentioned in chat, the name will be taken from tool configuration."
+                                                        " ***IMPORTANT*** Underscore `_` is prohibited in bucket name and should be replaced by `-`",
+                                            default=None))
         return [
             {
                 "ref": self.list_files,
                 "name": "listFiles",
                 "description": "List all files in the artifact",
-                "args_schema": create_model("listBucket")
+                "args_schema": create_model("listBucket", bucket_name=bucket_name)
             },
             {
                 "ref": self.create_file,
@@ -51,7 +59,8 @@ class ArtifactWrapper(BaseModel):
                 "args_schema": create_model(
                     "createFile", 
                     filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="Stringified content of the file"))
+                    filedata=(str, Field(description="Stringified content of the file")),
+                    bucket_name=bucket_name
                 )
             },
             {
@@ -60,7 +69,8 @@ class ArtifactWrapper(BaseModel):
                 "description": "Read a file in the artifact",
                 "args_schema": create_model(
                     "readFile", 
-                    filename=(str, Field(description="Filename"))
+                    filename=(str, Field(description="Filename")),
+                    bucket_name=bucket_name
                 )
             },
             {
@@ -69,7 +79,8 @@ class ArtifactWrapper(BaseModel):
                 "description": "Delete a file in the artifact",
                 "args_schema": create_model(
                     "deleteFile", 
-                    filename=(str, Field(description="Filename"))
+                    filename=(str, Field(description="Filename")),
+                    bucket_name=bucket_name
                 )
             },
             {
@@ -79,7 +90,8 @@ class ArtifactWrapper(BaseModel):
                 "args_schema": create_model(
                     "appendData", 
                     filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="Stringified content to append"))
+                    filedata=(str, Field(description="Stringified content to append")),
+                    bucket_name=bucket_name
                 )
             },
             {
@@ -89,9 +101,23 @@ class ArtifactWrapper(BaseModel):
                 "args_schema": create_model(
                     "overwriteData", 
                     filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="Stringified content to overwrite"))
+                    filedata=(str, Field(description="Stringified content to overwrite")),
+                    bucket_name=bucket_name
                 )
-            }
+            },
+            {
+                "ref": self.create_new_bucket,
+                "name": "createNewBucket",
+                "description": "Creates new bucket specified by user.",
+                "args_schema": create_model(
+                    "createNewBucket",
+                    bucket_name=(str, Field(description="Bucket name to create. ***IMPORTANT*** Underscore `_` is prohibited in bucket name and should be replaced by `-`.")),
+                    expiration_measure=(Optional[str], Field(description="Measure of expiration time for bucket configuration."
+                                                                         "Possible values: `days`, `weeks`, `months`, `years`.",
+                                                             default="weeks")),
+                    expiration_value=(Optional[int], Field(description="Expiration time values.", default=1))
+                )
+            },
         ]
 
     def run(self, name: str, *args: Any, **kwargs: Any):
