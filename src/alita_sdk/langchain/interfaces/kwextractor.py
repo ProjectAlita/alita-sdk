@@ -91,6 +91,9 @@ class LangchainEmbedder(BaseEmbedder):  # pylint: disable=R0903
         """ Wrapper """
         _ = verbose
         #
+        if not isinstance(documents, list):
+            documents = documents.tolist()
+        #
         embeddings = self.embeddings.embed_documents(documents)
         #
         import numpy as np  # pylint: disable=E0401,C0415
