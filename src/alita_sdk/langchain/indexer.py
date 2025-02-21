@@ -29,7 +29,7 @@ from .interfaces.loaders import loader
 from .interfaces.kwextractor import KWextractor
 from .interfaces.splitters import Splitter
 from .interfaces.llm_processor import get_embeddings, summarize, get_model, get_vectorstore, add_documents, generateResponse, llm_predict
-from .tools.utils import unpack_json, download_nltk, replace_source
+from .tools.utils import unpack_json, download_nltk, replace_source, LockedIterator
 from .tools.vector import VectorAdapter
 from .tools.log import print_log
 from .tools import log
@@ -65,6 +65,7 @@ def main(
         quota_params=None,
         bins_with_llm = False,
         max_docs_per_add=None,
+        indexer_extras=None,
 ):
     #
     # Logic is the following:
@@ -85,7 +86,11 @@ def main(
     #
     kw_extractor = None
     if kw_for_document and kw_plan:
-        kw_extractor = KWextractor(kw_plan, kw_args)
+        if isinstance(indexer_extras, dict) and indexer_extras.get("use_kw_embeddings", False):
+            indexer_extras["embeddings"] = embedding
+        #
+        kw_extractor = KWextractor(kw_plan, kw_args, indexer_extras)
+    #
     llmodel = get_model(ai_model, ai_model_params)
     #
     vectoradapter.quota_check(
@@ -93,11 +98,10 @@ def main(
         tag="Quota (before pre-cleanup)",
         verbose=True,
     )
-
+    #
     if bins_with_llm and llmodel is not None:
         loader_params['bins_with_llm'] = bins_with_llm
         loader_params['llm'] = llmodel
-
     #
     # Delete stale 'dataset' documents from vectorstore before (re-)indexing
     vectoradapter.delete_dataset(dataset)
@@ -123,7 +127,11 @@ def main(
     if chunk_processing_prompt:
         artifact_tmp = tempfile.mkdtemp()
         target_path = os.path.join(artifact_tmp, "Metadataextract.txt")
-    for document in loader(loader_name, loader_params, load_params):
+    #
+    safe_loader = loader(loader_name, loader_params, load_params)
+    # safe_loader = LockedIterator(loader(loader_name, loader_params, load_params))
+    #
+    for document in safe_loader:
         replace_source(document, source_replacers, keys=["source", "table_source"])
         #
         # Add: two records/placeholders here - summary + keywords
@@ -134,6 +142,7 @@ def main(
                     print_log("Summary: ", document.metadata.get('document_summary', ''))
             except Exception as e:
                 print_log("Failed to generate document summary", str(e))
+        #
         if kw_for_document and kw_extractor.extractor:
             if len(document.metadata.get('keywords', [])) == 0 and \
                     len(document.page_content) > 1000:
@@ -151,7 +160,9 @@ def main(
                     f.write(result + "\n")
             except Exception as e:
                 print_log("Failed to generate document metadata", str(e))
+        #
         splitter = Splitter(**splitter_params)
+        #
         for index, document in enumerate(splitter.split(document, splitter_name)):
             #
             _documents = []
@@ -299,6 +310,7 @@ def index(
         quota_params=None,
         bins_with_llm = False,
         max_docs_per_add=None,
+        indexer_extras=None,
 ):
     return main(
         dataset=dataset,
@@ -324,6 +336,7 @@ def index(
         quota_params=quota_params,
         bins_with_llm=bins_with_llm,
         max_docs_per_add=max_docs_per_add,
+        indexer_extras=indexer_extras,
     )
 
 

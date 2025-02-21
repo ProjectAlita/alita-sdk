@@ -3,6 +3,7 @@ import io
 import json
 import difflib
 import re
+import threading
 
 from PIL.Image import Image
 from openpyxl.cell.text import InlineFont
@@ -183,3 +184,18 @@ def image_to_byte_array(image: Image) -> bytes:
     raw_bytes = io.BytesIO()
     image.save(raw_bytes, format='PNG')
     return raw_bytes.getvalue()
+
+
+class LockedIterator:
+    """ Make iterator thread-safe """
+
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.lock = threading.Lock()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        with self.lock:
+            return self.iterator.__next__()

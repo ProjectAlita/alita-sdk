@@ -14,6 +14,8 @@
 
 from typing import Optional
 from keybert import KeyBERT
+from keybert.backend._base import BaseEmbedder
+
 
 class BertKeyphraseExtractor:
     kw_strategy_settings = {
@@ -40,10 +42,16 @@ class BertKeyphraseExtractor:
         }
     }
 
-    def __init__(self, kw_strategy='max_sum'):
-        self.kw_model = KeyBERT()
+    def __init__(self, kw_strategy='max_sum', indexer_extras=None):
+        #
+        if isinstance(indexer_extras, dict) and "embeddings" in indexer_extras:
+            embedder = LangchainEmbedder(indexer_extras["embeddings"])
+            self.kw_model = KeyBERT(model=embedder)
+        else:
+            self.kw_model = KeyBERT()
+        #
         self.kw_strategy = kw_strategy
-    
+
     def extract_keywords(self, text):
         kws = self.kw_model.extract_keywords(text, **self.kw_strategy_settings[self.kw_strategy])
         if kws:
@@ -58,14 +66,32 @@ _classmap = {
 
 
 class KWextractor:
-    def __init__(self, kw_extractor_name: Optional[str], kw_extractor_params: Optional[dict]) -> None:
+    def __init__(
+            self, kw_extractor_name: Optional[str], kw_extractor_params: Optional[dict],
+            indexer_extras=None) -> None:
         self.extractor = None
         if kw_extractor_name and kw_extractor_name in _classmap.keys():
-            self.extractor = _classmap[kw_extractor_name](**kw_extractor_params)
-    
+            self.extractor = _classmap[kw_extractor_name](
+                **kw_extractor_params, indexer_extras=indexer_extras,
+            )
+
     def extract_keywords(self, text: str) -> Optional[list]:
         if self.extractor:
             return self.extractor.extract_keywords(text)
         return []
 
 
+class LangchainEmbedder(BaseEmbedder):  # pylint: disable=R0903
+    """ Wrapper """
+
+    def __init__(self, embeddings):
+        self.embeddings = embeddings
+
+    def embed(self, documents, verbose=False):
+        """ Wrapper """
+        _ = verbose
+        #
+        embeddings = self.embeddings.embed_documents(documents)
+        #
+        import numpy as np  # pylint: disable=E0401,C0415
+        return np.array(embeddings)
