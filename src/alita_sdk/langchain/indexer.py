@@ -1,4 +1,5 @@
 # Copyright (c) 2023 Artem Rozumenko
+# pylint: disable=C0415
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,33 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+""" Indexer entrypoints """
+
 import io
 import os
 import json
 import hashlib
 import operator
-import importlib
 import tempfile
+import threading
+import importlib
+import concurrent.futures
 
 from typing import Optional
 
-from langchain_core.documents import Document
-from langchain.schema import HumanMessage
-
-from .interfaces.loaders import loader
-from .interfaces.kwextractor import KWextractor
-from .interfaces.splitters import Splitter
-from .interfaces.llm_processor import get_embeddings, summarize, get_model, get_vectorstore, add_documents, generateResponse, llm_predict
-from .tools.utils import unpack_json, download_nltk, replace_source, LockedIterator
-from .tools.vector import VectorAdapter
-from .tools.log import print_log
 from .tools import log
-from .retrievers.AlitaRetriever import AlitaRetriever
-
-try:
-    download_nltk("./nltk_data", force=False)
-except Exception as e:
-    print_log("Failed to download nltk data", str(e))
 
 
 def main(
@@ -68,6 +57,38 @@ def main(
         indexer_extras=None,
 ):
     #
+    log.info("Importing packages")
+    #
+    from langchain_core.documents import Document
+    #
+    from .interfaces.llm_processor import (
+        get_embeddings,
+        get_vectorstore,
+        get_model,
+        summarize,
+        llm_predict,
+        add_documents,
+    )
+    from .interfaces.loaders import loader
+    from .interfaces.splitters import Splitter
+    #
+    from .tools.log import print_log
+    from .tools.vector import VectorAdapter
+    from .tools.utils import (
+        replace_source,
+        download_nltk,
+        LockedIterator,
+    )
+    #
+    log.info("Checking NLTK")
+    #
+    try:
+        download_nltk("./nltk_data", force=False)
+    except Exception as e:
+        print_log("Failed to download nltk data", str(e))
+    #
+    log.info("Starting")
+    #
     # Logic is the following:
     # 1. Loader and its params to get data
     # 2. Keyword extractor and its params to get keywords (for the whole file)
@@ -89,6 +110,7 @@ def main(
         if isinstance(indexer_extras, dict) and indexer_extras.get("use_kw_embeddings", False):
             indexer_extras["embeddings"] = embedding
         #
+        from .interfaces.kwextractor import KWextractor
         kw_extractor = KWextractor(kw_plan, kw_args, indexer_extras)
     #
     llmodel = get_model(ai_model, ai_model_params)
@@ -124,102 +146,69 @@ def main(
     og_keywords_set_for_source = set()
     #
     target_path = None
+    target_lock = threading.Lock()
+    #
     if chunk_processing_prompt:
         artifact_tmp = tempfile.mkdtemp()
         target_path = os.path.join(artifact_tmp, "Metadataextract.txt")
     #
-    safe_loader = loader(loader_name, loader_params, load_params)
-    # safe_loader = LockedIterator(loader(loader_name, loader_params, load_params))
+    use_threads = isinstance(indexer_extras, dict) and indexer_extras.get("use_threads", False)
     #
-    for document in safe_loader:
-        replace_source(document, source_replacers, keys=["source", "table_source"])
-        #
-        # Add: two records/placeholders here - summary + keywords
-        if document_processing_prompt:
-            try:
-                document = summarize(llmodel, document, document_processing_prompt)
-                if document_debug:
-                    print_log("Summary: ", document.metadata.get('document_summary', ''))
-            except Exception as e:
-                print_log("Failed to generate document summary", str(e))
-        #
-        if kw_for_document and kw_extractor.extractor:
-            if len(document.metadata.get('keywords', [])) == 0 and \
-                    len(document.page_content) > 1000:
+    if use_threads:
+        safe_loader = LockedIterator(loader(loader_name, loader_params, load_params))
+        num_threads = indexer_extras.get("num_threads", 10)
+    else:
+        safe_loader = loader(loader_name, loader_params, load_params)
+    #
+    def _process_documents():
+        for document in safe_loader:
+            replace_source(document, source_replacers, keys=["source", "table_source"])
+            #
+            # Add: two records/placeholders here - summary + keywords
+            if document_processing_prompt:
+                try:
+                    document = summarize(llmodel, document, document_processing_prompt)
+                    if document_debug:
+                        print_log("Summary: ", document.metadata.get('document_summary', ''))
+                except Exception as e:
+                    print_log("Failed to generate document summary", str(e))
+            #
+            if kw_for_document and kw_extractor.extractor:
+                if len(document.metadata.get('keywords', [])) == 0 and \
+                        len(document.page_content) > 1000:
+                    #
+                    document.metadata['keywords'] = kw_extractor.extract_keywords(
+                        document.metadata.get('document_summary', '') + '\n' + document.page_content
+                    )
+                    if document_debug:
+                        print_log("Keywords: ", document.metadata['keywords'])
+            #
+            if chunk_processing_prompt:
+                try:
+                    result = llm_predict(
+                        llmodel, chunk_processing_prompt,
+                        document.metadata.get('document_summary', '') + '\n' + \
+                            document.page_content,
+                    )
+                    #
+                    with target_lock:
+                        with open(target_path, "a") as f:
+                            f.write(result + "\n")
+                except Exception as e:
+                    print_log("Failed to generate document metadata", str(e))
+            #
+            splitter = Splitter(**splitter_params)
+            #
+            for index, document in enumerate(splitter.split(document, splitter_name)):
                 #
-                document.metadata['keywords'] = kw_extractor.extract_keywords(
-                    document.metadata.get('document_summary', '') + '\n' + document.page_content
-                )
-                if document_debug:
-                    print_log("Keywords: ", document.metadata['keywords'])
-        #
-        if chunk_processing_prompt:
-            try:
-                result = llm_predict(llmodel, chunk_processing_prompt, document.metadata.get('document_summary', '') + '\n' + document.page_content)
-                with open(target_path, "a") as f:
-                    f.write(result + "\n")
-            except Exception as e:
-                print_log("Failed to generate document metadata", str(e))
-        #
-        splitter = Splitter(**splitter_params)
-        #
-        for index, document in enumerate(splitter.split(document, splitter_name)):
-            #
-            _documents = []
-            #
-            if document.metadata.get('keywords'):
-                _documents.append(
-                    Document(
-                        page_content=', '.join(document.metadata['keywords']),
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'keywords',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                        }
-                    )
-                )
-            #
-            if document.metadata.get('document_summary'):
-                _documents.append(
-                    Document(
-                        page_content=document.metadata['document_summary'],
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'document_summary',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                        }
-                    )
-                )
-            #
-            # og_data is only set by TableLoader
-            #
-            if document.metadata.get('og_data'):
-                _documents.append(
-                    Document(
-                        page_content=document.page_content,  # cleansed_data
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'data',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                            'chunk_index': index,
-                            'data': document.metadata['og_data'],
-                        }
-                    )
-                )
-                # Only save columns (=file keywords) once per source
-                if document.metadata['table_source'] not in og_keywords_set_for_source:
-                    og_keywords_set_for_source.add(document.metadata['table_source'])
+                _documents = []
+                #
+                if document.metadata.get('keywords'):
                     _documents.append(
                         Document(
-                            page_content=', '.join(document.metadata['columns']),
+                            page_content=', '.join(document.metadata['keywords']),
                             metadata={
-                                'source': document.metadata['table_source'],
+                                'source': document.metadata['source'],
                                 'type': 'keywords',
                                 'library': library,
                                 'source_type': loader_name,
@@ -227,39 +216,106 @@ def main(
                             }
                         )
                     )
-            #
-            else:
-                _documents.append(
-                    Document(
-                        page_content=document.page_content,
-                        metadata={
-                            'source': document.metadata['source'],
-                            'type': 'data',
-                            'library': library,
-                            'source_type': loader_name,
-                            'dataset': dataset,
-                            'chunk_index': index,
-                        }
+                #
+                if document.metadata.get('document_summary'):
+                    _documents.append(
+                        Document(
+                            page_content=document.metadata['document_summary'],
+                            metadata={
+                                'source': document.metadata['source'],
+                                'type': 'document_summary',
+                                'library': library,
+                                'source_type': loader_name,
+                                'dataset': dataset,
+                            }
+                        )
                     )
+                #
+                # og_data is only set by TableLoader
+                #
+                if document.metadata.get('og_data'):
+                    _documents.append(
+                        Document(
+                            page_content=document.page_content,  # cleansed_data
+                            metadata={
+                                'source': document.metadata['source'],
+                                'type': 'data',
+                                'library': library,
+                                'source_type': loader_name,
+                                'dataset': dataset,
+                                'chunk_index': index,
+                                'data': document.metadata['og_data'],
+                            }
+                        )
+                    )
+                    # Only save columns (=file keywords) once per source
+                    if document.metadata['table_source'] not in og_keywords_set_for_source:
+                        og_keywords_set_for_source.add(document.metadata['table_source'])
+                        _documents.append(
+                            Document(
+                                page_content=', '.join(document.metadata['columns']),
+                                metadata={
+                                    'source': document.metadata['table_source'],
+                                    'type': 'keywords',
+                                    'library': library,
+                                    'source_type': loader_name,
+                                    'dataset': dataset,
+                                }
+                            )
+                        )
+                #
+                else:
+                    _documents.append(
+                        Document(
+                            page_content=document.page_content,
+                            metadata={
+                                'source': document.metadata['source'],
+                                'type': 'data',
+                                'library': library,
+                                'source_type': loader_name,
+                                'dataset': dataset,
+                                'chunk_index': index,
+                            }
+                        )
+                    )
+                #
+                if document_debug:
+                    print_log(_documents)
+                #
+                for _document in _documents:
+                    if "\x00" in _document.page_content:
+                        _document.page_content = _document.page_content.replace("\x00", "")
+                #
+                if max_docs_per_add is None:
+                    add_documents(
+                        vectorstore=vectoradapter.vectorstore,
+                        documents=_documents,
+                    )
+                else:
+                    for idx in range(0, len(_documents), max_docs_per_add):
+                        _docs_add_chunk = _documents[idx:idx+max_docs_per_add]
+                        add_documents(
+                            vectorstore=vectoradapter.vectorstore,
+                            documents=_docs_add_chunk,
+                        )
+                #
+                quota_result = vectoradapter.quota_check(
+                    enforce=True,
+                    tag="Quota (docs added)",
+                    verbose=document_debug,
                 )
+                #
+                if not quota_result["ok"]:
+                    return {
+                        "ok": False,
+                        "error": "Storage quota exceeded",
+                    }
             #
-            if document_debug:
-                print_log(_documents)
-            #
-            for _document in _documents:
-                if "\x00" in _document.page_content:
-                    _document.page_content = _document.page_content.replace("\x00", "")
-            #
-            if max_docs_per_add is None:
-                add_documents(vectorstore=vectoradapter.vectorstore, documents=_documents)
-            else:
-                for idx in range(0, len(_documents), max_docs_per_add):
-                    _docs_add_chunk = _documents[idx:idx+max_docs_per_add]
-                    add_documents(vectorstore=vectoradapter.vectorstore, documents=_docs_add_chunk)
+            vectoradapter.persist()
             #
             quota_result = vectoradapter.quota_check(
                 enforce=True,
-                tag="Quota (docs added)",
+                tag="Quota (doc done)",
                 verbose=document_debug,
             )
             #
@@ -269,19 +325,54 @@ def main(
                     "error": "Storage quota exceeded",
                 }
         #
-        vectoradapter.persist()
+        return {"ok": True}
+    #
+    if use_threads:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=num_threads)
+        futures = []
         #
-        quota_result = vectoradapter.quota_check(
-            enforce=True,
-            tag="Quota (doc done)",
-            verbose=document_debug,
+        log.info("Submitting tasks")
+        #
+        for _ in range(num_threads):
+            futures.append(
+                executor.submit(_process_documents)
+            )
+        #
+        log.info("Waiting for tasks")
+        #
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                process_result = future.result()
+                #
+                if not process_result["ok"]:
+                    log.info("Got error, shutting down")
+                    #
+                    executor.shutdown(
+                        wait=True,
+                        cancel_futures=True,
+                    )
+                    #
+                    return process_result
+            except:  # pylint: disable=W0702
+                log.info("Got exception, shutting down")
+                #
+                executor.shutdown(
+                    wait=True,
+                    cancel_futures=True,
+                )
+                #
+                raise
+        #
+        log.info("Shutting down")
+        #
+        executor.shutdown(
+            wait=True,
         )
+    else:
+        process_result = _process_documents()
         #
-        if not quota_result["ok"]:
-            return {
-                "ok": False,
-                "error": "Storage quota exceeded",
-            }
+        if not process_result["ok"]:
+            return process_result
     #
     return {"ok": True, "target_path": target_path}
 
@@ -373,6 +464,18 @@ def search(
         str: Documents content
         set: References
     """
+    #
+    log.info("Importing packages")
+    #
+    from .interfaces.llm_processor import (
+        get_embeddings,
+        get_vectorstore,
+    )
+    #
+    from .tools.vector import VectorAdapter
+    #
+    from .retrievers.AlitaRetriever import AlitaRetriever
+    #
     vectorstore_params['collection_name'] = collection
     embedding = get_embeddings(embedding_model, embedding_model_params)
     vs = get_vectorstore(vectorstore, vectorstore_params, embedding_func=embedding)
@@ -390,6 +493,8 @@ def search(
             importlib.import_module(retriever_pkg),
             retriever_name
         )
+    #
+    log.info("Starting")
     #
     retriever_obj = retriever_cls(
         vectorstore=vectoradapter.vectorstore,
@@ -459,6 +564,17 @@ def predict(
         str: Generated response
         set: References to documents
     """
+    #
+    log.info("Importing packages")
+    #
+    from langchain.schema import HumanMessage
+    #
+    from .interfaces.llm_processor import (
+        get_model,
+    )
+    #
+    log.info("Starting")
+    #
     context, references = search(
         chat_history=chat_history,
         str_content=True,
@@ -537,6 +653,20 @@ def deduplicate(
         show_additional_metadata=False, # the checkbox which will allow the metadata to be shown in main report
 ):
     """ Deduplication """
+    #
+    log.info("Importing packages")
+    #
+    from langchain_core.documents import Document
+    #
+    from .interfaces.llm_processor import (
+        get_embeddings,
+        get_vectorstore,
+    )
+    #
+    from .tools.vector import VectorAdapter
+    #
+    log.info("Starting")
+    #
     embedding = get_embeddings(embedding_model, embedding_model_params)
     vectorstore = get_vectorstore(vectorstore, vectorstore_params, embedding_func=embedding)
     #
@@ -855,6 +985,18 @@ def delete(
         quota_params=None,
 ):
     """ Delete dataset documents from vectorstore """
+    #
+    log.info("Importing packages")
+    #
+    from .interfaces.llm_processor import (
+        get_embeddings,
+        get_vectorstore,
+    )
+    #
+    from .tools.vector import VectorAdapter
+    #
+    log.info("Starting")
+    #
     embedding = get_embeddings(embedding_model, embedding_model_params)
     vectorstore = get_vectorstore(vectorstore, vectorstore_params, embedding_func=embedding)
     #
