@@ -1,5 +1,6 @@
 import logging
 import requests
+from urllib.parse import quote
 
 from typing import Dict, List, Any, Optional
 
@@ -261,7 +262,7 @@ class AlitaClient:
         return data.content
 
     def delete_artifact(self, bucket_name, artifact_name):
-        url = f'{self.artifact_url}/{bucket_name}/{artifact_name}'
+        url = f'{self.artifact_url}/{bucket_name}/{quote(artifact_name)}'
         data = requests.delete(url, headers=self.headers, verify=False)
         return self._process_requst(data)
 
