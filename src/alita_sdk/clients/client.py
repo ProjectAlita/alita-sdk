@@ -225,11 +225,11 @@ class AlitaClient:
         except:
             return False
 
-    def create_bucket(self, bucket_name):
+    def create_bucket(self, bucket_name, expiration_measure = "weeks", expiration_value = 1):
         post_data = {
             "name": bucket_name,
-            "expiration_measure": "weeks",
-            "expiration_value": "1"
+            "expiration_measure": expiration_measure,
+            "expiration_value": expiration_value
         }
         resp = requests.post(f'{self.bucket_url}', headers=self.headers, json=post_data, verify=False)
         return self._process_requst(resp)
