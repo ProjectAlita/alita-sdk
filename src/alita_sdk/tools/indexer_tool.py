@@ -18,10 +18,13 @@ class IndexerNode(BaseTool):
     description: str = 'This is an index tool node for tools'
     tool: BaseTool = None
     index_tool: BaseTool = None
+    chunking_tool: str = None
     return_type: str = "str"
     input_mapping: Optional[dict[str, dict]] = None
     input_variables: Optional[list[str]] = None
     output_variables: Optional[list[str]] = None
+    chunking_config: Optional[dict] = None
+    
 
     def invoke(
         self,
@@ -29,6 +32,9 @@ class IndexerNode(BaseTool):
         config: Optional[RunnableConfig] = None,
         **kwargs: Any,
     ) -> Any:
+        # TODO: Not cool, but will work for now
+        from alita_tools.chunkers import __all__ as chunkers
+        
         params = convert_to_openai_tool(self.tool).get(
             'function', {'parameters': {}}).get(
             'parameters', {'properties': {}}).get('properties', {})
@@ -39,11 +45,23 @@ class IndexerNode(BaseTool):
             dispatch_custom_event(
                 "on_index_tool_node", {
                     "input_variables": self.input_variables,
-                    "tool_result": result,
+                    "tool_result": "Document generator provided",
                     "state": state,
                 }, config=config
             )
-            index_results = self.index_tool.invoke({"documents": result}, config=config, kwargs=kwargs)
+            try:
+                chunks = chunkers.get(self.chunking_tool, None)(result, self.chunking_config)
+                dispatch_custom_event(
+                    "on_index_tool_node", {
+                        "input_variables": self.input_variables,
+                        "tool_result": "Chunks generator provided",
+                        "state": state,
+                    }, config=config
+                )
+            except Exception as e:
+                logger.error(f"Chunking error: {format_exc()}")
+                return {"messages": [{"role": "assistant", "content": f"""Chunking tool {self.chunking_tool} raised an error.\n\nError: {format_exc()}"""}]}
+            index_results = self.index_tool.invoke({"documents": chunks}, config=config, kwargs=kwargs)
             logger.info(f"IndexNode response: {index_results}")
             return {
                 "messages": [{"role": "assistant", "content": dumps(index_results)}]
