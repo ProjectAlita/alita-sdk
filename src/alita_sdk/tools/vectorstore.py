@@ -1,4 +1,5 @@
-from typing import Any
+from json import dumps
+from typing import Any, Optional
 from pydantic import BaseModel, model_validator, Field, PrivateAttr
 from langchain_core.tools import ToolException
 from ..langchain.tools.vector import VectorAdapter
@@ -12,10 +13,11 @@ class IndexDocumentsModel(BaseModel):
 class SearchDocumentsModel(BaseModel):
     query: str = Field(description="Search query")
     doctype: str = Field(description="Document type")
-    filter: dict = Field(description='Filter for metadata of documents, Should be empty string if no filter required. In case needed i.e. " + \
+    filter: Optional[dict] = Field(description='Filter for metadata of documents, Should be empty string if no filter required. In case needed i.e. " + \
                         "({"id": {"$in": [1, 5, 2, 9]}, {"$and": [{"id": {"$in": [1, 5, 2, 9]}}, " + \
-                            "{"location": {"$in": ["pond", "market"]}}]}')
-    search_top: int = Field(description="Number of search results")
+                            "{"location": {"$in": ["pond", "market"]}}]}', default=None)
+    search_top: Optional[int] = Field(description="Number of search results", default=10)
+    cut_off: Optional[float] = Field(description="Cut off value for search results", default=0.5)
 
 class VectorStoreWrapper(BaseModel):
     embedding_model: str
@@ -79,17 +81,29 @@ class VectorStoreWrapper(BaseModel):
             add_documents(vectorstore=self._vectoradapter.vectorstore, documents=_documents)
             self._vectoradapter.persist()
         return {"status": "success"}
-        
-    def search_documents(self, query:str, doctype: str = 'code', filter:dict={}, search_top:int=10):
+
+
+    def search_documents(self, query:str, doctype: str = 'code', filter:dict={}, cut_off: float=0.5, search_top:int=10):
         from alita_tools.code.loaders.codesearcher import search_format as code_format
         if not filter:
             filter = None
         items = self._vectoradapter.vectorstore.similarity_search_with_score(query, filter=filter, k=search_top)
+        filtered = []
+        if cut_off:
+            filtered = [item for item in items if abs(item[1]) >= cut_off]
+            items = filtered
         if doctype == 'code':
             return code_format(items)
         else:
-            return items
-            
+            response = []
+            for item in items:
+                logger.debug(item)
+                response.append({
+                    'page_content': item[0].page_content, 
+                    'metadata': item[0].metadata,
+                    'score': item[1]
+                })
+            return dumps(response, indent=2)
 
 
     def get_available_tools(self):
