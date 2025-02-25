@@ -64,9 +64,11 @@ class VectorStoreWrapper(BaseModel):
         #
         self._vectoradapter.vacuum()
         #
+        documents_count = 0
         _documents = []
         for document in documents:
-            logger.debug(f"Indexing document: {document}")
+            documents_count += 1
+            # logger.debug(f"Indexing document: {document}")
             try:
                 _documents.append(document)
                 if len(_documents) >= self.max_docs_per_add:
@@ -80,7 +82,7 @@ class VectorStoreWrapper(BaseModel):
         if _documents:
             add_documents(vectorstore=self._vectoradapter.vectorstore, documents=_documents)
             self._vectoradapter.persist()
-        return {"status": "success"}
+        return {"status": "ok", "message": f"successfully indexed {documents_count} documents"}
 
 
     def search_documents(self, query:str, doctype: str = 'code', filter:dict={}, cut_off: float=0.5, search_top:int=10):
