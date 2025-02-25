@@ -54,8 +54,8 @@ Anwer must be JSON only extractable by JSON.LOADS."""
         # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
         input = []
         last_message = {}
-        logger.info(f"ToolNode input: {self.input_variables}")
-        logger.info(f"Output variables: {self.output_variables}")
+        logger.debug(f"ToolNode input: {self.input_variables}")
+        logger.debug(f"Output variables: {self.output_variables}")
         for var in self.input_variables:
             if 'messages' in self.input_variables:
                 messages = state.get('messages', [])[:]
@@ -63,7 +63,7 @@ Anwer must be JSON only extractable by JSON.LOADS."""
                 last_message["user_input"] = messages[-1].content
             else:
                 last_message[var] = state[var]
-        logger.info(f"ToolNode input: {input}")
+        logger.debug(f"ToolNode input: {input}")
         input += [
             HumanMessage(self.prompt.format(
                 tool_name=self.tool.name,

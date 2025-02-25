@@ -64,8 +64,8 @@ class VectorStoreWrapper(BaseModel):
         #
         _documents = []
         for document in documents:
+            logger.debug(f"Indexing document: {document}")
             try:
-                logger.debug(f"Indexing document: {document}")
                 _documents.append(document)
                 if len(_documents) >= self.max_docs_per_add:
                     add_documents(vectorstore=self._vectoradapter.vectorstore, documents=_documents)
@@ -74,16 +74,23 @@ class VectorStoreWrapper(BaseModel):
             except Exception as e:
                 from traceback import format_exc
                 logger.error(f"Error: {format_exc()}")
+                return {"status": "error", "message": f"Error: {format_exc()}"}
         if _documents:
             add_documents(vectorstore=self._vectoradapter.vectorstore, documents=_documents)
             self._vectoradapter.persist()
         return {"status": "success"}
         
     def search_documents(self, query:str, doctype: str = 'code', filter:dict={}, search_top:int=10):
-        from alita_tools.code.loaders.codesearcher import search_format
+        from alita_tools.code.loaders.codesearcher import search_format as code_format
+        if not filter:
+            filter = None
         items = self._vectoradapter.vectorstore.similarity_search_with_score(query, filter=filter, k=search_top)
         if doctype == 'code':
-            return search_format(items)
+            return code_format(items)
+        else:
+            return items
+            
+
 
     def get_available_tools(self):
         return [

@@ -39,7 +39,7 @@ class IndexerNode(BaseTool):
             dispatch_custom_event(
                 "on_index_tool_node", {
                     "input_variables": self.input_variables,
-                    "tool_result": "Completed and generator provided",
+                    "tool_result": result,
                     "state": state,
                 }, config=config
             )

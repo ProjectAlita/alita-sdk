@@ -68,5 +68,5 @@ def get_tools(tools_list: list, alita: 'AlitaClient') -> list:
                 **tool['settings']).get_tools())
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
-    tools += alita_tools(tools_list)
+    tools += alita_tools(tools_list, alita)
     return tools

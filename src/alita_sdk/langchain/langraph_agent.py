@@ -118,61 +118,61 @@ class TransitionalEdge(Runnable):
      
 def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=[], interrupt_after=[]):
     # prepare output channels
-        output_channels = (
-            "__root__"
-            if len(lg_builder.schemas[lg_builder.output]) == 1
-            and "__root__" in lg_builder.schemas[lg_builder.output]
-            else [
-                key
-                for key, val in lg_builder.schemas[lg_builder.output].items()
-                if not is_managed_value(val)
-            ]
-        )
-        stream_channels = (
-            "__root__"
-            if len(lg_builder.channels) == 1 and "__root__" in lg_builder.channels
-            else [
-                key for key, val in lg_builder.channels.items() if not is_managed_value(val)
-            ]
-        )
-        
-        compiled = LangGraphAgentRunnable(
-            builder=lg_builder,
-            config_type=lg_builder.config_schema,
-            nodes={},
-            channels={
-                **lg_builder.channels,
-                **lg_builder.managed,
-                START: EphemeralValue(lg_builder.input),
-            },
-            input_channels=START,
-            stream_mode="updates",
-            output_channels=output_channels,
-            stream_channels=stream_channels,
-            checkpointer=memory,
-            interrupt_before_nodes=interrupt_before,
-            interrupt_after_nodes=interrupt_after,
-            auto_validate=False,
-            debug=debug,
-            store=store,
-        )
+    output_channels = (
+        "__root__"
+        if len(lg_builder.schemas[lg_builder.output]) == 1
+        and "__root__" in lg_builder.schemas[lg_builder.output]
+        else [
+            key
+            for key, val in lg_builder.schemas[lg_builder.output].items()
+            if not is_managed_value(val)
+        ]
+    )
+    stream_channels = (
+        "__root__"
+        if len(lg_builder.channels) == 1 and "__root__" in lg_builder.channels
+        else [
+            key for key, val in lg_builder.channels.items() if not is_managed_value(val)
+        ]
+    )
+    
+    compiled = LangGraphAgentRunnable(
+        builder=lg_builder,
+        config_type=lg_builder.config_schema,
+        nodes={},
+        channels={
+            **lg_builder.channels,
+            **lg_builder.managed,
+            START: EphemeralValue(lg_builder.input),
+        },
+        input_channels=START,
+        stream_mode="updates",
+        output_channels=output_channels,
+        stream_channels=stream_channels,
+        checkpointer=memory,
+        interrupt_before_nodes=interrupt_before,
+        interrupt_after_nodes=interrupt_after,
+        auto_validate=False,
+        debug=debug,
+        store=store,
+    )
 
-        compiled.attach_node(START, None)
-        for key, node in lg_builder.nodes.items():
-            compiled.attach_node(key, node)
+    compiled.attach_node(START, None)
+    for key, node in lg_builder.nodes.items():
+        compiled.attach_node(key, node)
 
-        for start, end in lg_builder.edges:
-            compiled.attach_edge(start, end)
+    for start, end in lg_builder.edges:
+        compiled.attach_edge(start, end)
 
-        for starts, end in lg_builder.waiting_edges:
-            compiled.attach_edge(starts, end)
+    for starts, end in lg_builder.waiting_edges:
+        compiled.attach_edge(starts, end)
 
-        for start, branches in lg_builder.branches.items():
-            for name, branch in branches.items():
-                compiled.attach_branch(start, name, branch)
-                
-        logger.info(compiled.get_graph().draw_mermaid())
-        return compiled
+    for start, branches in lg_builder.branches.items():
+        for name, branch in branches.items():
+            compiled.attach_branch(start, name, branch)
+            
+    logger.info(compiled.get_graph().draw_mermaid())
+    return compiled
 
 def create_graph(
         client: Any, 
@@ -184,122 +184,124 @@ def create_graph(
         debug: bool = False,
         **kwargs
     ):
-        """ Create a message graph from a yaml schema """
-        schema = yaml.safe_load(yaml_schema)
-        logger.debug(f"Schema: {schema}")
-        logger.debug(f"Tools: {tools}")
-        state_class = create_state(schema.get('state', {}))
-        lg_builder = StateGraph(state_class)
-        interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
-        interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
-        try:
-            for node in schema['nodes']:
-                node_type = node.get('type', 'function')
-                node_id = clean_string(node['id'])
-                tool_name = clean_string(node.get('tool', node_id))
-                logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-                if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer']:
-                    for tool in tools:
-                        if tool.name == tool_name:
-                            if node_type == 'function':
-                                lg_builder.add_node(node_id, FunctionTool(
-                                    tool=tool, name=node['id'], return_type='dict',
-                                    output_variables=node.get('output', []),
-                                    input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
-                                    input_variables=node.get('input', ['messages'])))
-                            elif node_type == 'tool':
-                                lg_builder.add_node(node_id, ToolNode(
+    """ Create a message graph from a yaml schema """
+    schema = yaml.safe_load(yaml_schema)
+    logger.debug(f"Schema: {schema}")
+    logger.debug(f"Tools: {tools}")
+    state_class = create_state(schema.get('state', {}))
+    lg_builder = StateGraph(state_class)
+    interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
+    interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
+    try:
+        for node in schema['nodes']:
+            node_type = node.get('type', 'function')
+            node_id = clean_string(node['id'])
+            tool_name = clean_string(node.get('tool', node_id))
+            logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
+            if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer']:
+                for tool in tools:
+                    if tool.name == tool_name:
+                        if node_type == 'function':
+                            lg_builder.add_node(node_id, FunctionTool(
+                                tool=tool, name=node['id'], return_type='dict',
+                                output_variables=node.get('output', []),
+                                input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
+                                input_variables=node.get('input', ['messages'])))
+                        elif node_type == 'tool':
+                            lg_builder.add_node(node_id, ToolNode(
+                                client=client, tool=tool,
+                                name=node['id'], return_type='dict',
+                                output_variables=node.get('output', []),
+                                input_variables=node.get('input', ['messages']),
+                                structured_output=node.get('structured_output', False)))
+                        elif node_type == 'loop':
+                            lg_builder.add_node(node_id, LoopNode(
+                                client=client, tool=tool, task=node.get('task', ""),
+                                name=node['id'], return_type='dict',
+                                output_variables=node.get('output', []),
+                                input_variables=node.get('input', ['messages'])))
+                        elif node_type == 'loop_from_tool':
+                            loop_tool = None
+                            loop_tool_name = clean_string(node.get('loop_tool', 'None'))
+                            for t in tools:
+                                logger.info(f"Tool: {t.name}")
+                                if t.name == loop_tool_name:
+                                    loop_tool = t
+                            if loop_tool:
+                                lg_builder.add_node(node_id, LoopToolNode(
                                     client=client, tool=tool,
                                     name=node['id'], return_type='dict',
+                                    loop_tool=loop_tool,
+                                    variables_mapping = node.get('variables_mapping', {}),
                                     output_variables=node.get('output', []),
                                     input_variables=node.get('input', ['messages']),
                                     structured_output=node.get('structured_output', False)))
-                            elif node_type == 'loop':
-                                lg_builder.add_node(node_id, LoopNode(
-                                    client=client, tool=tool, task=node.get('task', ""),
-                                    name=node['id'], return_type='dict',
-                                    output_variables=node.get('output', []),
-                                    input_variables=node.get('input', ['messages'])))
-                            elif node_type == 'loop_from_tool':
-                                loop_tool = None
-                                loop_tool_name = clean_string(node.get('loop_tool', 'None'))
-                                for t in tools:
-                                    logger.info(f"Tool: {t.name}")
-                                    if t.name == loop_tool_name:
-                                        loop_tool = t
-                                if loop_tool:
-                                    lg_builder.add_node(node_id, LoopToolNode(
-                                        client=client, tool=tool,
-                                        name=node['id'], return_type='dict',
-                                        loop_tool=loop_tool,
-                                        variables_mapping = node.get('variables_mapping', {}),
-                                        output_variables=node.get('output', []),
-                                        input_variables=node.get('input', ['messages']),
-                                        structured_output=node.get('structured_output', False)))
-                            elif node_type == 'indexer':
-                                indexer_tool = None
-                                indexer_tool_name = clean_string(node.get('indexer_tool', None))
-                                for t in tools:
-                                    if t.name == indexer_tool_name:
-                                        indexer_tool = t
-                                logger.info(f"Indexer tool: {indexer_tool}")
-                                lg_builder.add_node(node_id, IndexerNode(
-                                    client=client, tool=tool,
-                                    index_tool=indexer_tool,
-                                    input_mapping=node.get('input_mapping', {}),
-                                    name=node['id'], return_type='dict',
-                                    output_variables=node.get('output', []),
-                                    input_variables=node.get('input', ['messages']),
-                                    structured_output=node.get('structured_output', False)))
-                            break
-                elif node_type == 'llm':
-                    lg_builder.add_node(node_id, LLMNode(
-                        client=client, prompt=node.get('prompt', {}),
-                        name=node['id'], return_type='dict',
-                        response_key=node.get('response_key', 'messages'),
-                        output_variables=node.get('output', []),
-                        input_variables=node.get('input', ['messages']),
-                        structured_output=node.get('structured_output', False)))
-                if node.get('transition'):
-                    next_step=clean_string(node['transition'])
-                    logger.info(f'Adding transition: {next_step}')
-                    lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
-                elif node.get('decision'):
-                    logger.info(f'Adding decision: {node["decision"]["nodes"]}')
-                    lg_builder.add_conditional_edges(node_id, DecisionEdge(
-                        client, node['decision']['nodes'], 
-                        node['decision'].get('description', ""),
-                        decisional_inputs=node['decision'].get('decisional_inputs', ['messages']),
-                        default_output=node['decision'].get('default_output', 'END')))
-                elif node.get('condition'):
-                    logger.info(f'Adding condition: {node["condition"]}')
-                    condition_input = node['condition'].get('condition_input', ['messages'])
-                    condition_definition = node['condition'].get('condition_definition', '')
-                    lg_builder.add_conditional_edges(node_id, ConditionalEdge(
-                        condition=condition_definition, condition_inputs=condition_input,
-                        conditional_outputs=node['condition'].get('conditional_outputs', []),
-                        default_output=node['condition'].get('default_output', 'END')))
+                        elif node_type == 'indexer':
+                            indexer_tool = None
+                            indexer_tool_name = clean_string(node.get('indexer_tool', None))
+                            for t in tools:
+                                if t.name == indexer_tool_name:
+                                    indexer_tool = t
+                            logger.info(f"Indexer tool: {indexer_tool}")
+                            lg_builder.add_node(node_id, IndexerNode(
+                                client=client, tool=tool,
+                                index_tool=indexer_tool,
+                                input_mapping=node.get('input_mapping', {}),
+                                name=node['id'], return_type='dict',
+                                chunking_tool=node.get('chunking_tool', None),
+                                chunking_config=node.get('chunking_config', {}),
+                                output_variables=node.get('output', []),
+                                input_variables=node.get('input', ['messages']),
+                                structured_output=node.get('structured_output', False)))
+                        break
+            elif node_type == 'llm':
+                lg_builder.add_node(node_id, LLMNode(
+                    client=client, prompt=node.get('prompt', {}),
+                    name=node['id'], return_type='dict',
+                    response_key=node.get('response_key', 'messages'),
+                    output_variables=node.get('output', []),
+                    input_variables=node.get('input', ['messages']),
+                    structured_output=node.get('structured_output', False)))
+            if node.get('transition'):
+                next_step=clean_string(node['transition'])
+                logger.info(f'Adding transition: {next_step}')
+                lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
+            elif node.get('decision'):
+                logger.info(f'Adding decision: {node["decision"]["nodes"]}')
+                lg_builder.add_conditional_edges(node_id, DecisionEdge(
+                    client, node['decision']['nodes'], 
+                    node['decision'].get('description', ""),
+                    decisional_inputs=node['decision'].get('decisional_inputs', ['messages']),
+                    default_output=node['decision'].get('default_output', 'END')))
+            elif node.get('condition'):
+                logger.info(f'Adding condition: {node["condition"]}')
+                condition_input = node['condition'].get('condition_input', ['messages'])
+                condition_definition = node['condition'].get('condition_definition', '')
+                lg_builder.add_conditional_edges(node_id, ConditionalEdge(
+                    condition=condition_definition, condition_inputs=condition_input,
+                    conditional_outputs=node['condition'].get('conditional_outputs', []),
+                    default_output=node['condition'].get('default_output', 'END')))
 
-            lg_builder.set_entry_point(clean_string(schema['entry_point']))
-            
-            # assign default values
-            interrupt_before = interrupt_before or []
-            interrupt_after = interrupt_after or []
-            
-            # validate the graph
-            lg_builder.validate(
-                interrupt=(
-                    (interrupt_before if interrupt_before != "*" else []) + interrupt_after
-                    if interrupt_after != "*"
-                    else []
-                )
+        lg_builder.set_entry_point(clean_string(schema['entry_point']))
+        
+        # assign default values
+        interrupt_before = interrupt_before or []
+        interrupt_after = interrupt_after or []
+        
+        # validate the graph
+        lg_builder.validate(
+            interrupt=(
+                (interrupt_before if interrupt_before != "*" else []) + interrupt_after
+                if interrupt_after != "*"
+                else []
             )
-        except ValueError as e:
-            raise ValueError(f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n{lg_builder.nodes}\n\n**Schema Enges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{tools}") 
-        compiled = prepare_output_schema(lg_builder, memory, store, debug, 
-                                         interrupt_before=interrupt_before, 
-                                         interrupt_after=interrupt_after)
-        return compiled.validate()
+        )
+    except ValueError as e:
+        raise ValueError(f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n{lg_builder.nodes}\n\n**Schema Enges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{tools}") 
+    compiled = prepare_output_schema(lg_builder, memory, store, debug, 
+                                        interrupt_before=interrupt_before, 
+                                        interrupt_after=interrupt_after)
+    return compiled.validate()
 
 
 class LangGraphAgentRunnable(CompiledStateGraph):
