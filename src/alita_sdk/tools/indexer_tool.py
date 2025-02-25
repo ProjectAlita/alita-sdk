@@ -51,10 +51,11 @@ class IndexerNode(BaseTool):
                 }, config=config
             )
             try:
-                from ..langchain.interfaces.llm_processor import get_embeddings
-                embedding = get_embeddings(self.chunking_config.get('embedding_model'), 
-                                           self.chunking_config.get('embedding_model_params'))
-                chunks = chunkers.get(self.chunking_tool, None)(result, self.chunking_config, embedding=embedding)
+                # if self.chunking_config.get('embedding_model') and self.chunking_config.get('embedding_model_params'):
+                #     from ..langchain.interfaces.llm_processor import get_embeddings
+                #     embedding = get_embeddings(self.chunking_config.get('embedding_model'), 
+                #                             self.chunking_config.get('embedding_model_params'))
+                chunks = chunkers.get(self.chunking_tool, None)(result, self.chunking_config)
                 dispatch_custom_event(
                     "on_index_tool_node", {
                         "input_variables": self.input_variables,
