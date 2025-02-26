@@ -24,14 +24,14 @@ class VectorStoreToolkit(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, client: Any, vectorstore_type: str, embedding_model: str, 
+    def get_toolkit(cls, llm: Any, vectorstore_type: str, embedding_model: str, 
                     embedding_model_params: dict, vectorstore_params: dict, 
                     selected_tools: list[str] = []):
         logger.info("Selected tools: %s", selected_tools)
         if selected_tools is None:
             selected_tools = []
         tools = []
-        vectorstore_wrapper = VectorStoreWrapper(llm=client,
+        vectorstore_wrapper = VectorStoreWrapper(llm=llm,
                                                  vectorstore_type=vectorstore_type,
                                                  embedding_model=embedding_model, 
                                                  embedding_model_params=embedding_model_params, 

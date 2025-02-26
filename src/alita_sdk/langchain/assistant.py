@@ -53,7 +53,7 @@ class Assistant:
             target_name
         )
         self.client = target_cls(**model_params)
-        self.tools = get_tools(data['tools'], alita)
+        self.tools = get_tools(data['tools'], alita=alita, llm=self.client)
         if app_type == "pipeline":
             self.prompt = data['instructions']
         else:

@@ -31,7 +31,7 @@ def get_toolkits():
     return  core_toolkits + community_toolkits + alita_toolkits()
 
 
-def get_tools(tools_list: list, alita: 'AlitaClient') -> list:
+def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> list:
     prompts = []
     tools = []
     for tool in tools_list:
@@ -65,9 +65,9 @@ def get_tools(tools_list: list, alita: 'AlitaClient') -> list:
                 **tool['settings']).get_tools())
         if tool['type'] == 'vectorstore':
             tools.extend(VectorStoreToolkit.get_toolkit(
-                client=alita,
+                llm=llm,
                 **tool['settings']).get_tools())
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
-    tools += alita_tools(tools_list, alita)
+    tools += alita_tools(tools_list, alita, llm)
     return tools
