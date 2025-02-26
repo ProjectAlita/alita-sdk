@@ -3,6 +3,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, model_validator, Field, PrivateAttr
 from langchain_core.tools import ToolException
 from ..langchain.tools.vector import VectorAdapter
+from langchain_core.messages import HumanMessage
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -18,8 +19,58 @@ class SearchDocumentsModel(BaseModel):
                             "{"location": {"$in": ["pond", "market"]}}]}', default=None)
     search_top: Optional[int] = Field(description="Number of search results", default=10)
     cut_off: Optional[float] = Field(description="Cut off value for search results", default=0.5)
+    
+class StepBackSearchDocumentsModel(BaseModel):
+    query: str = Field(description="Search query")
+    doctype: str = Field(description="Document type")
+    messages: Optional[list] = Field(description="Conversation history", default=[])
+    filter: Optional[dict] = Field(description='Filter for metadata of documents, Should be empty string if no filter required. In case needed i.e. " + \
+                        "({"id": {"$in": [1, 5, 2, 9]}, {"$and": [{"id": {"$in": [1, 5, 2, 9]}}, " + \
+                            "{"location": {"$in": ["pond", "market"]}}]}', default=None)
+    search_top: Optional[int] = Field(description="Number of search results", default=10)
+    cut_off: Optional[float] = Field(description="Cut off value for search results", default=0.5)
+
+STEPBACK_PROMPT = """Your task is to convert provided question into a more generic question that will be used for similarity search.
+Remove all not important words, question words, but save all names, dates and acronym as in original question.
+
+<input>
+{input} 
+</input>
+
+Output:
+"""
+
+GET_ANSWER_PROMPT = """<search_results>
+{search_results}
+</search_results>
+
+<conversation_history>
+{messages}
+</conversation_history>
+
+Please answer the question based on provided search results.
+Provided information is already processed and available in the context as list of possibly relevant pieces of the documents.
+Use only provided information. Do not make up answer.
+If you have no answer and you can not derive it from the context, please provide "I have no answer".
+<question>
+{input}
+</question>
+## Answer
+Add <ANSWER> here
+
+## Score
+Score the answer from 0 to 100, where 0 is not relevant and 100 is very relevant.
+
+## Citations
+- source (score)
+- source (score)
+Make sure to provide unique source for each citation.
+
+## Explanation
+How did you come up with the answer?"""
 
 class VectorStoreWrapper(BaseModel):
+    llm: Any
     embedding_model: str
     embedding_model_params: dict
     vectorstore_type: str
@@ -106,7 +157,30 @@ class VectorStoreWrapper(BaseModel):
                     'score': item[1]
                 })
             return dumps(response, indent=2)
+    
+    
+    def stepback_search(self, query:str, messages: list, doctype: str = 'code', filter:dict={}, cut_off: float=0.5, search_top:int=10):
+        result = self.llm.invoke([
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": STEPBACK_PROMPT.format(input=query, messages=messages)},
+                ]
+            )
+        ])
+        search_results = self.search_documents(result.content, doctype, filter, cut_off, search_top)
+        return dumps(search_results, indent=2)
 
+    def stepback_summary(self, query:str, messages: list, doctype: str = 'code', filter:dict={}, cut_off: float=0.5, search_top:int=10):
+        search_results = self.stepback_search(query, messages, doctype, filter, cut_off, search_top)
+        result = self.llm.invoke([
+            HumanMessage(
+                content=[
+                    {"type": "text", 
+                     "text": GET_ANSWER_PROMPT.format(input=query, search_results=search_results, messages=messages)},
+                ]
+            )
+        ])
+        return result.content
 
     def get_available_tools(self):
         return [
@@ -121,6 +195,18 @@ class VectorStoreWrapper(BaseModel):
                 "name": "searchDocuments",
                 "description": "Search documents in the vectorstore",
                 "args_schema": SearchDocumentsModel
+            },
+            {
+                "ref": self.stepback_search,
+                "name": "stepbackSearch",
+                "description": "Search in the vectorstore using stepback technique",
+                "args_schema": StepBackSearchDocumentsModel
+            },
+            {
+                "ref": self.stepback_summary,
+                "name": "stepbackSummary",
+                "description": "Get summary of search results using stepback technique",
+                "args_schema": StepBackSearchDocumentsModel
             }
         ]
     
