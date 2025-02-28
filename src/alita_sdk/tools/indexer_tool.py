@@ -18,6 +18,7 @@ class IndexerNode(BaseTool):
     name: str = 'IndexToolNode'
     description: str = 'This is an index tool node for tools'
     tool: BaseTool = None
+    client: Any = None
     index_tool: BaseTool = None
     chunking_tool: str = None
     return_type: str = "str"
@@ -40,7 +41,6 @@ class IndexerNode(BaseTool):
             'function', {'parameters': {}}).get(
             'parameters', {'properties': {}}).get('properties', {})
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables, state=state)
-        
         try:
             result = self.tool.invoke(func_args, config=config, kwargs=kwargs)
             dispatch_custom_event(
@@ -50,23 +50,28 @@ class IndexerNode(BaseTool):
                     "state": state,
                 }, config=config
             )
-            try:
-                # if self.chunking_config.get('embedding_model') and self.chunking_config.get('embedding_model_params'):
-                #     from ..langchain.interfaces.llm_processor import get_embeddings
-                #     embedding = get_embeddings(self.chunking_config.get('embedding_model'), 
-                #                             self.chunking_config.get('embedding_model_params'))
-                chunks = chunkers.get(self.chunking_tool, None)(result, self.chunking_config)
-                dispatch_custom_event(
-                    "on_index_tool_node", {
-                        "input_variables": self.input_variables,
-                        "tool_result": "Chunks generator provided",
-                        "state": state,
-                    }, config=config
-                )
-            except Exception as e:
-                logger.error(f"Chunking error: {format_exc()}")
-                return {"messages": [{"role": "assistant", "content": f"""Chunking tool {self.chunking_tool} raised an error.\n\nError: {format_exc()}"""}]}
-            index_results = self.index_tool.invoke({"documents": chunks}, config=config, kwargs=kwargs)
+            chunks = None
+            if self.chunking_tool:
+                try:
+                # TODO: Magic parameters need to be explained in the documentation
+                    if self.chunking_config.get('embedding_model') and self.chunking_config.get('embedding_model_params'):
+                        from ..langchain.interfaces.llm_processor import get_embeddings
+                        embedding = get_embeddings(self.chunking_config.get('embedding_model'), 
+                                                self.chunking_config.get('embedding_model_params'))
+                        self.chunking_config['embedding'] = embedding
+                    self.chunking_config['llm'] = self.client
+                    chunks = chunkers.get(self.chunking_tool, None)(result, self.chunking_config)
+                    dispatch_custom_event(
+                        "on_index_tool_node", {
+                            "input_variables": self.input_variables,
+                            "tool_result": "Chunks generator provided",
+                            "state": state,
+                        }, config=config
+                    )
+                except Exception as e:
+                    logger.error(f"Chunking error: {format_exc()}")
+                    return {"messages": [{"role": "assistant", "content": f"""Chunking tool {self.chunking_tool} raised an error.\n\nError: {format_exc()}"""}]}
+            index_results = self.index_tool.invoke({"documents": chunks if chunks else result}, config=config, kwargs=kwargs)
             logger.info(f"IndexNode response: {index_results}")
             total_time = round((time() - start_time), 2)
             index_results['total_time'] = total_time

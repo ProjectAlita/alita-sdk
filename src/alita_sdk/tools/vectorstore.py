@@ -69,6 +69,7 @@ Make sure to provide unique source for each citation.
 ## Explanation
 How did you come up with the answer?"""
 
+
 class VectorStoreWrapper(BaseModel):
     llm: Any
     embedding_model: str
@@ -163,7 +164,10 @@ class VectorStoreWrapper(BaseModel):
         result = self.llm.invoke([
             HumanMessage(
                 content=[
-                    {"type": "text", "text": STEPBACK_PROMPT.format(input=query, messages=messages)},
+                    {
+                        "type": "text", 
+                        "text": STEPBACK_PROMPT.format(input=query, messages=messages)
+                    }
                 ]
             )
         ])
@@ -175,8 +179,10 @@ class VectorStoreWrapper(BaseModel):
         result = self.llm.invoke([
             HumanMessage(
                 content=[
-                    {"type": "text", 
-                     "text": GET_ANSWER_PROMPT.format(input=query, search_results=search_results, messages=messages)},
+                    {
+                        "type": "text", 
+                        "text": GET_ANSWER_PROMPT.format(input=query, search_results=search_results, messages=messages)
+                    }
                 ]
             )
         ])
