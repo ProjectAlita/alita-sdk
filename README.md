@@ -8,7 +8,7 @@ Prerequisites
 
 Before you begin, ensure you have the following requirements met:
 
-*   Python 3.10
+*   Python 3.10+
 *   An active deployment of Project Alita
 *   Access to personal project
 
@@ -22,7 +22,6 @@ pip install langchain
 ```
 
 Next, clone the Alita SDK repository (assuming it's available on GitHub or another source):
-
 
 ```bash
 git clone https://github.com/ProjectAlita/alita-sdk.git
@@ -41,67 +40,84 @@ Environment Setup
 Before running your Alita agents, set up your environment variables. Create a `.env` file in the root directory of your project and include your Project Alita credentials:
 
 ```.env
-AUTH_TOKEN=<your_api_token>
-PROJECT_ID=<your_project_id> 
+DEPLOYMENT_URL=<your_deployment_url>
+API_KEY=<your_api_key>
+PROJECT_ID=<your_project_id>
 INTEGRATION_UID=<your_integration_uid>
+MODEL_NAME=<your_model_name>
 ```
 
-Ensure you load these variables in your application:
 
+Using SDK with Streamlit for Local Development
+----------------------------------------------
 
-```python
-from dotenv import load_dotenv 
-load_dotenv('.env')
-```
+To use the SDK with Streamlit for local development, follow these steps:
 
-Basic Usage
------------
+1. Ensure you have Streamlit installed:
+    ```bash
+    pip install streamlit
+    ```
 
-The Alita SDK allows you to create and execute agents with ease. Here's a simple example to get you started:
+2. Run the Streamlit app:
+    ```bash
+    streamlit run alita_local.py
+    ```
 
-```bash
-pip install alita-sdk
-```
+Streamlit Web Application
+------------------------
 
-```python
-import logging
-from os import environ
-from dotenv import load_dotenv
+The Alita SDK includes a Streamlit web application that provides a user-friendly interface for interacting with Alita agents. This application is powered by the `streamlit.py` module included in the SDK.
 
-logging.basicConfig(level=logging.INFO)
-load_dotenv('.env')
-logger = logging.getLogger(__name__)
+### Key Features
 
-from alita_sdk.utils.streamlit import run_streamlit
+- **Agent Management**: Load and interact with agents created in the Alita Platform
+- **Authentication**: Easily connect to your Alita/Elitea deployment using your credentials
+- **Chat Interface**: User-friendly chat interface for communicating with your agents
+- **Toolkit Integration**: Add and configure toolkits for your agents
+- **Session Management**: Maintain conversation history and thread state
 
-try:
-    import streamlit as st
-except ImportError:
-    logger.error("Streamlit not found, please install it using `pip install streamlit`")
-    exit(1)
+### Using the Web Application
 
-from alita_sdk.llms.alita import AlitaChatModel
-            
-# Minimal set of setting for AlitaChatModel
-settings = {
-    "deployment": "https://eye.projectalita.ai",
-    "model": "gpt-4-0125-preview",
-    "api_key": environ.get("AUTH_TOKEN"),
-    "project_id": environ.get("PROJECT_ID"),
-    "integration_uid": environ.get("INTEGRATION_UID"),
-    
-}
+1. **Authentication**:
+   - Navigate to the "Alita Settings" tab in the sidebar
+   - Enter your deployment URL, API key, and project ID
+   - Click "Login" to authenticate with the Alita Platform
 
-agent_id = 1  # Created Agent ID in Alita Platform
-agent_version_id = 1
+2. **Loading an Agent**:
+   - After authentication, you'll see a list of available agents
+   - Select an agent from the dropdown menu
+   - Specify a version name (default: 'latest')
+   - Optionally select an agent type and add custom tools
+   - Click "Load Agent" to initialize the agent
 
-print(settings)
-if 'messages' not in st.session_state:
-    llm = AlitaChatModel(**settings)
-    st.session_state.messages = []
-    st.session_state.agent_executor = llm.client.application(llm, agent_id, agent_version_id)
+3. **Interacting with the Agent**:
+   - Use the chat input at the bottom of the screen to send messages to the agent
+   - The agent's responses will appear in the chat window
+   - Your conversation history is maintained until you clear it
 
+4. **Clearing Data**:
+   - Use the "Clear Chat" button to reset the conversation history
+   - Use the "Clear Config" button to reset toolkit configurations
 
-run_streamlit(st)
+This web application simplifies the process of testing and interacting with your Alita agents, making development and debugging more efficient.
 
-```
+Adding Alita-Tools to PYTHONPATH
+--------------------------------
+
+If you have another repository containing Alita tools, you can add it to your PYTHONPATH to make the tools available to your project. For example:
+
+1. Clone the repository containing the Alita tools:
+    ```bash
+    git clone https://github.com/yourusername/alita-tools.git
+    ```
+
+2. Add the repository to your PYTHONPATH:
+    ```bash
+    export PYTHONPATH=$PYTHONPATH:/path/to/alita-tools
+    ```
+
+3. Verify that the tools are accessible in your project:
+    ```python
+    import sys
+    print(sys.path)
+    ```
