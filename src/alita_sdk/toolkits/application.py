@@ -1,6 +1,5 @@
-from typing import List, Any
-from pydantic import create_model, BaseModel
-from pydantic.fields import FieldInfo
+from typing import List, Any, Optional
+from pydantic import create_model, BaseModel, Field
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
 from ..tools.application import Application, applicationToolSchema
@@ -13,9 +12,10 @@ class ApplicationToolkit(BaseToolkit):
         return create_model(
             "application",
             # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
-            application_id = (int, FieldInfo(description="Application id")),
-            application_version_id = (int, FieldInfo(description="Application version id")),
-            app_api_key = (str, FieldInfo(description="Application API Key", autopopulate=True))
+
+            application_id = (int, Field(description="Application id")),
+            application_version_id = (int, Field(description="Application version id")),
+            app_api_key = (Optional[str], Field(description="Application API Key", autopopulate=True, default=None))
         )
     
     @classmethod
