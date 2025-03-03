@@ -52,9 +52,7 @@ class StepBackSearchDocumentsModel(BaseModel):
     query: str = Field(description="Search query")
     doctype: str = Field(description="Document type")
     messages: Optional[list] = Field(description="Conversation history", default=[])
-    filter: Optional[dict] = Field(
-        description='Filter for metadata of documents. Use JSON format for complex filters.',
-        default=None)
+    filter: Optional[dict] = Field(description='Filter for metadata of documents. Use JSON format for complex filters.', default=None)
     search_top: Optional[int] = Field(description="Number of search results", default=10)
     cut_off: Optional[float] = Field(description="Cut off value for search results", default=0.5)
     full_text_search: Optional[Dict[str, Any]] = Field(
@@ -133,11 +131,11 @@ class VectorStoreWrapper(BaseModel):
     vectorstore_type: str
     vectorstore_params: dict
     max_docs_per_add: int = 100
-    _dataset: str = None
-    _embedding: Any = None
-    _vectorstore: Any = None
-    _vectoradapter: Any = None
-    _pg_helper: Any = None
+    dataset: str = None
+    embedding: Any = None
+    vectorstore: Any = None
+    vectoradapter: Any = None
+    pg_helper: Any = None
     
     @model_validator(mode='before')
     @classmethod
@@ -152,26 +150,27 @@ class VectorStoreWrapper(BaseModel):
             raise ValueError("Vectorstore parameters are required.")
         if not values.get('embedding_model_params'):
             raise ValueError("Embedding model parameters are required.")
-        values["_dataset"] = values.get('vectorstore_params').get('collection_name')
-        if not cls._dataset:
+        values["dataset"] = values.get('vectorstore_params').get('collection_name')
+        if not values["dataset"]:
             raise ValueError("Collection name is required.")
-        values['_embeddings'] = get_embeddings(values['embedding_model'], values['embedding_model_params'])
-        values['_vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['_embedding'])
-        values['_vectoradapter'] = VectorAdapter(
-            vectorstore=values['_vectorstore'],
-            embeddings=values['_embedding'],
+        values['embeddings'] = get_embeddings(values['embedding_model'], values['embedding_model_params'])
+        values['vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['embeddings'])
+        values['vectoradapter'] = VectorAdapter(
+            vectorstore=values['vectorstore'],
+            embeddings=values['embeddings'],
             quota_params=None,
         )
+        logger.debug(f"Vectorstore wrapper initialized: {values}")
         return values
 
     def _init_pg_helper(self, language='english'):
         """Initialize PGVector helper if needed and not already initialized"""
-        if self._pg_helper is None and hasattr(self._vectorstore, 'connection_string') and hasattr(self._vectorstore, 'collection_name'):
+        if self.pg_helper is None and hasattr(self.vectorstore, 'connection_string') and hasattr(self.vectorstore, 'collection_name'):
             try:
                 from .pgvector_search import PGVectorSearch
-                self._pg_helper = PGVectorSearch(
-                    self._vectorstore.connection_string,
-                    self._vectorstore.collection_name,
+                self.pg_helper = PGVectorSearch(
+                    self.vectorstore.connection_string,
+                    self.vectorstore.collection_name,
                     language=language
                 )
             except ImportError:
@@ -182,11 +181,12 @@ class VectorStoreWrapper(BaseModel):
     def index_documents(self, documents):
         from ..langchain.interfaces.llm_processor import add_documents
         logger.debug(f"Indexing documents: {documents}")
-        self._vectoradapter.delete_dataset(self._dataset)
-        self._vectoradapter.persist()
+        logger.debug(self.vectoradapter)
+        self.vectoradapter.delete_dataset(self.dataset)
+        self.vectoradapter.persist()
         logger.debug(f"Deleted Dataset")
         #
-        self._vectoradapter.vacuum()
+        self.vectoradapter.vacuum()
         #
         documents_count = 0
         _documents = []
@@ -196,16 +196,16 @@ class VectorStoreWrapper(BaseModel):
             try:
                 _documents.append(document)
                 if len(_documents) >= self.max_docs_per_add:
-                    add_documents(vectorstore=self._vectoradapter.vectorstore, documents=_documents)
-                    self._vectoradapter.persist()
+                    add_documents(vectorstore=self.vectoradapter.vectorstore, documents=_documents)
+                    self.vectoradapter.persist()
                     _documents = []
             except Exception as e:
                 from traceback import format_exc
                 logger.error(f"Error: {format_exc()}")
                 return {"status": "error", "message": f"Error: {format_exc()}"}
         if _documents:
-            add_documents(vectorstore=self._vectoradapter.vectorstore, documents=_documents)
-            self._vectoradapter.persist()
+            add_documents(vectorstore=self.vectoradapter.vectorstore, documents=_documents)
+            self.vectoradapter.persist()
         return {"status": "ok", "message": f"successfully indexed {documents_count} documents"}
 
     def search_documents(self, query:str, doctype: str = 'code', 
@@ -225,14 +225,23 @@ class VectorStoreWrapper(BaseModel):
             # Track unique documents by source and chunk_id
             unique_docs = {}
             chunk_type_scores = {}  # Store scores by document identifier
-            
-            # Create initial set of resuls from documents
-            document_filter = {"chunk_type": "document"} if filter is None else {**filter, "chunk_type": "document"}
+            # Create initial set of results from documents
+            if filter is None:
+                document_filter = {"chunk_type": {"$eq": "document"}}
+            else:
+                document_filter = {
+                    "$and": [
+                        filter,
+                        {"chunk_type": {"$eq": "document"}}
+                    ]
+                }
+                
             try:
-                document_items = self._vectoradapter.vectorstore.similarity_search_with_score(
-                    query, filter=document_filter, k=max_search_results
+                document_items = self.vectoradapter.vectorstore.similarity_search_with_score(
+                    query, filter=document_filter, k=search_top
                 )                
                 # Add document results to unique docs
+                vector_items = document_items
                 for doc, score in document_items:
                     source = doc.metadata.get('source')
                     chunk_id = doc.metadata.get('chunk_id')
@@ -248,15 +257,24 @@ class VectorStoreWrapper(BaseModel):
             valid_chunk_types = ["title", "summary", "propositions", "keywords"]
             chunk_types_to_search = [ct for ct in extended_search if ct in valid_chunk_types]
             
-            
             # Search for each chunk type separately
             for chunk_type in chunk_types_to_search:
-                chunk_filter = {"chunk_type": chunk_type} if filter is None else {**filter, "chunk_type": chunk_type}
+                if filter is None:
+                    chunk_filter = {"chunk_type": {"$eq": chunk_type}}
+                else:
+                    chunk_filter = {
+                        "$and": [
+                            filter,
+                            {"chunk_type": {"$eq": chunk_type}}
+                        ]
+                    }
                 
                 try:
-                    chunk_items = self._vectoradapter.vectorstore.similarity_search_with_score(
+                    chunk_items = self.vectoradapter.vectorstore.similarity_search_with_score(
                         query, filter=chunk_filter, k=search_top
                     )
+                    
+                    logger.debug(f"Chunk items for {chunk_type}: {chunk_items[0]}")
                     
                     for doc, score in chunk_items:
                         # Create unique identifier for document
@@ -268,38 +286,38 @@ class VectorStoreWrapper(BaseModel):
                         if doc_id not in unique_docs:
                             unique_docs[doc_id] = doc
                             chunk_type_scores[doc_id] = score
-                        if score > chunk_type_scores.get(doc_id, 0):
-                            chunk_type_scores[doc_id] = score
-                            if unique_docs[doc_id].metadata.get('chunk_type', 'document') != 'document':
+                            # Create a filter with proper operators 
+                            doc_filter_parts = [
+                                {"source": {"$eq": source}},
+                                {"chunk_id": {"$eq": chunk_id}},
+                                {"chunk_type": {"$eq": "document"}}
+                            ]
+                            
+                            if filter is not None:
                                 doc_filter = {
-                                    "source": source, 
-                                    "chunk_id": chunk_id,
-                                    "chunk_type": "document"
-                                } if filter is None else {
-                                    **filter, 
-                                    "source": source, 
-                                    "chunk_id": chunk_id,
-                                    "chunk_type": "document"
+                                    "$and": [filter] + doc_filter_parts
                                 }
-                                try:
-                                    fetch_items = self._vectoradapter.vectorstore.similarity_search_with_score(
-                                        "", filter=doc_filter, k=1
-                                    )
-                                    if fetch_items:
-                                        doc, _ = fetch_items[0]
-                                        unique_docs[doc_id] = doc
-                                except Exception as e:
-                                    logger.warning(f"Error retrieving document chunk for {source}_{chunk_id}: {str(e)}")
+                            else:
+                                doc_filter = {
+                                    "$and": doc_filter_parts
+                                }
+                                
+                            try:
+                                fetch_items = self.vectoradapter.vectorstore.similarity_search_with_score(
+                                    query, filter=doc_filter, k=1
+                                )
+                                if fetch_items:
+                                    vector_items.append(fetch_items[0])
+
+                            except Exception as e:
+                                logger.warning(f"Error retrieving document chunk for {source}_{chunk_id}: {str(e)}")
                 except Exception as e:
                     logger.warning(f"Error searching for chunk type {chunk_type}: {str(e)}")
             
-            # Convert unique docs back to a list with their scores
-            vector_items = [(doc, chunk_type_scores.get(doc_id, 0.5)) 
-                           for doc_id, doc in unique_docs.items()]
         else:
             # Default search behavior (unchanged)
             max_search_results = 30 if search_top * 3 > 30 else search_top * 3
-            vector_items = self._vectoradapter.vectorstore.similarity_search_with_score(
+            vector_items = self.vectoradapter.vectorstore.similarity_search_with_score(
                 query, filter=filter, k=max_search_results
             )
             
@@ -311,14 +329,14 @@ class VectorStoreWrapper(BaseModel):
         if full_text_search and full_text_search.get('enabled') and full_text_search.get('fields'):
             language = full_text_search.get('language', 'english')
             self._init_pg_helper(language)
-            if self._pg_helper:
+            if self.pg_helper:
                 vector_weight = 1.0  # Default vector weight
                 text_weight = full_text_search.get('weight', 0.3)
                 
                 # Query each specified field
                 for field_name in full_text_search.get('fields', []):
                     try:
-                        text_results = self._pg_helper.full_text_search(field_name, query)
+                        text_results = self.pg_helper.full_text_search(field_name, query)
                         
                         # Combine text search results with vector results
                         for result in text_results:
@@ -332,7 +350,7 @@ class VectorStoreWrapper(BaseModel):
                                 doc_map[doc_id] = (doc, combined_score)
                             else:
                                 # Document is new from text search, fetch and add if possible
-                                doc_data = self._pg_helper.get_documents_by_ids([doc_id]).get(doc_id)
+                                doc_data = self.pg_helper.get_documents_by_ids([doc_id]).get(doc_id)
                                 if doc_data:
                                     from langchain_core.documents import Document
                                     doc = Document(
