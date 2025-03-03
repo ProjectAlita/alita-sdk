@@ -1,6 +1,6 @@
 from json import dumps
-from typing import Any, Optional, List, Dict, Tuple, Union
-from pydantic import BaseModel, model_validator, Field, PrivateAttr
+from typing import Any, Optional, List, Dict
+from pydantic import BaseModel, model_validator, Field
 from langchain_core.tools import ToolException
 from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
@@ -43,6 +43,10 @@ class SearchDocumentsModel(BaseModel):
         }""",
         default=None
     )
+    extended_search: Optional[List[str]] = Field(
+        description="List of chunk types to search for (title, summary, propositions, keywords, documents)",
+        default=None
+    )
 
 class StepBackSearchDocumentsModel(BaseModel):
     query: str = Field(description="Search query")
@@ -75,6 +79,10 @@ class StepBackSearchDocumentsModel(BaseModel):
                 }
             }
         }""",
+        default=None
+    )
+    extended_search: Optional[List[str]] = Field(
+        description="List of chunk types to search for (title, summary, propositions, keywords, documents)",
         default=None
     )
 
@@ -125,11 +133,11 @@ class VectorStoreWrapper(BaseModel):
     vectorstore_type: str
     vectorstore_params: dict
     max_docs_per_add: int = 100
-    _dataset: str = PrivateAttr()
-    _embedding: Any = PrivateAttr()
-    _vectorstore: Any = PrivateAttr()
-    _vectoradapter: Any = PrivateAttr()
-    _pg_helper: Any = PrivateAttr(default=None)
+    _dataset: str = None
+    _embedding: Any = None
+    _vectorstore: Any = None
+    _vectoradapter: Any = None
+    _pg_helper: Any = None
     
     @model_validator(mode='before')
     @classmethod
@@ -144,14 +152,14 @@ class VectorStoreWrapper(BaseModel):
             raise ValueError("Vectorstore parameters are required.")
         if not values.get('embedding_model_params'):
             raise ValueError("Embedding model parameters are required.")
-        cls._dataset = values.get('vectorstore_params').get('collection_name')
+        values["_dataset"] = values.get('vectorstore_params').get('collection_name')
         if not cls._dataset:
             raise ValueError("Collection name is required.")
-        cls._embedding = get_embeddings(values['embedding_model'], values['embedding_model_params'])
-        cls._vectorstore = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=cls._embedding)
-        cls._vectoradapter = VectorAdapter(
-            vectorstore=cls._vectorstore,
-            embeddings=cls._embedding,
+        values['_embeddings'] = get_embeddings(values['embedding_model'], values['embedding_model_params'])
+        values['_vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['_embedding'])
+        values['_vectoradapter'] = VectorAdapter(
+            vectorstore=values['_vectorstore'],
+            embeddings=values['_embedding'],
             quota_params=None,
         )
         return values
@@ -204,19 +212,97 @@ class VectorStoreWrapper(BaseModel):
                          filter:dict={}, cut_off: float=0.5, 
                          search_top:int=10, reranker:dict = {}, 
                          full_text_search: Optional[Dict[str, Any]] = None,
-                         reranking_config: Optional[Dict[str, Dict[str, Any]]] = None):
+                         reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
+                         extended_search: Optional[List[str]] = None):
         """Enhanced search documents method using JSON configurations for full-text search and reranking"""
         from alita_tools.code.loaders.codesearcher import search_format as code_format
         
         if not filter:
             filter = None
-        
-        max_search_results = 30 if search_top * 3 > 30 else search_top * 3
-        # Get initial vector search results (get more than needed for flexibility)
-        vector_items = self._vectoradapter.vectorstore.similarity_search_with_score(
-            query, filter=filter, k=max_search_results
-        )
-        
+            
+        # Extended search implementation
+        if extended_search:
+            # Track unique documents by source and chunk_id
+            unique_docs = {}
+            chunk_type_scores = {}  # Store scores by document identifier
+            
+            # Create initial set of resuls from documents
+            document_filter = {"chunk_type": "document"} if filter is None else {**filter, "chunk_type": "document"}
+            try:
+                document_items = self._vectoradapter.vectorstore.similarity_search_with_score(
+                    query, filter=document_filter, k=max_search_results
+                )                
+                # Add document results to unique docs
+                for doc, score in document_items:
+                    source = doc.metadata.get('source')
+                    chunk_id = doc.metadata.get('chunk_id')
+                    doc_id = f"{source}_{chunk_id}" if source and chunk_id else str(doc.metadata.get('id', id(doc)))
+                    
+                    if doc_id not in unique_docs or score > chunk_type_scores.get(doc_id, 0):
+                        unique_docs[doc_id] = doc
+                        chunk_type_scores[doc_id] = score
+            except Exception as e:
+                logger.warning(f"Error searching for document chunks: {str(e)}")
+            
+            # First search for specified chunk types (title, summary, propositions, keywords)
+            valid_chunk_types = ["title", "summary", "propositions", "keywords"]
+            chunk_types_to_search = [ct for ct in extended_search if ct in valid_chunk_types]
+            
+            
+            # Search for each chunk type separately
+            for chunk_type in chunk_types_to_search:
+                chunk_filter = {"chunk_type": chunk_type} if filter is None else {**filter, "chunk_type": chunk_type}
+                
+                try:
+                    chunk_items = self._vectoradapter.vectorstore.similarity_search_with_score(
+                        query, filter=chunk_filter, k=search_top
+                    )
+                    
+                    for doc, score in chunk_items:
+                        # Create unique identifier for document
+                        source = doc.metadata.get('source')
+                        chunk_id = doc.metadata.get('chunk_id')
+                        doc_id = f"{source}_{chunk_id}" if source and chunk_id else str(doc.metadata.get('id', id(doc)))
+                        
+                        # Store document and its score
+                        if doc_id not in unique_docs:
+                            unique_docs[doc_id] = doc
+                            chunk_type_scores[doc_id] = score
+                        if score > chunk_type_scores.get(doc_id, 0):
+                            chunk_type_scores[doc_id] = score
+                            if unique_docs[doc_id].metadata.get('chunk_type', 'document') != 'document':
+                                doc_filter = {
+                                    "source": source, 
+                                    "chunk_id": chunk_id,
+                                    "chunk_type": "document"
+                                } if filter is None else {
+                                    **filter, 
+                                    "source": source, 
+                                    "chunk_id": chunk_id,
+                                    "chunk_type": "document"
+                                }
+                                try:
+                                    fetch_items = self._vectoradapter.vectorstore.similarity_search_with_score(
+                                        "", filter=doc_filter, k=1
+                                    )
+                                    if fetch_items:
+                                        doc, _ = fetch_items[0]
+                                        unique_docs[doc_id] = doc
+                                except Exception as e:
+                                    logger.warning(f"Error retrieving document chunk for {source}_{chunk_id}: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Error searching for chunk type {chunk_type}: {str(e)}")
+            
+            # Convert unique docs back to a list with their scores
+            vector_items = [(doc, chunk_type_scores.get(doc_id, 0.5)) 
+                           for doc_id, doc in unique_docs.items()]
+        else:
+            # Default search behavior (unchanged)
+            max_search_results = 30 if search_top * 3 > 30 else search_top * 3
+            vector_items = self._vectoradapter.vectorstore.similarity_search_with_score(
+                query, filter=filter, k=max_search_results
+            )
+            
         # Initialize document map for tracking by ID
         doc_map = {doc.metadata.get('id', f"idx_{i}"): (doc, score) 
                   for i, (doc, score) in enumerate(vector_items)}
@@ -342,7 +428,8 @@ class VectorStoreWrapper(BaseModel):
     def stepback_search(self, query:str, messages: list, doctype: str = 'code', 
                         filter:dict={}, cut_off: float=0.5, search_top:int=10, 
                         full_text_search: Optional[Dict[str, Any]] = None,
-                        reranking_config: Optional[Dict[str, Dict[str, Any]]] = None):
+                        reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
+                        extended_search: Optional[List[str]] = None):
         """Enhanced stepback search using JSON configs for full-text search and reranking"""
         result = self.llm.invoke([
             HumanMessage(
@@ -357,19 +444,22 @@ class VectorStoreWrapper(BaseModel):
         search_results = self.search_documents(
             result.content, doctype, filter, cut_off, search_top, 
             full_text_search=full_text_search,
-            reranking_config=reranking_config
+            reranking_config=reranking_config,
+            extended_search=extended_search
         )
         return dumps(search_results, indent=2)
 
     def stepback_summary(self, query:str, messages: list, doctype: str = 'code', 
                          filter:dict={}, cut_off: float=0.5, search_top:int=10, 
                          full_text_search: Optional[Dict[str, Any]] = None,
-                         reranking_config: Optional[Dict[str, Dict[str, Any]]] = None):
+                         reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
+                         extended_search: Optional[List[str]] = None):
         """Enhanced stepback summary using JSON configs for full-text search and reranking"""
         search_results = self.stepback_search(
             query, messages, doctype, filter, cut_off, search_top, 
             full_text_search=full_text_search,
-            reranking_config=reranking_config
+            reranking_config=reranking_config,
+            extended_search=extended_search
         )
         result = self.llm.invoke([
             HumanMessage(
