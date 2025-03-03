@@ -1,6 +1,5 @@
 from typing import List, Any
-from pydantic import create_model, BaseModel
-from pydantic.fields import FieldInfo
+from pydantic import create_model, BaseModel, Field
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
 from ..tools.datasource import DatasourcePredict, DatasourceSearch, datasourceToolSchema
@@ -13,8 +12,8 @@ class DatasourcesToolkit(BaseToolkit):
         return create_model(
             "datasource",
             # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
-            datasource_ids = (list, FieldInfo(description="List of datasource ids")),
-            selected_tools = (list, FieldInfo(description="List of selected tools", default=['chat', 'search']))
+            datasource_ids = (list, Field(description="List of datasource ids", alias="datasource_id")),
+            selected_tools = (list, Field(description="List of selected tools", default=['chat', 'search']))
         )
     
     @classmethod
