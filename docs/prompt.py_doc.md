@@ -4,10 +4,13 @@
 
 ## Data Flow
 
-The data flow within `prompt.py` revolves around the creation and management of prompt tools within the `PromptToolkit` class. The data originates from the `client` and `prompts` parameters passed to the `get_toolkit` method. The `client` is expected to provide prompt configurations based on the `prompts` list, which contains pairs of `prompt_id` and `prompt_version_id`. These configurations are then used to create `Prompt` objects, which are stored in the `tools` attribute of the `PromptToolkit` instance.
+The data flow within `prompt.py` revolves around the creation and management of prompt tools using the `PromptToolkit` class. The data originates from the `client` object and a list of prompt configurations (`prompts`). Each prompt configuration is a list containing a prompt ID and a prompt version ID. The `get_toolkit` class method processes these configurations, retrieves the corresponding prompt objects from the client, and creates `Prompt` tools. These tools are then stored in the `tools` attribute of the `PromptToolkit` instance. The data flow can be summarized as follows:
 
-For example, in the `get_toolkit` method:
+1. **Input:** The `client` object and `prompts` list are provided as inputs to the `get_toolkit` method.
+2. **Processing:** The method iterates over the `prompts` list, retrieves prompt objects from the client, and creates `Prompt` tools.
+3. **Output:** The created `Prompt` tools are stored in the `tools` attribute of the `PromptToolkit` instance.
 
+Example:
 ```python
 @classmethod
  def get_toolkit(cls, client: Any, prompts: list[list[int, int]]):
@@ -15,60 +18,114 @@ For example, in the `get_toolkit` method:
  for prompt_config in prompts:
  prmt = client.prompt(prompt_config[0], prompt_config[1], return_tool=True)
  tools.append(Prompt(
- name=prmt.name, description=prmt.description, 
+ name=prmt.name, description=prmt.description,
  prompt=prmt, args_schema=prmt.create_pydantic_model(),
  return_type='str'))
  return cls(tools=tools)
 ```
-
-In this snippet, the `client.prompt` method fetches the prompt configuration, which is then used to create a `Prompt` object. This object is appended to the `tools` list, which is eventually returned as part of the `PromptToolkit` instance. The data flow is thus from the `client` to the `PromptToolkit` via the `prompts` list, with intermediate transformations occurring in the creation of `Prompt` objects.
+In this example, the `get_toolkit` method processes the `prompts` list, retrieves prompt objects from the client, and creates `Prompt` tools, which are then stored in the `tools` attribute.
 
 ## Functions Descriptions
 
 ### `toolkit_config_schema`
 
-This static method returns a Pydantic `BaseModel` that defines the schema for the toolkit configuration. It includes a single field, `prompts`, which is a list of lists containing `prompt_id` and `prompt_version_id` pairs. This schema is used to validate the configuration data passed to the toolkit.
+This static method returns a Pydantic `BaseModel` that defines the schema for the toolkit configuration. The schema includes a single field, `prompts`, which is a list of lists containing prompt IDs and prompt version IDs.
+
+Example:
+```python
+@staticmethod
+ def toolkit_config_schema() -> BaseModel:
+ return create_model(
+ "prompt",
+ prompts = (list, FieldInfo(description="List of lists for [[prompt_id, prompt_version_id]]"))
+ )
+```
+In this example, the `toolkit_config_schema` method creates and returns a Pydantic model with a single field, `prompts`.
 
 ### `get_toolkit`
 
-This class method is responsible for creating an instance of `PromptToolkit`. It takes two parameters: `client` and `prompts`. The `client` is used to fetch prompt configurations based on the `prompts` list. Each prompt configuration is then used to create a `Prompt` object, which is added to the `tools` list. The method returns an instance of `PromptToolkit` with the `tools` list populated.
+This class method creates a `PromptToolkit` instance by processing the provided `client` object and `prompts` list. It retrieves prompt objects from the client, creates `Prompt` tools, and stores them in the `tools` attribute of the `PromptToolkit` instance.
+
+Example:
+```python
+@classmethod
+ def get_toolkit(cls, client: Any, prompts: list[list[int, int]]):
+ tools = []
+ for prompt_config in prompts:
+ prmt = client.prompt(prompt_config[0], prompt_config[1], return_tool=True)
+ tools.append(Prompt(
+ name=prmt.name, description=prmt.description,
+ prompt=prmt, args_schema=prmt.create_pydantic_model(),
+ return_type='str'))
+ return cls(tools=tools)
+```
+In this example, the `get_toolkit` method processes the `prompts` list, retrieves prompt objects from the client, and creates `Prompt` tools, which are then stored in the `tools` attribute.
 
 ### `get_tools`
 
-This instance method simply returns the `tools` attribute of the `PromptToolkit` instance. This attribute contains the list of `Prompt` objects created in the `get_toolkit` method.
+This method returns the list of `Prompt` tools stored in the `tools` attribute of the `PromptToolkit` instance.
+
+Example:
+```python
+def get_tools(self):
+ return self.tools
+```
+In this example, the `get_tools` method simply returns the list of `Prompt` tools stored in the `tools` attribute.
 
 ## Dependencies Used and Their Descriptions
 
 ### `typing`
 
-The `typing` module is used for type hinting. In this file, it is used to specify the types of the `tools` attribute and the parameters of the `get_toolkit` method.
+The `typing` module is used to provide type hints for the function signatures and class attributes. In this file, it is used to specify the types of the `tools` attribute and the parameters of the `get_toolkit` method.
 
 ### `pydantic`
 
-The `pydantic` library is used for data validation and settings management. In this file, it is used to create a schema for the toolkit configuration using the `create_model` function and the `BaseModel` class.
+The `pydantic` module is used to create data models and perform data validation. In this file, it is used to create the schema for the toolkit configuration using the `create_model` function and the `BaseModel` class.
 
 ### `langchain_community.agent_toolkits.base`
 
-This module provides the `BaseToolkit` class, which `PromptToolkit` inherits from. It likely contains common functionality for all toolkits in the LangChain community.
+The `BaseToolkit` class from the `langchain_community.agent_toolkits.base` module is used as the base class for the `PromptToolkit` class. It provides the basic structure and functionality for creating and managing toolkits.
 
 ### `langchain_core.tools`
 
-This module provides the `BaseTool` class, which is used as the type for the `tools` attribute in `PromptToolkit`. It likely defines the basic interface for all tools in the LangChain core library.
+The `BaseTool` class from the `langchain_core.tools` module is used as the base class for the `Prompt` tools created by the `PromptToolkit` class. It provides the basic structure and functionality for creating and managing tools.
 
 ### `..tools.prompt`
 
-This module provides the `Prompt` class, which is used to create prompt tools. The `Prompt` class is instantiated with a name, description, prompt configuration, argument schema, and return type.
+The `Prompt` class from the `..tools.prompt` module is used to create the `Prompt` tools. It provides the structure and functionality for creating and managing prompt tools.
 
 ## Functional Flow
 
-The functional flow of `prompt.py` begins with the definition of the `PromptToolkit` class, which inherits from `BaseToolkit`. The class has a single attribute, `tools`, which is a list of `BaseTool` objects. The `toolkit_config_schema` static method defines the schema for the toolkit configuration, while the `get_toolkit` class method is responsible for creating an instance of `PromptToolkit` with the appropriate tools. The `get_tools` instance method simply returns the `tools` attribute.
+The functional flow of `prompt.py` involves the creation and management of prompt tools using the `PromptToolkit` class. The process begins with the definition of the `PromptToolkit` class, which inherits from the `BaseToolkit` class. The `toolkit_config_schema` static method defines the schema for the toolkit configuration, and the `get_toolkit` class method processes the provided `client` object and `prompts` list to create `Prompt` tools. These tools are stored in the `tools` attribute of the `PromptToolkit` instance and can be retrieved using the `get_tools` method.
 
-The flow is as follows:
-1. The `PromptToolkit` class is defined.
-2. The `toolkit_config_schema` static method is defined to return the configuration schema.
-3. The `get_toolkit` class method is defined to create and return an instance of `PromptToolkit`.
-4. The `get_tools` instance method is defined to return the `tools` attribute.
+Example:
+```python
+class PromptToolkit(BaseToolkit):
+ tools: List[BaseTool] = []
+ 
+ @staticmethod
+ def toolkit_config_schema() -> BaseModel:
+ return create_model(
+ "prompt",
+ prompts = (list, FieldInfo(description="List of lists for [[prompt_id, prompt_version_id]]"))
+ )
+ 
+ @classmethod
+ def get_toolkit(cls, client: Any, prompts: list[list[int, int]]):
+ tools = []
+ for prompt_config in prompts:
+ prmt = client.prompt(prompt_config[0], prompt_config[1], return_tool=True)
+ tools.append(Prompt(
+ name=prmt.name, description=prmt.description,
+ prompt=prmt, args_schema=prmt.create_pydantic_model(),
+ return_type='str'))
+ return cls(tools=tools)
+ 
+ def get_tools(self):
+ return self.tools
+```
+In this example, the `PromptToolkit` class defines the structure and functionality for creating and managing prompt tools. The `toolkit_config_schema` method defines the schema for the toolkit configuration, the `get_toolkit` method processes the `client` object and `prompts` list to create `Prompt` tools, and the `get_tools` method returns the list of created tools.
 
 ## Endpoints Used/Created
 
-There are no explicit endpoints used or created in `prompt.py`. The file focuses on defining the `PromptToolkit` class and its methods for managing prompt tools.
+There are no explicit endpoints used or created within the `prompt.py` file. The functionality is focused on creating and managing prompt tools using the `PromptToolkit` class and the provided `client` object and `prompts` list.
