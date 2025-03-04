@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 def get_toolkits():
     core_toolkits = [
-        PromptToolkit.toolkit_config_schema(),
-        DatasourcesToolkit.toolkit_config_schema(),
-        ApplicationToolkit.toolkit_config_schema(),
+        # PromptToolkit.toolkit_config_schema(),
+        # DatasourcesToolkit.toolkit_config_schema(),
+        # ApplicationToolkit.toolkit_config_schema(),
         ArtifactToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema()
     ]
