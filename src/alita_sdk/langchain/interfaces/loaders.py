@@ -21,6 +21,7 @@ from ..document_loaders.AlitaDirectoryLoader import AlitaDirectoryLoader
 from ..document_loaders.AlitaGitRepoLoader import AlitaGitRepoLoader
 from ..document_loaders.AlitaConfluenceLoader import AlitaConfluenceLoader
 from ..document_loaders.AlitaBDDScenariosLoader import BDDScenariosLoader
+from ..document_loaders.AlitaJiraLoader import AlitaJiraLoader
 
 
 ex_classes = {
@@ -30,7 +31,8 @@ ex_classes = {
     'GitLoader': AlitaGitRepoLoader,
     'ConfluenceLoader': AlitaConfluenceLoader,
     'QtestLoader': AlitaQTestApiDataLoader,
-    'BDDLoader': BDDScenariosLoader
+    'BDDLoader': BDDScenariosLoader,
+    'JiraLoader': AlitaJiraLoader,
 }
 
 class LoaderInterface:
