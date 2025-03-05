@@ -35,8 +35,8 @@ class ConditionalEdge(Runnable):
                  conditional_outputs: Optional[list[str]] = [], default_output: str = 'END'):
         self.condition = condition
         self.condition_inputs = condition_inputs
-        self.conditional_outputs = conditional_outputs
-        self.default_output = default_output
+        self.conditional_outputs = {clean_string(cond) for cond in conditional_outputs}
+        self.default_output = clean_string(default_output)
     
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
         logger.info(f"Current state in condition edge - {state}")
