@@ -23,7 +23,7 @@ from ..tools.loop import LoopNode
 from ..tools.loop_output import LoopToolNode
 from ..tools.function import FunctionTool
 from ..tools.indexer_tool import IndexerNode
-from ..utils.utils import clean_string
+from ..utils.utils import clean_string, TOOLKIT_SPLITTER
 
 from .utils import create_state
 
@@ -196,7 +196,10 @@ def create_graph(
         for node in schema['nodes']:
             node_type = node.get('type', 'function')
             node_id = clean_string(node['id'])
+            toolkit_name = node.get('toolkit_name')
             tool_name = clean_string(node.get('tool', node_id))
+            if toolkit_name:
+                tool_name = f"{clean_string(toolkit_name)}{TOOLKIT_SPLITTER}{tool_name}"
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
             if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer']:
                 for tool in tools:
