@@ -8,7 +8,7 @@ from atlassian.errors import ApiError
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 
-from src.alita_sdk.langchain.document_loaders.constants import loaders_map
+from .constants import loaders_map
 
 DEFAULT_FIELDS = 'status,summary,reporter'
 
