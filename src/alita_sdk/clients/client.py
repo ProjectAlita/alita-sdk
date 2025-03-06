@@ -226,7 +226,7 @@ class AlitaClient:
         except:
             return False
 
-    def create_bucket(self, bucket_name, expiration_measure = "weeks", expiration_value = 1):
+    def create_bucket(self, bucket_name, expiration_measure = "months", expiration_value = 1):
         post_data = {
             "name": bucket_name,
             "expiration_measure": expiration_measure,
