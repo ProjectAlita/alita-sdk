@@ -309,7 +309,7 @@ def create_graph(
 
 class LangGraphAgentRunnable(CompiledStateGraph):
     builder: CompiledStateGraph
-    
+
     def invoke(self, input: Union[dict[str, Any], Any], 
                config: Optional[RunnableConfig] = None, 
                *args, **kwargs):
@@ -333,9 +333,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         except:
             output =list(result.values())[-1]
         thread_id = None
-        if self.get_state(config).next:
+        config_state = self.get_state(config)
+        if config_state.next:
             thread_id = config['configurable']['thread_id']
         return {
             "output": output,
-            "thread_id": thread_id
+            "thread_id": thread_id,
+            "execution_finished": not config_state.next
         }
