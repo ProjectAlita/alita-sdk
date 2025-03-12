@@ -15,6 +15,8 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables import Runnable
+from langgraph.types import StateSnapshot
+
 from .mixedAgentRenderes import convert_message_to_json
 from ..utils.evaluate import EvaluateTemplate
 from ..tools.llm import LLMNode
@@ -309,7 +311,10 @@ def create_graph(
 
 class LangGraphAgentRunnable(CompiledStateGraph):
     builder: CompiledStateGraph
-    
+
+    def is_finished(self, state_snapshot: StateSnapshot) -> bool:
+        return not state_snapshot.next
+
     def invoke(self, input: Union[dict[str, Any], Any], 
                config: Optional[RunnableConfig] = None, 
                *args, **kwargs):
@@ -333,9 +338,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         except:
             output =list(result.values())[-1]
         thread_id = None
-        if self.get_state(config).next:
+        config_state = self.get_state(config)
+        if config_state.next:
             thread_id = config['configurable']['thread_id']
         return {
             "output": output,
-            "thread_id": thread_id
+            "thread_id": thread_id,
+            "execution_finished": self.is_finished(config_state)
         }
