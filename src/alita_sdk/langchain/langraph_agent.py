@@ -15,7 +15,6 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables import Runnable
-
 from .mixedAgentRenderes import convert_message_to_json
 from ..utils.evaluate import EvaluateTemplate
 from ..tools.llm import LLMNode
