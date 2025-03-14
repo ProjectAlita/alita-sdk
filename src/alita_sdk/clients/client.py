@@ -156,13 +156,19 @@ class AlitaClient:
 
     def application(self, client: Any, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
-                    app_type=None, memory=None, runtime='langchain'):
+                    app_type=None, memory=None, runtime='langchain',
+                    application_variables: Optional[dict] = None):
         if tools is None:
             tools = []
         if chat_history is None:
             chat_history = []
-        
+
         data = self.get_app_version_details(application_id, application_version_id)
+
+        for var in data['variables']:
+            if var['name'] in application_variables:
+                var.update(application_variables[var['name']])
+
         if not app_type:
             app_type = data.get("agent_type", "react")
         if app_type == "alita":
