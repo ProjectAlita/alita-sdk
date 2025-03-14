@@ -165,9 +165,10 @@ class AlitaClient:
 
         data = self.get_app_version_details(application_id, application_version_id)
 
-        for var in data['variables']:
-            if var['name'] in application_variables:
-                var.update(application_variables[var['name']])
+        if application_variables:
+            for var in data.get('variables', {}):
+                if var['name'] in application_variables:
+                    var.update(application_variables[var['name']])
 
         if not app_type:
             app_type = data.get("agent_type", "react")
