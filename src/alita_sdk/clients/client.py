@@ -194,8 +194,11 @@ class AlitaClient:
         if not response.ok:
             raise Exception(f'Datasource request failed with code {response.status_code}\n{response.content}')
         data = response.json()
-        datasource_model = data['version_details']['datasource_settings']['chat']['chat_settings_embedding']
-        chat_model = data['version_details']['datasource_settings']['chat']['chat_settings_ai']
+        ds_chat = data['version_details']['datasource_settings']['chat']
+        if not ds_chat:
+            raise Exception(f'Datasource with id {datasource_id} has missing model settings')
+        datasource_model = ds_chat['chat_settings_embedding']
+        chat_model = ds_chat['chat_settings_ai']
         return AlitaDataSource(self, datasource_id, data["name"], data["description"],
                                datasource_model, chat_model)
 
