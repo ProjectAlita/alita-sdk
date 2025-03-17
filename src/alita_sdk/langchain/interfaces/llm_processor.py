@@ -140,6 +140,14 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
                     )
                 )
                 session.commit()
+            #
+            vectorstore_params["engine_args"] = {
+                "execution_options": {
+                    "schema_translate_map": {
+                        None: schema_name,
+                    },
+                },
+            }
     #
     if vectorstore_type in vectorstores:
         vectorstore_params = vectorstore_params.copy()
