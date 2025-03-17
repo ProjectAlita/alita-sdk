@@ -136,7 +136,8 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
                         sqlalchemy.text(
                             "BEGIN;"
                             "SELECT pg_advisory_xact_lock(1573678846307946496);"
-                            "CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;"
+                            'SET search_path TO "$user", public;'
+                            "CREATE EXTENSION IF NOT EXISTS vector;"
                             "COMMIT;"
                         )
                     )
