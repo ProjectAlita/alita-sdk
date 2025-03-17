@@ -119,6 +119,22 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
     """ Get vector store obj """
     if vectorstore_type is None:
         return None
+    #
+    if vectorstore_type == "PGVector" and isinstance(vectorstore_params, dict):
+        conn_str = vectorstore_params.get("connection_string", "")
+        #
+        if "?options=-csearch_path%3D" in conn_str:
+            schema_name = conn_str.rsplit("%3D", 1)[1].split(",")[0]
+            #
+            import sqlalchemy  # pylint: disable=C0415,E0401
+            from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
+            from sqlalchemy.schema import CreateSchema  # pylint: disable=E0401,C0415
+            #
+            engine = sqlalchemy.create_engine(url=conn_str)
+            with Session(engine) as session:  # pylint: disable=W0212
+                session.execute(CreateSchema(schema_name, if_not_exists=True))
+                session.commit()
+    #
     if vectorstore_type in vectorstores:
         vectorstore_params = vectorstore_params.copy()
         if embedding_func:
