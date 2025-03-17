@@ -24,7 +24,7 @@ class VectorAdapter:
             conn_str = self._vectorstore.connection_string
             #
             if "?options=-csearch_path%3D" in conn_str:
-                schema_name = conn_str.rsplit("%3D", 1)[1].split(",")[0]
+                schema_name = conn_str.rsplit("%3D", 1)[1].split("%2C")[0]
                 #
                 from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
                 from sqlalchemy.schema import CreateSchema  # pylint: disable=E0401,C0415
