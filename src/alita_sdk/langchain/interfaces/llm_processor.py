@@ -124,15 +124,33 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
         conn_str = vectorstore_params.get("connection_string", "")
         #
         if "?options=-csearch_path%3D" in conn_str:
-            schema_name = conn_str.rsplit("%3D", 1)[1].split("%2C")[0]
-            #
             import sqlalchemy  # pylint: disable=C0415,E0401
             from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
             from sqlalchemy.schema import CreateSchema  # pylint: disable=E0401,C0415
             #
             engine = sqlalchemy.create_engine(url=conn_str)
+            #
+            if "create_extension" in vectorstore_params and vectorstore_params["create_extension"]:
+                with Session(engine) as session:  # pylint: disable=W0212
+                    session.execute(
+                        sqlalchemy.text(
+                            "BEGIN;"
+                            "SELECT pg_advisory_xact_lock(1573678846307946496);"
+                            "CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;"
+                            "COMMIT;"
+                        )
+                    )
+                    session.commit()
+            #
+            schema_name = conn_str.rsplit("%3D", 1)[1].split("%2C")[0]
+            #
             with Session(engine) as session:  # pylint: disable=W0212
-                session.execute(CreateSchema(schema_name, if_not_exists=True))
+                session.execute(
+                    CreateSchema(
+                        schema_name,
+                        if_not_exists=True,
+                    )
+                )
                 session.commit()
     #
     if vectorstore_type in vectorstores:

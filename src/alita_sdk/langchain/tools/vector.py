@@ -15,23 +15,6 @@ class VectorAdapter:
         self._quota_params = quota_params
         #
         self._vs_cls_name = self._vectorstore.__class__.__name__
-        #
-        self.init()
-
-    def init(self):
-        """ Perform init actions """
-        if self._vs_cls_name == "PGVector":
-            conn_str = self._vectorstore.connection_string
-            #
-            if "?options=-csearch_path%3D" in conn_str:
-                schema_name = conn_str.rsplit("%3D", 1)[1].split("%2C")[0]
-                #
-                from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
-                from sqlalchemy.schema import CreateSchema  # pylint: disable=E0401,C0415
-                #
-                with Session(self._vectorstore._bind) as session:  # pylint: disable=W0212
-                    session.execute(CreateSchema(schema_name, if_not_exists=True))
-                    session.commit()
 
     @property
     def vectorstore(self):
