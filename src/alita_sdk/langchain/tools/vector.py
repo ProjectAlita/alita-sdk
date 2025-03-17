@@ -23,8 +23,8 @@ class VectorAdapter:
         if self._vs_cls_name == "PGVector":
             conn_str = self._vectorstore.connection_string
             #
-            if "?search_path=" in conn_str:
-                schema_name = conn_str.rsplit("=", 1)[1].split(",")[0]
+            if "?options=-csearch_path%3D" in conn_str:
+                schema_name = conn_str.rsplit("%3D", 1)[1].split(",")[0]
                 #
                 from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
                 from sqlalchemy.schema import CreateSchema  # pylint: disable=E0401,C0415
