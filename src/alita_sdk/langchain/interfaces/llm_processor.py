@@ -121,29 +121,16 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
         return None
     #
     if vectorstore_type == "PGVector" and isinstance(vectorstore_params, dict):
+        sdk_options = vectorstore_params.pop("alita_sdk_options", {})
         conn_str = vectorstore_params.get("connection_string", "")
         #
-        if "?options=-csearch_path%3D" in conn_str:
+        if "target_schema" in sdk_options and conn_str:
             import sqlalchemy  # pylint: disable=C0415,E0401
             from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
             from sqlalchemy.schema import CreateSchema  # pylint: disable=E0401,C0415
             #
             engine = sqlalchemy.create_engine(url=conn_str)
-            #
-            if "create_extension" in vectorstore_params and vectorstore_params["create_extension"]:
-                with Session(engine) as session:  # pylint: disable=W0212
-                    session.execute(
-                        sqlalchemy.text(
-                            "BEGIN;"
-                            "SELECT pg_advisory_xact_lock(1573678846307946496);"
-                            'SET search_path TO "$user", public;'
-                            "CREATE EXTENSION IF NOT EXISTS vector;"
-                            "COMMIT;"
-                        )
-                    )
-                    session.commit()
-            #
-            schema_name = conn_str.rsplit("%3D", 1)[1].split("%2C")[0]
+            schema_name = sdk_options["target_schema"]
             #
             with Session(engine) as session:  # pylint: disable=W0212
                 session.execute(
@@ -156,9 +143,12 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
     #
     if vectorstore_type in vectorstores:
         vectorstore_params = vectorstore_params.copy()
+        #
         if embedding_func:
             vectorstore_params['embedding_function'] = embedding_func
+        #
         return get_vectorstore_cls(vectorstore_type)(**vectorstore_params)
+    #
     raise RuntimeError(f"Unknown VectorStore type: {vectorstore_type}")
 
 def add_documents(vectorstore, documents):
