@@ -168,8 +168,10 @@ class VectorAdapter:
             results = query.all()
             #
             for result in results:
-                data_result["documents"].append(result.document)
-                data_result["metadatas"].append(result.cmetadata)
+                if "documents" in data_result:
+                    data_result["documents"].append(result.document)
+                if "metadatas" in data_result:
+                    data_result["metadatas"].append(result.cmetadata)
         #
         return data_result
 
