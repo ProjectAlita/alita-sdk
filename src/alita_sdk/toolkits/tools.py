@@ -1,10 +1,8 @@
 import logging
-from typing import Optional, Literal
 
 from alita_tools import get_tools as alita_tools
 from alita_tools import get_toolkits as alita_toolkits
 from langchain_core.tools import ToolException
-from pydantic import Field, create_model
 
 from .prompt import PromptToolkit
 from .datasource import DatasourcesToolkit
@@ -94,37 +92,10 @@ def mcp_tools(tools_list):
                 tools.append(McpTool(name=available_tool["name"],
                                      description=available_tool["description"],
                                      socket_client=None,
-                                     args_schema=create_pydantic_model_from_schema(available_tool["inputSchema"])))
+                                     args_schema=McpTool.create_pydantic_model_from_schema(available_tool["inputSchema"])))
     return tools
 
-# TODO: move to separate module
-def create_pydantic_model_from_schema(schema: dict):
-     fields = {}
-     for field_name, field_info in schema['properties'].items():
-         field_type = field_info['type']
-         field_description = field_info.get('description', '')
-         if field_type == 'string':
-             if 'enum' in field_info:
-                 field_type = Literal[tuple(field_info['enum'])]
-             else:
-                 field_type = str
-         elif field_type == 'integer':
-             field_type = int
-         elif field_type == 'number':
-             field_type = float
-         elif field_type == 'boolean':
-             field_type = bool
-         else:
-             raise ValueError(f"Unsupported field type: {field_type}")
-
-         if field_name in schema.get('required', []):
-             fields[field_name] = (field_type, Field(..., description=field_description))
-         else:
-             fields[field_name] = (Optional[field_type], Field(None, description=field_description))
-     return create_model('DynamicModel', **fields)
-
-
-# TODO: move to separate module
+# TODO: remove after BE
 def find_toolkit_by_name(name):
     for toolkit in _available_mcp_toolkits:
         if toolkit["toolkit_name"] == name:
