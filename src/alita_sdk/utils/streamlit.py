@@ -35,7 +35,8 @@ def decode_img(msg):
 from src.alita_sdk.llms.alita import AlitaChatModel
 from src.alita_sdk.utils.AlitaCallback import AlitaStreamlitCallback
 from src.alita_sdk.toolkits.tools import get_toolkits
-
+from src.alita_sdk.community.browseruse.api_wrapper import BrowserUseAPIWrapper
+from src.alita_sdk.community.utils import check_schema
 
 def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_icon)):
 
@@ -83,52 +84,51 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
         clear_chat = st.button("Clear Chat")
         if clear_chat:
             clear_chat_history()
-        llmconfig, agentconfig = st.tabs(["Alita Settings", "Local Runtime"])
+        st.title("Elitea Login Form")
+        deployment_value = environ.get('DEPLOYMENT_URL', None)
+        deployment_secret = environ.get('XSECRET', 'secret')
+        api_key_value = environ.get('API_KEY', None)
+        project_id_value = int(environ.get('PROJECT_ID', 0))
+        if st.session_state.llm:
+            deployment_value = st.session_state.llm.deployment
+            api_key_value = st.session_state.llm.api_token
+            project_id_value = st.session_state.llm.project_id
+        ## Alita authentication
+        with st.form("settings_form", clear_on_submit=False):
+            deployment = st.text_input("Deployment URL", placeholder="Enter Deployment URL", value=deployment_value)
+            api_key = st.text_input("API Key", placeholder="Enter API Key", value=api_key_value, type="password")
+            project_id = st.number_input("Project ID", format="%d", min_value=0, value=project_id_value, placeholder="Enter Project ID")
+            deployment_secret = st.text_input("Deployment Secret", placeholder="Enter Deployment Secret", value=deployment_secret)
+            submitted = st.form_submit_button("Login")
+            if submitted:
+                with st.spinner("Logging to Alita..."):
+                    try:
+                        st.session_state.llm = AlitaChatModel(**{
+                                "deployment": deployment,
+                                "api_token": api_key,
+                                "project_id": project_id,
+                            })
+                        client = st.session_state.llm.client
+                        integrations = client.all_models_and_integrations()
+                        unique_models = set()
+                        models_list = []
+                        for entry in integrations:
+                            models = entry.get('settings', {}).get('models', [])
+                            for model in models:
+                                if model.get('capabilities', {}).get('chat_completion') and model['name'] not in unique_models:
+                                    unique_models.add(model['name'])
+                                    models_list.append({'name': model['name'], 'integration_id': entry['uid']})
+                        st.session_state.agents = client.get_list_of_apps()
+                        st.session_state.models = models_list
+                        clear_chat_history()
+                    except Exception as e:
+                        logger.error(f"Error loggin to ELITEA: {format_exc()}")
+                        st.session_state.agents = None
+                        st.session_state.models = None
+                        st.session_state.llm = None
+                        st.error(f"Error loggin to ELITEA ")
+        llmconfig, agentconfig = st.tabs(["Alita Agents", "Exploratory Tester"])
         with llmconfig:
-            st.title("Elitea Login Form")
-            deployment_value = environ.get('DEPLOYMENT_URL', None)
-            deployment_secret = environ.get('XSECRET', 'secret')
-            api_key_value = environ.get('API_KEY', None)
-            project_id_value = int(environ.get('PROJECT_ID', 0))
-            if st.session_state.llm:
-                deployment_value = st.session_state.llm.deployment
-                api_key_value = st.session_state.llm.api_token
-                project_id_value = st.session_state.llm.project_id
-            ## Alita authentication
-            with st.form("settings_form", clear_on_submit=False):
-                deployment = st.text_input("Deployment URL", placeholder="Enter Deployment URL", value=deployment_value)
-                api_key = st.text_input("API Key", placeholder="Enter API Key", value=api_key_value, type="password")
-                project_id = st.number_input("Project ID", format="%d", min_value=0, value=project_id_value, placeholder="Enter Project ID")
-                deployment_secret = st.text_input("Deployment Secret", placeholder="Enter Deployment Secret", value=deployment_secret)
-                submitted = st.form_submit_button("Login")
-                if submitted:
-                    with st.spinner("Logging to Alita..."):
-                        try:
-                            st.session_state.llm = AlitaChatModel(**{
-                                    "deployment": deployment,
-                                    "api_token": api_key,
-                                    "project_id": project_id,
-                                })
-                            client = st.session_state.llm.client
-                            integrations = client.all_models_and_integrations()
-                            unique_models = set()
-                            models_list = []
-                            for entry in integrations:
-                                models = entry.get('settings', {}).get('models', [])
-                                for model in models:
-                                    if model.get('capabilities', {}).get('chat_completion') and model['name'] not in unique_models:
-                                        unique_models.add(model['name'])
-                                        models_list.append({model['name']: entry['uid']})
-                            st.session_state.agents = client.get_list_of_apps()
-                            st.session_state.models = models_list
-                            clear_chat_history()
-                        except Exception as e:
-                            logger.error(f"Error loggin to ELITEA: {format_exc()}")
-                            st.session_state.agents = None
-                            st.session_state.models = None
-                            st.session_state.llm = None
-                            st.error(f"Error loggin to ELITEA ")
-
             if st.session_state.llm:
                 st.title("Available Agents")
                 st.write("This one will load latest version of agent")
@@ -169,6 +169,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                         tools=custom_tools_json,
                                         memory=memory,
                                     )
+                                    st.session_state.agent_chat = True
                                     #
                                     st.session_state.agent_name = options
                                     clear_chat_history()
@@ -179,28 +180,52 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                                     st.error("Agent version not found")
 
         with agentconfig:
-            st.title("Local Agent")
-            clear_agent = st.button("Clear Config")
-            if clear_agent:
-                st.session_state.toolkits = []
-                
-            with st.form("add_tkit", clear_on_submit=False):
-                options = st.selectbox("Add toolkit", st.session_state.tooklit_names)
-                submitted = st.form_submit_button("Add Toolkit")
-                if submitted:
-                    tkit_schema = st.session_state.tooklit_configs[st.session_state.tooklit_names.index(options)]
-                    schema = create_tooklit_schema(tkit_schema)
-                    st.session_state.toolkits.append(schema)
-                    
-
-            with st.form("agent_config", clear_on_submit=False):
-                context = st.text_area("Context", placeholder="Enter Context")
-                tools = st.text_area("Tools", placeholder="Enter Tools in JSON format", value=json.dumps(st.session_state.toolkits, indent=2))
-                submitted = st.form_submit_button("Submit")
-                if submitted:
-                    pass
-
-    if st.session_state.llm and st.session_state.agent_executor:
+            if st.session_state.llm:
+                with st.form("exploratory tester", clear_on_submit=False):
+                    st.title("Agent to get model settings")
+                    options = st.selectbox("Select an agent to load", (agent['name'] for agent in st.session_state.agents))
+                    agent_version_name = st.text_input("Agent Version Name", value='latest', placeholder="Enter Version ID")
+                    browser_width = st.number_input("Browser Width", value=1980, min_value=1024, max_value=3840)
+                    browser_height = st.number_input("Browser Height", value=1080, min_value=768, max_value=4320)
+                    use_vision = st.checkbox("Use Vision", value=True)
+                    headless = st.checkbox("Headless", value=False)
+                    submitted = st.form_submit_button("Load Agent")
+                    if submitted:
+                        with st.spinner("Loading Agent..."):
+                            agent = next((a for a in st.session_state.agents if a['name'] == options), None)
+                            if agent:
+                                agent_id = agent['id']
+                                agent_details = st.session_state.llm.client.get_app_details(agent_id)
+                                latest_version = next((v for v in agent_details['versions'] if v['name'] == agent_version_name), None)
+                                if latest_version:
+                                    agent_version_id = latest_version['id']
+                                    #
+                                    import sqlite3
+                                    from langgraph.checkpoint.sqlite import SqliteSaver
+                                    #
+                                    memory = SqliteSaver(
+                                        sqlite3.connect("memory.db", check_same_thread=False)
+                                    )
+                                    agent_executor = st.session_state.llm.client.application(
+                                        client=st.session_state.llm,
+                                        application_id=agent_id,
+                                        application_version_id=agent_version_id,
+                                        memory=memory,
+                                        runtime='nonrunnable'
+                                    )
+                                    st.session_state.model = agent_executor.client
+                                    browser_api = BrowserUseAPIWrapper(headless=headless, 
+                                                                        llm=st.session_state.model, 
+                                                                        width=browser_width,
+                                                                        height=browser_height,
+                                                                        alita=st.session_state.llm, 
+                                                                        validate_output=True, 
+                                                                        use_vision=use_vision)
+                                    check_schema(browser_api)
+                                    st.session_state.agent_executor = browser_api
+                                    st.session_state.agent_chat = False
+                                        
+    if st.session_state.llm and st.session_state.agent_executor and st.session_state.agent_chat:
         try:
             st.title(st.session_state.agent_name)
         except:
@@ -220,5 +245,126 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                 st.write(response["output"])
                 st.session_state.thread_id = response.get("thread_id", None)
                 st.session_state.messages.append({"role": "assistant", "content": response["output"]})
+    elif st.session_state.llm and st.session_state.agent_executor and not st.session_state.agent_chat:
+        discover, loadhistory, testcases, runtests = st.tabs([
+            "Disover using Browser-use", "Load Previously Discovered",
+            "Create Test Cases", "Run Test Cases"])
+        with discover:
+            st.markdown("# Step 1. Discover Website")
+            
+            with st.form("discover_task", clear_on_submit=False):
+                st.markdown("## Describe the website and scenario you want to discover")
+                task = st.text_area("Task", placeholder="Enter the task you want to perform")
+                max_steps = st.number_input("Maximum Steps", value=25, min_value=1, max_value=100)
+                submitted = st.form_submit_button("Discover")
+                if submitted:
+                    with st.spinner("Discovering scenarios ..."):
+                        history = st.session_state.agent_executor.task(task=task, max_steps=max_steps)
+                        history.save_to_file('history.json')
+                        content_of_the_website = ''
+                        with open('history.json', 'r') as f:
+                            history = json.load(f)
+                            for record in history['history']:
+                                content_of_the_website += record['model_output']['current_state']['memory']
+                                content_of_the_website += "\n"
+                                for content in record['result']:
+                                    print(content)
+                                    content_of_the_website += content.get('extracted_content', '')
+                                    content_of_the_website += "\n"
+                                content_of_the_website += "\n\n"
+                        st.session_state.website_description = content_of_the_website
+        with loadhistory:
+            with st.form("load_history", clear_on_submit=False):
+                st.markdown("## Load Previously Discovered")
+                file_to_load = st.file_uploader("Upload History File", type=["json"])
+                submitted = st.form_submit_button("Load")
+                if submitted:
+                    with st.spinner("Loading History ..."):
+                        history = json.loads(file_to_load.read())
+                        content_of_the_website = ''
+                        for record in history['history']:
+                            content_of_the_website += record['model_output']['current_state']['memory']
+                            content_of_the_website += "\n"
+                            for content in record['result']:
+                                print(content)
+                                content_of_the_website += content.get('extracted_content', '')
+                                content_of_the_website += "\n"
+                            content_of_the_website += "\n\n"
+                        st.session_state.website_description = content_of_the_website     
+                        st.rerun()
+        with testcases:
+            st.markdown("# Step 2. Design Test Cases")
+            sys_description = st.text_area('System Description', st.session_state.website_description)
+            st.text("File dumped to history.json, you can preserve it for future use")
+            st.markdown("## Secribe what kind of test cases you want to create")
+            task = st.text_area("Task to LLM", placeholder="Enter Task to LLM")
+            
+            prompt = """Act as a senior QA engineer tasked to create test cases for the website.
+            Stricly follow the guidance from user-task. Description of the system under test in given in system-description.
+            Expected output format: is a list of list of test cases. Each test case should be a list of steps to perform.
+            Provide only pythonic list of list of test cases. Where each test case starts from opening the website.
+            Example of test cases: [["open https://www.google.com", "search for alita", "check that elitea.ai is in the list of results"],[....]]
+            Output should be presented raw and not wrapped in markdown
+            
+            <user-task>
+            {task}
+            </user-task>
+            
+            <system-description>
+            {sys_description}
+            </system-description>
+            
+            """
+            if st.button("Generate Test Cases"):
+                prompt = prompt.format(task=task, sys_description=sys_description)
+                if st.session_state.test_cases:
+                    prompt += f"<previous-test-cases>\n{json.dumps(st.session_state.test_cases)}\n</previous-test-cases>"
+                response = st.session_state.model.invoke(prompt)
+                st.session_state.test_cases = response.content
+                st.rerun()
+
+            st.markdown("### Test Cases")
+            st.text("Make sure test cases starts from opening whatever url as a first step")
+            st.text('Only pythonic list of list of test cases excepted')
+            st.text('example of test cases: [["open https://www.google.com", "search for alita", "check that elitea.ai is in the list of results"],[....]]')
+            test_cases = st.text_area('Test Cases', json.dumps(st.session_state.test_cases, indent=2))
+            if st.button("Save Test Cases"):
+                st.session_state.test_cases = json.loads(test_cases)
+                st.rerun()
+        with runtests:
+            st.markdown("# Step 3. Run Test Cases")
+            with st.form("run_test_cases", clear_on_submit=False):
+                # sys_description = st.text_area('System Description', st.session_state.website_description)
+                test_cases = st.text_area('Test Cases', json.dumps(st.session_state.test_cases, indent=2))
+                submitted = st.form_submit_button("Run Tests")
+                if submitted:
+                    with st.spinner("Running Test Cases ..."):
+                        total_results = 0
+                        for index, test in enumerate(json.loads(test_cases)):
+                            content = """#### Test Scenario:\n\n"""
+                            content += " - "
+                            content += "\n - ".join(test)
+                            history = st.session_state.agent_executor.tasks(test, max_steps=15)
+                            content += "\n\n#### Final Result:\n\n"
+                            content += str(history.final_result())
+                            content += "\n\n#### Execution Steps:\n\n"
+                            for ind, thought in enumerate(history.model_thoughts()):
+                                if ind != 0:
+                                    content += f"##### Result of Step {ind-1}\n\n"
+                                    content += str(thought.evaluation_previous_goal)
+                                content += f"\n\n##### Goal for step {ind}\n\n"
+                                content += str(thought.next_goal)
+                                content += "\n\n"
+                            
+                            with open('agent_history.gif', 'rb') as f:
+                                with open(f'agent_history_{index}.gif', 'wb') as f2:
+                                    f2.write(f.read())
+                            with open(f'agent_history_{index}.md', 'w') as f:
+                                f.write(content)
+                            history.save_to_file(f'history_{index}.json')
+                            total_results = index+1
+                            st.markdown(f"##### Test Case Results {index}")
+                            st.markdown(content)
+                            st.image(f'agent_history_{index}.gif')
     else:
         st.title("Please Load an Agent to Start Chatting")

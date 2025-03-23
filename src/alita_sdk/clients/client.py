@@ -180,6 +180,9 @@ class AlitaClient:
             app_type = "openai"
         elif app_type == 'autogen':
             app_type = "openai"
+        if runtime == 'nonrunnable':
+            return LangChainAssistant(self, data, client, chat_history, app_type, 
+                                      tools=tools, memory=memory)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, client, 
                                       chat_history, app_type, 

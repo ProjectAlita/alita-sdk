@@ -15,7 +15,7 @@ from src.utils.constants import OUTPUT_METRICS_FOLDER
 from src.utils.excel_manager import ExcelManager
 
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 
 class OLAPbuild:
