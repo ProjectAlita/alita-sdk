@@ -327,7 +327,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
             st.text("Make sure test cases starts from opening whatever url as a first step")
             st.text('Only pythonic list of list of test cases excepted')
             st.text('example of test cases: [["open https://www.google.com", "search for alita", "check that elitea.ai is in the list of results"],[....]]')
-            test_cases = st.text_area('Test Cases', json.dumps(st.session_state.test_cases, indent=2))
+            test_cases = st.text_area('Test Cases', st.session_state.test_cases)
             if st.button("Save Test Cases"):
                 st.session_state.test_cases = json.loads(test_cases)
                 st.rerun()
