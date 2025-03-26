@@ -121,9 +121,15 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
         return None
     #
     if vectorstore_type == "PGVector" and isinstance(vectorstore_params, dict):
-        from langchain_postgres import PGVector
-        sdk_options = vectorstore_params.pop("alita_sdk_options", {})
+        vectorstore_params = vectorstore_params.copy()
+        new_pgvector = False
+        #
         conn_str = vectorstore_params.get("connection_string", "")
+        if conn_str.startswith("postgresql+psycopg:"):
+            vectorstore_params["connection"] = vectorstore_params.pop("connection_string")
+            new_pgvector = True
+        #
+        sdk_options = vectorstore_params.pop("alita_sdk_options", {})
         #
         if "target_schema" in sdk_options and conn_str:
             import sqlalchemy  # pylint: disable=C0415,E0401
@@ -149,16 +155,13 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
                     },
                 },
             }
-        vectorstore_params = vectorstore_params.copy()
-        
         #
-        if embedding_func:
-            vectorstore_params['embeddings'] = embedding_func
-        #
-        if vectorstore_params.get("connection_string"):
-            vectorstore_params['connection'] = vectorstore_params.pop("connection_string")
-        #    
-        return PGVector(**vectorstore_params)
+        if new_pgvector:
+            if embedding_func:
+                vectorstore_params["embeddings"] = embedding_func
+            #
+            from langchain_postgres import PGVector  # pylint: disable=E0401,C0415
+            return PGVector(**vectorstore_params)
     #
     if vectorstore_type in vectorstores:
         vectorstore_params = vectorstore_params.copy()
