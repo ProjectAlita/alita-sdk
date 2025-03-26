@@ -121,7 +121,12 @@ class VectorAdapter:
         if "metadatas" in include:
             data_result["metadatas"] = []
         #
-        with Session(self._vectorstore._engine) as session:  # pylint: disable=W0212
+        try:
+            engine_bind = self._vectorstore._bind  # pylint: disable=W0212
+        except:  # pylint: disable=W0702
+            engine_bind = self._vectorstore._engine  # pylint: disable=W0212
+        #
+        with Session(engine_bind) as session:  # pylint: disable=W0212
             collection = self._vectorstore.get_collection(session)
             if not collection:
                 raise ValueError("Collection not found")
@@ -179,7 +184,12 @@ class VectorAdapter:
         # Adapted from langchain_community/vectorstores/pgvector.py
         from sqlalchemy.orm import Session  # pylint: disable=C0415,E0401
         #
-        with Session(self._vectorstore._engine) as session:  # pylint: disable=W0212
+        try:
+            engine_bind = self._vectorstore._bind  # pylint: disable=W0212
+        except:  # pylint: disable=W0702
+            engine_bind = self._vectorstore._engine  # pylint: disable=W0212
+        #
+        with Session(engine_bind) as session:  # pylint: disable=W0212
             collection = self._vectorstore.get_collection(session)
             if not collection:
                 raise ValueError("Collection not found")
