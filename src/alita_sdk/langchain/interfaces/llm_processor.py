@@ -150,10 +150,14 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
                 },
             }
         vectorstore_params = vectorstore_params.copy()
+        
         #
         if embedding_func:
-            vectorstore_params['embedding_function'] = embedding_func
-            
+            vectorstore_params['embeddings'] = embedding_func
+        #
+        if vectorstore_params.get("connection_string"):
+            vectorstore_params['connection'] = vectorstore_params.pop("connection_string")
+        #    
         return PGVector(**vectorstore_params)
     #
     if vectorstore_type in vectorstores:
