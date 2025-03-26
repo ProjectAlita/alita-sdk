@@ -121,6 +121,7 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
         return None
     #
     if vectorstore_type == "PGVector" and isinstance(vectorstore_params, dict):
+        from langchain_postgres import PGVector
         sdk_options = vectorstore_params.pop("alita_sdk_options", {})
         conn_str = vectorstore_params.get("connection_string", "")
         #
@@ -148,6 +149,12 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
                     },
                 },
             }
+        vectorstore_params = vectorstore_params.copy()
+        #
+        if embedding_func:
+            vectorstore_params['embedding_function'] = embedding_func
+            
+        return PGVector(**vectorstore_params)
     #
     if vectorstore_type in vectorstores:
         vectorstore_params = vectorstore_params.copy()
