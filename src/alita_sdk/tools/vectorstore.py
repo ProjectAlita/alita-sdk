@@ -1,4 +1,4 @@
-import ast
+import json
 from json import dumps
 from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, model_validator, Field
@@ -222,7 +222,7 @@ class VectorStoreWrapper(BaseModel):
             filter = None
         else:
             if isinstance(filter, str):
-                filter = ast.literal_eval(filter)
+                filter = json.loads(filter)
 
         # Extended search implementation
         if extended_search:
