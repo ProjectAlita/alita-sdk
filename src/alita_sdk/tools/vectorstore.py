@@ -1,3 +1,4 @@
+import ast
 from json import dumps
 from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, model_validator, Field
@@ -14,7 +15,7 @@ class IndexDocumentsModel(BaseModel):
 class SearchDocumentsModel(BaseModel):
     query: str = Field(description="Search query")
     doctype: str = Field(description="Document type")
-    filter: Optional[dict] = Field(
+    filter: Optional[dict | str] = Field(
         description='Filter for metadata of documents. Use JSON format for complex filters.',
         default=None)
     search_top: Optional[int] = Field(description="Number of search results", default=10)
@@ -209,7 +210,7 @@ class VectorStoreWrapper(BaseModel):
         return {"status": "ok", "message": f"successfully indexed {documents_count} documents"}
 
     def search_documents(self, query:str, doctype: str = 'code', 
-                         filter:dict={}, cut_off: float=0.5, 
+                         filter:dict|str={}, cut_off: float=0.5,
                          search_top:int=10, reranker:dict = {}, 
                          full_text_search: Optional[Dict[str, Any]] = None,
                          reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -219,7 +220,10 @@ class VectorStoreWrapper(BaseModel):
         
         if not filter:
             filter = None
-            
+        else:
+            if isinstance(filter, str):
+                filter = ast.literal_eval(filter)
+
         # Extended search implementation
         if extended_search:
             # Track unique documents by source and chunk_id
