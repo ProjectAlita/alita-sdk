@@ -1,8 +1,11 @@
+import asyncio
 from logging import getLogger
 from typing import Any, Type, Literal, Optional
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, create_model
+
+from src.alita_sdk.utils.serverio import send_message_and_wait_for_response
 
 logger = getLogger(__name__)
 
@@ -45,4 +48,10 @@ class McpTool(BaseTool):
         # send event to socket per contract
         # socket_client.send_event(event=kwargs.get('event'), data=kwargs.get('data'))
         # wait for response
+
+        # response = asyncio.run(send_message_and_wait_for_response({"query":"call_tools", "data": [dict(function = dict(name = self.name, arguments = kwargs), server = "local-server-toolkit")]}))
+        # print(response)
+        #
+        # return response
+
         return f"Calling tool: \n{self.name} \n with kwargs: {kwargs}"
