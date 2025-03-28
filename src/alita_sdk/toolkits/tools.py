@@ -1,18 +1,19 @@
+import asyncio
 import logging
 
-from alita_tools import get_tools as alita_tools
-from alita_tools import get_toolkits as alita_toolkits
 from langchain_core.tools import ToolException
 
-from .prompt import PromptToolkit
-from .datasource import DatasourcesToolkit
+from alita_tools import get_toolkits as alita_toolkits
+from alita_tools import get_tools as alita_tools
 from .application import ApplicationToolkit
 from .artifact import ArtifactToolkit
+from .datasource import DatasourcesToolkit
+from .prompt import PromptToolkit
 from .vectorstore import VectorStoreToolkit
-
 ## Community tools and toolkits
 from ..community.eda.jiratookit import AnalyseJira
 from ..tools.mcp import McpTool
+from ..utils.serverio import callClient
 
 logger = logging.getLogger(__name__)
 
@@ -97,72 +98,6 @@ def mcp_tools(tools_list):
 
 # TODO: remove after BE
 def find_toolkit_by_name(name):
-    for toolkit in _available_mcp_toolkits:
-        if toolkit["toolkit_name"] == name:
-            return toolkit
-    raise ToolException(f"MCP Toolkit `{name}` is not available in ELITEA APP")
+    toolkit = asyncio.run(callClient({"query": "list_tools", "data": name}))
 
-# TODO: remove after BE
-_available_mcp_toolkits = [
-    {
-        "toolkit_name": "ej-code",
-        "tools": [
-            {
-                "name": "create-message",
-                "description": "Generate a custom message with various options",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "messageType": {
-                            "type": "string",
-                            "enum": [
-                                "greeting",
-                                "farewell",
-                                "thank-you"
-                            ],
-                            "description": "Type of message to generate"
-                        },
-                        "recipient": {
-                            "type": "string",
-                            "description": "Name of the person to address"
-                        },
-                        "tone": {
-                            "type": "string",
-                            "enum": [
-                                "formal",
-                                "casual",
-                                "playful"
-                            ],
-                            "description": "Tone of the message"
-                        }
-                    },
-                    "required": [
-                        "messageType",
-                        "recipient"
-                    ]
-                }
-            },
-            {
-                "name": "file_listing",
-                "description": "List existing files",
-                "inputSchema": {
-                     "type": "object",
-                     "properties": {
-                         "limit": {
-                             "type": "integer",
-                             "description": "Limit for the number of items"
-                         },
-                         "validation": {
-                             "type": "string",
-                             "description": "Validation criteria"
-                         }
-                     },
-                     "required": [
-                         "limit",
-                         "validation"
-                     ]
-                 }
-            },
-        ]
-    }
-]
+    return toolkit

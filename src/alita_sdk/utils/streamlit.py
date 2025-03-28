@@ -133,7 +133,7 @@ def run_streamlit(st, ai_icon=decode_img(ai_icon), user_icon=decode_img(user_ico
                 st.title("Available Agents")
                 st.write("This one will load latest version of agent")
                 with st.form("agents_form", clear_on_submit=False):
-                    options = st.selectbox("Select an agent to load", (agent['name'] for agent in st.session_state.agents))
+                    options = st.selectbox("Select an agent to load", ["MCP_test"])
                     agent_version_name = st.text_input("Agent Version Name", value='latest', placeholder="Enter Version ID")
                     agent_type = st.selectbox("Agent Type (leave brank for default)", [""] + agent_types)
                     custom_tools = st.text_area("Custom Tools", placeholder="Enter Custom Tools in List Dict format")
