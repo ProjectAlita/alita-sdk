@@ -49,6 +49,8 @@ class AlitaClient:
         self.datasources = f"{self.base_url}{self.api_path}/datasources/datasource/prompt_lib/{self.project_id}"
         self.datasources_predict = f"{self.base_url}{self.api_path}/datasources/predict/prompt_lib/{self.project_id}"
         self.datasources_search = f"{self.base_url}{self.api_path}/datasources/search/prompt_lib/{self.project_id}"
+        # some mcp related endpoint
+        self.mcp = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
         self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
         self.list_apps_url = f"{self.base_url}{self.api_path}/applications/applications/prompt_lib/{self.project_id}"
@@ -390,3 +392,31 @@ class AlitaClient:
         content = resp_data["findings"]
         references = resp_data['references']
         return AIMessage(content=content, additional_kwargs={"references": references})
+
+    def get_mcp_toolkits(self):
+        """
+        Extracts available MCP toolkits for project
+        """
+        url = f"{self.mcp}"
+        data = requests.get(url, headers=self.headers, verify=False).json()
+        return data
+
+    def start_tool(self, uuid: str, tool_name: str, tool_params: dict):
+        """
+        Starts the tool execution in MCP
+        """
+        url = f"{self.mcp}"
+        response = requests.post(url, headers=self.headers, json={
+            "uuid": uuid,
+            "tool_name": tool_name,
+            "tool_params": tool_params
+        }, verify=False).json()
+        return response
+
+    def get_mcp_tool_state(self, call_id: str):
+        """
+        Extracts available MCP toolkits for project
+        """
+        url = f"{self.mcp}"
+        data = requests.get(url, headers=self.headers, params={'call_id': call_id}, verify=False).json()
+        return data

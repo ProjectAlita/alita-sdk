@@ -1,19 +1,18 @@
-import asyncio
+from datetime import time
 from logging import getLogger
-from typing import Any, Type, Literal, Optional
+from typing import Type, Literal, Optional
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, create_model
 
-from src.alita_sdk.utils.serverio import send_message_and_wait_for_response
+from src.alita_sdk.clients import AlitaClient
 
 logger = getLogger(__name__)
 
 class McpTool(BaseTool):
     name: str
     description: str
-    # Whether it's already established?
-    socket_client: Any
+    alita: AlitaClient  # This should be the client to interact with the backend
     args_schema: Type[BaseModel] = None
     return_type: str = "str"
 
@@ -44,14 +43,23 @@ class McpTool(BaseTool):
         return create_model('DynamicModel', **fields)
     
     def _run(self, *args, **kwargs):
-        # socket connection?????
-        # send event to socket per contract
-        # socket_client.send_event(event=kwargs.get('event'), data=kwargs.get('data'))
-        # wait for response
+        # send API call to BE: start tool execution (uuid???, tool name, tool params)
+        # exec_data = self.alita.start_tool(uuid=room_uuid, tool_name=self.name, params=kwargs)
+        # get execution status from BE and wait until it's done
+        # return self._wait_for_execution(exec_data['call_id'])
 
-        # response = asyncio.run(send_message_and_wait_for_response({"query":"call_tools", "data": [dict(function = dict(name = self.name, arguments = kwargs), server = "local-server-toolkit")]}))
-        # print(response)
-        #
-        # return response
-
+        # return tool's execution result
         return f"Calling tool: \n{self.name} \n with kwargs: {kwargs}"
+
+    def _wait_for_execution(self, call_id, polling_interval=20) -> str:
+        """
+        Wait for the tool execution to finish and return the final output.
+        """
+        exec_data = {'call_id': call_id}
+        status = self.alita.get_mcp_tool_state(call_id=exec_data['call_id'])
+
+        while status['status'] not in ['success', 'error']:
+            logger.info(f"Tool execution status: {status['status']}")
+            time.sleep(polling_interval)
+            status = self.alita.get_mcp_tool_state(call_id=exec_data['call_id'])['status']
+        return status['final_output']

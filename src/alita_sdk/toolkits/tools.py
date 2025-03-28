@@ -69,34 +69,53 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
             tools.extend(VectorStoreToolkit.get_toolkit(
                 llm=llm,
                 **tool['settings']).get_tools())
+        # TODO: review this part MCP filter
+        if 'mcp' in tool['type']:
+            toolkit_name = tool['name']
+            # get MCP Toolkits from the deployment via API call (project, token, toolkit_name)
+            # alita.get_mcp_toolkits()  # This would be an API call to get the list of toolkits
+            # handle list of toolkits to understand whether required toolkit is available
+            # alita.get_mcp_toolkit(toolkit_name)  # This would be an API call to get the toolkit details
+            toolkit = find_toolkit_by_name(toolkit_name)
+            # get selected tools from the toolkit
+            available_tools = toolkit["tools"]
+            selected_tools = tool['settings'].get('selected_tools', [])
+            # check that requested tool is among available
+            for available_tool in available_tools:
+                if not selected_tools or available_tool["name"].lower() in selected_tools:
+                    # check that tool is available
+                    tools.append(McpTool(name=available_tool["name"],
+                                         description=available_tool["description"],
+                                         socket_client=None,
+                                         args_schema=McpTool.create_pydantic_model_from_schema(
+                                             available_tool["inputSchema"])))
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
     tools += alita_tools(tools_list, alita, llm)
-    # add tools from ELITEA APP
-    tools += mcp_tools(tools_list)
     return tools
 
-def mcp_tools(tools_list):
-    # get available MCP tools from ELITEA APP
-    tools = []
-    for tool in tools_list:
-        toolkit_name = tool['type']
-        # get MCP Toolkits from platform
-        toolkit = find_toolkit_by_name(toolkit_name)
-        # get selected tools from the toolkit
-        available_tools = toolkit["tools"]
-        selected_tools = tool['settings'].get('selected_tools', [])
-        for available_tool in available_tools:
-            if not selected_tools or available_tool["name"].lower() in selected_tools:
-                # check that tool is available
-                tools.append(McpTool(name=available_tool["name"],
-                                     description=available_tool["description"],
-                                     socket_client=None,
-                                     args_schema=McpTool.create_pydantic_model_from_schema(available_tool["inputSchema"])))
-    return tools
+# def mcp_tools(tools_list):
+#     # get available MCP tools from ELITEA APP
+#     tools = []
+#     for tool in tools_list:
+#         toolkit_name = tool['type']
+#         # get MCP Toolkits from platform
+#         toolkit = find_toolkit_by_name(toolkit_name)
+#         # get selected tools from the toolkit
+#         available_tools = toolkit["tools"]
+#         selected_tools = tool['settings'].get('selected_tools', [])
+#         for available_tool in available_tools:
+#             if not selected_tools or available_tool["name"].lower() in selected_tools:
+#                 # check that tool is available
+#                 tools.append(McpTool(name=available_tool["name"],
+#                                      description=available_tool["description"],
+#                                      args_schema=McpTool.create_pydantic_model_from_schema(available_tool["inputSchema"])))
+#     return tools
 
 # TODO: remove after BE
 def find_toolkit_by_name(name):
+    # find required toolkit from the deployment
+    # TODO: API call to BE
     for toolkit in _available_mcp_toolkits:
         if toolkit["toolkit_name"] == name:
             return toolkit
@@ -105,7 +124,7 @@ def find_toolkit_by_name(name):
 # TODO: remove after BE
 _available_mcp_toolkits = [
     {
-        "toolkit_name": "ej-code",
+        "toolkit_name": "mcp-ej-code",
         "tools": [
             {
                 "name": "create-message",
