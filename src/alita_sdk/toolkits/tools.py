@@ -57,6 +57,7 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
             tools.extend(ArtifactToolkit.get_toolkit(
                 client=alita,
                 bucket=tool['settings']['bucket'],
+                toolkit_name=tool.get('toolkit_name', ''),
                 selected_tools=tool['settings'].get('selected_tools', [])
             ).get_tools())
         if tool['type'] == 'analyse_jira':
