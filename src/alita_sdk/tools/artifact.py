@@ -1,9 +1,9 @@
-from langchain_core.tools import ToolException
+from alita_tools.elitea_base import BaseToolApiWrapper
 from typing import Any, Optional
-from pydantic import create_model, BaseModel, Field, model_validator
+from pydantic import create_model, Field, model_validator
 from pydantic.fields import PrivateAttr
 
-class ArtifactWrapper(BaseModel):
+class ArtifactWrapper(BaseToolApiWrapper):
     client: Any
     bucket: str
     _artifact: Any = PrivateAttr()
@@ -119,10 +119,3 @@ class ArtifactWrapper(BaseModel):
                 )
             },
         ]
-
-    def run(self, name: str, *args: Any, **kwargs: Any):
-        for tool in self.get_available_tools():
-            if tool["name"] == name:
-                return tool["ref"](*args, **kwargs)
-        else:
-            raise ToolException(f"Unknown tool name: {name}")
