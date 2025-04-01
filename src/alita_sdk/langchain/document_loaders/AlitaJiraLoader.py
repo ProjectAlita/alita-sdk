@@ -10,7 +10,7 @@ from langchain_core.documents import Document
 
 from .constants import loaders_map
 
-DEFAULT_FIELDS = 'status,summary,reporter'
+DEFAULT_FIELDS = ['status','summary','reporter','description']
 
 
 class AlitaJiraLoader(BaseLoader):
@@ -89,26 +89,29 @@ class AlitaJiraLoader(BaseLoader):
     def __get_issues(self):
         fields = DEFAULT_FIELDS
         if self.fields_to_extract:
-            fields += f',{self.fields_to_extract}'
-        else:
-            fields += ',description,comment'  # Fetch only necessary fields by default
+            fields += self.fields_to_extract
 
         if self.include_attachments:
-            fields += ',attachment'
+            fields += ['attachment']
 
         jql_query = ''
         if self.project:
             jql_query = f'project={self.project}'
         elif self.epic_id:
-            jql_query = f'parentEpic={self.epic_id}'
+            if self.cloud:
+                jql_query = f'parentEpic={self.epic_id}'
+            else:
+                jql_query = f'"Parent Link"={self.epic_id}'
         elif self.jql:
             jql_query = self.jql
 
         if not jql_query:
             raise ValueError("Must provide `jql`, `project`, or `epic_id` to fetch issues.")
 
+        final_fields = ','.join({field.lower() for field in fields})
+
         limit = self.max_total_issues if self.max_total_issues is not None else None
-        issue_generator = self.__jql_get_tickets(jql_query, fields=fields, limit=limit)
+        issue_generator = self.__jql_get_tickets(jql_query, fields=final_fields, limit=limit)
         return issue_generator
 
     def __jql_get_tickets(
@@ -158,20 +161,24 @@ class AlitaJiraLoader(BaseLoader):
         issue_generator = self.__get_issues()
         for issues_batch in issue_generator:
             for issue in issues_batch:
-                yield self.__process_issue(issue)
+                issue_doc = self.__process_issue(issue)
+                if issue_doc:
+                    yield self.__process_issue(issue)
 
-    def __process_issue(self, issue: dict) -> Document:
+    def __process_issue(self, issue: dict) -> Document | None:
         content = f"{issue['fields']['summary']}\n"
         description = issue['fields'].get('description', '')
         if description:
             content += f"{description}\n"
+        else:
+            return None
         if 'comment' in issue['fields'] and issue['fields']['comment']['comments']:
             for comment in issue['fields']['comment']['comments']:
                 content += f"{comment['body']}\n"
 
         if self.fields_to_index:
-            for field in self.fields_to_index.split(','):
-                if field in issue['fields']:
+            for field in self.fields_to_index:
+                if field in issue['fields'] and issue['fields'][field]:
                     content += f"{issue['fields'][field]}\n"
 
         if self.include_attachments and issue['fields'].get('attachment', {}):
