@@ -188,6 +188,7 @@ def create_graph(
     schema = yaml.safe_load(yaml_schema)
     logger.debug(f"Schema: {schema}")
     logger.debug(f"Tools: {tools}")
+    logger.info(f"Tools: {[tool.name for tool in tools]}")
     state_class = create_state(schema.get('state', {}))
     lg_builder = StateGraph(state_class)
     interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
