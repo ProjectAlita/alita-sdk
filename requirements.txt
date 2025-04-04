@@ -24,6 +24,7 @@ langsmith==0.1.144
 langgraph~=0.2.53
 langchain_chroma~=0.1.0
 langchain-unstructured~=0.1.2
+langchain-postgres~=0.0.13
 
 ## Indexer
 keybert==0.8.3
