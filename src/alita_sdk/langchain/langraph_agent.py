@@ -241,8 +241,8 @@ def create_graph(
                         elif node_type == 'loop_from_tool':
                             loop_toolkit_name = node.get('loop_toolkit_name')
                             loop_tool_name = node.get('loop_tool')
-                            if toolkit_name and loop_tool_name:
-                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{clean_string(tool_name)}"
+                            if loop_toolkit_name and loop_tool_name:
+                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{loop_tool_name}"
                                 for t in tools:
                                     if t.name == loop_tool_name:
                                         logger.debug(f"Loop tool discovered: {t}")
