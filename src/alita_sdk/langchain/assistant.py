@@ -80,7 +80,7 @@ class Assistant:
             if chat_history and isinstance(chat_history, list):
                 messages.extend(chat_history)
             self.prompt = Jinja2TemplatedChatMessagesTemplate(messages=messages)
-            if input_variables and not variables:
+            if input_variables:
                 self.prompt.input_variables = input_variables
             if variables:
                 self.prompt.partial_variables = variables
