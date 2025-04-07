@@ -239,24 +239,24 @@ def create_graph(
                                 task=node.get('task', '')
                             ))
                         elif node_type == 'loop_from_tool':
-                            loop_tool = None
-                            loop_tool_name = clean_string(node.get('loop_tool', 'None'))
-                            for t in tools:
-                                logger.debug(f"Tool: {t.name}")
-                                if t.name == loop_tool_name:
-                                    loop_tool = t
-                                    break
-                            if loop_tool:
-                                lg_builder.add_node(node_id, LoopToolNode(
-                                    client=client, tool=tool,
-                                    name=node['id'], return_type='dict',
-                                    loop_tool=loop_tool,
-                                    variables_mapping=node.get('variables_mapping', {}),
-                                    output_variables=node.get('output', []),
-                                    input_variables=node.get('input', ['messages']),
-                                    structured_output=node.get('structured_output', False),
-                                    task=node.get('task')
-                                ))
+                            loop_toolkit_name = node.get('loop_toolkit_name')
+                            loop_tool_name = node.get('loop_tool')
+                            if toolkit_name and loop_tool_name:
+                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{clean_string(tool_name)}"
+                                for t in tools:
+                                    if t.name == loop_tool_name:
+                                        logger.debug(f"Loop tool discovered: {t}")
+                                        lg_builder.add_node(node_id, LoopToolNode(
+                                            client=client,
+                                            name=node['id'], return_type='dict',
+                                            tool=tool, loop_tool=t,
+                                            variables_mapping=node.get('variables_mapping', {}),
+                                            output_variables=node.get('output', []),
+                                            input_variables=node.get('input', ['messages']),
+                                            structured_output=node.get('structured_output', False),
+                                            task=node.get('task')
+                                        ))
+                                        break
                         elif node_type == 'indexer':
                             indexer_tool = None
                             indexer_tool_name = clean_string(node.get('indexer_tool', None))
