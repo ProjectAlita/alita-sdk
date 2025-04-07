@@ -1,17 +1,19 @@
 import logging
-from json import dumps, loads
+from json import dumps
+from typing import Any, Optional, Union
 
 from langchain_core.callbacks import dispatch_custom_event
+from langchain_core.messages import HumanMessage, ToolCall
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from typing import Any, Optional, Union
-from langchain_core.messages import HumanMessage, ToolCall
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from ..langchain.utils import _old_extract_json
 from pydantic import ValidationError
-from openai import BadRequestError
+
+from ..langchain.utils import _old_extract_json
+
 logger = logging.getLogger(__name__)
 from traceback import format_exc
+
 
 def process_response(response, return_type, accumulated_response):
     if return_type == "str":
@@ -21,19 +23,21 @@ def process_response(response, return_type, accumulated_response):
             accumulated_response['messages'][-1]["content"] += f'{response}\n\n'
         elif isinstance(response, dict):
             if response.get('messages'):
-                accumulated_response['messages'][-1]["content"] += "\n\n".join([message['content'] for message in response['messages']]) + "\n\n"
+                accumulated_response['messages'][-1]["content"] += "\n\n".join(
+                    [message['content'] for message in response['messages']]) + "\n\n"
             else:
                 accumulated_response['messages'][-1]['content'] += f"{dumps(response)}\n\n"
         else:
             accumulated_response['messages'][-1]['content'] += f"{str(response)}\n\n"
     return accumulated_response
 
+
 class LoopNode(BaseTool):
     name: str = 'LoopNode'
     description: str = 'This is tool node for tools'
     client: Any = None
     tool: BaseTool = None
-    task: str = ""
+    task: str = ''
     output_variables: Optional[list] = None
     input_variables: Optional[list] = None
     return_type: str = "str"
@@ -65,10 +69,10 @@ JSON Output Constraint:
 """
 
     def invoke(
-        self,
-        state: Union[str, dict, ToolCall],
-        config: Optional[RunnableConfig] = None,
-        **kwargs: Any,
+            self,
+            state: Union[str, dict, ToolCall],
+            config: Optional[RunnableConfig] = None,
+            **kwargs: Any,
     ) -> Any:
         params = convert_to_openai_tool(self.tool).get(
             'function', {'parameters': {}}).get(
@@ -153,4 +157,3 @@ JSON Output Constraint:
 
     def _run(self, *args, **kwargs):
         return self.invoke(**kwargs)
-
