@@ -41,7 +41,7 @@ class LoopNode(BaseTool):
     output_variables: Optional[list] = None
     input_variables: Optional[list] = None
     return_type: str = "str"
-    prompt: str = """Formulate a JSON LIST of inputs for the tool based *solely* on the conversation history and provided information.
+    prompt: str = """# ROLE: AI assistant generating tool arguments based on user intent.
 
 Input Data:
 - Tool Name: {tool_name}
@@ -50,22 +50,22 @@ Input Data:
 - Context: {context}
 - Instructions: {task}
 
-Output Requirements:
-- Generate a COMPLETE LIST of JSON objects, each representing kwargs for a tool call.
-- Provide ALL inputs within a SINGLE JSON LIST. Do not output inputs individually.
-- Output MUST be a JSON LIST directly extractable by `JSON.loads`.
+# INSTRUCTIONS & CONSTRAINTS:
 
-Output Format:
-- `[{{"arg1": "input1", "arg2": "input2"}}, {{"arg1": "input3", "arg2": "input4"}}, ...]`
+1.  **Process Context:** Apply the `Instructions` (e.g., batching, filtering) to the relevant data in `Context`. Each resulting piece is an 'output unit'. Preserve data formatting unless instructed otherwise.
+2.  **Analyze Schema:** Understand the available fields, types, and purpose within `Tool Argument Schema`.
+3.  **Infer Mapping:** For each output unit, determine the *most logical* field in `Tool Argument Schema` to place the primary processed data (and any associated metadata from `Context` requested by `Instructions`). Base this inference on schema field names, types, and descriptions.
+4.  **Construct Objects:** Create one JSON object per output unit.
+    *   Populate the inferred target field with the processed data/metadata, formatted correctly.
+    *   Include ALL required fields from `Tool Argument Schema`, using defaults or context/instructions where applicable.
+    *   **Strict Schema Adherence:** Output objects MUST match `Tool Argument Schema` structure, fields, and types exactly. DO NOT add extra fields.
+5.  **Data Grounding:** Use ONLY data from `Context` and `Instructions`. Do not invent information. Ensure all specified data is processed and included.
+6.  **`chat_history` Field:** If `Tool Argument Schema` contains a `chat_history` key, include it. Default to `[]` unless history is implicitly available and relevant. Ensure all other schema fields are still present.
 
-Conditional `chat_history` Integration:
-- IF the `Tool Arguments Schema` contains a `chat_history` key, include it in the generated JSON objects.
-- The value for `chat_history` should be a list of messages with "role" and "content": `{{"chat_history": [{{"role": "user", "content": "input"}}, {{"role": "assistant", "content": "output"}}]}}`.
-- Ensure all keys and values required by the `Tool Arguments Schema` are present in each generated JSON object. `chat_history` is an additional key when specified in the schema.
-- All keys and values must be self-contained and independent, as the tool has no access to the conversation history.
+# OUTPUT REQUIREMENTS:
+- **MUST be a single, valid JSON list (`[...]`)** containing the argument objects (`{{...}}`).
+- **MUST be directly parsable by `JSON.loads`**.
 
-JSON Output Constraint:
-- The final answer MUST be valid JSON extractable by `JSON.loads`.
 """
 
     def invoke(
@@ -97,7 +97,7 @@ JSON Output Constraint:
                 tool_name=self.tool.name,
                 tool_description=self.tool.description,
                 context=context,
-                schema=parameters,
+                schema=params,
                 task=self.task))]
         logger.debug(f"LoopNode input: {predict_input}")
         completion = self.client.invoke(predict_input, config=config)
