@@ -33,7 +33,7 @@ class AnalyseJira(BaseToolkit):
             jira_custom_files=(Optional[str], Field(description="Additional fields", default="")),
             jira_api_version=(str, Field(description="Jira API Version", default="2")),
             artifact_bucket_path=(str, Field(description="Artifact Bucket Path")),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Analyse_Jira", "icon_url": None}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Analyse_Jira", "icon_url": None, "hidden": True}})
         )
 
     @classmethod
