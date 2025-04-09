@@ -20,7 +20,7 @@ class VectorStoreToolkit(BaseToolkit):
             vectorstore_type=(str, Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)")),
             vectorstore_params=(dict, Field(description="Vectorstore connection parameters")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "VectorStore", "icon_url": None}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "VectorStore", "icon_url": None, "hidden": True}})
         )
 
     @classmethod
