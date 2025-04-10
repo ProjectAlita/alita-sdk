@@ -1,7 +1,7 @@
 import logging
 from json import dumps
 from traceback import format_exc
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, List
 
 from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import HumanMessage, ToolCall
@@ -11,7 +11,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
 from .loop import process_response
-from ..langchain.utils import _extract_json, create_pydantic_model
+from ..langchain.utils import _extract_json, create_pydantic_model, propagate_the_input_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             completion = self.client.invoke(input_, config=config)
             result = _extract_json(completion.content.strip())
         try:
-            tool_result = self.tool.invoke(result, config=config, kwargs=kwargs)
+            tool_result: dict | List[dict] = self.tool.invoke(result, config=config, kwargs=kwargs)
             dispatch_custom_event(
                 "on_loop_tool_node", {
                     "input_variables": self.input_variables,
@@ -103,22 +103,26 @@ Anwer must be JSON only extractable by JSON.LOADS."""
                     "state": state,
                 }, config=config
             )
+
             tool_inputs = []
-            if isinstance(tool_result, dict):
+            if not isinstance(tool_result, list):
                 tool_result = [tool_result]
             if isinstance(tool_result, list):
-                for each in tool_result:
-                    tool_inputs.append({})
-                    if isinstance(each, dict):
-                        for k in self.variables_mapping.keys():
-                            if k == 'messages':
-                                tool_inputs[-1][self.variables_mapping[k]] = state.get(k, [])
-                            else:
-                                tool_inputs[-1][self.variables_mapping[k]] = each[k]
-                    else:
-                        tool_inputs[-1][list(self.variables_mapping.values())[0]] = each
+                for i in tool_result:
+                    if not isinstance(i, dict):
+                        logger.error(f'Tool result expected to be dict, but got {type(i)} {i=}')
+                        raise TypeError(f'Tool result expected to be dict, but got {type(i)} {i=}')
+                    v_mapping = propagate_the_input_mapping(
+                        input_mapping=self.variables_mapping,
+                        input_variables=self.input_variables,
+                        state=state,
+                        tool=i
+                    )
+                    tool_inputs.append(v_mapping)
             else:
-                tool_inputs.append({list(self.variables_mapping.keys())[0]: tool_result})
+                logger.error(f'Tool results expected to be List[dict], but got {type(tool_result)} {tool_result=}')
+                raise TypeError(f'Tool results expected to be List[dict], but got {type(tool_result)} {tool_result=}')
+            #     tool_inputs.append({list(self.variables_mapping.keys())[0]: tool_result})
             logger.info(f"Loop tool inputs: {tool_inputs}")
             output_variables = dict()
             if len(self.output_variables) > 0:

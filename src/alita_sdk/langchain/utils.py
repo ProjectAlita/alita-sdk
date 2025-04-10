@@ -156,16 +156,23 @@ def create_params(input_variables: list[str], state: dict) -> dict:
         for var in input_variables
     }
 
-def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables: list[str], state: dict) -> dict:
+def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables: list[str], state: dict, **kwargs) -> dict:
     input_data = {}
     for key, value in input_mapping.items():
+        source_dict = value.get('source')
+        if source_dict and source_dict != 'state':
+            source = kwargs[source_dict]
+            var_dict = source
+        else:
+            source = state
+            var_dict = create_params(input_variables, source)
+
         if value['type'] == 'fstring':
-            var_dict = create_params(input_variables, state)
             input_data[key] = value['value'].format(**var_dict)
         elif value['type'] == 'fixed':
             input_data[key] = value['value']
         else:
-            input_data[key] = state.get(value['value'], "")
+            input_data[key] = source.get(value['value'], "")
     return input_data
 
 
