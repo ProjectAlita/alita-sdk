@@ -69,6 +69,7 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
         if tool['type'] == 'vectorstore':
             tools.extend(VectorStoreToolkit.get_toolkit(
                 llm=llm,
+                toolkit_name=tool.get('toolkit_name', ''),
                 **tool['settings']).get_tools())
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
