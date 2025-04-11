@@ -1,5 +1,7 @@
 from logging import getLogger
-from typing import Any, List, Literal
+from typing import Any, List, Literal, Optional
+
+from alita_tools.utils import clean_string, TOOLKIT_SPLITTER
 from pydantic import BaseModel, create_model, Field, ConfigDict
 from langchain_core.tools import BaseToolkit, BaseTool
 from alita_tools.base.tool import BaseAction
@@ -25,9 +27,11 @@ class VectorStoreToolkit(BaseToolkit):
 
     @classmethod
     def get_toolkit(cls, llm: Any, vectorstore_type: str, embedding_model: str, 
-                    embedding_model_params: dict, vectorstore_params: dict, 
+                    embedding_model_params: dict, vectorstore_params: dict,
+                    toolkit_name: Optional[str] = None,
                     selected_tools: list[str] = []):
         logger.info("Selected tools: %s", selected_tools)
+        prefix = clean_string(toolkit_name) + TOOLKIT_SPLITTER if toolkit_name else ''
         if selected_tools is None:
             selected_tools = []
         tools = []
@@ -44,7 +48,7 @@ class VectorStoreToolkit(BaseToolkit):
             #         continue
             tools.append(BaseAction(
                 api_wrapper=vectorstore_wrapper,
-                name=tool["name"],
+                name=f'{prefix}{tool["name"]}',
                 description=tool["description"],
                 args_schema=tool["args_schema"]
             ))
