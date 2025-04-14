@@ -10,7 +10,7 @@ from logging import getLogger
 
 logger = getLogger(__name__)
 
-class IndexDocumentsModel(BaseToolApiWrapper):
+class IndexDocumentsModel(BaseModel):
     documents: Any = Field(description="Generator of documents to index")
 
 class SearchDocumentsModel(BaseModel):
@@ -126,7 +126,7 @@ Make sure to provide unique source for each citation.
 How did you come up with the answer?
 """
 
-class VectorStoreWrapper(BaseModel):
+class VectorStoreWrapper(BaseToolApiWrapper):
     llm: Any
     embedding_model: str
     embedding_model_params: dict
