@@ -15,7 +15,7 @@ logger = getLogger(__name__)
 applicationToolSchema = create_model(
     "applicatrionSchema", 
     task = (str, FieldInfo(description="Task for Application")), 
-    chat_history = (Optional[list], FieldInfo(description="Chat History relevant for Application", default=[]))
+    chat_history = (Optional[list[dict[str, str]]], FieldInfo(description="Chat History relevant for Application"))
 )
 
 def formulate_query(kwargs):

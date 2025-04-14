@@ -10,7 +10,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
-from ..langchain.utils import _extract_json, create_pydantic_model
+from ..langchain.utils import _extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +48,6 @@ Anwer must be JSON only extractable by JSON.LOADS."""
         params = convert_to_openai_tool(self.tool).get(
             'function', {'parameters': {}}).get(
             'parameters', {'properties': {}}).get('properties', {})
-        parameters = ''
-        struct_params = {}
-        for key in params.keys():
-            parameters += f"{key} [{params[key].get('type', 'str')}]: {params[key].get('description', '')}\n"
-            struct_params[key] = {"type": params[key].get('type', 'str'),
-                                  "description": params[key].get('description', '')}
         # this is becasue messages is shared between all tools and we need to make sure that we are not modifying it
         input_ = []
         last_message = {}
@@ -75,13 +69,12 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             HumanMessage(self.prompt.format(
                 tool_name=self.tool.name,
                 tool_description=self.tool.description,
-                schema=parameters,
+                schema=params,
                 task=task
             ))
         ]
         if self.structured_output:
-            struct_model = create_pydantic_model(f"{self.tool.name}Output", struct_params)
-            llm = self.client.with_structured_output(struct_model)
+            llm = self.client.with_structured_output(self.tool.args_schema)
             completion = llm.invoke(input_, config=config)
             result = completion.model_dump()
         else:
