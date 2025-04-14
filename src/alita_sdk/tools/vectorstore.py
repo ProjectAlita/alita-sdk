@@ -5,11 +5,12 @@ from pydantic import BaseModel, model_validator, Field
 from langchain_core.tools import ToolException
 from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
+from alita_tools.elitea_base import BaseToolApiWrapper
 from logging import getLogger
 
 logger = getLogger(__name__)
 
-class IndexDocumentsModel(BaseModel):
+class IndexDocumentsModel(BaseToolApiWrapper):
     documents: Any = Field(description="Generator of documents to index")
 
 class SearchDocumentsModel(BaseModel):
@@ -522,10 +523,3 @@ class VectorStoreWrapper(BaseModel):
                 "args_schema": StepBackSearchDocumentsModel
             }
         ]
-    
-    def run(self, name: str, *args: Any, **kwargs: Any):
-        for tool in self.get_available_tools():
-            if tool["name"] == name:
-                return tool["ref"](*args, **kwargs)
-        else:
-            raise ToolException(f"Unknown tool name: {name}")
