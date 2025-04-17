@@ -45,7 +45,7 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
                 alita,
                 datasource_ids=[int(tool['settings']['datasource_id'])],
                 selected_tools=tool['settings']['selected_tools'],
-                toolkit_name=tool.get('toolkit_name', '')
+                toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
             ).get_tools())
         elif tool['type'] == 'application':
             tools.extend(ApplicationToolkit.get_toolkit(
