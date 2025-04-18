@@ -11,6 +11,7 @@ from alita_tools.base.tool import BaseAction
 
 class ArtifactToolkit(BaseToolkit):
     tools: List[BaseTool] = []
+    toolkit_max_length: int = 0
     
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
@@ -19,7 +20,7 @@ class ArtifactToolkit(BaseToolkit):
         return create_model(
             "artifact",
             # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
-            bucket = (str, FieldInfo(description="Bucket name")),
+            bucket = (str, FieldInfo(description="Bucket name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ArtifactToolkit.toolkit_max_length})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})
         )
