@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, ToolCall
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel, create_model
 
 from ..langchain.utils import _extract_json
 
@@ -74,7 +74,11 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             ))
         ]
         if self.structured_output:
-            llm = self.client.with_structured_output(self.tool.args_schema)
+            # cut defaults from schema
+            fields = {name: (field.annotation, ...) for name, field in self.tool.args_schema.model_fields.items()}
+            input_schema = create_model('NewModel', **fields)
+
+            llm = self.client.with_structured_output(input_schema)
             completion = llm.invoke(input_, config=config)
             result = completion.model_dump()
         else:
