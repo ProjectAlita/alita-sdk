@@ -44,7 +44,7 @@ class Artifact:
     def list(self, bucket_name: str = None) -> str:
         if not bucket_name:
             bucket_name = self.bucket_name
-        return self.client.list_artifacts(bucket_name)
+        return str(self.client.list_artifacts(bucket_name))
 
     def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None):
         if not bucket_name:
