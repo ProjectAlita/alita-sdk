@@ -11,6 +11,7 @@ from .vectorstore import VectorStoreToolkit
 
 ## Community tools and toolkits
 from ..community.eda.jiratookit import AnalyseJira
+from ..community.browseruse import BrowserUseToolkit
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,8 @@ def get_toolkits():
     ]
     
     community_toolkits = [ 
-        AnalyseJira.toolkit_config_schema()
+        AnalyseJira.toolkit_config_schema(),
+        BrowserUseToolkit.toolkit_config_schema()
     ]
     
     return  core_toolkits + community_toolkits + alita_toolkits()
@@ -65,6 +67,11 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
         if tool['type'] == 'analyse_jira':
             tools.extend(AnalyseJira.get_toolkit(
                 client=alita, 
+                **tool['settings']).get_tools())
+        if tool['type'] == 'browser_use':
+            tools.extend(BrowserUseToolkit.get_toolkit(
+                client=alita, 
+                llm=llm,
                 **tool['settings']).get_tools())
         if tool['type'] == 'vectorstore':
             tools.extend(VectorStoreToolkit.get_toolkit(

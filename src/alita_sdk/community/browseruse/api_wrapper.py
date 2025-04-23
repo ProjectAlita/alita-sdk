@@ -43,8 +43,8 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
     disable_security: bool = True
     proxy: Any = None
     extra_chromium_args: List[str] = []
-    alita: Any = None
-    llm: Any = None
+    client: Any = None # AlitaClient
+    llm: Any = None # LLMLikeObject
     proxy_settings: Any = None
     validate_output: bool = False
     planner_llm: Any = None

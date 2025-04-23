@@ -43,16 +43,16 @@ class BrowserUseToolkit(BaseToolkit):
             extra_chromium_args=(List[str], Field(description="Extra arguments to pass to the browser", default=[])),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Browser Use", "icon_url": None}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Browser Use", "icon_url": None, "hidden": True}})
         )
     
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        figma_api_wrapper = BrowserUseAPIWrapper(**kwargs)
+        _api_wrapper = BrowserUseAPIWrapper(**kwargs)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
-        available_tools = figma_api_wrapper.get_available_tools()
+        available_tools = _api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
@@ -60,7 +60,7 @@ class BrowserUseToolkit(BaseToolkit):
                     continue
             tools.append(
                 BaseAction(
-                    api_wrapper=figma_api_wrapper,
+                    api_wrapper=_api_wrapper,
                     name=prefix + tool["name"],
                     description=f"Browser automation tool: {tool['name']}" + tool["description"],
                     args_schema=tool["args_schema"],
