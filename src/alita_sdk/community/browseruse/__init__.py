@@ -37,7 +37,7 @@ class BrowserUseToolkit(BaseToolkit):
             headless=(bool, Field(description="Run browser in headless mode", default=True)),
             width=(int, Field(description="Browser window width", default=1280)),
             height=(int, Field(description="Browser window height", default=800)),
-            cookies=(Optional[Dict[str, Any]], Field(description="Browser cookies as JSON", default=None, json_schema_extra={'secret': True})),
+            cookies=(Optional[Dict[str, Any]], Field(description="Browser cookies as JSON", default=None)),
             disable_security=(bool, Field(description="Disable browser security features", default=True)),
             proxy=(Optional[Dict[str, str]], Field(description="Proxy settings", default=None)),
             extra_chromium_args=(List[str], Field(description="Extra arguments to pass to the browser", default=[])),
