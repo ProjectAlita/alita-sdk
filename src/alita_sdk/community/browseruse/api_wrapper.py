@@ -115,7 +115,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
                 agent.add_new_task(task) 
             history: AgentHistoryList = await agent.run(max_steps=max_steps)
         await browser.close()
-        return history
+        return str(history.extracted_content())
     
     def tasks(self, tasks: List[str], max_steps: Optional[int] = 20):
         """Perform a list of tasks using the browser."""
