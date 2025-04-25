@@ -72,6 +72,7 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
             tools.extend(BrowserUseToolkit.get_toolkit(
                 client=alita, 
                 llm=llm,
+                toolkit_name=tool.get('toolkit_name', ''),
                 **tool['settings']).get_tools())
         if tool['type'] == 'vectorstore':
             tools.extend(VectorStoreToolkit.get_toolkit(
