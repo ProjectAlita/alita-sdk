@@ -1,8 +1,8 @@
+from datetime import datetime
 from typing import Dict, List, Any, Optional, Type
 from pydantic import BaseModel, Field
 from browser_use import Agent, ActionResult, Browser, BrowserConfig, BrowserContextConfig
 from browser_use.agent.views import AgentHistoryList
-from browser_use.browser.browser import BrowserContext
 from playwright._impl._api_structures import ProxySettings
 from alita_tools.elitea_base import BaseToolApiWrapper
 from pydantic import create_model, Field, model_validator
@@ -15,6 +15,7 @@ BrowserTask = create_model(
     "BrowserTask",
     task=(str, Field(description="Task to perform")),
     max_steps=(Optional[int], Field(description="Maximum number of steps to perform")),
+    debug=(Optional[bool], Field(description="Whether debug mode is enabled")),
     __config__=Field(description="Browser Use API Wrapper")
 )
 
@@ -22,6 +23,7 @@ BrowserTasks = create_model(
     "BrowserTasks",
     tasks=(List[str], Field(description="List of tasks to perform")),
     max_steps=(Optional[int], Field(description="Maximum number of steps to perform")),
+    debug=(Optional[bool], Field(description="Whether debug mode is enabled")),
     __config__=Field(description="Browser Use API Wrapper")
 )
 
@@ -29,7 +31,9 @@ class DoneResult(BaseModel):
 	title: str
 	comments: str
 	hours_since_start: int
-    
+
+gif_default_location = './agent_history.gif'
+default_bucket = 'browser_use'
 
 class BrowserUseAPIWrapper(BaseToolApiWrapper):
     """Wrapper for Browser Use API."""
@@ -44,6 +48,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
     proxy: Any = None
     extra_chromium_args: List[str] = []
     client: Any = None # AlitaClient
+    artifact: Any = None # Artifact
     llm: Any = None # LLMLikeObject
     proxy_settings: Any = None
     validate_output: bool = False
@@ -58,6 +63,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
         values['proxy'] = ProxySettings(**values['proxy']) if values.get('proxy') else None
         values['extra_chromium_args'] = values.get('extra_chromium_args') or []
         values['browser_window_size'] = {"width": values.get('width', 1280), "height": values.get('height', 800)}
+        values['artifact'] = values.get('client').artifact(default_bucket)
         return values
         
         
@@ -83,11 +89,11 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
         return Browser(config=browser_config)
         
     
-    def task(self, task: str, max_steps: Optional[int] = 20):
+    def task(self, task: str, max_steps: Optional[int] = 20, debug: Optional[bool] = False):
         """Perform a task using the browser."""
-        return asyncio.run(self._tasks([task], max_steps))
+        return asyncio.run(self._tasks([task], max_steps, debug))
     
-    async def _tasks(self, tasks: List[str], max_steps: Optional[int] = 20):
+    async def _tasks(self, tasks: List[str], max_steps: Optional[int] = 20, debug: Optional[bool] = False):
         browser = self._create_browser()
         context_config = BrowserContextConfig(
                 wait_for_network_idle_page_load_time=10.0, # TODO: Make this configurable
@@ -115,11 +121,35 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
                 agent.add_new_task(task) 
             history: AgentHistoryList = await agent.run(max_steps=max_steps)
         await browser.close()
+        if debug:
+            # saves tasks metadata to artifact
+            self._save_tasks_info(history.model_dump_json())
+            self._save_gif()
+
         return str(history.extracted_content())
-    
-    def tasks(self, tasks: List[str], max_steps: Optional[int] = 20):
+
+    def _save_tasks_info(self, data_content: Any):
+        """
+        Saves tasks information to artifact
+        """
+        self.artifact.create(f"tasks_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json", data_content)
+
+    def _save_gif(self):
+        """Saves tasks execution gif"""
+
+        try:
+            with open(gif_default_location, 'rb') as file:
+                artifact_data = file.read()
+        except FileNotFoundError:
+            artifact_data = None
+
+        if artifact_data:
+            self.artifact.create(f"tasks_{datetime.now().strftime("%Y%m%d_%H%M%S")}.gif", artifact_data)
+
+
+    def tasks(self, tasks: List[str], max_steps: Optional[int] = 20, debug: Optional[bool] = False):
         """Perform a list of tasks using the browser."""
-        return asyncio.run(self._tasks(tasks, max_steps))
+        return asyncio.run(self._tasks(tasks, max_steps, debug))
     
     def get_available_tools(self):
         return [
