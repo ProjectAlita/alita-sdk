@@ -6,15 +6,12 @@ from typing import Dict, List, Any, Optional
 
 from langchain_core.messages import (
     AIMessage, HumanMessage,
-    SystemMessage, BaseMessage,
+    BaseMessage,
 )
 
 from ..langchain.assistant import Assistant as LangChainAssistant
-# from ..llamaindex.assistant import Assistant as LLamaAssistant
-from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
-from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
 
 
 logger = logging.getLogger(__name__)
@@ -44,8 +41,6 @@ class AlitaClient:
         if api_extra_headers is not None:
             self.headers.update(api_extra_headers)
         self.predict_url = f"{self.base_url}{self.api_path}/prompt_lib/predict/prompt_lib/{self.project_id}"
-        self.prompt_versions = f"{self.base_url}{self.api_path}/prompt_lib/version/prompt_lib/{self.project_id}"
-        self.prompts = f"{self.base_url}{self.api_path}/prompt_lib/prompt/prompt_lib/{self.project_id}"
         self.datasources = f"{self.base_url}{self.api_path}/datasources/datasource/prompt_lib/{self.project_id}"
         self.datasources_predict = f"{self.base_url}{self.api_path}/datasources/predict/prompt_lib/{self.project_id}"
         self.datasources_search = f"{self.base_url}{self.api_path}/datasources/search/prompt_lib/{self.project_id}"
@@ -60,40 +55,6 @@ class AlitaClient:
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.configurations: list = configurations or []
-
-    def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
-        url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
-        data = requests.get(url, headers=self.headers, verify=False).json()
-        model_settings = data['model_settings']
-        messages = [SystemMessage(content=data['context'])]
-        variables = {}
-        if data['messages']:
-            for message in data['messages']:
-                if message.get('role') == 'assistant':
-                    messages.append(AIMessage(content=message['content']))
-                elif message.get('role') == 'user':
-                    messages.append(HumanMessage(content=message['content']))
-                else:
-                    messages.append(SystemMessage(content=message['content']))
-        if chat_history and isinstance(chat_history, list):
-            messages.extend(chat_history)
-        input_variables = []
-        for variable in data['variables']:
-            if variable['value']:
-                variables[variable['name']] = variable['value']
-            else:
-                input_variables.append(variable['name'])
-        template = Jinja2TemplatedChatMessagesTemplate(messages=messages)
-        if input_variables and not variables:
-            template.input_variables = input_variables
-        if variables:
-            template.partial_variables = variables
-        if not return_tool:
-            return template
-        else:
-            url = f"{self.prompts}/{prompt_id}"
-            data = requests.get(url, headers=self.headers, verify=False).json()
-            return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
 
     def get_app_details(self, application_id: int):
         url = f"{self.app}/{application_id}"
