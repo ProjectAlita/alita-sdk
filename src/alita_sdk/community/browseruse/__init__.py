@@ -18,6 +18,7 @@ def get_tools(tool):
         disable_security=tool['settings'].get('disable_security', True),
         proxy=tool['settings'].get('proxy', None),
         extra_chromium_args=tool['settings'].get('extra_chromium_args', []),
+        bucket=tool['settings'].get('bucket', None),
         alita=tool['settings'].get('alita'),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
@@ -37,6 +38,7 @@ class BrowserUseToolkit(BaseToolkit):
             headless=(bool, Field(description="Run browser in headless mode", default=True)),
             width=(int, Field(description="Browser window width", default=1280)),
             height=(int, Field(description="Browser window height", default=800)),
+            bucket=(Optional[str], Field(description="Bucket to store test results", default=None)),
             cookies=(Optional[Dict[str, Any]], Field(description="Browser cookies as JSON", default=None)),
             disable_security=(bool, Field(description="Disable browser security features", default=True)),
             proxy=(Optional[Dict[str, str]], Field(description="Proxy settings", default=None)),

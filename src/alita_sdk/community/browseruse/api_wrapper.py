@@ -33,7 +33,7 @@ class DoneResult(BaseModel):
 	hours_since_start: int
 
 gif_default_location = './agent_history.gif'
-default_bucket = 'browser_use'
+default_bucket = 'browseruse'
 
 class BrowserUseAPIWrapper(BaseToolApiWrapper):
     """Wrapper for Browser Use API."""
@@ -50,6 +50,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
     client: Any = None # AlitaClient
     artifact: Any = None # Artifact
     llm: Any = None # LLMLikeObject
+    bucket: str = None
     proxy_settings: Any = None
     validate_output: bool = False
     planner_llm: Any = None
@@ -63,7 +64,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
         values['proxy'] = ProxySettings(**values['proxy']) if values.get('proxy') else None
         values['extra_chromium_args'] = values.get('extra_chromium_args') or []
         values['browser_window_size'] = {"width": values.get('width', 1280), "height": values.get('height', 800)}
-        values['artifact'] = values.get('client').artifact(default_bucket)
+        values['artifact'] = values.get('client').artifact(values.get('bucket', default_bucket))
         return values
         
         
