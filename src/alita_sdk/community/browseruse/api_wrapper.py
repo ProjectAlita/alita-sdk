@@ -122,20 +122,14 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
                 agent.add_new_task(task) 
             history: AgentHistoryList = await agent.run(max_steps=max_steps)
         await browser.close()
-        if debug:
-            # saves tasks metadata to artifact
-            self._save_tasks_info(history.model_dump_json())
-            self._save_gif()
+        files = self._save_execution(history.model_dump_json())
 
-        return str(history.extracted_content())
+        return {
+            "run_data": str(history.extracted_content()), 
+            "files": files
+        }
 
-    def _save_tasks_info(self, data_content: Any):
-        """
-        Saves tasks information to artifact
-        """
-        self.artifact.create(f"tasks_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json", data_content)
-
-    def _save_gif(self):
+    def _save_execution(self, data_content: Any):
         """Saves tasks execution gif"""
 
         try:
@@ -144,8 +138,16 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
         except FileNotFoundError:
             artifact_data = None
 
+        filename = f"tasks_{datetime.now().strftime("%Y%m%d_%H%M%S")}"
+        files = []
+        if data_content:
+            self.artifact.create(f'{filename}.json', data_content)
+            files.append(f'{filename}.json')
+        
         if artifact_data:
-            self.artifact.create(f"tasks_{datetime.now().strftime("%Y%m%d_%H%M%S")}.gif", artifact_data)
+            self.artifact.create(f'{filename}.gif', artifact_data)
+            files.append(f'{filename}.gif')
+        return files
 
 
     def tasks(self, tasks: List[str], max_steps: Optional[int] = 20, debug: Optional[bool] = False):
