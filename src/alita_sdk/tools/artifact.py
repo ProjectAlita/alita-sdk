@@ -1,12 +1,11 @@
 from alita_tools.elitea_base import BaseToolApiWrapper
 from typing import Any, Optional
 from pydantic import create_model, Field, model_validator
-from pydantic.fields import PrivateAttr
 
 class ArtifactWrapper(BaseToolApiWrapper):
     client: Any
     bucket: str
-    _artifact: Any = PrivateAttr()
+    artifact: Optional[Any] = None
     
     @model_validator(mode='before')
     @classmethod
@@ -15,29 +14,29 @@ class ArtifactWrapper(BaseToolApiWrapper):
             raise ValueError("Client is required.")
         if not values.get('bucket'):
             raise ValueError("Bucket is required.")
-        cls._artifact = values['client'].artifact(values['bucket'])
+        cls.artifact = values['client'].artifact(values['bucket'])
         return values
 
     def list_files(self, bucket_name = None):
-        return self._artifact.list(bucket_name)
+        return self.artifact.list(bucket_name)
 
     def create_file(self, filename: str, filedata: str, bucket_name = None):
-        return self._artifact.create(filename, filedata, bucket_name)
+        return self.artifact.create(filename, filedata, bucket_name)
 
     def read_file(self, filename: str, bucket_name = None):
-        return self._artifact.get(filename, bucket_name)
+        return self.artifact.get(filename, bucket_name)
 
     def delete_file(self, filename: str, bucket_name = None):
-        return self._artifact.delete(filename, bucket_name)
+        return self.artifact.delete(filename, bucket_name)
 
     def append_data(self, filename: str, filedata: str, bucket_name = None):
-        return self._artifact.append(filename, filedata, bucket_name)
+        return self.artifact.append(filename, filedata, bucket_name)
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
-        return self._artifact.overwrite(filename, filedata, bucket_name)
+        return self.artifact.overwrite(filename, filedata, bucket_name)
 
     def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
-        return self._artifact.client.create_bucket(bucket_name, expiration_measure, expiration_value)
+        return self.artifact.client.create_bucket(bucket_name, expiration_measure, expiration_value)
 
     def get_available_tools(self):
         bucket_name = (Optional[str], Field(description="Name of the bucket to work with."
