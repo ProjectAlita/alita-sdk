@@ -14,7 +14,7 @@ class ArtifactWrapper(BaseToolApiWrapper):
             raise ValueError("Client is required.")
         if not values.get('bucket'):
             raise ValueError("Bucket is required.")
-        cls.artifact = values['client'].artifact(values['bucket'])
+        values["artifact"] = values['client'].artifact(values['bucket'])
         return values
 
     def list_files(self, bucket_name = None):
