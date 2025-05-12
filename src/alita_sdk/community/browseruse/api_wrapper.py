@@ -30,7 +30,7 @@ BrowserTasks = create_model(
     __config__=Field(description="Browser Use API Wrapper")
 )
 
-async def my_step_hook(agent):
+async def thinking_processor(agent):
     """Hook to be called after each step."""
     if hasattr(agent, "state"):
         history = agent.state.history
@@ -118,8 +118,6 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
         )
         return Browser(config=browser_config)
     
-    
-    
     def task(self, task: str, max_steps: Optional[int] = 20, debug: Optional[bool] = False):
         """Perform a task using the browser."""
         return asyncio.run(self._tasks([task], max_steps, debug))
@@ -146,7 +144,8 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
                 planner_llm=self.planner_llm,
                 controller=Controller(),
                 message_context = "Carefully check every step, and make sure to provide detailed feedback on the results.",
-                validate_output=self.validate_output
+                validate_output=self.validate_output,
+                on_step_end=thinking_processor
             )
             for task in tasks:
                 agent.add_new_task(task) 
