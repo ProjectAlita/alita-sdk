@@ -10,8 +10,90 @@ from tempfile import TemporaryDirectory, NamedTemporaryFile
 from browser_use.controller.service import Controller
 from langchain_core.callbacks import dispatch_custom_event
 from pyobjtojson import obj_to_json
-
+import os
 import asyncio
+
+import socket
+from browser_use.browser.utils.screen_resolution import get_screen_resolution, get_window_adjustments
+from playwright.async_api import Playwright, Browser as PlaywrightBrowser
+from browser_use.browser.chrome import (
+	CHROME_ARGS,
+	CHROME_DEBUG_PORT,
+	CHROME_DETERMINISTIC_RENDERING_ARGS,
+	CHROME_DISABLE_SECURITY_ARGS,
+	CHROME_DOCKER_ARGS,
+	CHROME_HEADLESS_ARGS,
+)
+IN_DOCKER = os.environ.get('IN_DOCKER', 'false').lower()[0] in 'ty1'
+
+class BrowserEx(Browser):
+    def __init__(self, config: BrowserConfig):
+        super().__init__(config)
+        self.config = config
+
+    async def _setup_builtin_browser(self, playwright: Playwright) -> PlaywrightBrowser:
+        """Sets up and returns a Playwright Browser instance with anti-detection measures."""
+        assert self.config.browser_binary_path is None, 'browser_binary_path should be None if trying to use the builtin browsers'
+
+		# Use the configured window size from new_context_config if available
+        if (
+			not self.config.headless
+			and hasattr(self.config, 'new_context_config')
+			and hasattr(self.config.new_context_config, 'browser_window_size')
+		):
+            screen_size = self.config.new_context_config.browser_window_size.model_dump()
+            offset_x, offset_y = get_window_adjustments()
+        elif self.config.headless:
+            screen_size = {'width': 1920, 'height': 1080}
+            offset_x, offset_y = 0, 0
+        else:
+            screen_size = get_screen_resolution()
+            offset_x, offset_y = get_window_adjustments()
+
+        chrome_args = {
+			f'--remote-debugging-port={self.config.chrome_remote_debugging_port}',
+			*CHROME_ARGS,
+			*(CHROME_DOCKER_ARGS if IN_DOCKER else []),
+			*(CHROME_HEADLESS_ARGS if self.config.headless else []),
+			*(CHROME_DISABLE_SECURITY_ARGS if self.config.disable_security else []),
+			*(CHROME_DETERMINISTIC_RENDERING_ARGS if self.config.deterministic_rendering else []),
+			f'--window-position={offset_x},{offset_y}',
+			f'--window-size={screen_size["width"]},{screen_size["height"]}',
+			*self.config.extra_browser_args,
+		}
+
+		# check if chrome remote debugging port is already taken,
+		# if so remove the remote-debugging-port arg to prevent conflicts
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('localhost', self.config.chrome_remote_debugging_port)) == 0:
+                chrome_args.remove(f'--remote-debugging-port={self.config.chrome_remote_debugging_port}')
+
+        browser_class = getattr(playwright, self.config.browser_class)
+        args = {
+			'chromium': list(chrome_args),
+			'firefox': [
+				*{
+					'-no-remote',
+					*self.config.extra_browser_args,
+				}
+			],
+			'webkit': [
+				*{
+					'--no-startup-window',
+					*self.config.extra_browser_args,
+				}
+			],
+		}
+
+        browser = await browser_class.launch(
+			headless=self.config.headless,
+			channel='chromium',
+			args=args[self.config.browser_class],
+			proxy=self.config.proxy.model_dump() if self.config.proxy else None,
+			handle_sigterm=False,
+			handle_sigint=False,
+		)
+        return browser
 
 
 BrowserTask = create_model(
@@ -95,7 +177,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
         values['proxy'] = ProxySettings(**values['proxy']) if values.get('proxy') else None
         values['extra_chromium_args'] = values.get('extra_chromium_args') or []
         values['browser_window_size'] = {"width": values.get('width', 1280), "height": values.get('height', 800)}
-        values['artifact'] = values.get('client').artifact(values.get('bucket', default_bucket))
+        values['artifact'] = values.get('client').artifact(values.get('bucket', default_bucket))        
         return values
         
         
@@ -105,6 +187,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
             cookies_file = NamedTemporaryFile(delete=False)
             cookies_file.write(self.cookies)
             cookies_file.close()
+            
         context_config = BrowserContextConfig(
                 cookies_file=cookies_file,
                 wait_for_network_idle_page_load_time=10.0, # TODO: Make this configurable
@@ -113,12 +196,13 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
             )
         browser_config = BrowserConfig(
             headless=self.headless,
+            browser_class='chromium', # TODO: Make this configurable
             disable_security=self.disable_security,
             extra_chromium_args=self.extra_chromium_args,
             proxy=self.proxy,
             new_context_config=context_config
         )
-        return Browser(config=browser_config)
+        return BrowserEx(config=browser_config)
     
     def task(self, task: str, max_steps: Optional[int] = 20, debug: Optional[bool] = False):
         """Perform a task using the browser."""
