@@ -8,6 +8,9 @@ from alita_tools.elitea_base import BaseToolApiWrapper
 from pydantic import create_model, Field, model_validator
 from tempfile import TemporaryDirectory, NamedTemporaryFile
 from browser_use.controller.service import Controller
+from langchain_core.callbacks import dispatch_custom_event
+from pyobjtojson import obj_to_json
+
 import asyncio
 
 
@@ -26,6 +29,32 @@ BrowserTasks = create_model(
     debug=(Optional[bool], Field(description="Whether debug mode is enabled")),
     __config__=Field(description="Browser Use API Wrapper")
 )
+
+async def my_step_hook(agent):
+    """Hook to be called after each step."""
+    if hasattr(agent, "state"):
+        history = agent.state.history
+    else:
+        history = None
+        return
+
+    # Process model thoughts
+    model_thoughts = obj_to_json(
+        obj=history.model_thoughts(),
+        check_circular=False
+    )
+    if len(model_thoughts) > 0:
+        model_thoughts_last_elem = model_thoughts[-1]
+    
+    dispatch_custom_event(
+        name="thinking_step",
+        data={
+            "message": f"Model thoughts: {model_thoughts_last_elem}",
+            "tool_name": "task",
+            "toolkit": "browser_use"
+        }
+    )
+
 
 class DoneResult(BaseModel):
 	title: str
@@ -88,7 +117,8 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
             new_context_config=context_config
         )
         return Browser(config=browser_config)
-        
+    
+    
     
     def task(self, task: str, max_steps: Optional[int] = 20, debug: Optional[bool] = False):
         """Perform a task using the browser."""

@@ -13,6 +13,7 @@ chardet==5.2.0
 retry-extended==0.2.3
 jira==3.8.0
 browser-use>=0.1.40
+pyobjtojson==0.3
 
 # Garpbage to speedup the build
 fastapi==0.115.5
