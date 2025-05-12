@@ -49,7 +49,7 @@ openpyxl==3.1.2
 markdown==3.5.1
 beautifulsoup4==4.12.2
 gensim==4.3.3
-chromadb==1.0.8
+chromadb<0.7.0
 pgvector==0.2.5
 atlassian-python-api~=3.41
 
@@ -66,3 +66,6 @@ rlpycairo==0.3.0
 cairocffi==1.7.1
 docx2txt==0.8
 mammoth==1.9.0
+
+# Fix
+opentelemetry-exporter-otlp-proto-grpc==1.25.0
