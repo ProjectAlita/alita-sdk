@@ -52,7 +52,7 @@ gensim==4.3.3
 chromadb==0.5.20
 pgvector==0.2.5
 atlassian-python-api~=3.41
-markdownify==0.14.1
+
 dulwich==0.21.6
 paramiko==3.3.1
 urllib3>=2
