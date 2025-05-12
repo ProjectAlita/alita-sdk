@@ -45,15 +45,17 @@ async def thinking_processor(agent):
     )
     if len(model_thoughts) > 0:
         model_thoughts_last_elem = model_thoughts[-1]
-    
-    dispatch_custom_event(
-        name="thinking_step",
-        data={
-            "message": f"Model thoughts: {model_thoughts_last_elem}",
-            "tool_name": "task",
-            "toolkit": "browser_use"
-        }
-    )
+        evalualtion = model_thoughts_last_elem.get('evaluation_previous_goal')
+        memory = model_thoughts_last_elem.get('memory')
+        next_goal = model_thoughts_last_elem.get('next_goal')
+        dispatch_custom_event(
+            name="thinking_step",
+            data={
+                "message": f"**Memory** : \n\n{memory}\n\n**Evaluation goal**:\n\n{evalualtion}\n\n**Next goal**:\n\n{next_goal}",
+                "tool_name": "task",
+                "toolkit": "browser_use"
+            }
+        )
 
 
 class DoneResult(BaseModel):

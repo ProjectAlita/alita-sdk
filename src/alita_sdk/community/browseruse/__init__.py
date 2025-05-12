@@ -23,16 +23,15 @@ def get_tools(tool):
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
 
+toolkit_max_length = 25
 
 class BrowserUseToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           BrowserUseAPIWrapper.model_construct().get_available_tools()}
-        BrowserUseToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             headless=(bool, Field(description="Run browser in headless mode", default=True)),
@@ -53,7 +52,7 @@ class BrowserUseToolkit(BaseToolkit):
         if selected_tools is None:
             selected_tools = []
         _api_wrapper = BrowserUseAPIWrapper(**kwargs)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
+        prefix = clean_string(toolkit_name, toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = _api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
