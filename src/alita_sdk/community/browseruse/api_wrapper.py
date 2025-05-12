@@ -144,12 +144,11 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
                 planner_llm=self.planner_llm,
                 controller=Controller(),
                 message_context = "Carefully check every step, and make sure to provide detailed feedback on the results.",
-                validate_output=self.validate_output,
-                on_step_end=thinking_processor
+                validate_output=self.validate_output
             )
             for task in tasks:
                 agent.add_new_task(task) 
-            history: AgentHistoryList = await agent.run(max_steps=max_steps)
+            history: AgentHistoryList = await agent.run(max_steps=max_steps, on_step_end=thinking_processor)
         await browser.close()
         files = self._save_execution(history.model_dump_json())
 
