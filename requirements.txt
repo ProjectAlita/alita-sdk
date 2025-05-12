@@ -21,7 +21,7 @@ httpcore==1.0.7
 
 #Langchain-runtime
 langchain_core==0.3.49
-langchain~=0.3.7
+langchain<=0.3.22
 langchain_community~=0.3.7
 langchain-openai~=0.3.0
 langgraph-checkpoint-sqlite~=2.0.0
