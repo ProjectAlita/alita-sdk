@@ -28,7 +28,7 @@ langgraph-checkpoint-sqlite~=2.0.0
 langgraph-checkpoint-postgres~=2.0.1
 langsmith==0.1.144
 langgraph~=0.2.53
-langchain_chroma~=0.2.3
+langchain_chroma~=0.2.2
 langchain-unstructured~=0.1.6
 langchain-postgres~=0.0.13
 
