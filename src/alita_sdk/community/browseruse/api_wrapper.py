@@ -148,7 +148,10 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
             )
             for task in tasks:
                 agent.add_new_task(task) 
-            history: AgentHistoryList = await agent.run(max_steps=max_steps, on_step_end=thinking_processor)
+            history: AgentHistoryList = await agent.run(
+                max_steps=max_steps, 
+                on_step_end=thinking_processor
+                )
         await browser.close()
         files = self._save_execution(history.model_dump_json())
 

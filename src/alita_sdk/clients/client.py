@@ -162,7 +162,6 @@ class AlitaClient:
             tools = []
         if chat_history is None:
             chat_history = []
-
         data = self.get_app_version_details(application_id, application_version_id)
 
         if application_variables:
