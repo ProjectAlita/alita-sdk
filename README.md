@@ -63,6 +63,9 @@ To use the SDK with Streamlit for local development, follow these steps:
     streamlit run alita_local.py
     ```
 
+Note: If **streamlite** throws an error related to **pytorch**, add this `--server.fileWatcherType none` extra arguments.   
+Sometimes it try to index **pytorch** modules and since they are **C** modules it raises an exception. 
+
 Streamlit Web Application
 ------------------------
 
