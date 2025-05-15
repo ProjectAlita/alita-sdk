@@ -1,7 +1,5 @@
 import json
 
-from langchain_core.runnables import RunnableConfig
-
 from ..utils.utils import clean_string
 from langchain_core.tools import BaseTool
 from langchain_core.messages import BaseMessage, AIMessage, ToolCall
@@ -15,7 +13,7 @@ logger = getLogger(__name__)
 applicationToolSchema = create_model(
     "applicatrionSchema", 
     task = (str, FieldInfo(description="Task for Application")), 
-    chat_history = (Optional[list[dict[str, str]]], FieldInfo(description="Chat History relevant for Application"))
+    chat_history = (Optional[list[BaseMessage]], FieldInfo(description="Chat History relevant for Application"))
 )
 
 def formulate_query(kwargs):
