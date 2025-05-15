@@ -1,10 +1,11 @@
 import logging
 from io import StringIO
 from typing import Optional, List, Dict, Any
+from langchain_core.callbacks import dispatch_custom_event
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 from jira import JIRA
 import pandas as pd
-from langchain_core.tools import ToolException
 
 
 from eda_sdk.utils.constants import OUTPUT_MAPPING_FILE, OUTPUT_WORK_ITEMS_FILE
@@ -68,6 +69,16 @@ class EDAApiWrapper(BaseToolApiWrapper):
             f"projects_overview_{project_keys}.csv",
             csv_options={"index": False},
         )
+        dispatch_custom_event(
+            name="jira_projects_overview",
+            data={
+                "project_keys": project_keys,
+                "after_date": after_date,
+                "files": [f"projects_overview_{project_keys}.csv"],
+                "project_count": len(project_df),
+                "columns": project_df.columns.tolist(),
+            },
+        )
 
         return {
             "projects": project_df["key"].tolist(),
@@ -81,9 +92,30 @@ class EDAApiWrapper(BaseToolApiWrapper):
             one or more projects keys separated with comma
         after_date: str
             date after which issues are considered
-        """       
+        """
+        dispatch_custom_event(
+            name="jira_all_fields_overview",
+            data={
+                "project_keys": project_keys,
+                "after_date": after_date,
+            },
+        )
         overall_stat, issue_types_stat = jira_all_fields_overview(
             project_keys, after_date, jira=self.jira
+        )
+
+        dispatch_custom_event(
+            name="jira_fields_saving",
+            data={
+                "project_keys": project_keys,
+                "after_date": after_date,
+                "overall_stat": len(overall_stat),
+                "issue_types_stat": len(issue_types_stat),
+                "files": [
+                    "fields_count.csv",
+                    f"fields_count_issues_{project_keys}.csv",
+                ],
+            },
         )
 
         self.save_dataframe(
@@ -139,6 +171,13 @@ class EDAApiWrapper(BaseToolApiWrapper):
                 "ERROR: Check input parameters closed_issues_based_on and closed_status"
             )
 
+        dispatch_custom_event(
+            name="jira_issues_extraction_start",
+            data={
+                "closed_issues_based_on": closed_issues_based_on,
+                "closed_status": self.closed_status,
+            }
+        )
         jira_issues = JiraIssues(
             self.jira,
             project_keys,
@@ -150,11 +189,25 @@ class EDAApiWrapper(BaseToolApiWrapper):
         df_issues, df_map = jira_issues.extract_issues_from_jira_and_transform(
             self.custom_fields, (resolved_after, updated_after, created_after)
         )
-
+        dispatch_custom_event(
+            name="jira_issues_extracted",
+            data={
+                "project_keys": jira_issues.projects,
+                "issue_count": len(df_issues),
+                "map_rows": len(df_map),
+            },
+        )
         self.save_dataframe(
             df_map,
             f"{OUTPUT_MAPPING_FILE}{jira_issues.projects}.csv",
             csv_options={"index_label": "id"},
+        )
+        dispatch_custom_event(
+            name="jira_map_statuces_saved",
+            data={
+                "output_file": f"{OUTPUT_MAPPING_FILE}{jira_issues.projects}.csv",
+                "row_count": len(df_map),
+            }
         )
 
         if not df_issues.empty:
@@ -162,6 +215,13 @@ class EDAApiWrapper(BaseToolApiWrapper):
                 df_issues,
                 f"{OUTPUT_WORK_ITEMS_FILE}{jira_issues.projects}.csv",
                 csv_options={"index_label": "id"},
+            )
+            dispatch_custom_event(
+                name="jira_issues_saved",
+                data={
+                    "output_file": f"{OUTPUT_WORK_ITEMS_FILE}{jira_issues.projects}.csv",
+                    "row_count": len(df_issues),
+                }
             )
 
         return f"{jira_issues.projects} Data has been extracted successfully."
