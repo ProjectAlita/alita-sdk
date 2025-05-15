@@ -163,7 +163,7 @@ class EDAApiWrapper(BaseToolApiWrapper):
         if not (
             (
                 closed_issues_based_on == 1
-                and self.closed_status in get_all_statuses_list(self.jira)
+                and self.closed_status in get_all_statuses_list(jira=self.jira)
             )
             or closed_issues_based_on == 2
         ):
