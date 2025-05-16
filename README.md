@@ -121,6 +121,6 @@ If you have another repository containing Alita tools, you can add it to your PY
 
 3. Verify that the tools are accessible in your project:
     ```python
-import sys
-print(sys.path)
+    import sys
+    print(sys.path)
     ```
