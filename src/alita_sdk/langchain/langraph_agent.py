@@ -26,6 +26,7 @@ from ..tools.loop_output import LoopToolNode
 from ..tools.tool import ToolNode
 from ..utils.evaluate import EvaluateTemplate
 from ..utils.utils import clean_string, TOOLKIT_SPLITTER
+from ..tools.router import RouterNode
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +284,25 @@ def create_graph(
                     output_variables=node.get('output', []),
                     input_variables=node.get('input', ['messages']),
                     structured_output=node.get('structured_output', False)))
+            elif node_type == 'router':
+                # Add a RouterNode as an independent node
+                lg_builder.add_node(node_id, RouterNode(
+                    name=node['id'],
+                    condition=node.get('condition', ''),
+                    routes=node.get('routes', []),
+                    default_output=node.get('default_output', 'END'),
+                    input_variables=node.get('input', ['messages'])
+                ))
+                # Add a single conditional edge for all routes
+                lg_builder.add_conditional_edges(
+                    node_id,
+                    ConditionalEdge(
+                        condition="{{router_output}}",  # router node returns the route key in 'router_output'
+                        condition_inputs=["router_output"],
+                        conditional_outputs=node.get('routes', []),
+                        default_output=node.get('default_output', 'END')
+                    )
+                )
             if node.get('transition'):
                 next_step = clean_string(node['transition'])
                 logger.info(f'Adding transition: {next_step}')
