@@ -125,6 +125,58 @@ class TransitionalEdge(Runnable):
         return self.next_step if self.next_step != 'END' else END
 
 
+class StateModifierNode(Runnable):
+    name = "StateModifierNode"
+
+    def __init__(self, template: str, variables_to_clean: Optional[list[str]] = None, 
+                 input_variables: Optional[list[str]] = None, 
+                 output_variables: Optional[list[str]] = None):
+        self.template = template
+        self.variables_to_clean = variables_to_clean or []
+        self.input_variables = input_variables or ["messages"]
+        self.output_variables = output_variables or []
+
+    def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> dict:
+        logger.info(f"Modifying state with template: {self.template}")
+
+        # Collect input variables from state
+        input_data = {}
+        for var in self.input_variables:
+            if var in state:
+                input_data[var] = state.get(var)
+
+        # Render the template using Jinja
+        from jinja2 import Template
+        rendered_message = Template(self.template).render(**input_data)
+        result = {}
+        # Store the rendered message in the state or messages
+        if len(self.output_variables) > 0:
+            # Use the first output variable to store the rendered content
+            output_var = self.output_variables[0]
+            result[output_var] = rendered_message
+
+        # Clean up specified variables (make them empty, not delete)
+        
+        for var in self.variables_to_clean:
+            if var in state:
+                # Empty the variable based on its type
+                if isinstance(state[var], list):
+                    result[var] = []
+                elif isinstance(state[var], dict):
+                    result[var] = {}
+                elif isinstance(state[var], str):
+                    result[var] = ""
+                elif isinstance(state[var], (int, float)):
+                    result[var] = 0
+                elif state[var] is None:
+                    pass
+                else:
+                    # For other types, set to None
+                    result[var] = None
+        logger.info(f"State modifier result: {result}")
+        return result
+
+
 def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=[], interrupt_after=[]):
     # prepare output channels
     output_channels = (
@@ -303,6 +355,13 @@ def create_graph(
                         default_output=node.get('default_output', 'END')
                     )
                 )
+            elif node_type == 'state_modifier':
+                lg_builder.add_node(node_id, StateModifierNode(
+                    template=node.get('template', ''),
+                    variables_to_clean=node.get('variables_to_clean', []),
+                    input_variables=node.get('input', ['messages']),
+                    output_variables=node.get('output', [])
+                ))
             if node.get('transition'):
                 next_step = clean_string(node['transition'])
                 logger.info(f'Adding transition: {next_step}')
