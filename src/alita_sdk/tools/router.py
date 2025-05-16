@@ -23,11 +23,13 @@ class RouterNode(BaseTool):
         result = template.evaluate()
         logger.info(f"RouterNode evaluated condition '{self.condition}' with input {input_data} => {result}")
         result = clean_string(str(result))
-        if self._cleaned_routes is None:
-            self._cleaned_routes = [clean_string(r) for r in self.routes]
-        if result in self._cleaned_routes:
+        if result in self.routes:
+            # If the result is one of the routes, return it
             return {"router_output": result}
-        return {"router_output": clean_string(self.default_output)}
+        elif result == self.default_output:
+            # If the result is the default output, return it
+            return {"router_output": clean_string(self.default_output)}
+        return {"router_output": 'END'}
 
     def _run(self, *args, **kwargs):
         return self.invoke(**kwargs)
