@@ -128,7 +128,7 @@ def parse_type(type_str):
 
 
 def create_state(data: Optional[dict] = None):
-    state_dict = {'input': str,}
+    state_dict = {'input': str, 'router_output': str}  # Always include router_output
     if not data:
         data = {'messages': 'list[str]'}
     for key, value in data.items():
