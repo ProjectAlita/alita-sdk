@@ -4,7 +4,7 @@ from json import dumps
 import chardet
 import logging
 
-from src.alita_sdk.utils.content_parser import parse_file_content
+from alita_tools.utils.content_parser import parse_file_content
 
 logger = logging.getLogger(__name__)
 
