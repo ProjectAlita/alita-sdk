@@ -3,6 +3,9 @@ from typing import Any
 from json import dumps
 import chardet
 import logging
+
+from alita_tools.utils.content_parser import parse_file_content
+
 logger = logging.getLogger(__name__)
 
 class Artifact:
@@ -21,7 +24,7 @@ class Artifact:
             logger.error(f"Error: {e}")
             return f"Error: {e}"
     
-    def get(self, artifact_name: str, bucket_name: str = None):
+    def get(self, artifact_name: str, bucket_name: str = None, is_capture_image: bool = False, page_number: int = None):
         if not bucket_name:
             bucket_name = self.bucket_name
         data = self.client.download_artifact(bucket_name, artifact_name)
@@ -34,7 +37,7 @@ class Artifact:
         if detected['encoding'] is not None:
             return data.decode(detected['encoding'])
         else:
-            return "Could not detect encoding"
+            return parse_file_content(artifact_name, data, is_capture_image, page_number)
 
     def delete(self, artifact_name: str, bucket_name = None):
         if not bucket_name:

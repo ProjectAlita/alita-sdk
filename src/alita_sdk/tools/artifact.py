@@ -23,8 +23,8 @@ class ArtifactWrapper(BaseToolApiWrapper):
     def create_file(self, filename: str, filedata: str, bucket_name = None):
         return self.artifact.create(filename, filedata, bucket_name)
 
-    def read_file(self, filename: str, bucket_name = None):
-        return self.artifact.get(filename, bucket_name)
+    def read_file(self, filename: str, bucket_name = None, is_capture_image: bool = False, page_number: int = None):
+        return self.artifact.get(filename, bucket_name, is_capture_image, page_number)
 
     def delete_file(self, filename: str, bucket_name = None):
         return self.artifact.delete(filename, bucket_name)
@@ -69,7 +69,13 @@ class ArtifactWrapper(BaseToolApiWrapper):
                 "args_schema": create_model(
                     "readFile", 
                     filename=(str, Field(description="Filename")),
-                    bucket_name=bucket_name
+                    bucket_name=bucket_name,
+                    is_capture_image=(Optional[bool],
+                                      Field(description="Determines is pictures in the document should be recognized.",
+                                            default=False)),
+                    page_number=(Optional[int], Field(
+                        description="Specifies which page to read. If it is None, then full document will be read.",
+                        default=None))
                 )
             },
             {
