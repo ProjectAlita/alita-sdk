@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 from dotenv import load_dotenv
 
-from eda_sdk.jira.jira_connect import connect_to_jira
+from elitea_analyse.jira.jira_connect import connect_to_jira
 from ..alita_sdk.community.eda.jiratookit.api_wrapper import (
     EDAApiWrapper,
     GetJiraFieldsArgs,

@@ -8,11 +8,11 @@ from jira import JIRA
 import pandas as pd
 
 
-from eda_sdk.utils.constants import OUTPUT_MAPPING_FILE, OUTPUT_WORK_ITEMS_FILE
-from eda_sdk.jira.jira_projects_overview import jira_projects_overview
-from eda_sdk.jira.jira_all_fields_overview import jira_all_fields_overview
-from eda_sdk.jira.jira_statuses import get_all_statuses_list
-from eda_sdk.jira.jira_issues import JiraIssues
+from elitea_analyse.utils.constants import OUTPUT_MAPPING_FILE, OUTPUT_WORK_ITEMS_FILE
+from elitea_analyse.jira.jira_projects_overview import jira_projects_overview
+from elitea_analyse.jira.jira_all_fields_overview import jira_all_fields_overview
+from elitea_analyse.jira.jira_statuses import get_all_statuses_list
+from elitea_analyse.jira.jira_issues import JiraIssues
 
 from alita_tools.elitea_base import BaseToolApiWrapper
 from ....tools.artifact import ArtifactWrapper

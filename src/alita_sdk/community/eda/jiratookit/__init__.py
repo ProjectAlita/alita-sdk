@@ -1,18 +1,16 @@
-import os
 import json
 from typing import List, Optional, Literal
 from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from langchain_core.tools import BaseTool, BaseToolkit
 
-from eda_sdk.jira.jira_connect import connect_to_jira
+from elitea_analyse.jira.jira_connect import connect_to_jira
 from alita_tools.base.tool import BaseAction
 
 from ....tools.artifact import ArtifactWrapper
 from .api_wrapper import EDAApiWrapper
 
 from ...utils import check_schema
-import shutil
 
 name = "Analyse_Jira"
 
