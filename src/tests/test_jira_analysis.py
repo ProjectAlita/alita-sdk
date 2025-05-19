@@ -4,7 +4,7 @@ import pytest
 from dotenv import load_dotenv
 
 from elitea_analyse.jira.jira_connect import connect_to_jira
-from ..alita_sdk.community.eda.jiratookit.api_wrapper import (
+from ..alita_sdk.community.analysis.jira_analyse.api_wrapper import (
     JiraAnalyseWrapper,
     GetJiraFieldsArgs,
     GetJiraIssuesArgs,
@@ -52,7 +52,7 @@ def eda_api_wrapper():
 
 def test_get_number_of_all_issues(eda_api_wrapper):
     with patch(
-        "src.alita_sdk.community.eda.jiratookit.api_wrapper.dispatch_custom_event",
+        "src.alita_sdk.community.analysis.jira_analyse.api_wrapper.dispatch_custom_event",
         return_value=None,
     ):
         args = GetJiraFieldsArgs(
@@ -67,7 +67,7 @@ def test_get_number_of_all_issues(eda_api_wrapper):
 
 def test_get_all_jira_fields(eda_api_wrapper):
     with patch(
-        "src.alita_sdk.community.eda.jiratookit.api_wrapper.dispatch_custom_event",
+        "src.alita_sdk.community.analysis.jira_analyse.api_wrapper.dispatch_custom_event",
         return_value=None,
     ):
         args = GetJiraFieldsArgs(
@@ -80,7 +80,7 @@ def test_get_all_jira_fields(eda_api_wrapper):
 
 def test_get_jira_issues(eda_api_wrapper):
     with patch(
-        "src.alita_sdk.community.eda.jiratookit.api_wrapper.dispatch_custom_event",
+        "src.alita_sdk.community.analysis.jira_analyse.api_wrapper.dispatch_custom_event",
         return_value=None,
     ):
         args = GetJiraIssuesArgs(

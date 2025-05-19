@@ -10,7 +10,7 @@ from .artifact import ArtifactToolkit
 from .vectorstore import VectorStoreToolkit
 
 ## Community tools and toolkits
-from ..community.eda.jiratookit import AnalyseJira
+from ..community.analysis.jira_analyse import AnalyseJira
 from ..community.browseruse import BrowserUseToolkit
 
 logger = logging.getLogger(__name__)
