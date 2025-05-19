@@ -21,20 +21,19 @@ class AnalyseJira(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         return create_model(
             "analyse_jira",
-            project_keys = (str, Field(description="Jira project keys separated by comma")),
-            team_field = (str, Field(description="Jira field used as identifier for team")),
-            environment_field = (str, Field(description="Jira field used as identifier for environment")),
-            defects_name = (str, Field(description="Jira defects type")),
-            closed_status = (str, Field(description="Jira closed statuse")),
+            team_field = (Optional[str], Field(description="Jira field used as identifier for team")),
+            environment_field = (Optional[str], Field(description="Jira field used as identifier for environment")),
+            defects_name = (Optional[str], Field(description="Jira defects type")),
+            closed_status = (Optional[str], Field(description="Jira closed statuse")),
             jira_base_url=(str, Field(description="Jira URL")),
             jira_cloud=(bool, Field(description="Hosting Option")),
             jira_api_key=(Optional[str], Field(description="API key", default=None, json_schema_extra={'secret': True})),
-            jira_username=(Optional[str], Field(description="Jira Username", default=None)),
+            jira_username=(str, Field(description="Jira Username", default=None)),
             jira_token=(Optional[str], Field(description="Jira token", default=None, json_schema_extra={'secret': True})),
             jira_verify_ssl=(bool, Field(description="Verify SSL", default=True)),
-            jira_custom_files=(Optional[str], Field(description="Additional fields", default="")),
-            jira_api_version=(str, Field(description="Jira API Version", default="2")),
-            artifact_bucket_path=(str, Field(description="Artifact Bucket Path")),
+            jira_custom_fields=(Optional[str], Field(description="Additional fields", default="")),
+            # jira_api_version=(str, Field(description="Jira API Version", default="2")),
+            artifact_bucket_path=(Optional[str], Field(description="Artifact Bucket Path")),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Analyse_Jira", "icon_url": None, "hidden": True}})
         )
 
@@ -57,11 +56,11 @@ class AnalyseJira(BaseToolkit):
         jira_token = kwargs.get('jira_token')
         jira_api_key = kwargs.get('jira_api_key')
         try:
-            jira_custom_files = json.loads(kwargs.get('jira_custom_files', '{}'))
+            jira_custom_fields = json.loads(kwargs.get('jira_custom_fields', '{}'))
         except:
-            jira_custom_files = {}
-        jira_custom_files['team'] = kwargs.get('team_field', '')
-        jira_custom_files['environment'] = kwargs.get('environment_field', '')
+            jira_custom_fields = {}
+        jira_custom_fields['team'] = kwargs.get('team_field', '')
+        jira_custom_fields['environment'] = kwargs.get('environment_field', '')
         closed_status = kwargs.get('closed_status', '')
         defects_name = kwargs.get('defects_name', '')
 
@@ -84,7 +83,7 @@ class AnalyseJira(BaseToolkit):
             jira=jira,
             closed_status=closed_status,
             defects_name=defects_name,
-            custom_fields=jira_custom_files,
+            custom_fields=jira_custom_fields,
         )
         tools = []
         available_tools = api_wrapper.get_available_tools()
