@@ -132,10 +132,12 @@ def create_state(data: Optional[dict] = None):
     if not data:
         data = {'messages': 'list[str]'}
     for key, value in data.items():
+        # support of old & new UI
+        value = value['type'] if isinstance(value, dict) else value
         if key == 'messages':
             state_dict[key] = Annotated[list[AnyMessage], add_messages]
-        elif value['type'] in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number']:
-            state_dict[key] = parse_type(value['type'])
+        elif value in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number']:
+            state_dict[key] = parse_type(value)
     return TypedDict('State', state_dict)
 
 def create_typed_dict_from_yaml(data):
