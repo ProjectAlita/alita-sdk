@@ -21,34 +21,49 @@ class AnalyseJira(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         return create_model(
             "analyse_jira",
-            team_field = (Optional[str], Field(description="Jira field used as identifier for team")),
-            environment_field = (Optional[str], Field(description="Jira field used as identifier for environment")),
-            defects_name = (Optional[str], Field(description="Jira defects type")),
-            closed_status = (Optional[str], Field(description="Jira closed statuse")),
             jira_base_url=(str, Field(description="Jira URL")),
             jira_cloud=(bool, Field(description="Hosting Option")),
-            jira_api_key=(Optional[str], Field(description="API key", default=None, json_schema_extra={'secret': True})),
             jira_username=(str, Field(description="Jira Username", default=None)),
-            jira_token=(Optional[str], Field(description="Jira token", default=None, json_schema_extra={'secret': True})),
+            jira_api_key=(Optional[str], Field(description="API key", json_schema_extra={'secret': True})),
+            jira_token=(Optional[str], Field(description="Jira token", json_schema_extra={'secret': True})),
+            # TODO: Add these fields to the schema as custom fields comma-separated if required
+            team_field=(Optional[str], Field(description="Jira field used as identifier for team")),
+            environment_field=(Optional[str], Field(description="Jira field used as identifier for environment")),
+            defects_name=(Optional[str], Field(description="Jira defects type")),
+            closed_status=(Optional[str], Field(description="Jira closed status")),
             jira_verify_ssl=(bool, Field(description="Verify SSL", default=True)),
-            jira_custom_fields=(Optional[str], Field(description="Additional fields", default="")),
-            # jira_api_version=(str, Field(description="Jira API Version", default="2")),
+            jira_custom_fields=(Optional[str], Field(description="Additional fields, split by comma")),
             artifact_bucket_path=(Optional[str], Field(description="Artifact Bucket Path")),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Analyse_Jira", "icon_url": None, "hidden": True}})
+            __config__=ConfigDict(json_schema_extra={'metadata':
+                {
+                    "label": "Analyse_Jira",
+                    "icon_url": None,
+                    "hidden": True,
+                    "sections": {
+                        "auth": {
+                            "required": True,
+                            "subsections": [
+                                {
+                                    "name": "Api key",
+                                    "fields": ["username", "jira_api_key"]
+                                },
+                                {
+                                    "name": "Token",
+                                    "fields": ["jira_token"]
+                                }
+                            ]
+                        }
+                    }
+                }
+            })
         )
 
     @classmethod
     def get_toolkit(cls, client: 'AlitaClient', **kwargs):
         artifact_wrapper = ArtifactWrapper(
-            client=client, bucket=kwargs.get('artifact_bucket_path')
+            client=client, bucket=kwargs.get('artifact_bucket_path', 'analyse-jira')
         )
         check_schema(artifact_wrapper)
-
-        # artifacts_wrapper: ArtifactWrapper
-        # jira: JIRA
-        # closed_status: str # Jira ticket closed statuses
-        # defects_name: str # Jira ticket defects name
-        # custom_fields: dict # Jira ticket custom fields
 
         jira_base_url = kwargs.get('jira_base_url')
         jira_verify_ssl = kwargs.get('jira_verify_ssl')
@@ -64,7 +79,7 @@ class AnalyseJira(BaseToolkit):
         closed_status = kwargs.get('closed_status', '')
         defects_name = kwargs.get('defects_name', '')
 
-        jira_credentials = {  
+        jira_credentials = {
             "username": jira_username,
             "base_url": jira_base_url,
             "token": jira_token,
