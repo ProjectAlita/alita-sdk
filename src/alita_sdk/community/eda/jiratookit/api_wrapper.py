@@ -43,7 +43,7 @@ class GetJiraIssuesArgs(BaseModel):
     )
 
 
-class EDAApiWrapper(BaseToolApiWrapper):
+class JiraAnalyseWrapper(BaseToolApiWrapper):
     artifacts_wrapper: ArtifactWrapper
     jira: JIRA
     closed_status: str  # Jira ticket closed statuses

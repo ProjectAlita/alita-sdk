@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 from elitea_analyse.jira.jira_connect import connect_to_jira
 from ..alita_sdk.community.eda.jiratookit.api_wrapper import (
-    EDAApiWrapper,
+    JiraAnalyseWrapper,
     GetJiraFieldsArgs,
     GetJiraIssuesArgs,
 )
@@ -39,7 +39,7 @@ def eda_api_wrapper():
     )
 
     check_schema(artifacts_wrapper)
-    eda_wrapper = EDAApiWrapper(
+    eda_wrapper = JiraAnalyseWrapper(
         artifacts_wrapper=artifacts_wrapper,
         jira=jira,
         closed_status=os.getenv("JIRA_CLOSED_STATUS"),

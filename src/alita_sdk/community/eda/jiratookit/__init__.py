@@ -8,7 +8,7 @@ from elitea_analyse.jira.jira_connect import connect_to_jira
 from alita_tools.base.tool import BaseAction
 
 from ....tools.artifact import ArtifactWrapper
-from .api_wrapper import EDAApiWrapper
+from .api_wrapper import JiraAnalyseWrapper
 
 from ...utils import check_schema
 
@@ -79,7 +79,7 @@ class AnalyseJira(BaseToolkit):
                 "Failed to connect to Jira. Please check your credentials."
             )
 
-        api_wrapper = EDAApiWrapper(
+        api_wrapper = JiraAnalyseWrapper(
             artifacts_wrapper=artifact_wrapper,
             jira=jira,
             closed_status=closed_status,
