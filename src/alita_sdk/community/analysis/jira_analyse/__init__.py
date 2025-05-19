@@ -37,15 +37,15 @@ class AnalyseJira(BaseToolkit):
             __config__=ConfigDict(json_schema_extra={'metadata':
                 {
                     "label": "Analyse_Jira",
-                    "icon_url": None,
-                    "hidden": True,
+                    "icon_url": "jira-icon.svg",
+                    "hidden": False,
                     "sections": {
                         "auth": {
                             "required": True,
                             "subsections": [
                                 {
                                     "name": "Api key",
-                                    "fields": ["username", "jira_api_key"]
+                                    "fields": ["jira_api_key"]
                                 },
                                 {
                                     "name": "Token",
