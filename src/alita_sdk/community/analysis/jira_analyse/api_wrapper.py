@@ -10,7 +10,6 @@ import pandas as pd
 
 from elitea_analyse.utils.constants import OUTPUT_MAPPING_FILE, OUTPUT_WORK_ITEMS_FILE
 from elitea_analyse.jira.jira_projects_overview import jira_projects_overview
-from elitea_analyse.jira.jira_all_fields_overview import jira_all_fields_overview
 from elitea_analyse.jira.jira_statuses import get_all_statuses_list
 from elitea_analyse.jira.jira_issues import JiraIssues
 
@@ -22,15 +21,16 @@ logger = logging.getLogger(__name__)
 
 
 class GetJiraFieldsArgs(BaseModel):
-    project_keys: str = Field(
-        description="One or more projects keys separated with comma."
+    project_keys: Optional[str] = Field(
+        description="One or more projects keys separated with comma.",
+        default=''
     )
     after_date: str = Field(description="Date after which issues are considered.")
 
 
 class GetJiraIssuesArgs(BaseModel):
-    project_keys: str = Field(
-        description="One or more projects keys separated with comma."
+    project_keys: Optional[str] = Field(
+        description="One or more projects keys separated with comma.", default=''
     )
     closed_issues_based_on: int = Field(
         description="Define whether issues can be thought as closed based on their status (1) or not empty resolved date (2)."
@@ -46,6 +46,7 @@ class GetJiraIssuesArgs(BaseModel):
 class JiraAnalyseWrapper(BaseToolApiWrapper):
     artifacts_wrapper: ArtifactWrapper
     jira: JIRA
+    project_keys: str  # Jira project keys
     closed_status: str  # Jira ticket closed statuses
     defects_name: str  # Jira ticket defects name
     custom_fields: dict  # Jira ticket custom fields
@@ -53,12 +54,14 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
     class Config:
         arbitrary_types_allowed = True
 
-    def get_number_off_all_issues(self, project_keys: str, after_date: str):
+    def get_number_off_all_issues(self, after_date: str, project_keys: Optional[str] = None):
         """
         Get projects a user has access to and merge them with issues count.
         after_date: str
             date after which issues are considered
         """
+        project_keys = project_keys or self.project_keys
+
         project_df = jira_projects_overview(
             after_date, project_keys=project_keys, jira=self.jira
         )
@@ -85,64 +88,14 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
             "projects_summary": project_df.to_string(),
         }
 
-    def get_all_jira_fields(self, project_keys: str, after_date: str):
-        """
-        Get all Jira fields for the specified projects.
-        projects: str
-            one or more projects keys separated with comma
-        after_date: str
-            date after which issues are considered
-        """
-        dispatch_custom_event(
-            name="jira_all_fields_overview",
-            data={
-                "project_keys": project_keys,
-                "after_date": after_date,
-            },
-        )
-        overall_stat, issue_types_stat = jira_all_fields_overview(
-            project_keys, after_date, jira=self.jira
-        )
-
-        dispatch_custom_event(
-            name="jira_fields_saving",
-            data={
-                "project_keys": project_keys,
-                "after_date": after_date,
-                "overall_stat": len(overall_stat),
-                "issue_types_stat": len(issue_types_stat),
-                "files": [
-                    "fields_count.csv",
-                    f"fields_count_issues_{project_keys}.csv",
-                ],
-            },
-        )
-
-        self.save_dataframe(
-            overall_stat,
-            "fields_count.csv",
-            csv_options={"index": False},
-        )
-
-        self.save_dataframe(
-            issue_types_stat,
-            f"fields_count_issues_{project_keys}.csv",
-            csv_options={"index": False},
-        )
-
-        return {
-            "overall_stat": overall_stat.to_string(),
-            "issue_types_stat": issue_types_stat.to_string(),
-        }
-
     def get_jira_issues(
         self,
-        project_keys: str,
         closed_issues_based_on: int,
         resolved_after: str,
         updated_after: str,
         created_after: str,
         add_filter: str = "",
+        project_keys: Optional[str] = None,
     ):
         """
         Extract Jira issues for the specified projects.
@@ -178,6 +131,8 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
                 "closed_status": self.closed_status,
             }
         )
+        project_keys = project_keys or self.project_keys
+
         jira_issues = JiraIssues(
             self.jira,
             project_keys,
@@ -234,12 +189,6 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
                 "description": self.get_number_off_all_issues.__doc__,
                 "args_schema": GetJiraFieldsArgs,
                 "ref": self.get_number_off_all_issues,
-            },
-            {
-                "name": "get_all_jira_fields",
-                "description": self.get_all_jira_fields.__doc__,
-                "args_schema": GetJiraFieldsArgs,
-                "ref": self.get_all_jira_fields,
             },
             {
                 "name": "get_jira_issues",
