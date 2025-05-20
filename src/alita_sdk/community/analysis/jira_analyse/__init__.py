@@ -18,7 +18,7 @@ class AnalyseJira(BaseToolkit):
     tools: List[BaseTool] = []
 
     @staticmethod
-    def toolkit_config_schema() -> BaseModel:
+    def toolkit_config_schema() -> type[BaseModel]:
         return create_model(
             "analyse_jira",
             jira_base_url=(str, Field(description="Jira URL")),
@@ -60,8 +60,9 @@ class AnalyseJira(BaseToolkit):
 
     @classmethod
     def get_toolkit(cls, client: 'AlitaClient', **kwargs):
+        bucket_path = kwargs.get('artifact_bucket_path') or 'analyse-jira'
         artifact_wrapper = ArtifactWrapper(
-            client=client, bucket=kwargs.get('artifact_bucket_path', 'analyse-jira')
+            client=client, bucket=bucket_path
         )
         check_schema(artifact_wrapper)
 
