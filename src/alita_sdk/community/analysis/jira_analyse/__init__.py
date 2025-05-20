@@ -30,9 +30,7 @@ class AnalyseJira(BaseToolkit):
                 description="Jira URL",
                 json_schema_extra={
                     'toolkit_name': True,
-                    'max_toolkit_length': AnalyseJira.toolkit_max_length,
-                    'configuration': True,
-                    'configuration_title': True
+                    'max_toolkit_length': AnalyseJira.toolkit_max_length                   
                 })
             ),
             jira_cloud=(bool, Field(description="Hosting Option")),
