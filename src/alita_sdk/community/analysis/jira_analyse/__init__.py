@@ -5,6 +5,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field
 from langchain_core.tools import BaseTool, BaseToolkit
 
 from elitea_analyse.jira.jira_connect import connect_to_jira
+from alita_tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from alita_tools.base.tool import BaseAction
 
 from ....tools.artifact import ArtifactWrapper
@@ -16,15 +17,24 @@ name = "Analyse_Jira"
 
 class AnalyseJira(BaseToolkit):
     tools: List[BaseTool] = []
+    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> type[BaseModel]:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           JiraAnalyseWrapper.model_construct().get_available_tools()}
-        
+        AnalyseJira.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             "analyse_jira",
-            jira_base_url=(str, Field(description="Jira URL")),
+            jira_base_url=(str, Field(
+                description="Jira URL",
+                json_schema_extra={
+                    'toolkit_name': True,
+                    'max_toolkit_length': AnalyseJira.toolkit_max_length,
+                    'configuration': True,
+                    'configuration_title': True
+                })
+            ),
             jira_cloud=(bool, Field(description="Hosting Option")),
             jira_username=(str, Field(description="Jira Username")),
             jira_api_key=(Optional[str], Field(description="API key", json_schema_extra={'secret': True}, default="")),

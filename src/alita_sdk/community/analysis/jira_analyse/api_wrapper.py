@@ -21,15 +21,16 @@ logger = logging.getLogger(__name__)
 
 
 class GetJiraFieldsArgs(BaseModel):
-    project_keys: str = Field(
-        description="One or more projects keys separated with comma."
+    project_keys: Optional[str] = Field(
+        description="One or more projects keys separated with comma.",
+        default=''
     )
     after_date: str = Field(description="Date after which issues are considered.")
 
 
 class GetJiraIssuesArgs(BaseModel):
-    project_keys: str = Field(
-        description="One or more projects keys separated with comma."
+    project_keys: Optional[str] = Field(
+        description="One or more projects keys separated with comma.", default=''
     )
     closed_issues_based_on: int = Field(
         description="Define whether issues can be thought as closed based on their status (1) or not empty resolved date (2)."
