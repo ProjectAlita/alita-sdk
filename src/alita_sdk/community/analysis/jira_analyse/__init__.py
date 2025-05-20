@@ -36,7 +36,7 @@ class AnalyseJira(BaseToolkit):
             defects_name=(Optional[str], Field(description="Jira defects type", default="")),
             closed_status=(Optional[str], Field(description="Jira closed status", default="")),
             jira_verify_ssl=(bool, Field(description="Verify SSL")),
-            jira_custom_fields=(Optional[str], Field(description="Additional fields, split by comma", default="")),
+            jira_custom_fields=(Optional[dict], Field(description="Additional fields, split by comma", default={})),
             artifact_bucket_path=(Optional[str], Field(description="Artifact Bucket Path", default="")),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
