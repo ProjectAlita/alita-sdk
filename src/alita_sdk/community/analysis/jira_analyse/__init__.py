@@ -19,6 +19,9 @@ class AnalyseJira(BaseToolkit):
 
     @staticmethod
     def toolkit_config_schema() -> type[BaseModel]:
+        selected_tools = {x['name']: x['args_schema'].schema() for x in
+                          JiraAnalyseWrapper.model_construct().get_available_tools()}
+        
         return create_model(
             "analyse_jira",
             jira_base_url=(str, Field(description="Jira URL")),
@@ -27,6 +30,7 @@ class AnalyseJira(BaseToolkit):
             jira_api_key=(Optional[str], Field(description="API key", json_schema_extra={'secret': True}, default="")),
             jira_token=(Optional[str], Field(description="Jira token", json_schema_extra={'secret': True}, default="")),
             # TODO: Add these fields to the schema as custom fields comma-separated if required
+            project_keys=(Optional[str], Field(description="Jira project keys separated by comma", default=None)),
             team_field=(Optional[str], Field(description="Jira field used as identifier for team", default="")),
             environment_field=(Optional[str], Field(description="Jira field used as identifier for environment", default="")),
             defects_name=(Optional[str], Field(description="Jira defects type", default="")),
@@ -34,6 +38,8 @@ class AnalyseJira(BaseToolkit):
             jira_verify_ssl=(bool, Field(description="Verify SSL")),
             jira_custom_fields=(Optional[str], Field(description="Additional fields, split by comma", default="")),
             artifact_bucket_path=(Optional[str], Field(description="Artifact Bucket Path", default="")),
+            selected_tools=(List[Literal[tuple(selected_tools)]],
+                           Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata':
                 {
                     "label": "Analyse_Jira",
@@ -59,12 +65,17 @@ class AnalyseJira(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, client: 'AlitaClient', **kwargs):
+    def get_toolkit(cls, client: 'AlitaClient', selected_tools: list[str], **kwargs):
+        if selected_tools is None:
+            selected_tools = []
+
         bucket_path = kwargs.get('artifact_bucket_path') or 'analyse-jira'
         artifact_wrapper = ArtifactWrapper(
             client=client, bucket=bucket_path
         )
         check_schema(artifact_wrapper)
+
+        project_keys = kwargs.get('project_keys') or ''
 
         jira_base_url = kwargs.get('jira_base_url')
         jira_verify_ssl = kwargs.get('jira_verify_ssl')
@@ -97,13 +108,18 @@ class AnalyseJira(BaseToolkit):
         api_wrapper = JiraAnalyseWrapper(
             artifacts_wrapper=artifact_wrapper,
             jira=jira,
+            project_keys=project_keys,
             closed_status=closed_status,
             defects_name=defects_name,
             custom_fields=jira_custom_fields,
         )
+
         tools = []
         available_tools = api_wrapper.get_available_tools()
         for tool in available_tools:
+            if selected_tools:
+                if tool["name"] not in selected_tools:
+                    continue
             tools.append(
                 BaseAction(
                     api_wrapper=api_wrapper,
