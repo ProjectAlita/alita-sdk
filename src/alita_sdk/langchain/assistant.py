@@ -90,6 +90,9 @@ class Assistant:
                 logger.info(f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
 
     def runnable(self):
+        if not self.tools:
+            # agent as a prompt
+            return self.getPromptExecutor()
         if self.app_type == 'pipeline':
             return self.pipeline()
         elif self.app_type == 'openai':
@@ -118,6 +121,16 @@ class Assistant:
 
     def getOpenAIToolsAgentExecutor(self):
         agent = create_openai_tools_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
+        return self._agent_executor(agent)
+
+    def getPromptExecutor(self):
+        """ Agent executor for prompt as agent functionality """
+
+        # limit tools execution by instructions in system msg
+        for message in self.prompt.messages:
+            if hasattr(message, 'type') and message.type == 'system':
+                message.content += f"\n\n#Constraints:\nDo not try to use any tools, just reply per user's query"
+        agent = create_openai_tools_agent(llm=self.client, tools= [], prompt=self.prompt)
         return self._agent_executor(agent)
 
     def pipeline(self):
