@@ -90,10 +90,8 @@ class AnalyseJira(BaseToolkit):
         jira_username = kwargs.get('jira_username')
         jira_token = kwargs.get('jira_token')
         jira_api_key = kwargs.get('jira_api_key')
-        try:
-            jira_custom_fields = json.loads(kwargs.get('jira_custom_fields', '{}'))
-        except:
-            jira_custom_fields = {}
+       
+        jira_custom_fields = kwargs.get('jira_custom_fields', {})
         jira_custom_fields['team'] = kwargs.get('team_field', '')
         jira_custom_fields['environment'] = kwargs.get('environment_field', '')
         closed_status = kwargs.get('closed_status', '')
