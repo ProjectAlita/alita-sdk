@@ -1,6 +1,7 @@
 import logging
 import json
 import traceback
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from typing import Any, Dict, List, Optional
 from collections import defaultdict
@@ -50,6 +51,35 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
     #
     # Tool
     #
+
+    def on_custom_event(
+        self,
+        name: str,
+        data: Any,
+        *,
+        run_id: UUID,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Callback containing a group of custom events"""
+
+        payload = {
+            "name": name,
+            "run_id": str(run_id),
+            "tool_run_id": str(run_id),  # compatibility
+            "metadata": metadata,
+            "datetime": str(datetime.now(tz=timezone.utc)),
+            **data,
+        }
+        payload = json.loads(
+            json.dumps(payload, ensure_ascii=False, default=lambda o: str(o))
+        )
+
+        self.callback_state[str(run_id)] = self.st.status(
+            f"Running {payload.get("tool_name")}...", expanded=True
+        )
+        self.callback_state[str(run_id)].write(f"Tool inputs: {payload}")
 
     def on_tool_start(self, *args, run_id: UUID, **kwargs):
         """ Callback """
@@ -125,7 +155,7 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
 
         self.current_model_name = metadata.get('ls_model_name', self.current_model_name)
         llm_run_id = str(run_id)
-        
+
         self.callback_state[llm_run_id] = self.st.status(f"Running LLM ...", expanded=True)
         self.callback_state[llm_run_id].write(f"LLM inputs: {messages}")
 
