@@ -373,7 +373,7 @@ def create_graph(
                     node['decision'].get('description', ""),
                     decisional_inputs=node['decision'].get('decisional_inputs', ['messages']),
                     default_output=node['decision'].get('default_output', 'END')))
-            elif node.get('condition'):
+            elif node.get('condition') and node_type != 'router':
                 logger.info(f'Adding condition: {node["condition"]}')
                 condition_input = node['condition'].get('condition_input', ['messages'])
                 condition_definition = node['condition'].get('condition_definition', '')
