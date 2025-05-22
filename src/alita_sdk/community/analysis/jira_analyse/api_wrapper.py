@@ -99,8 +99,6 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
     ):
         """
         Extract Jira issues for the specified projects.
-        projects: str
-            one or more projects keys separated with comma
         closed_issues_based_on: int
             define whether issues can be thought as closed based on their status (1) or not empty resolved date (2)
         resolved_after: str
@@ -111,8 +109,9 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
             created after date (i.e. 2023-01-01)
         add_filter: str
             additional filter for Jira issues in JQL format like "customfield_10000 = 'value' AND customfield_10001 = 'value'"
+        project_keys: str
+            one or more projects keys separated with comma
         """
-
         if not (
             (
                 closed_issues_based_on == 1
@@ -123,15 +122,21 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
             return (
                 "ERROR: Check input parameters closed_issues_based_on and closed_status"
             )
+        
+        project_keys = project_keys or self.project_keys
 
         dispatch_custom_event(
-            name="jira_issues_extraction_start",
+            name="thinking_step",
             data={
-                "closed_issues_based_on": closed_issues_based_on,
-                "closed_status": self.closed_status,
-            }
+                "message": f"I am extracting Jira issues with initial parameters:\
+                    project keys: {project_keys}, closed status: {self.closed_status},\
+                    defects name: {self.defects_name}, custom fields: {self.custom_fields}, \
+                    closed status based on: {closed_issues_based_on}, resolved after: {resolved_after}, \
+                    updated after: {updated_after}, created after: {created_after}, additional filter:{add_filter}",
+                "tool_name": "jira_issues_extraction_start",
+                "toolkit": "analyse_jira",
+            },
         )
-        project_keys = project_keys or self.project_keys
 
         jira_issues = JiraIssues(
             self.jira,
@@ -144,25 +149,21 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
         df_issues, df_map = jira_issues.extract_issues_from_jira_and_transform(
             self.custom_fields, (resolved_after, updated_after, created_after)
         )
+
         dispatch_custom_event(
-            name="jira_issues_extracted",
+            name="thinking_step",
             data={
-                "project_keys": jira_issues.projects,
-                "issue_count": len(df_issues),
-                "map_rows": len(df_map),
+                "message": f"I am saving the extracted Jira issues to the artifact repository. \
+                            issues count: {len(df_issues)}, mapping rows: {len(df_map)}, \
+                            output file: {OUTPUT_MAPPING_FILE}{jira_issues.projects}.csv",
+                "tool_name": "get_jira_issues",
+                "toolkit": "analyse_jira",
             },
         )
         self.save_dataframe(
             df_map,
             f"{OUTPUT_MAPPING_FILE}{jira_issues.projects}.csv",
             csv_options={"index_label": "id"},
-        )
-        dispatch_custom_event(
-            name="jira_map_statuces_saved",
-            data={
-                "output_file": f"{OUTPUT_MAPPING_FILE}{jira_issues.projects}.csv",
-                "row_count": len(df_map),
-            }
         )
 
         if not df_issues.empty:
@@ -172,11 +173,14 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
                 csv_options={"index_label": "id"},
             )
             dispatch_custom_event(
-                name="jira_issues_saved",
+                name="thinking_step",
                 data={
-                    "output_file": f"{OUTPUT_WORK_ITEMS_FILE}{jira_issues.projects}.csv",
-                    "row_count": len(df_issues),
-                }
+                    "message": f"Saving Jira issues to the file . \
+                                 output file: {OUTPUT_WORK_ITEMS_FILE}{jira_issues.projects}.csv,\
+                                 row count: {len(df_issues)}",
+                    "tool_name": "get_jira_issues",
+                    "toolkit": "analyse_jira",
+                },
             )
 
         return f"{jira_issues.projects} Data has been extracted successfully."
