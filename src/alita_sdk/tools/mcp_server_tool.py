@@ -10,7 +10,7 @@ logger = getLogger(__name__)
 class McpServerTool(BaseTool):
     name: str
     description: str
-    args_schema: Type[BaseModel] = None
+    args_schema: Optional[Type[BaseModel]] = None
     return_type: str = "str"
     client: Any
     server: str
