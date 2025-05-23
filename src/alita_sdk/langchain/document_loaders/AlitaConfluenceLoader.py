@@ -1,6 +1,7 @@
 from io import BytesIO
-from typing import Optional
+from typing import Optional, List
 
+import requests
 from PIL import Image
 from langchain_community.document_loaders import ConfluenceLoader
 from langchain_community.document_loaders.confluence import ContentFormat
@@ -9,7 +10,7 @@ from pdf2image import convert_from_bytes
 from reportlab.graphics import renderPM
 from svglib.svglib import svg2rlg
 
-from ..tools.utils import image_to_byte_array, bytes_to_base64
+from src.alita_sdk.langchain.tools.utils import image_to_byte_array, bytes_to_base64
 
 Image.MAX_IMAGE_PIXELS = 300_000_000
 
@@ -72,6 +73,61 @@ class AlitaConfluenceLoader(ConfluenceLoader):
         }
         kwargs['content_format'] = mapping.get(content_formant, ContentFormat.VIEW)
         return super().load(**kwargs)
+
+    def process_attachment(
+        self,
+        page_id: str,
+        ocr_languages: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Process attachments from a Confluence page and extract text from them.
+        Note: if the attachment is corrupted, it will be skipped and an error will be logged.
+        """
+
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "`Pillow` package not found, " "please run `pip install Pillow`"
+            )
+
+        attachments = self.confluence.get_attachments_from_content(page_id)["results"]
+        texts = []
+        for attachment in attachments:
+            media_type = attachment["metadata"]["mediaType"]
+            absolute_url = self.base_url + attachment["_links"]["download"]
+            title = attachment["title"]
+            try:
+                if media_type == "application/pdf":
+                    text = title + self.process_pdf(absolute_url, ocr_languages)
+                elif (
+                    media_type == "image/png"
+                    or media_type == "image/jpg"
+                    or media_type == "image/jpeg"
+                ):
+                    text = title + self.process_image(absolute_url, ocr_languages)
+                elif (
+                    media_type == "application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document"
+                ):
+                    text = title + self.process_doc(absolute_url)
+                elif media_type == "application/vnd.ms-excel":
+                    text = title + self.process_xls(absolute_url)
+                # elif media_type == "image/svg+xml":
+                #     text = title + self.process_svg(absolute_url, ocr_languages)
+                else:
+                    continue
+                texts.append(text)
+            except requests.HTTPError as e:
+                if e.response.status_code == 404:
+                    print(f"Attachment not found at {absolute_url}")  # noqa: T201
+                    continue
+                else:
+                    raise
+            except Exception as e:
+                print(f"Error processing attachment {absolute_url}: {e}")
+                continue
+        return texts
 
     def process_pdf(
             self,

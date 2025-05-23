@@ -19,7 +19,7 @@ from ..document_loaders.AlitaCSVLoader import AlitaCSVLoader
 from ..document_loaders.AlitaExcelLoader import AlitaExcelLoader
 from ..document_loaders.AlitaDirectoryLoader import AlitaDirectoryLoader
 from ..document_loaders.AlitaGitRepoLoader import AlitaGitRepoLoader
-from ..document_loaders.AlitaConfluenceLoader import AlitaConfluenceLoader
+from alita_tools.confluence.loader import AlitaConfluenceLoader
 from ..document_loaders.AlitaBDDScenariosLoader import BDDScenariosLoader
 from ..document_loaders.AlitaJiraLoader import AlitaJiraLoader
 
