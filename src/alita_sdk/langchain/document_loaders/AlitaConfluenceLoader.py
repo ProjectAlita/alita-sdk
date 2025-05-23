@@ -10,7 +10,7 @@ from pdf2image import convert_from_bytes
 from reportlab.graphics import renderPM
 from svglib.svglib import svg2rlg
 
-from src.alita_sdk.langchain.tools.utils import image_to_byte_array, bytes_to_base64
+from ..tools.utils import image_to_byte_array, bytes_to_base64
 
 Image.MAX_IMAGE_PIXELS = 300_000_000
 
