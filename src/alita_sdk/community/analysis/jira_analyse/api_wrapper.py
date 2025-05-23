@@ -15,7 +15,7 @@ from elitea_analyse.jira.jira_issues import JiraIssues
 
 from alita_tools.elitea_base import BaseToolApiWrapper
 from ....tools.artifact import ArtifactWrapper
-
+from ....utils.logging import with_streamlit_logs
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,20 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
         Get projects a user has access to and merge them with issues count.
         after_date: str
             date after which issues are considered
+        project_keys: str
+            one or more projects keys separated with comma
         """
         project_keys = project_keys or self.project_keys
+
+        dispatch_custom_event(
+            name="thinking_step",
+            data={
+                "message": f"I am extracting number of all issues with initial parameters:\
+                    project keys: {project_keys},   after date: {after_date}",
+                "tool_name": "get_number_off_all_issues",
+                "toolkit": "analyse_jira",
+            },
+        )
 
         project_df = jira_projects_overview(
             after_date, project_keys=project_keys, jira=self.jira
@@ -72,22 +84,12 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
             f"projects_overview_{project_keys}.csv",
             csv_options={"index": False},
         )
-        dispatch_custom_event(
-            name="jira_projects_overview",
-            data={
-                "project_keys": project_keys,
-                "after_date": after_date,
-                "files": [f"projects_overview_{project_keys}.csv"],
-                "project_count": len(project_df),
-                "columns": project_df.columns.tolist(),
-            },
-        )
-
         return {
             "projects": project_df["key"].tolist(),
             "projects_summary": project_df.to_string(),
         }
 
+    @with_streamlit_logs(tool_name="get_jira_issues")
     def get_jira_issues(
         self,
         closed_issues_based_on: int,
@@ -100,7 +102,8 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
         """
         Extract Jira issues for the specified projects.
         closed_issues_based_on: int
-            define whether issues can be thought as closed based on their status (1) or not empty resolved date (2)
+            define whether issues can be thought as 
+            closed based on their status (1) or not empty resolved date (2)
         resolved_after: str
             resolved after date (i.e. 2023-01-01)
         updated_after: str
@@ -112,6 +115,7 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
         project_keys: str
             one or more projects keys separated with comma
         """
+
         if not (
             (
                 closed_issues_based_on == 1
@@ -122,7 +126,7 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
             return (
                 "ERROR: Check input parameters closed_issues_based_on and closed_status"
             )
-        
+
         project_keys = project_keys or self.project_keys
 
         dispatch_custom_event(
