@@ -50,6 +50,8 @@ class AlitaClient:
         self.datasources_predict = f"{self.base_url}{self.api_path}/datasources/predict/prompt_lib/{self.project_id}"
         self.datasources_search = f"{self.base_url}{self.api_path}/datasources/search/prompt_lib/{self.project_id}"
         self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
+        self.mcp_tools_list = f"{self.base_url}{self.api_path}/applications/mcp/{self.project_id}"
+        self.mcp_tools_call = f"{self.base_url}{self.api_path}/applications/mcp_tools_call/{self.project_id}"
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
         self.list_apps_url = f"{self.base_url}{self.api_path}/applications/applications/prompt_lib/{self.project_id}"
         self.integration_details = f"{self.base_url}{self.api_path}/integrations/integration/{self.project_id}"
@@ -60,6 +62,16 @@ class AlitaClient:
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.configurations: list = configurations or []
+
+    def get_mcp_toolkits(self):
+        url = self.mcp_tools_list
+        data = requests.get(url, headers=self.headers, verify=False).json()
+        return data
+
+    def mcp_tool_call(self, params: dict[str, Any]):
+        url = self.mcp_tools_call
+        data = requests.post(url, headers=self.headers, json=params, verify=False).json()
+        return data
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
