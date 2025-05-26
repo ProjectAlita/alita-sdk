@@ -1,5 +1,5 @@
 import logging
-from typing import Union, Any, Optional, Annotated
+from typing import Union, Any, Optional, Annotated, get_type_hints
 from uuid import uuid4
 
 import yaml
@@ -329,11 +329,16 @@ def create_graph(
                                 structured_output=node.get('structured_output', False)))
                         break
             elif node_type == 'llm':
+                output_vars = node.get('output', [])
+                output_vars_dict = {
+                    var: get_type_hints(state_class).get('labels', str).__name__
+                    for var in output_vars
+                }
                 lg_builder.add_node(node_id, LLMNode(
                     client=client, prompt=node.get('prompt', {}),
                     name=node['id'], return_type='dict',
                     response_key=node.get('response_key', 'messages'),
-                    output_variables=node.get('output', []),
+                    output_variables=output_vars_dict,
                     input_variables=node.get('input', ['messages']),
                     structured_output=node.get('structured_output', False)))
             elif node_type == 'router':
