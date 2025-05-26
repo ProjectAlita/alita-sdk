@@ -107,12 +107,12 @@ def _mcp_tools(tools_list, alita):
         for available_tool in available_tools:
             tool_name = available_tool.get("name", "").lower()
             if not selected_tools or tool_name in selected_tools:
-                if server_tool := _init_single_mcp_tool(toolkit_name, available_tool, alita):
+                if server_tool := _init_single_mcp_tool(toolkit_name, available_tool, alita, selected_toolkit['settings']):
                     tools.append(server_tool)
     return tools
 
 
-def _init_single_mcp_tool(toolkit_name, available_tool, alita):
+def _init_single_mcp_tool(toolkit_name, available_tool, alita, toolkit_settings):
     try:
         tool_name = available_tool["name"]
         return McpServerTool(
@@ -122,7 +122,8 @@ def _init_single_mcp_tool(toolkit_name, available_tool, alita):
                 available_tool.get("inputSchema", {})
             ),
             client=alita,
-            server=toolkit_name
+            server=toolkit_name,
+            tool_timeout_sec=toolkit_settings["timeout"]
         )
     except Exception as e:
         logger.error(f"Failed to create McpServerTool for '{toolkit_name}.{tool_name}': {e}")

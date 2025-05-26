@@ -1,3 +1,4 @@
+import uuid
 from logging import getLogger
 from typing import Any, Type, Literal, Optional
 
@@ -14,6 +15,7 @@ class McpServerTool(BaseTool):
     return_type: str = "str"
     client: Any
     server: str
+    tool_timeout_sec: int = 60
 
 
     @staticmethod
@@ -43,9 +45,14 @@ class McpServerTool(BaseTool):
         return create_model('DynamicModel', **fields)
 
     def _run(self, *args, **kwargs):
-        call_data = {"server": self.server, "params": {
-            "name": self.name,
-            "arguments": kwargs
-        }}
+        call_data = {
+            "server": self.server,
+            "tool_timeout_sec": self.tool_timeout_sec,
+            "tool_call_id": str(uuid.uuid4()),
+            "params": {
+                "name": self.name,
+                "arguments": kwargs
+            }
+        }
         
         return self.client.mcp_tool_call(call_data)
