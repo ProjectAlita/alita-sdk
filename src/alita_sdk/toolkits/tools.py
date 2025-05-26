@@ -90,26 +90,30 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
 
 
 def _mcp_tools(tools_list, alita):
-    all_available_toolkits = alita.get_mcp_toolkits()
-    toolkit_lookup = {tk["name"].lower(): tk for tk in all_available_toolkits}
-    tools = []
-    #
-    for selected_toolkit in tools_list:
-        toolkit_name = selected_toolkit['type'].lower()
-        toolkit_conf = toolkit_lookup.get(toolkit_name)
+    try:
+        all_available_toolkits = alita.get_mcp_toolkits()
+        toolkit_lookup = {tk["name"].lower(): tk for tk in all_available_toolkits}
+        tools = []
         #
-        if not toolkit_conf:
-            logger.warning(f"Toolkit '{toolkit_name}' not found in available toolkits.")
-            continue
-        #
-        available_tools = toolkit_conf.get("tools", [])
-        selected_tools = [name.lower() for name in selected_toolkit['settings'].get('selected_tools', [])]
-        for available_tool in available_tools:
-            tool_name = available_tool.get("name", "").lower()
-            if not selected_tools or tool_name in selected_tools:
-                if server_tool := _init_single_mcp_tool(toolkit_name, available_tool, alita, selected_toolkit['settings']):
-                    tools.append(server_tool)
-    return tools
+        for selected_toolkit in tools_list:
+            toolkit_name = selected_toolkit['type'].lower()
+            toolkit_conf = toolkit_lookup.get(toolkit_name)
+            #
+            if not toolkit_conf:
+                logger.warning(f"Toolkit '{toolkit_name}' not found in available toolkits.")
+                continue
+            #
+            available_tools = toolkit_conf.get("tools", [])
+            selected_tools = [name.lower() for name in selected_toolkit['settings'].get('selected_tools', [])]
+            for available_tool in available_tools:
+                tool_name = available_tool.get("name", "").lower()
+                if not selected_tools or tool_name in selected_tools:
+                    if server_tool := _init_single_mcp_tool(toolkit_name, available_tool, alita, selected_toolkit['settings']):
+                        tools.append(server_tool)
+        return tools
+    except Exception:
+        logger.error("Error while fetching MCP tools", exc_info=True)
+        return []
 
 
 def _init_single_mcp_tool(toolkit_name, available_tool, alita, toolkit_settings):
