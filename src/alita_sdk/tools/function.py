@@ -47,11 +47,10 @@ class FunctionTool(BaseTool):
             )
             logger.info(f"ToolNode response: {tool_result}")
             if not self.output_variables:
-                return {"messages": [{"role": "assistant", "content": tool_result}]}
+                return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
             else:
                 return {
-                    self.output_variables[0]: tool_result,
-                    "messages": [{"role": "assistant", "content": tool_result}]
+                    self.output_variables[0]: tool_result
                 }
         except ValidationError:
             return {"messages": [

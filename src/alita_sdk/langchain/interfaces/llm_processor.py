@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import importlib
+from json import dumps
 from traceback import format_exc
 from langchain.chains.llm import LLMChain
 
@@ -31,6 +32,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from ...llms.preloaded import PreloadedEmbeddings, PreloadedChatModel  # pylint: disable=E0401
 from ..retrievers.AlitaRetriever import AlitaRetriever
 from ..tools.log import print_log
+
 
 
 def get_model(model_type: str, model_params: dict):
@@ -181,6 +183,11 @@ def add_documents(vectorstore, documents):
     metadata = []
     for document in documents:
         texts.append(document.page_content)
+        for key in document.metadata:
+            if isinstance(document.metadata[key], list):
+                document.metadata[key] = "; ".join(document.metadata[key])
+            if isinstance(document.metadata[key], dict):
+                document.metadata[key] = dumps(document.metadata[key])
         metadata.append(document.metadata)
     vectorstore.add_texts(texts, metadatas=metadata)
 
