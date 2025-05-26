@@ -13,6 +13,8 @@ from .vectorstore import VectorStoreToolkit
 from ..community.analysis.jira_analyse import AnalyseJira
 from ..community.browseruse import BrowserUseToolkit
 
+from ..tools.mcp_server_tool import McpServerTool
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +38,7 @@ def get_toolkits():
 def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> list:
     prompts = []
     tools = []
+
     for tool in tools_list:
         if tool['type'] == 'prompt':
             prompts.append([
@@ -82,4 +85,46 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
     tools += alita_tools(tools_list, alita, llm)
+    tools += _mcp_tools(tools_list, alita)
     return tools
+
+
+def _mcp_tools(tools_list, alita):
+    all_available_toolkits = alita.get_mcp_toolkits()
+    toolkit_lookup = {tk["name"].lower(): tk for tk in all_available_toolkits}
+    tools = []
+    #
+    for selected_toolkit in tools_list:
+        toolkit_name = selected_toolkit['type'].lower()
+        toolkit_conf = toolkit_lookup.get(toolkit_name)
+        #
+        if not toolkit_conf:
+            logger.warning(f"Toolkit '{toolkit_name}' not found in available toolkits.")
+            continue
+        #
+        available_tools = toolkit_conf.get("tools", [])
+        selected_tools = [name.lower() for name in selected_toolkit['settings'].get('selected_tools', [])]
+        for available_tool in available_tools:
+            tool_name = available_tool.get("name", "").lower()
+            if not selected_tools or tool_name in selected_tools:
+                if server_tool := _init_single_mcp_tool(toolkit_name, available_tool, alita, selected_toolkit['settings']):
+                    tools.append(server_tool)
+    return tools
+
+
+def _init_single_mcp_tool(toolkit_name, available_tool, alita, toolkit_settings):
+    try:
+        tool_name = available_tool["name"]
+        return McpServerTool(
+            name=tool_name,
+            description=available_tool.get("description", ""),
+            args_schema=McpServerTool.create_pydantic_model_from_schema(
+                available_tool.get("inputSchema", {})
+            ),
+            client=alita,
+            server=toolkit_name,
+            tool_timeout_sec=toolkit_settings["timeout"]
+        )
+    except Exception as e:
+        logger.error(f"Failed to create McpServerTool for '{toolkit_name}.{tool_name}': {e}")
+        return None
