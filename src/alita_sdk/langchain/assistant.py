@@ -1,4 +1,3 @@
-
 import logging
 import importlib
 from copy import deepcopy as copy
@@ -17,6 +16,7 @@ from .constants import REACT_ADDON, REACT_VARS, XML_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from ..toolkits.tools import get_tools
+from langchain_core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class Assistant:
             target_name
         )
         self.client = target_cls(**model_params)
-        self.tools = get_tools(data['tools'], alita=alita, llm=self.client)
+        self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client)
         if app_type == "pipeline":
             self.prompt = data['instructions']
         else:
@@ -106,18 +106,22 @@ class Assistant:
                                                   max_execution_time=None, return_intermediate_steps=True)
 
     def getAgentExecutor(self):
-        agent = create_json_chat_agent(llm=self.client, tools=self.tools, prompt=self.prompt,
-                                       #tools_renderer=render_react_text_description_and_args
-                                       )
+        # Exclude compiled graph runnables from simple tool agents
+        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        agent = create_json_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
 
 
     def getXMLAgentExecutor(self):
-        agent = create_xml_chat_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
+        # Exclude compiled graph runnables from simple tool agents
+        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        agent = create_xml_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
 
     def getOpenAIToolsAgentExecutor(self):
-        agent = create_openai_tools_agent(llm=self.client, tools=self.tools, prompt=self.prompt)
+        # Exclude compiled graph runnables from simple tool agents
+        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        agent = create_openai_tools_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
 
     def pipeline(self):

@@ -1,6 +1,7 @@
 import logging
 from typing import Union, Any, Optional, Annotated, get_type_hints
 from uuid import uuid4
+from typing import Dict
 
 import yaml
 from langchain_core.callbacks import dispatch_custom_event
@@ -17,7 +18,7 @@ from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 
 from .mixedAgentRenderes import convert_message_to_json
-from .utils import create_state
+from .utils import create_state, propagate_the_input_mapping
 from ..tools.function import FunctionTool
 from ..tools.indexer_tool import IndexerNode
 from ..tools.llm import LLMNode
@@ -30,15 +31,101 @@ from ..tools.router import RouterNode
 
 logger = logging.getLogger(__name__)
 
+# Global registry for subgraph definitions
+# Structure: {'subgraph_name': {'yaml': 'yaml_def', 'tools': [tools], 'flattened': False}}
+SUBGRAPH_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+
+# Wrapper for injecting a compiled subgraph into a parent StateGraph
+class SubgraphRunnable(CompiledStateGraph):
+    def __init__(
+        self,
+        inner: CompiledStateGraph,
+        *,
+        name: str,
+        input_mapping: Dict[str, Any],
+        output_mapping: Dict[str, Any]
+    ):
+        # copy child graph internals
+        super().__init__(
+            builder=inner.builder,
+            config_type=inner.config_type,
+            nodes=inner.nodes,
+            channels=inner.channels,
+            input_channels=inner.input_channels,
+            stream_mode=inner.stream_mode,
+            output_channels=inner.output_channels,
+            stream_channels=inner.stream_channels,
+            checkpointer=inner.checkpointer,
+            interrupt_before_nodes=inner.interrupt_before_nodes,
+            interrupt_after_nodes=inner.interrupt_after_nodes,
+            auto_validate=False,
+            debug=inner.debug,
+            store=inner.store,
+        )
+        self.inner = inner
+        self.name = name
+        self.input_mapping = input_mapping or {}
+        self.output_mapping = output_mapping or {}
+
+    def invoke(
+        self,
+        state: Union[dict[str, Any], Any],
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Any,
+    ) -> Union[dict[str, Any], Any]:
+        # Detailed logging for debugging
+        logger.debug(f"SubgraphRunnable '{self.name}' invoke called with state: {state}")
+        logger.debug(f"SubgraphRunnable '{self.name}' config: {config}")
+
+        # 1) parent -> child mapping
+        if not self.input_mapping:
+            child_input = state.copy()
+        else:
+            child_input = propagate_the_input_mapping(
+                self.input_mapping, list(self.input_mapping.keys()), state
+            )
+        # debug trace of messages flowing into child
+        logger.debug(f"SubgraphRunnable '{self.name}' child_input.messages: {child_input.get('messages')}")
+        logger.debug(f"SubgraphRunnable '{self.name}' child_input.input: {child_input.get('input')}")
+
+        # 2) Invoke the child graph.
+        # Pass None as the first argument for input if the child is expected to resume
+        # using its (now updated) checkpoint. The CompiledStateGraph.invoke method, when
+        # input is None but a checkpoint exists, loads from the checkpoint.
+        # Any resume commands (if applicable for internal child interrupts) are in 'config'.
+        # logger.debug(f"SubgraphRunnable '{self.name}': Invoking child graph super().invoke(None, config).")
+        subgraph_output = super().invoke(child_input, config=config, **kwargs)
+
+        # 3) child complete: apply output_mapping or passthrough
+        logger.debug(f"SubgraphRunnable '{self.name}' child complete, applying mappings")
+        result: Dict[str, Any] = {}
+        if self.output_mapping:
+            for child_key, parent_key in self.output_mapping.items():
+                if child_key in subgraph_output:
+                    state[parent_key] = subgraph_output[child_key]
+                    result[parent_key] = subgraph_output[child_key]
+                    logger.debug(f"SubgraphRunnable '{self.name}' mapped {child_key} -> {parent_key}")
+        else:
+            for k, v in subgraph_output.items():
+                state[k] = v
+                result[k] = v
+
+        # include full messages history on completion
+        if 'messages' not in result:
+            result['messages'] = subgraph_output.get('messages', [])
+        logger.debug(f"SubgraphRunnable '{self.name}' returning result: {result}")
+        return result
+
 
 class ConditionalEdge(Runnable):
     name = "ConditionalEdge"
 
     def __init__(self, condition: str, condition_inputs: Optional[list[str]] = [],
-                 conditional_outputs: Optional[list[str]] = [], default_output: str = 'END'):
+                 conditional_outputs: Optional[list[str]] = [], default_output: str = END):
         self.condition = condition
         self.condition_inputs = condition_inputs
-        self.conditional_outputs = {clean_string(cond) for cond in conditional_outputs}
+        self.conditional_outputs = {clean_string(cond if not 'END' == cond else '__end__') for cond in conditional_outputs}
         self.default_output = clean_string(default_output)
 
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
@@ -177,8 +264,13 @@ class StateModifierNode(Runnable):
         return result
 
 
-def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=[], interrupt_after=[]):
+
+def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None, state_class=None):
     # prepare output channels
+    if interrupt_after is None:
+        interrupt_after = []
+    if interrupt_before is None:
+        interrupt_before = []
     output_channels = (
         "__root__"
         if len(lg_builder.schemas[lg_builder.output]) == 1
@@ -239,14 +331,24 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
 def create_graph(
         client: Any,
         yaml_schema: str,
-        tools: list[BaseTool],
+        tools: list[Union[BaseTool, CompiledStateGraph]],
         *args,
         memory: Optional[Any] = None,
         store: Optional[BaseStore] = None,
         debug: bool = False,
+        for_subgraph: bool = False,
         **kwargs
 ):
     """ Create a message graph from a yaml schema """
+
+    # For top-level graphs (not subgraphs), detect and flatten any subgraphs
+    if not for_subgraph:
+        flattened_yaml, additional_tools = detect_and_flatten_subgraphs(yaml_schema)
+        # Add collected tools from subgraphs to the tools list
+        tools = list(tools) + additional_tools
+        # Use the flattened YAML for building the graph
+        yaml_schema = flattened_yaml
+
     schema = yaml.safe_load(yaml_schema)
     logger.debug(f"Schema: {schema}")
     logger.debug(f"Tools: {tools}")
@@ -264,7 +366,7 @@ def create_graph(
             if toolkit_name:
                 tool_name = f"{clean_string(toolkit_name)}{TOOLKIT_SPLITTER}{tool_name}"
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-            if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer']:
+            if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph']:
                 for tool in tools:
                     if tool.name == tool_name:
                         if node_type == 'function':
@@ -274,6 +376,19 @@ def create_graph(
                                 input_mapping=node.get('input_mapping',
                                                        {'messages': {'type': 'variable', 'value': 'messages'}}),
                                 input_variables=node.get('input', ['messages'])))
+                        elif node_type == 'subgraph':
+                            # assign parent memory/store
+                            # tool.checkpointer = memory
+                            # tool.store = store
+                            # wrap with mappings
+                            node_fn = SubgraphRunnable(
+                                inner=tool,
+                                name=node['id'],
+                                input_mapping=node.get('input_mapping', {}),
+                                output_mapping=node.get('output_mapping', {}),
+                            )
+                            lg_builder.add_node(node_id, node_fn)
+                            break  # skip legacy handling
                         elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(
                                 client=client, tool=tool,
@@ -394,20 +509,37 @@ def create_graph(
         interrupt_before = interrupt_before or []
         interrupt_after = interrupt_after or []
 
-        # validate the graph
-        lg_builder.validate(
-            interrupt=(
-                (interrupt_before if interrupt_before != "*" else []) + interrupt_after
-                if interrupt_after != "*"
-                else []
+        if not for_subgraph:
+            # validate the graph for LangGraphAgentRunnable before the actual construction
+            lg_builder.validate(
+                interrupt=(
+                    (interrupt_before if interrupt_before != "*" else []) + interrupt_after
+                    if interrupt_after != "*"
+                    else []
+                )
             )
+
+        # Compile into a CompiledStateGraph  for the subgraph
+        graph = lg_builder.compile(
+            checkpointer=True,
+            interrupt_before=interrupt_before,
+            interrupt_after=interrupt_after,
+            store=store,
+            debug=debug,
         )
     except ValueError as e:
         raise ValueError(
             f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n{lg_builder.nodes}\n\n**Schema Enges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{tools}")
-    compiled = prepare_output_schema(lg_builder, memory, store, debug,
-                                     interrupt_before=interrupt_before,
-                                     interrupt_after=interrupt_after)
+    # If building a nested subgraph, return the raw CompiledStateGraph
+    if for_subgraph:
+        return graph
+    # Otherwise prepare top-level runnable wrapper and validate
+    compiled = prepare_output_schema(
+        lg_builder, memory, store, debug,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+        state_class={state_class: None}
+    )
     return compiled.validate()
 
 
@@ -440,8 +572,249 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         config_state = self.get_state(config)
         if config_state.next:
             thread_id = config['configurable']['thread_id']
-        return {
+
+        result_with_state = {
             "output": output,
             "thread_id": thread_id,
             "execution_finished": not config_state.next
         }
+
+        # Include all state values in the result
+        if hasattr(config_state, 'values') and config_state.values:
+            for key, value in config_state.values.items():
+                result_with_state[key] = value
+
+        return result_with_state
+
+def merge_subgraphs(parent_yaml: str, registry: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Merge subgraphs into parent graph by flattening YAML structures.
+
+    This function implements the complete flattening approach:
+    1. Parse parent YAML
+    2. Detect subgraph nodes
+    3. Recursively flatten subgraphs
+    4. Merge states, nodes, interrupts, and transitions
+    5. Return single unified graph definition
+
+    Args:
+        parent_yaml: YAML string of parent graph
+        registry: Global subgraph registry
+
+    Returns:
+        Dict containing flattened graph definition
+    """
+    import copy
+
+    # Parse parent YAML
+    parent_def = yaml.safe_load(parent_yaml)
+
+    # Check if already flattened (prevent infinite recursion)
+    if parent_def.get('_flattened', False):
+        return parent_def
+
+    # Find subgraph nodes in parent
+    subgraph_nodes = []
+    regular_nodes = []
+
+    for node in parent_def.get('nodes', []):
+        if node.get('type') == 'subgraph':
+            subgraph_nodes.append(node)
+        else:
+            regular_nodes.append(node)
+
+    # If no subgraphs, return as-is
+    if not subgraph_nodes:
+        parent_def['_flattened'] = True
+        return parent_def
+
+    # Start with parent state and merge subgraph states
+    merged_state = copy.deepcopy(parent_def.get('state', {}))
+    merged_nodes = copy.deepcopy(regular_nodes)
+    merged_interrupts_before = set(parent_def.get('interrupt_before', []))
+    merged_interrupts_after = set(parent_def.get('interrupt_after', []))
+    all_tools = []
+
+    # Track node remapping for transition rewiring
+    node_mapping = {}  # subgraph_node_id -> actual_internal_node_id
+
+    # Process each subgraph
+    for subgraph_node in subgraph_nodes:
+        # Support both 'tool' and 'subgraph' fields for subgraph name
+        subgraph_name = subgraph_node.get('tool') or subgraph_node.get('subgraph')
+        subgraph_node_id = subgraph_node['id']
+
+        if subgraph_name not in registry:
+            logger.warning(f"Subgraph '{subgraph_name}' not found in registry")
+            continue
+
+        # Get subgraph definition
+        subgraph_entry = registry[subgraph_name]
+        subgraph_yaml = subgraph_entry['yaml']
+        subgraph_tools = subgraph_entry.get('tools', [])
+
+        # Recursively flatten the subgraph (in case it has nested subgraphs)
+        subgraph_def = merge_subgraphs(subgraph_yaml, registry)
+
+        # Collect tools from subgraph
+        all_tools.extend(subgraph_tools)
+
+        # Merge state (union of all fields)
+        for field_name, field_type in subgraph_def.get('state', {}).items():
+            if field_name not in merged_state:
+                merged_state[field_name] = field_type
+            elif merged_state[field_name] != field_type:
+                logger.warning(f"State field '{field_name}' type mismatch: {merged_state[field_name]} vs {field_type}")
+
+        # Map subgraph node to its entry point
+        subgraph_entry_point = subgraph_def.get('entry_point')
+        if subgraph_entry_point:
+            node_mapping[subgraph_node_id] = subgraph_entry_point
+            logger.debug(f"Mapped subgraph node '{subgraph_node_id}' to entry point '{subgraph_entry_point}'")
+
+        # Add subgraph nodes without prefixing (keep original IDs)
+        for sub_node in subgraph_def.get('nodes', []):
+            # Keep original node ID - no prefixing
+            new_node = copy.deepcopy(sub_node)
+            merged_nodes.append(new_node)
+
+        # Handle the original subgraph node's transition - apply it to nodes that end with END
+        original_transition = subgraph_node.get('transition')
+        if original_transition and original_transition != 'END' and original_transition != END:
+            # Find nodes in this subgraph that have END transitions and update them
+            for node in merged_nodes:
+                # Check if this is a node from the current subgraph by checking if it was just added
+                # and has an END transition
+                if node.get('transition') == 'END' and node in subgraph_def.get('nodes', []):
+                    node['transition'] = original_transition
+
+        # Merge interrupts without prefixing (keep original names)
+        for interrupt in subgraph_def.get('interrupt_before', []):
+            merged_interrupts_before.add(interrupt)  # No prefixing
+        for interrupt in subgraph_def.get('interrupt_after', []):
+            merged_interrupts_after.add(interrupt)  # No prefixing
+
+    # Handle entry point - keep parent's unless it's a subgraph node
+    entry_point = parent_def.get('entry_point')
+    logger.debug(f"Original entry point: {entry_point}")
+    logger.debug(f"Node mapping: {node_mapping}")
+    if entry_point in node_mapping:
+        # Parent entry point is a subgraph, redirect to subgraph's entry point
+        old_entry_point = entry_point
+        entry_point = node_mapping[entry_point]
+        logger.debug(f"Entry point changed from {old_entry_point} to {entry_point}")
+    else:
+        logger.debug(f"Entry point {entry_point} not in node mapping, keeping as-is")
+
+    # Rewrite transitions in regular nodes that point to subgraph nodes
+    for node in merged_nodes:
+        # Handle direct transitions
+        if 'transition' in node:
+            transition = node['transition']
+            if transition in node_mapping:
+                node['transition'] = node_mapping[transition]
+
+        # Handle conditional transitions
+        if 'condition' in node:
+            condition = node['condition']
+            if 'conditional_outputs' in condition:
+                new_outputs = []
+                for output in condition['conditional_outputs']:
+                    if output in node_mapping:
+                        new_outputs.append(node_mapping[output])
+                    else:
+                        new_outputs.append(output)
+                condition['conditional_outputs'] = new_outputs
+
+            if 'default_output' in condition:
+                default = condition['default_output']
+                if default in node_mapping:
+                    condition['default_output'] = node_mapping[default]
+
+            # Update condition_definition Jinja2 template to replace subgraph node references
+            if 'condition_definition' in condition:
+                condition_definition = condition['condition_definition']
+                # Replace subgraph node references in the Jinja2 template
+                for subgraph_node_id, subgraph_entry_point in node_mapping.items():
+                    condition_definition = condition_definition.replace(subgraph_node_id, subgraph_entry_point)
+                condition['condition_definition'] = condition_definition
+
+        # Handle decision nodes
+        if 'decision' in node:
+            decision = node['decision']
+            # Update decision.nodes list to replace subgraph node references
+            if 'nodes' in decision:
+                new_nodes = []
+                for decision_node in decision['nodes']:
+                    if decision_node in node_mapping:
+                        new_nodes.append(node_mapping[decision_node])
+                    else:
+                        new_nodes.append(decision_node)
+                decision['nodes'] = new_nodes
+
+            # Update decision.default_output to replace subgraph node references
+            if 'default_output' in decision:
+                default_output = decision['default_output']
+                if default_output in node_mapping:
+                    decision['default_output'] = node_mapping[default_output]
+
+    # Build final flattened definition
+    flattened = {
+        'name': parent_def.get('name', 'FlattenedGraph'),
+        'state': merged_state,
+        'nodes': merged_nodes,
+        'entry_point': entry_point,
+        '_flattened': True,
+        '_all_tools': all_tools  # Store tools for later collection
+    }
+
+    # Add interrupts if present
+    if merged_interrupts_before:
+        flattened['interrupt_before'] = list(merged_interrupts_before)
+    if merged_interrupts_after:
+        flattened['interrupt_after'] = list(merged_interrupts_after)
+
+    return flattened
+
+
+def detect_and_flatten_subgraphs(yaml_schema: str) -> tuple[str, list]:
+    """
+    Detect subgraphs in YAML and flatten them if found.
+
+    Returns:
+        tuple: (flattened_yaml_string, collected_tools)
+    """
+    # Parse to check for subgraphs
+    schema_dict = yaml.safe_load(yaml_schema)
+    subgraph_nodes = [
+        node for node in schema_dict.get('nodes', [])
+        if node.get('type') == 'subgraph'
+    ]
+
+    if not subgraph_nodes:
+        return yaml_schema, []
+
+    # Check if all required subgraphs are available in registry
+    missing_subgraphs = []
+    for node in subgraph_nodes:
+        # Support both 'tool' and 'subgraph' fields for subgraph name
+        # Don't clean the string - registry keys use original names
+        subgraph_name = node.get('tool') or node.get('subgraph')
+        if subgraph_name and subgraph_name not in SUBGRAPH_REGISTRY:
+            missing_subgraphs.append(subgraph_name)
+
+    if missing_subgraphs:
+        logger.warning(f"Cannot flatten - missing subgraphs: {missing_subgraphs}")
+        return yaml_schema, []
+
+    # Flatten the graph
+    flattened_def = merge_subgraphs(yaml_schema, SUBGRAPH_REGISTRY)
+
+    # Extract tools
+    all_tools = flattened_def.pop('_all_tools', [])
+
+    # Convert back to YAML
+    flattened_yaml = yaml.dump(flattened_def, default_flow_style=False)
+
+    return flattened_yaml, all_tools
+
