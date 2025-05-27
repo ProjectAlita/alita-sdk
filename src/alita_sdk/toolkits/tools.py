@@ -1,14 +1,14 @@
 import logging
 
-from alita_tools import get_tools as alita_tools
 from alita_tools import get_toolkits as alita_toolkits
+from alita_tools import get_tools as alita_tools
 
-from .prompt import PromptToolkit
-from .datasource import DatasourcesToolkit
 from .application import ApplicationToolkit
 from .artifact import ArtifactToolkit
+from .datasource import DatasourcesToolkit
+from .prompt import PromptToolkit
+from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
-
 ## Community tools and toolkits
 from ..community.analysis.jira_analyse import AnalyseJira
 from ..community.browseruse import BrowserUseToolkit
@@ -35,7 +35,7 @@ def get_toolkits():
     return  core_toolkits + community_toolkits + alita_toolkits()
 
 
-def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> list:
+def get_tools(tools_list: list, alita_client, llm) -> list:
     prompts = []
     tools = []
 
@@ -47,33 +47,43 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
             ])
         elif tool['type'] == 'datasource':
             tools.extend(DatasourcesToolkit.get_toolkit(
-                alita,
+                alita_client,
                 datasource_ids=[int(tool['settings']['datasource_id'])],
                 selected_tools=tool['settings']['selected_tools'],
                 toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
             ).get_tools())
         elif tool['type'] == 'application':
             tools.extend(ApplicationToolkit.get_toolkit(
-                alita,
+                alita_client,
                 application_id=int(tool['settings']['application_id']),
                 application_version_id=int(tool['settings']['application_version_id']),
-                app_api_key=alita.auth_token,
+                app_api_key=alita_client.auth_token,
                 selected_tools=[]
             ).get_tools())
+        elif tool['type'] == 'subgraph':
+            # static get_toolkit returns a list of CompiledStateGraph stubs
+            tools.extend(SubgraphToolkit.get_toolkit(
+                alita_client,
+                application_id=int(tool['settings']['application_id']),
+                application_version_id=int(tool['settings']['application_version_id']),
+                app_api_key=alita_client.auth_token,
+                selected_tools=[],
+                llm=llm
+            ))
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
-                client=alita,
+                client=alita_client,
                 bucket=tool['settings']['bucket'],
                 toolkit_name=tool.get('toolkit_name', ''),
                 selected_tools=tool['settings'].get('selected_tools', [])
             ).get_tools())
         if tool['type'] == 'analyse_jira':
             tools.extend(AnalyseJira.get_toolkit(
-                client=alita, 
+                client=alita_client,
                 **tool['settings']).get_tools())
         if tool['type'] == 'browser_use':
             tools.extend(BrowserUseToolkit.get_toolkit(
-                client=alita, 
+                client=alita_client,
                 llm=llm,
                 toolkit_name=tool.get('toolkit_name', ''),
                 **tool['settings']).get_tools())
@@ -83,9 +93,9 @@ def get_tools(tools_list: list, alita: 'AlitaClient', llm: 'LLMLikeObject') -> l
                 toolkit_name=tool.get('toolkit_name', ''),
                 **tool['settings']).get_tools())
     if len(prompts) > 0:
-        tools += PromptToolkit.get_toolkit(alita, prompts).get_tools()
-    tools += alita_tools(tools_list, alita, llm)
-    tools += _mcp_tools(tools_list, alita)
+        tools += PromptToolkit.get_toolkit(alita_client, prompts).get_tools()
+    tools += alita_tools(tools_list, alita_client, llm)
+    tools += _mcp_tools(tools_list, alita_client)
     return tools
 
 
