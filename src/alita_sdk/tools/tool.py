@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError, BaseModel, create_model
 
+from .application import Application
 from ..langchain.utils import _extract_json
 
 logger = logging.getLogger(__name__)
@@ -74,8 +75,9 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             ))
         ]
         if self.structured_output:
-            # cut defaults from schema
-            fields = {name: (field.annotation, ...) for name, field in self.tool.args_schema.model_fields.items()}
+            # cut defaults from schema and remove chat_history for application as a tool
+            fields = {name: (field.annotation, ...) for name, field
+                      in self.tool.args_schema.model_fields.items() if name != 'chat_history'}
             input_schema = create_model('NewModel', **fields)
 
             llm = self.client.with_structured_output(input_schema)
@@ -87,6 +89,10 @@ Anwer must be JSON only extractable by JSON.LOADS."""
             result = _extract_json(completion.content.strip())
             logger.info(f"ToolNode tool params: {result}")
         try:
+            # handler for application added as a tool
+            if isinstance(self.tool, Application):
+                # set empty chat history
+                result['chat_history'] = None
             tool_result = self.tool.invoke(result, config=config, kwargs=kwargs)
             dispatch_custom_event(
                 "on_tool_node", {
