@@ -505,7 +505,6 @@ def create_graph(
 
         lg_builder.set_entry_point(clean_string(schema['entry_point']))
 
-        # assign default values
         interrupt_before = interrupt_before or []
         interrupt_after = interrupt_after or []
 
