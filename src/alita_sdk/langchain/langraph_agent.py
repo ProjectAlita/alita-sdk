@@ -4,6 +4,7 @@ from uuid import uuid4
 from typing import Dict
 
 import yaml
+import ast
 from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import Runnable
@@ -211,6 +212,25 @@ class TransitionalEdge(Runnable):
         )
         return self.next_step if self.next_step != 'END' else END
 
+class StateDefaultNode(Runnable):
+    name = "StateDefaultNode"
+
+    def __init__(self, default_vars: dict = {}):
+        self.default_vars = default_vars
+
+    def invoke(self, state: BaseStore, config: Optional[RunnableConfig] = None) -> dict:
+        logger.info("Setting default state variables")
+        result = {}
+        for key, value in self.default_vars.items():
+            if isinstance(value, dict) and 'value' in value:
+                temp_value = value['value']
+                try:
+                    result[key] = ast.literal_eval(temp_value)
+                except:
+                    logger.debug("Unable to evaluate value, using as is")
+                    result[key] = temp_value
+        return result
+
 
 class StateModifierNode(Runnable):
     name = "StateModifierNode"
@@ -353,7 +373,8 @@ def create_graph(
     logger.debug(f"Schema: {schema}")
     logger.debug(f"Tools: {tools}")
     logger.info(f"Tools: {[tool.name for tool in tools]}")
-    state_class = create_state(schema.get('state', {}))
+    state = schema.get('state', {})
+    state_class = create_state(state)
     lg_builder = StateGraph(state_class)
     interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
     interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
@@ -503,7 +524,19 @@ def create_graph(
                     conditional_outputs=node['condition'].get('conditional_outputs', []),
                     default_output=node['condition'].get('default_output', 'END')))
 
-        lg_builder.set_entry_point(clean_string(schema['entry_point']))
+        # set default value for state variable at START
+        entry_point = clean_string(schema['entry_point'])
+        for key, value in state.items():
+            if 'type' in value and 'value' in value:
+                # set default value for state variable if it is defined in the schema
+                state_default_node = StateDefaultNode(default_vars=state)
+                lg_builder.add_node(state_default_node.name, state_default_node)
+                lg_builder.set_entry_point(state_default_node.name)
+                lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
+                break
+        else:
+            # if no state variables are defined, set the entry point directly
+            lg_builder.set_entry_point(entry_point)
 
         interrupt_before = interrupt_before or []
         interrupt_after = interrupt_after or []
