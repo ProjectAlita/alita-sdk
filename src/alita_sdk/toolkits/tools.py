@@ -11,6 +11,7 @@ from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 ## Community tools and toolkits
 from ..community.analysis.jira_analyse import AnalyseJira
+from ..community.analysis.ado_analyse import AnalyseAdo
 from ..community.browseruse import BrowserUseToolkit
 
 from ..tools.mcp_server_tool import McpServerTool
@@ -26,12 +27,13 @@ def get_toolkits():
         ArtifactToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema()
     ]
-    
-    community_toolkits = [ 
+
+    community_toolkits = [
         AnalyseJira.toolkit_config_schema(),
-        BrowserUseToolkit.toolkit_config_schema()
+        AnalyseAdo.toolkit_config_schema(),
+        BrowserUseToolkit.toolkit_config_schema(),
     ]
-    
+
     return  core_toolkits + community_toolkits + alita_toolkits()
 
 
@@ -79,6 +81,10 @@ def get_tools(tools_list: list, alita_client, llm) -> list:
             ).get_tools())
         if tool['type'] == 'analyse_jira':
             tools.extend(AnalyseJira.get_toolkit(
+                client=alita_client,
+                **tool['settings']).get_tools())
+        if tool['type'] == 'analyse_ado':
+            tools.extend(AnalyseAdo.get_toolkit(
                 client=alita_client,
                 **tool['settings']).get_tools())
         if tool['type'] == 'browser_use':
