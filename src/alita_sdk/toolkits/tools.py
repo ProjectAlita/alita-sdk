@@ -52,7 +52,7 @@ def get_tools(tools_list: list, alita_client, llm) -> list:
                 selected_tools=tool['settings']['selected_tools'],
                 toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
             ).get_tools())
-        elif tool['type'] == 'application':
+        elif tool['type'] == 'application' and tool.get('agent_type', '') != 'pipeline' :
             tools.extend(ApplicationToolkit.get_toolkit(
                 alita_client,
                 application_id=int(tool['settings']['application_id']),
@@ -60,7 +60,7 @@ def get_tools(tools_list: list, alita_client, llm) -> list:
                 app_api_key=alita_client.auth_token,
                 selected_tools=[]
             ).get_tools())
-        elif tool['type'] == 'subgraph':
+        elif tool['type'] == 'application' and tool.get('agent_type', '') == 'pipeline':
             # static get_toolkit returns a list of CompiledStateGraph stubs
             tools.extend(SubgraphToolkit.get_toolkit(
                 alita_client,
