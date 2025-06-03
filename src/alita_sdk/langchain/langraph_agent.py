@@ -20,7 +20,6 @@ from langgraph.store.base import BaseStore
 
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping
-from ..tools.agent import AgentNode
 from ..tools.function import FunctionTool
 from ..tools.indexer_tool import IndexerNode
 from ..tools.llm import LLMNode
@@ -398,6 +397,19 @@ def create_graph(
                                 input_mapping=node.get('input_mapping',
                                                        {'messages': {'type': 'variable', 'value': 'messages'}}),
                                 input_variables=node.get('input', ['messages'])))
+                        elif node_type == 'agent':
+                            input_params = node.get('input', ['messages'])
+                            input_mapping = {'task': {'type': 'fstring', 'value': f"{node.get('task', '')}"}}
+                            # Add 'chat_history' to input_mapping only if 'messages' is in input_params
+                            if 'messages' in input_params:
+                                input_mapping['chat_history'] = {'type': 'variable', 'value': 'messages'}
+                            lg_builder.add_node(node_id, FunctionTool(
+                                client=client, tool=tool,
+                                name=node['id'], return_type='dict',
+                                output_variables=node.get('output', []),
+                                input_variables=input_params,
+                                input_mapping= input_mapping
+                            ))
                         elif node_type == 'subgraph' or node_type == 'pipeline':
                             # assign parent memory/store
                             # tool.checkpointer = memory
@@ -423,14 +435,15 @@ def create_graph(
                                 structured_output=node.get('structured_output', False),
                                 task=node.get('task')
                             ))
-                        elif node_type == 'agent':
-                            lg_builder.add_node(node_id, AgentNode(
-                                client=client, tool=tool,
-                                name=node['id'], return_type='dict',
-                                output_variables=node.get('output', []),
-                                input_variables=node.get('input', ['messages']),
-                                task=node.get('task')
-                            ))
+                        # TODO: decide on struct output for agent nodes
+                        # elif node_type == 'agent':
+                        #     lg_builder.add_node(node_id, AgentNode(
+                        #         client=client, tool=tool,
+                        #         name=node['id'], return_type='dict',
+                        #         output_variables=node.get('output', []),
+                        #         input_variables=node.get('input', ['messages']),
+                        #         task=node.get('task')
+                        #     ))
                         elif node_type == 'loop':
                             lg_builder.add_node(node_id, LoopNode(
                                 client=client, tool=tool,
