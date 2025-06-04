@@ -348,7 +348,7 @@ class AlitaClient:
             response_data = response.json()
             response_messages = []
             for message in response_data['messages']:
-                if message.get('type') == 'user':
+                if message.get('role') == 'user':
                     response_messages.append(HumanMessage(content=message['content']))
                 else:
                     response_messages.append(AIMessage(content=message['content']))
