@@ -37,8 +37,8 @@ Tool arguments schema:
 """
     unstructured_output: str = """Expected output is JSON that to be used as a KWARGS for the tool call like {{"key": "value"}} 
 in case your key is "chat_history" value should be a list of messages with roles like {{"chat_history": [{{"role": "user", "content": "input"}}, {{"role": "assistant", "content": "output"}}]}}.
-Tool won't have access to convesation so all keys and values need to be actual and independant. 
-Anwer must be JSON only extractable by JSON.LOADS."""
+Tool won't have access to conversation so all keys and values need to be actual and independent.
+Answer must be JSON only extractable by JSON.LOADS."""
 
     def invoke(
             self,
