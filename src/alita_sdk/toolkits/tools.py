@@ -137,7 +137,7 @@ def _init_single_mcp_tool(toolkit_name, available_tool, alita, toolkit_settings)
             ),
             client=alita,
             server=toolkit_name,
-            tool_timeout_sec=toolkit_settings["timeout"]
+            toolkit_settings=toolkit_settings
         )
     except Exception as e:
         logger.error(f"Failed to create McpServerTool for '{toolkit_name}.{tool_name}': {e}")
