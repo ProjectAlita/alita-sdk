@@ -399,7 +399,8 @@ def create_graph(
                                 input_variables=node.get('input', ['messages'])))
                         elif node_type == 'agent':
                             input_params = node.get('input', ['messages'])
-                            input_mapping = {'task': {'type': 'fstring', 'value': f"{node.get('task', '')}"}}
+                            input_mapping = {'task': {'type': 'fstring', 'value': f"{node.get('task', '')}"},
+                                                      'chat_history': {'type': 'fixed', 'value': []}}
                             # Add 'chat_history' to input_mapping only if 'messages' is in input_params
                             if 'messages' in input_params:
                                 input_mapping['chat_history'] = {'type': 'variable', 'value': 'messages'}
