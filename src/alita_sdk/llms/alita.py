@@ -167,11 +167,11 @@ class AlitaChatModel(BaseChatModel):
         )
         done = object()
         while True:
-            item = await run_in_executor(
+            item: ChatGenerationChunk | object = await run_in_executor(
                 None,
                 next,
                 iterator,
-                done,  # type: ignore[call-arg, arg-type]
+                done,
             )
             if item is done:
                 break
