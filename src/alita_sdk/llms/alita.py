@@ -150,14 +150,32 @@ class AlitaChatModel(BaseChatModel):
                 logger.debug(f"message before getting to ChatGenerationChunk: {message}")
                 yield ChatGenerationChunk(message=message, generation_info=generation_info)
     
-    async def _astrem(
+    async def _astream(
         self,
         messages: List[BaseMessage],
         stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
-        raise NotImplementedError("Streaming is not implemented")
+        iterator = await run_in_executor(
+            None,
+            self._stream,
+            messages,
+            stop,
+            run_manager.get_sync() if run_manager else None,
+            **kwargs,
+        )
+        done = object()
+        while True:
+            item = await run_in_executor(
+                None,
+                next,
+                iterator,
+                done,  # type: ignore[call-arg, arg-type]
+            )
+            if item is done:
+                break
+            yield item  # type: ignore[misc]
     
     def _create_chat_result(self, response: list[BaseMessage]) -> ChatResult:
         token_usage = 0
