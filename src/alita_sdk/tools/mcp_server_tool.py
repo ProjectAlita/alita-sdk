@@ -15,7 +15,7 @@ class McpServerTool(BaseTool):
     return_type: str = "str"
     client: Any
     server: str
-    tool_timeout_sec: int = 60
+    toolkit_settings: dict = {}
 
 
     @staticmethod
@@ -36,7 +36,7 @@ class McpServerTool(BaseTool):
             elif field_type == 'boolean':
                 field_type = bool
             else:
-                raise ValueError(f"Unsupported field type: {field_type}")
+                raise ValueError(f"Unsupported field type {field_name}: {field_type}")
 
             if field_name in schema.get('required', []):
                 fields[field_name] = (field_type, Field(..., description=field_description))
@@ -47,7 +47,8 @@ class McpServerTool(BaseTool):
     def _run(self, *args, **kwargs):
         call_data = {
             "server": self.server,
-            "tool_timeout_sec": self.tool_timeout_sec,
+            "tool_timeout_sec": self.toolkit_settings.get("timeout", 90),
+            "mcp_client_uid": self.toolkit_settings.get("mcp_client_uid", None),
             "tool_call_id": str(uuid.uuid4()),
             "params": {
                 "name": self.name,
