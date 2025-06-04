@@ -175,7 +175,8 @@ class AlitaChatModel(BaseChatModel):
             )
             if item is done:
                 break
-            yield item  # type: ignore[misc]
+            if isinstance(item, ChatGenerationChunk):
+                yield item
     
     def _create_chat_result(self, response: list[BaseMessage]) -> ChatResult:
         token_usage = 0
