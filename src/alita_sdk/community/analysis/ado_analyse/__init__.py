@@ -1,4 +1,3 @@
-import json
 from typing import List, Optional, Literal
 from elitea_analyse.ado.azure_search import AzureSearch
 from pydantic import SecretStr, create_model, BaseModel, ConfigDict, Field
@@ -30,11 +29,11 @@ class AnalyseAdo(BaseToolkit):
         AnalyseAdo.toolkit_max_length = get_max_toolkit_length(selected_tools)
 
         return create_model(
-            "analyse_ado",  
+            "analyse_ado",
             organization=(str, Field(description="Azure DevOps organization name",
-            json_schema_extra={"toolkit_name": True, "max_toolkit_length": AnalyseAdo.toolkit_max_length})),
+                json_schema_extra={"toolkit_name": True, "max_toolkit_length": AnalyseAdo.toolkit_max_length})),
             username=(str, Field(description="Azure DevOps username (e.g., 'john.doe@domain.com')")),
-            token=(SecretStr, Field(description="Azure DevOps Personal Access Token", json_schema_extra={"secret": True})),
+            token=(SecretStr, Field(description="Azure DevOps Access Token", json_schema_extra={"secret": True})),
             project_keys=(Optional[str], Field(description="Azure DevOps project keys separated by comma", default=None)),
             default_branch_name=(Optional[str], Field(description="Default branch name", default="main")),
             area=(Optional[str], Field(description="Area path filter", default="")),
@@ -42,7 +41,7 @@ class AnalyseAdo(BaseToolkit):
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={"args_schemas": selected_tools})),
             __config__=ConfigDict(json_schema_extra={"metadata": {
                     "label": "Analyse_Ado",
-                    "icon_url": "ado-icon.svg",
+                    "icon_url": "ado-icon.svg", # ???
                     "hidden": True,
                     "sections": {
                         "auth": {
@@ -71,14 +70,14 @@ class AnalyseAdo(BaseToolkit):
         if not organization or not username or not token:
             raise ValueError("Organization, username, and token must be provided.")
 
+        ado_search = AzureSearch(organization=organization, user=username, token=token)
+
         ado_analyse_wrapper = AdoAnalyseWrapper(
             artifacts_wrapper=artifact_wrapper,
             project_keys=project_keys,
             default_branch_name=kwargs.get("default_branch_name", "main"),
             area=area,
-            username=username,
-            organization=organization,
-            token=token,
+            ado_search=ado_search,
         )
 
         selected_tools = selected_tools or []

@@ -2,7 +2,7 @@ import logging
 
 from typing import Optional, Dict, Any
 from langchain_core.callbacks import dispatch_custom_event
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 
 from elitea_analyse.utils.constants import OUTPUT_WORK_ITEMS_FILE
 from elitea_analyse.ado.azure_search import AzureSearch
@@ -21,6 +21,7 @@ from src.alita_sdk.utils.save_dataframe import save_dataframe_to_artifact
 from ....tools.artifact import ArtifactWrapper
 from ....utils.logging import with_streamlit_logs
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +32,7 @@ class GetAdoWorkItemsArgs(BaseModel):
     resolved_after: str = Field(description="Resolveed after date (i.e. 2023-01-01)")
     updated_after: str = Field(description="Updated after date (i.e. 2023-01-01)")
     created_after: str = Field(description="Created after date (i.e. 2023-01-01)")
-    area: str = Field(description="Area path filter (optional).", default="")
+    area: Optional[str] = Field(description="Area path filter.", default="")
 
 
 class AdoCommitsArgs(BaseModel):
@@ -52,31 +53,17 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
     project_keys: str  # Comma-separated list of Azure DevOps project names
     default_branch_name: str = "main"
     area: str = ""
-    username: str  # Azure DevOps username (e.g., "john.doe@domain.com")
-    organization: str  # Azure DevOps organization name
-    token: SecretStr  # Personal Access Token for Azure DevOps
+    ado_search: AzureSearch  # Azure DevOps search client
 
     class Config:
         arbitrary_types_allowed = True
-
-    @property
-    def credentials(self) -> Dict[str, str]:
-        """
-        Returns the credentials dictionary for Azure DevOps API.
-        """
-        return {
-            "organization": self.organization,
-            "user": self.username,
-            "token": self.token.get_secret_value(),
-        }
 
     def get_projects_list(self):
         """
         Get all projects in the organization that the authenticated user has access to.
         Details on a page: https://docs.microsoft.com/en-us/rest/api/azure/devops/core/projects/list
         """
-        azure_search = AzureSearch(**self.credentials)
-        result = azure_search.get_projects_list()
+        result = self.ado_search.get_projects_list()
 
         save_dataframe_to_artifact(
             self.artifacts_wrapper,
@@ -121,7 +108,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
             updated_after,
             created_after,
             area=area,
-            credentials=self.credentials,
+            ado_search=self.ado_search,
         )
 
         save_dataframe_to_artifact(
@@ -129,25 +116,6 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
             df_work_items,
             f"{OUTPUT_WORK_ITEMS_FILE}{project_keys}.csv",
             csv_options={"index_label": "id"},
-        )
-
-        # Calculate statistics
-        closed_items = len(df_work_items[df_work_items["request_type"] == "closed"])
-        open_items = len(df_work_items[df_work_items["request_type"] == "open"])
-        bugs = len(df_work_items[df_work_items["issue_type"].str.lower() == "bug"])
-
-        dispatch_custom_event(
-            name="thinking_step",
-            data={
-            "message": (
-                "Summary:\n"
-                f"  Closed items: {closed_items}\n"
-                f"  Open items: {open_items}\n"
-                f"  Bugs: {bugs}"
-            ),
-            "tool_name": "get_work_items",
-            "toolkit": "analyse_jira",
-            },
         )
 
         return (
@@ -182,7 +150,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
             since_date,
             new_version=new_version,
             with_commit_size=with_commit_size,
-            credentials=self.credentials,
+            ado_search=self.ado_search,
         )
 
         save_dataframe_to_artifact(
@@ -198,9 +166,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
         )
 
     def get_merge_requests(
-        self,
-        since_date: str,
-        project_keys: Optional[str] = None,
+        self, since_date: str, project_keys: Optional[str] = None
     ) -> str:
         """
         Get pull requests from multiple Azure DevOps projects.
@@ -213,9 +179,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
         project_keys = project_keys or self.project_keys
 
         df_prs = get_merge_requests_several_projects(
-            project_keys,
-            since_date,
-            credentials=self.credentials,
+            project_keys, since_date, ado_search=self.ado_search
         )
 
         save_dataframe_to_artifact(
@@ -241,17 +205,11 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
             Comma-separated project names.
         """
         project_keys = project_keys or self.project_keys
-        pipelines_df = get_pipelines_runs_several_projects(
-            project_keys,
-            credentials=self.credentials,
-        )
+        pipelines_df = get_pipelines_runs_several_projects( project_keys, ado_search=self.ado_search, )
 
         save_dataframe_to_artifact(
-            self.artifacts_wrapper,
-            pipelines_df,
-            f"pipelines_runs_{project_keys}.csv",
-            csv_options={"index": False},
-        )
+            self.artifacts_wrapper, pipelines_df, f"pipelines_runs_{project_keys}.csv", csv_options={"index": False}
+         )
 
         return (
             f"Pipeline runs for {project_keys} have been successfully retrieved "
