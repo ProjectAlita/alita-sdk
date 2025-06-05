@@ -12,6 +12,9 @@ from .vectorstore import VectorStoreToolkit
 ## Community tools and toolkits
 from ..community.analysis.jira_analyse import AnalyseJira
 from ..community.analysis.ado_analyse import AnalyseAdo
+from ..community.analysis.gitlab_analyse import AnalyseGitLab
+from ..community.analysis.github_analyse import AnalyseGithub
+
 from ..community.browseruse import BrowserUseToolkit
 
 from ..tools.mcp_server_tool import McpServerTool
@@ -31,6 +34,8 @@ def get_toolkits():
     community_toolkits = [
         AnalyseJira.toolkit_config_schema(),
         AnalyseAdo.toolkit_config_schema(),
+        AnalyseGitLab.toolkit_config_schema(),
+        AnalyseGithub.toolkit_config_schema(),
         BrowserUseToolkit.toolkit_config_schema(),
     ]
 
@@ -85,6 +90,14 @@ def get_tools(tools_list: list, alita_client, llm) -> list:
                 **tool['settings']).get_tools())
         if tool['type'] == 'analyse_ado':
             tools.extend(AnalyseAdo.get_toolkit(
+                client=alita_client,
+                **tool['settings']).get_tools())
+        if tool['type'] == 'analyse_gitlab':
+            tools.extend(AnalyseGitLab.get_toolkit(
+                client=alita_client,
+                **tool['settings']).get_tools())
+        if tool['type'] == 'analyse_github':
+            tools.extend(AnalyseGithub.get_toolkit(
                 client=alita_client,
                 **tool['settings']).get_tools())
         if tool['type'] == 'browser_use':
