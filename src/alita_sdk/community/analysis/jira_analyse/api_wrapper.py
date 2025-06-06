@@ -33,13 +33,15 @@ class GetJiraIssuesArgs(BaseModel):
         description="One or more projects keys separated with comma.", default=''
     )
     closed_issues_based_on: int = Field(
-        description="Define whether issues can be thought as closed based on their status (1) or not empty resolved date (2)."
+        description=("Define whether issues can be thought as closed based on their status (1) "
+                     "or not empty resolved date (2).")
     )
     resolved_after: str = Field(description="Resolved after date (i.e. 2023-01-01).")
     updated_after: str = Field(description="Updated after date (i.e. 2023-01-01).")
     created_after: str = Field(description="Created after date (i.e. 2023-01-01).")
     add_filter: Optional[str] = Field(
-        description="Additional filter for Jira issues in JQL format like 'customfield_10000 = 'value' AND customfield_10001 = 'value'"
+        description=("Additional filter for Jira issues in JQL format like "
+                     "'customfield_10000 = 'value' AND customfield_10001 = 'value'")
     )
 
 
@@ -111,7 +113,8 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
         created_after: str
             created after date (i.e. 2023-01-01)
         add_filter: str
-            additional filter for Jira issues in JQL format like "customfield_10000 = 'value' AND customfield_10001 = 'value'"
+            additional filter for Jira issues in JQL format 
+            like "customfield_10000 = 'value' AND customfield_10001 = 'value'"
         project_keys: str
             one or more projects keys separated with comma
         """
@@ -124,7 +127,8 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
             or closed_issues_based_on == 2
         ):
             return (
-                "ERROR: Check input parameters closed_issues_based_on and closed_status"
+                f"ERROR: Check input parameters closed_issues_based_on ({closed_issues_based_on}) "
+                f"and closed_status ({self.closed_status}) not in Jira statuses list."
             )
 
         project_keys = project_keys or self.project_keys
@@ -244,5 +248,5 @@ class JiraAnalyseWrapper(BaseToolApiWrapper):
         for tool in self.get_available_tools():
             if tool["name"] == mode:
                 return tool["ref"](*args, **kwargs)
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
+
+        raise ValueError(f"Unknown mode: {mode}")
