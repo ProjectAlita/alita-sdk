@@ -22,7 +22,10 @@ logger = logging.getLogger(__name__)
 
 class GetGithubCommitsFromReposArgs(BaseModel):
     since_after: str = Field( description="Date to filter commits from, in 'YYYY-MM-DD' format." )
-    repos: Optional[str] = Field( description="Comma-separated list of repositories to extract commits from." )
+    repos: Optional[str] = Field(
+        description="Comma-separated list of repositories to extract commits from.",
+        default="",
+    )
 
 
 class GetGithubRepositoriesListArgs(BaseModel):
