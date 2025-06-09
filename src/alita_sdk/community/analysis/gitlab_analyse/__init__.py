@@ -37,7 +37,9 @@ class AnalyseGitLab(BaseToolkit):
                     json_schema_extra={"toolkit_name": True, "max_toolkit_length": AnalyseGitLab.toolkit_max_length}
                 )
             ),
-            project_keys=(Optional[str], Field(description="GitLab project keys separated by comma", default=None)),
+            project_ids=(Optional[str], Field(description="GitLab project ids separated by comma", default=None)),
+            jira_project_keys=(Optional[str],
+                               Field(description="GitLab project Jira keys separated by comma", default=None)),
             token=(SecretStr, Field(description="GitLab Personal Access Token", json_schema_extra={"secret": True})),
             default_branch_name=(Optional[str], Field(description="Default branch name", default="master")),
             artifact_bucket_path=(Optional[str], Field(description="Artifact Bucket Path", default="analyse-gitlab")),
@@ -64,7 +66,8 @@ class AnalyseGitLab(BaseToolkit):
         artifact_wrapper = ArtifactWrapper(client=client, bucket=bucket_path)
         check_schema(artifact_wrapper)
 
-        project_keys = kwargs.get("project_keys") or ""
+        jira_project_keys = kwargs.get("jira_project_keys") or ""
+        project_ids = kwargs.get("project_ids")  or ""
         url = kwargs.get("url")
         token = kwargs.get("token")
 
@@ -79,7 +82,8 @@ class AnalyseGitLab(BaseToolkit):
 
         gitlab_analyse_wrapper = GitLabAnalyseWrapper(
             artifacts_wrapper=artifact_wrapper,
-            project_keys=project_keys,
+            project_ids=project_ids,
+            jira_project_keys=jira_project_keys,
             gitlab_search=gitlab_search,
         )
 

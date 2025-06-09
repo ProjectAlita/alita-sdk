@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 from pydantic import BaseModel, Field
+from typing import Optional
 
 from elitea_analyse.git.main import (
     get_git_projects_list,
@@ -24,19 +25,18 @@ class GitLabProjectsListArgs(BaseModel):
         description="Filter projects by last activity date in 'YYYY-MM-DD' format."
     )
 
-
 class GitLabProjectsListInJiraArgs(BaseModel):
-    project_keys: str = Field(description="Comma-separated Jira project keys.")
-
+    jira_project_keys: Optional[str] = Field(description="Comma-separated Jira project keys.", default=None)
 
 class GitLabCommitsArgs(BaseModel):
-    project_id: str = Field(description="GitLab project ID.")
+    project_ids: Optional[str] = Field(description="GitLab project ID.", default=None)
     since_date:str = Field(description="Date filter in 'YYYY-MM-DD' format.")
 
 
 class GitLabAnalyseWrapper(BaseToolApiWrapper):
     artifacts_wrapper: ArtifactWrapper
-    project_keys: str  # Comma-separated list of GitLab project names
+    project_ids: str  # Comma-separated list of GitLab project IDs
+    jira_project_keys: str  # Comma-separated list of Jira projects' keys
     gitlab_search: GitLabV4Search  # GitLab search client
 
     class Config:
@@ -62,15 +62,16 @@ class GitLabAnalyseWrapper(BaseToolApiWrapper):
             f"Data has been downloaded to the bucket as 'gitlab_projects_info.csv'"
         )
 
-    def get_gitlab_projects_that_in_jira(self, project_keys: str) -> str:
+    def get_gitlab_projects_that_in_jira(self, jira_project_keys: Optional[str] = None) -> str:
         """
         Find GitLab projects that correspond to Jira projects by matching names.
 
-        project_keys: str
+        jira_project_keys: str
             Comma-separated Jira project keys.
         """
+        jira_project_keys = jira_project_keys or self.jira_project_keys
         df_projects = get_git_projects_that_in_jira(
-            project_keys, git=self.gitlab_search)
+            jira_project_keys, git=self.gitlab_search)
 
         if df_projects is None or df_projects.empty:
             return "No GitLab projects found that match the provided Jira project keys."
@@ -84,7 +85,7 @@ class GitLabAnalyseWrapper(BaseToolApiWrapper):
             f"Data has been downloaded to the bucket as 'gitlab_projects_that_in_Jira.csv'."
         )
 
-    def get_gitlab_commits(self, project_id: str, since_date: str,
+    def get_gitlab_commits(self, project_ids: Optional[str], since_date: str,
     ) -> str:
         """
         Get commit data for specified GitLab project.
@@ -94,45 +95,46 @@ class GitLabAnalyseWrapper(BaseToolApiWrapper):
         since_date: str
             Date filter in 'YYYY-MM-DD' format.
         """
-
+        project_ids = project_ids or self.project_ids
         df_commits = get_git_commits(
-            project_id, since_date, git_search=self.gitlab_search
+            project_ids, since_date, git_search=self.gitlab_search
         )
 
         if df_commits is None or df_commits.empty:
-            return f'There are no commits in the project {project_id} created after {since_date}'
+            return f'There are no commits in the project {project_ids} created after {since_date}'
 
         save_dataframe_to_artifact(
-            self.artifacts_wrapper, df_commits, f"commits_details_{project_id}.csv", csv_options={"index": False},
+            self.artifacts_wrapper, df_commits, f"commits_details_{project_ids}.csv", csv_options={"index": False},
         )
 
         return (
-            f"Commits data for project {project_id} has been saved. "
-            f"Data has been downloaded to the bucket as 'commits_details_{project_id}.csv'."
+            f"Commits data for project {project_ids} has been saved. "
+            f"Data has been downloaded to the bucket as 'commits_details_{project_ids}.csv'."
         )
 
-    def get_gitlab_merge_requests(self, project_id: str, since_date: str) -> str:
+    def get_gitlab_merge_requests(self, project_ids: Optional[str], since_date: str) -> str:
         """
         Get merge requests for specified GitLab project.
 
-        project_id: str
+        project_ids: str
             GitLab project ID.
         since_date: str
             Date filter in 'YYYY-MM-DD' format.
         """
+        project_ids = project_ids or self.project_ids
         df_mrs = get_git_merge_requests(
-            project_id, since_date, git_search=self.gitlab_search)
+            project_ids, since_date, git_search=self.gitlab_search)
 
         if df_mrs is None or df_mrs.empty:
-            return f'There are no merge requests in the project {project_id} created after {since_date}'
+            return f'There are no merge requests in the project {project_ids} created after {since_date}'
 
         save_dataframe_to_artifact(
-            self.artifacts_wrapper, df_mrs, f"merge_requests_details_{project_id}.csv", csv_options={"index": False},
+            self.artifacts_wrapper, df_mrs, f"merge_requests_details_{project_ids}.csv", csv_options={"index": False},
         )
 
         return (
-            f"Merge requests data for project {project_id} has been saved. "
-            f"Data has been downloaded to the bucket as 'merge_requests_details_{project_id}.csv'."
+            f"Merge requests data for project {project_ids} has been saved. "
+            f"Data has been downloaded to the bucket as 'merge_requests_details_{project_ids}.csv'."
         )
 
 
