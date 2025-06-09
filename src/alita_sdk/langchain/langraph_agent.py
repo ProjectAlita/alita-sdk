@@ -676,7 +676,7 @@ def merge_subgraphs(parent_yaml: str, registry: Dict[str, Dict[str, Any]]) -> Di
     regular_nodes = []
 
     for node in parent_def.get('nodes', []):
-        if node.get('type') == 'subgraph':
+        if node.get('type') == 'subgraph' or node.get('type') == 'pipeline':
             subgraph_nodes.append(node)
         else:
             regular_nodes.append(node)
@@ -846,7 +846,7 @@ def detect_and_flatten_subgraphs(yaml_schema: str) -> tuple[str, list]:
     schema_dict = yaml.safe_load(yaml_schema)
     subgraph_nodes = [
         node for node in schema_dict.get('nodes', [])
-        if node.get('type') == 'subgraph'
+        if node.get('type') == 'subgraph' or node.get('type') == 'pipeline'
     ]
 
     if not subgraph_nodes:
