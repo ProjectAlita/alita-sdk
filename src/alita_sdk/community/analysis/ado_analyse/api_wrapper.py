@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 class GetAdoWorkItemsArgs(BaseModel):
-    project_keys: Optional[str] = Field(
-        description="One or more projects keys separated with comma.", default=""
-    )
     resolved_after: str = Field(description="Resolveed after date (i.e. 2023-01-01)")
     updated_after: str = Field(description="Updated after date (i.e. 2023-01-01)")
     created_after: str = Field(description="Created after date (i.e. 2023-01-01)")
     area: Optional[str] = Field(description="Area path filter.", default="")
+    project_keys: Optional[str] = Field(
+        description="One or more projects keys separated with comma.", default=""
+    )
 
 
 class AdoCommitsArgs(BaseModel):
@@ -101,6 +101,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
                 Area path filter (optional).
         """
         project_keys = project_keys or self.project_keys
+        area = area or self.area
 
         df_work_items = get_work_items_several_projects(
             project_keys,
@@ -205,7 +206,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
             Comma-separated project names.
         """
         project_keys = project_keys or self.project_keys
-        pipelines_df = get_pipelines_runs_several_projects( project_keys, ado_search=self.ado_search, )
+        pipelines_df = get_pipelines_runs_several_projects(project_keys, ado_search=self.ado_search)
 
         save_dataframe_to_artifact(
             self.artifacts_wrapper, pipelines_df, f"pipelines_runs_{project_keys}.csv", csv_options={"index": False}
