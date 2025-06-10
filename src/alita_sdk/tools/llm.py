@@ -3,7 +3,7 @@ from traceback import format_exc
 from typing import Any, Optional, Dict, List
 
 from langchain_core.messages import HumanMessage, BaseMessage
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 
 from ..langchain.utils import _extract_json, create_pydantic_model, create_params
 
@@ -13,7 +13,12 @@ logger = logging.getLogger(__name__)
 def create_llm_input(prompt: Dict[str, str], params: Dict[str, Any], kwargs: Dict[str, Any]) -> list[BaseMessage]:
     logger.info(f"Creating LLM input with prompt: {prompt}, params: {params}, kwargs: {kwargs}")
     if prompt.get('type') == 'fstring' and params:
-        return [HumanMessage(content=prompt['value'].format(**params))]
+        try:
+            return [HumanMessage(content=prompt['value'].format(**params))]
+        except KeyError as e:
+            error_msg = f"KeyError in input formatting - make sure you have added all required state variables as input to the node: {e}"
+            logger.error(error_msg)
+            raise ToolException(error_msg)
     else:
         return kwargs.get("messages") + [HumanMessage(prompt['value'])]
 

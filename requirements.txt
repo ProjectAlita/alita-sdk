@@ -67,7 +67,7 @@ cairocffi==1.7.1
 docx2txt==0.8
 mammoth==1.9.0
 
-elitea-analyse==0.1.1
+elitea-analyse==0.1.2
 
 # Fix
 opentelemetry-exporter-otlp-proto-grpc==1.25.0

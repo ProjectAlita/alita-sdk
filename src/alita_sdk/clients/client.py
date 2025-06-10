@@ -8,6 +8,7 @@ from langchain_core.messages import (
     AIMessage, HumanMessage,
     SystemMessage, BaseMessage,
 )
+from langchain_core.tools import ToolException
 
 from ..langchain.assistant import Assistant as LangChainAssistant
 # from ..llamaindex.assistant import Assistant as LLamaAssistant
@@ -174,7 +175,12 @@ class AlitaClient:
             tools = []
         if chat_history is None:
             chat_history = []
-        data = self.get_app_version_details(application_id, application_version_id)
+        try:
+            data = self.get_app_version_details(application_id, application_version_id)
+        except ApiDetailsRequestError as e:
+            error_msg = f"Failed to fetch application version details for {application_id}/{application_version_id}\nDetails: {e}"
+            logger.error(error_msg)
+            raise ToolException(error_msg)
 
         if application_variables:
             for var in data.get('variables', {}):

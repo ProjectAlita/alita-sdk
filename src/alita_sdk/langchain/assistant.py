@@ -16,7 +16,7 @@ from .constants import REACT_ADDON, REACT_VARS, XML_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from ..toolkits.tools import get_tools
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,11 @@ class Assistant:
             target_name
         )
         self.client = target_cls(**model_params)
+        # validate agents compatibility: non-pipeline agents cannot have pipelines as toolkits
+        if app_type != "pipeline" and any(tool['agent_type'] == 'pipeline' for tool in data['tools']):
+            raise ToolException("Non-pipeline agents cannot have pipelines as a toolkits. "
+                                "Review toolkits configuration or use pipeline as master agent.")
+
         self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client)
         if app_type == "pipeline":
             self.prompt = data['instructions']
