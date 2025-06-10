@@ -24,6 +24,8 @@ from ....utils.logging import with_streamlit_logs
 
 logger = logging.getLogger(__name__)
 
+class NoInputArgs(BaseModel):
+    pass
 
 class GetAdoWorkItemsArgs(BaseModel):
     resolved_after: str = Field(description="Resolveed after date (i.e. 2023-01-01)")
@@ -224,7 +226,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
                 "name": "get_projects_list",
                 "description": self.get_projects_list.__doc__,
                 "ref": self.get_projects_list,
-                "args_schema": {},
+                "args_schema": NoInputArgs,
             },
             {
                 "name": "get_work_items",
