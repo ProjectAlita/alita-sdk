@@ -12,7 +12,7 @@ from elitea_analyse.github.main_github import (
 )
 
 from alita_tools.elitea_base import BaseToolApiWrapper
-from src.alita_sdk.utils.save_dataframe import save_dataframe_to_artifact
+from ....utils.save_dataframe import save_dataframe_to_artifact
 from ....tools.artifact import ArtifactWrapper
 from ....utils.logging import with_streamlit_logs
 

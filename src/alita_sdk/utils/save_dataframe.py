@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from langchain_core.tools import ToolException
 import pandas as pd
 
-from src.alita_sdk.tools.artifact import ArtifactWrapper
+from ..tools.artifact import ArtifactWrapper
 
 logger = logging.getLogger(__name__)
 
