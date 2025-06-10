@@ -92,3 +92,6 @@ class AnalyseGithub(BaseToolkit):
             )
 
         return cls(tools=tools)
+
+    def get_tools(self):
+        return self.tools
