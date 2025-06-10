@@ -103,7 +103,11 @@ Answer must be JSON only extractable by JSON.LOADS."""
             )
             message_result = tool_result
             if isinstance(tool_result, dict) or isinstance(tool_result, list):
-                message_result = dumps(tool_result)
+                try:
+                    message_result = dumps(tool_result)
+                except TypeError:
+                    logger.error(f"ToolNode tool result is not JSON serializable: {tool_result}")
+                    message_result = str(tool_result)
             logger.info(f"ToolNode response: {tool_result}")
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": message_result}]}
