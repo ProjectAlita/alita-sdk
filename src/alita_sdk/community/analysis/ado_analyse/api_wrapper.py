@@ -76,7 +76,7 @@ class AdoAnalyseWrapper(BaseToolApiWrapper):
 
         return (
             f"You have access to {len(result)} project. "
-            f"Data has been downloaded to the bucket as 'projects_info_AzureDevOps.csv'."
+            f"Data has been downloaded to the bucket as 'projects_info.csv'."
         )
 
     @with_streamlit_logs(tool_name="get_work_items")
