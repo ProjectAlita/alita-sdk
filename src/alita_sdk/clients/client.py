@@ -65,14 +65,22 @@ class AlitaClient:
         self.configurations: list = configurations or []
 
     def get_mcp_toolkits(self):
-        url = self.mcp_tools_list
-        data = requests.get(url, headers=self.headers, verify=False).json()
-        return data
+        if user_id := self._get_real_user_id():
+            url = f"{self.mcp_tools_list}/{user_id}"
+            data = requests.get(url, headers=self.headers, verify=False).json()
+            return data
+        else:
+            return []
+        
+        
 
     def mcp_tool_call(self, params: dict[str, Any]):
-        url = self.mcp_tools_call
-        data = requests.post(url, headers=self.headers, json=params, verify=False).json()
-        return data
+        if user_id := self._get_real_user_id():
+            url = f"{self.mcp_tools_call}/{user_id}"
+            data = requests.post(url, headers=self.headers, json=params, verify=False).json()
+            return data
+        else:
+            return f"Error: Could not determine user ID for MCP tool call: {e}"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -410,3 +418,12 @@ class AlitaClient:
         content = resp_data["findings"]
         references = resp_data['references']
         return AIMessage(content=content, additional_kwargs={"references": references})
+    
+    def _get_real_user_id(self):
+        try:
+            import tasknode_task
+            monitoring_meta = tasknode_task.meta.get("monitoring", {})
+            return monitoring_meta["user_id"]
+        except Exception as e:
+            logger.warning(f"Error: Could not determine user ID for MCP tool: {e}")
+            return None
