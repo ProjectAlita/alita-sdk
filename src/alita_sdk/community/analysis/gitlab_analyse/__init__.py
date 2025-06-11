@@ -77,7 +77,7 @@ class AnalyseGitLab(BaseToolkit):
         gitlab_search = GitLabV4Search(
             url=url,
             default_branch_name=kwargs.get("default_branch_name", "master"),
-            token=token.get_secret_value(),
+            token=token,
         )
 
         gitlab_analyse_wrapper = GitLabAnalyseWrapper(
