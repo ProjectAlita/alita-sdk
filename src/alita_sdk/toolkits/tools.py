@@ -121,11 +121,11 @@ def get_tools(tools_list: list, alita_client, llm) -> list:
 def _mcp_tools(tools_list, alita):
     try:
         all_available_toolkits = alita.get_mcp_toolkits()
-        toolkit_lookup = {tk["name"].lower(): tk for tk in all_available_toolkits}
+        toolkit_lookup = {tk["name"]: tk for tk in all_available_toolkits}
         tools = []
         #
         for selected_toolkit in tools_list:
-            toolkit_name = selected_toolkit['type'].lower()
+            toolkit_name = selected_toolkit['type']
             toolkit_conf = toolkit_lookup.get(toolkit_name)
             #
             if not toolkit_conf:
