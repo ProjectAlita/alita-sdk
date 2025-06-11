@@ -71,8 +71,6 @@ class AlitaClient:
             return data
         else:
             return []
-        
-        
 
     def mcp_tool_call(self, params: dict[str, Any]):
         if user_id := self._get_real_user_id():
