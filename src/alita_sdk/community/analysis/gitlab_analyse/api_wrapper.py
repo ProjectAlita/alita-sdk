@@ -85,8 +85,7 @@ class GitLabAnalyseWrapper(BaseToolApiWrapper):
             f"Data has been downloaded to the bucket as 'gitlab_projects_that_in_Jira.csv'."
         )
 
-    def get_gitlab_commits(self, project_ids: Optional[str], since_date: str,
-    ) -> str:
+    def get_gitlab_commits(self, since_date: str, project_ids: Optional[str] = None) -> str:
         """
         Get commit data for specified GitLab project.
 
@@ -112,7 +111,7 @@ class GitLabAnalyseWrapper(BaseToolApiWrapper):
             f"Data has been downloaded to the bucket as 'commits_details_{project_ids}.csv'."
         )
 
-    def get_gitlab_merge_requests(self, project_ids: Optional[str], since_date: str) -> str:
+    def get_gitlab_merge_requests(self, since_date: str, project_ids: Optional[str] = None) -> str:
         """
         Get merge requests for specified GitLab project.
 
