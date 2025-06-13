@@ -176,17 +176,21 @@ class AlitaClient:
     def application(self, client: Any, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                     app_type=None, memory=None, runtime='langchain',
-                    application_variables: Optional[dict] = None):
+                    application_variables: Optional[dict] = None,
+                    version_details: Optional[dict] = None):
         if tools is None:
             tools = []
         if chat_history is None:
             chat_history = []
-        try:
-            data = self.get_app_version_details(application_id, application_version_id)
-        except ApiDetailsRequestError as e:
-            error_msg = f"Failed to fetch application version details for {application_id}/{application_version_id}\nDetails: {e}"
-            logger.error(error_msg)
-            raise ToolException(error_msg)
+        if version_details:
+            data = version_details
+        else:
+            try:
+                data = self.get_app_version_details(application_id, application_version_id)
+            except ApiDetailsRequestError as e:
+                error_msg = f"Failed to fetch application version details for {application_id}/{application_version_id}\nDetails: {e}"
+                logger.error(error_msg)
+                raise ToolException(error_msg)
 
         if application_variables:
             for var in data.get('variables', {}):
@@ -204,15 +208,14 @@ class AlitaClient:
         elif app_type == 'autogen':
             app_type = "openai"
         if runtime == 'nonrunnable':
-            return LangChainAssistant(self, data, client, chat_history, app_type, 
+            return LangChainAssistant(self, data, client, chat_history, app_type,
                                       tools=tools, memory=memory)
         if runtime == 'langchain':
-            return LangChainAssistant(self, data, client, 
-                                      chat_history, app_type, 
+            return LangChainAssistant(self, data, client,
+                                      chat_history, app_type,
                                       tools=tools, memory=memory).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
-        
 
     def datasource(self, datasource_id: int) -> AlitaDataSource:
         url = f"{self.datasources}/{datasource_id}"
