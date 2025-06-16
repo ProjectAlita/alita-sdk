@@ -138,6 +138,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     vectorstore: Any = None
     vectoradapter: Any = None
     pg_helper: Any = None
+    embeddings: Any = None
     
     @model_validator(mode='before')
     @classmethod
@@ -155,7 +156,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         values["dataset"] = values.get('vectorstore_params').get('collection_name')
         if not values["dataset"]:
             raise ValueError("Collection name is required.")
-        values['embeddings'] = get_embeddings(values['embedding_model'], values['embedding_model_params'])
+        if not values.get('embeddings'):
+            values['embeddings'] = get_embeddings(values['embedding_model'], values['embedding_model_params'])
         values['vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['embeddings'])
         values['vectoradapter'] = VectorAdapter(
             vectorstore=values['vectorstore'],
