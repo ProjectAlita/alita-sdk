@@ -397,7 +397,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                     'metadata': doc.metadata,
                     'score': score
                 })
-            return dumps(response, indent=2)
+            return response
 
     def _apply_reranking(self, items, reranker):
         """Apply reranking rules to search results"""
@@ -472,7 +472,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             reranking_config=reranking_config,
             extended_search=extended_search
         )
-        return dumps(search_results, indent=2)
+        return search_results
 
     def stepback_summary(self, query:str, messages: list, doctype: str = 'code', 
                          filter:dict={}, cut_off: float=0.5, search_top:int=10, 
