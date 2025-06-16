@@ -110,9 +110,9 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
         """ Initializes the vector store wrapper with the provided parameters."""
         try:
-            from alita_sdk.tools.vectorstore import VectorStoreWrapper
+            from alita_sdk.runtime.tools.vectorstore import VectorStoreWrapper
         except ImportError:
-            from src.alita_sdk.tools.vectorstore import VectorStoreWrapper
+            from alita_sdk.runtime.tools.vectorstore import VectorStoreWrapper
         
         # Validate collection_suffix length
         if collection_suffix and len(collection_suffix.strip()) > 7:
@@ -284,7 +284,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         try:
             from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
         except ImportError:
-            from src.alita_sdk.langchain.interfaces.llm_processor import get_embeddings
+            from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
         
         documents = self.loader(
             branch=branch,

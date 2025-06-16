@@ -959,7 +959,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         try:
             from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
         except ImportError:
-            from src.alita_sdk.langchain.interfaces.llm_processor import get_embeddings
+            from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
         
         loader_params = {
             'url': self.base_url,
