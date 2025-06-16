@@ -12,10 +12,10 @@ from elitea_analyse.utils.constants import OUTPUT_MAPPING_FILE, OUTPUT_WORK_ITEM
 from elitea_analyse.jira.jira_projects_overview import jira_projects_overview
 from elitea_analyse.jira.jira_statuses import get_all_statuses_list
 from elitea_analyse.jira.jira_issues import JiraIssues
-
+ 
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from alita_sdk.runtime.tools.artifact import ArtifactWrapper
-from ....utils.logging import with_streamlit_logs
+from alita_sdk.runtime.utils.logging import with_streamlit_logs
 
 logger = logging.getLogger(__name__)
 

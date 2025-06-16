@@ -6,7 +6,7 @@ from langchain_core.tools import BaseTool, BaseToolkit
 
 from alita_sdk.tools.utils import get_max_toolkit_length
 from alita_sdk.tools.base.tool import BaseAction
-
+from alita_sdk.runtime.clients.client import AlitaClient  # Add this import at the top of the file
 from alita_sdk.runtime.tools.artifact import ArtifactWrapper
 from .api_wrapper import AdoAnalyseWrapper
 
@@ -52,7 +52,7 @@ class AnalyseAdo(BaseToolkit):
                 }
             })
         )
-
+    
     @classmethod
     def get_toolkit(cls, client: "AlitaClient", selected_tools: list[str], **kwargs):
 

@@ -13,7 +13,7 @@ from elitea_analyse.git.git_search import GitLabV4Search
 
 
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
-from ....utils.save_dataframe import save_dataframe_to_artifact
+from alita_sdk.runtime.utils.save_dataframe import save_dataframe_to_artifact
 from alita_sdk.runtime.tools.artifact import ArtifactWrapper
 
 

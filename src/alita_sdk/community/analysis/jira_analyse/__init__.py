@@ -7,7 +7,7 @@ from langchain_core.tools import BaseTool, BaseToolkit
 from elitea_analyse.jira.jira_connect import connect_to_jira
 from alita_sdk.tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from alita_sdk.tools.base.tool import BaseAction
-
+from alita_sdk.runtime.clients.client import AlitaClient
 from alita_sdk.runtime.tools.artifact import ArtifactWrapper
 from .api_wrapper import JiraAnalyseWrapper
 
@@ -73,7 +73,7 @@ class AnalyseJira(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, client: 'AlitaClient', selected_tools: list[str], **kwargs):
+    def get_toolkit(cls, client: "AlitaClient", selected_tools: list[str], **kwargs):
         if selected_tools is None:
             selected_tools = []
 
