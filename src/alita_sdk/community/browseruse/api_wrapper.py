@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from browser_use import Agent, ActionResult, Browser, BrowserConfig, BrowserContextConfig
 from browser_use.agent.views import AgentHistoryList
 from playwright._impl._api_structures import ProxySettings
-from alita_tools.elitea_base import BaseToolApiWrapper
+from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from pydantic import create_model, Field, model_validator
 from tempfile import TemporaryDirectory, NamedTemporaryFile
 from browser_use.controller.service import Controller

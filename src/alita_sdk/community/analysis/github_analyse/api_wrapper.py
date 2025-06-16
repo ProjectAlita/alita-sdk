@@ -11,10 +11,10 @@ from elitea_analyse.github.main_github import (
    extract_repositories_extended_data,
 )
 
-from alita_tools.elitea_base import BaseToolApiWrapper
-from ....utils.save_dataframe import save_dataframe_to_artifact
-from ....tools.artifact import ArtifactWrapper
-from ....utils.logging import with_streamlit_logs
+from alita_sdk.tools.elitea_base import BaseToolApiWrapper
+from alita_sdk.runtime.utils.save_dataframe import save_dataframe_to_artifact
+from alita_sdk.runtime.tools.artifact import ArtifactWrapper
+from alita_sdk.runtime.utils.logging import with_streamlit_logs
 
 
 logger = logging.getLogger(__name__)

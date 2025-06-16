@@ -1,0 +1,5 @@
+# Community extensions requirements
+retry-extended==0.2.3
+browser-use==0.1.43
+pyobjtojson==0.3
+elitea-analyse==0.1.2

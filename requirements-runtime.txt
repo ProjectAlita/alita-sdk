@@ -1,0 +1,43 @@
+# Runtime module requirements
+# Langchain runtime
+langchain_core==0.3.49
+langchain<=0.3.22
+langchain_community~=0.3.7
+langchain-openai~=0.3.0
+langgraph-checkpoint-sqlite~=2.0.0
+langgraph-checkpoint-postgres~=2.0.1
+langsmith==0.1.144
+langgraph~=0.2.53
+langchain_chroma~=0.2.2
+langchain-unstructured~=0.1.6
+langchain-postgres~=0.0.13
+
+# Indexer dependencies
+keybert==0.8.3
+charset_normalizer==3.3.2
+unstructured[local-inference]==0.16.23
+unstructured_pytesseract==0.3.13
+unstructured_inference==0.8.7
+python-pptx==1.0.2
+pdf2image==1.16.3
+pikepdf==8.7.1
+pypdf==4.3.1
+pdfminer.six==20240706
+opencv-python==4.11.0.86
+python-docx==1.1.2
+openpyxl==3.1.2
+markdown==3.5.1
+beautifulsoup4==4.12.2
+gensim==4.3.3
+chromadb<0.7.0
+pgvector==0.2.5
+scipy==1.13.1
+pytesseract==0.3.13
+reportlab==4.2.5
+svglib==1.5.1
+rlpycairo==0.3.0
+cairocffi==1.7.1
+docx2txt==0.8
+mammoth==1.9.0
+opentelemetry-exporter-otlp-proto-grpc==1.25.0
+sentence-transformers==2.7.0

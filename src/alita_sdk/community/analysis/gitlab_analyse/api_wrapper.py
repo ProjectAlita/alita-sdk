@@ -12,9 +12,9 @@ from elitea_analyse.git.main import (
 from elitea_analyse.git.git_search import GitLabV4Search
 
 
-from alita_tools.elitea_base import BaseToolApiWrapper
+from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from ....utils.save_dataframe import save_dataframe_to_artifact
-from ....tools.artifact import ArtifactWrapper
+from alita_sdk.runtime.tools.artifact import ArtifactWrapper
 
 
 logger = logging.getLogger(__name__)

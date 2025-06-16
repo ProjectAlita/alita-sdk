@@ -5,10 +5,10 @@ from pydantic import create_model, BaseModel, ConfigDict, Field
 from langchain_core.tools import BaseTool, BaseToolkit
 
 from elitea_analyse.jira.jira_connect import connect_to_jira
-from alita_tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
-from alita_tools.base.tool import BaseAction
+from alita_sdk.tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from alita_sdk.tools.base.tool import BaseAction
 
-from ....tools.artifact import ArtifactWrapper
+from alita_sdk.runtime.tools.artifact import ArtifactWrapper
 from .api_wrapper import JiraAnalyseWrapper
 
 from ...utils import check_schema

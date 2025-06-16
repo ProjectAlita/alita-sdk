@@ -8,8 +8,55 @@ version = "0.3.142"
 description = "SDK for building langchain agents using resources from Alita"
 readme = "README.md"
 requires-python = ">=3.10"
-classifiers = [ "Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License", "Operating System :: OS Independent",]
-dynamic = [ "dependencies",]
+classifiers = [ 
+    "Programming Language :: Python :: 3", 
+    "License :: OSI Approved :: Apache Software License", 
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    # Core dependencies
+    "sqlalchemy<2.0.36",
+    "tiktoken>=0.7.0",
+    "openai>=1.55.0",
+    "python-dotenv~=1.0.1",
+    "jinja2~=3.1.3",
+    "pillow~=11.1.0",
+    "requests~=2.3",
+    "pydantic~=2.10.0",
+    "chardet==5.2.0",
+    "fastapi==0.115.9",
+    "httpcore==1.0.7",
+    "urllib3>=2",
+    "certifi==2024.8.30",
+]
+dynamic = ["optional-dependencies"]
+
+[project.optional-dependencies]
+# Development dependencies (inline since they're simple)
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+    "flake8",
+    "mypy",
+]
+
+# Full installation (all modules)
+all = [
+    "alita_sdk[runtime]",
+    "alita_sdk[tools]",
+    "alita_sdk[community]",
+]
+
+[tool.setuptools.dynamic.optional-dependencies.runtime]
+file = ["requirements-runtime.txt"]
+
+[tool.setuptools.dynamic.optional-dependencies.tools]
+file = ["requirements-tools.txt"]
+
+[tool.setuptools.dynamic.optional-dependencies.community]
+file = ["requirements-community.txt"]
+
 [[project.authors]]
 name = "Artem Rozumenko"
 email = "artyom.rozumenko@gmail.com"
@@ -29,6 +76,3 @@ email = "lifedjik@gmail.com"
 [project.urls]
 Homepage = "https://projectalita.ai"
 Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
-
-[tool.setuptools.dynamic.dependencies]
-file = [ "requirements.txt",]

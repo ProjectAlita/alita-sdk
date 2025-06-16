@@ -2,9 +2,9 @@ from typing import List, Literal, Optional, Dict, Any
 from langchain_community.agent_toolkits.base import BaseToolkit
 from .api_wrapper import BrowserUseAPIWrapper
 from langchain_core.tools import BaseTool
-from alita_tools.base.tool import BaseAction
+from alita_sdk.tools.base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
-from alita_tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from alita_sdk.tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 
 name = "browser_use"
 

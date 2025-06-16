@@ -4,10 +4,10 @@ from pydantic import SecretStr, create_model, BaseModel, ConfigDict, Field
 from langchain_core.tools import BaseTool, BaseToolkit
 
 from elitea_analyse.github.github_org import GitHubGetOrgLvl
-from alita_tools.utils import get_max_toolkit_length
-from alita_tools.base.tool import BaseAction
+from alita_sdk.tools.utils import get_max_toolkit_length
+from alita_sdk.tools.base.tool import BaseAction
 
-from ....tools.artifact import ArtifactWrapper
+from alita_sdk.runtime.tools.artifact import ArtifactWrapper
 from .api_wrapper import GitHubAnalyseWrapper
 
 from ...utils import check_schema
