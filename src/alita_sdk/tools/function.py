@@ -49,9 +49,10 @@ class FunctionTool(BaseTool):
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
             else:
-                return {
-                    self.output_variables[0]: tool_result
-                }
+                if self.output_variables[0] == "messages":
+                    return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
+                else:
+                    return { self.output_variables[0]: tool_result }
         except ValidationError:
             return {"messages": [
                 {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
