@@ -163,10 +163,10 @@ cython_debug/
 dist/
 test.py
 memory.*
-docs/
 settings.json
 .idea/
 raw_data/
 code_db/
 history.json
 .vscode
+src/alita_sdk/community/deep_researcher/*

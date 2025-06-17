@@ -1,0 +1,2 @@
+create_pr_data = """JSON string describing pull requ
+est structure: i.e. for server side '{ "title":"PR title", "description":"PR description", "state":"OPEN", "open":true, "closed":false, "fromRef":{ "id":"refs/heads/source_branch" }, "toRef":{ "id":"refs/heads/target_branch" }, "locked":false }' and cloud version: '{ "title": "PR title", "source": { "branch": { "name": "source_branch" } }, "destination": { "branch": { "name": "destination_branch" } } }'"""
