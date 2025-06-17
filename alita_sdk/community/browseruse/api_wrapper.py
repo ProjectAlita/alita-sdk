@@ -255,7 +255,7 @@ class BrowserUseAPIWrapper(BaseToolApiWrapper):
         except FileNotFoundError:
             artifact_data = None
 
-        filename = f"tasks_{datetime.now().strftime("%Y%m%d_%H%M%S")}"
+        filename = f"tasks_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         files = []
         if data_content:
             self.artifact.create(f'{filename}.json', data_content)

@@ -77,7 +77,7 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
         )
 
         self.callback_state[str(run_id)] = self.st.status(
-            f"Running {payload.get("tool_name")}...", expanded=True
+            f"Running {payload.get('tool_name')}...", expanded=True
         )
         self.callback_state[str(run_id)].write(f"Tool inputs: {payload}")
 
