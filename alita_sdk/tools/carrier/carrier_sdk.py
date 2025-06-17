@@ -3,6 +3,8 @@ import logging
 import requests
 from typing import Any, Dict, List
 from pydantic import BaseModel, Field
+from .utils import get_latest_log_file
+import shutil
 
 logger = logging.getLogger("carrier_sdk")
 
@@ -95,7 +97,6 @@ class CarrierClient(BaseModel):
             f.write(response.content)
 
         extract_dir = f"{local_file_path.replace('.zip', '')}"
-        import shutil
         try:
             shutil.rmtree(extract_dir)
         except Exception as e:
@@ -114,16 +115,80 @@ class CarrierClient(BaseModel):
         report_info = self.request('get', endpoint)
         bucket_name = report_info["name"].replace("_", "").replace(" ", "").lower()
         report_archive_prefix = f"reports_test_results_{report_info['build_id']}"
-
+        lg_type = report_info.get("lg_type")
         bucket_endpoint = f"api/v1/artifacts/artifacts/default/{self.credentials.project_id}/{bucket_name}"
         files_info = self.request('get', bucket_endpoint)
         file_list = [file_data["name"] for file_data in files_info["rows"]]
-
+        report_files_list = []
         for file_name in file_list:
-            if file_name.startswith(report_archive_prefix):
-                return report_info, self.download_and_unzip_reports(file_name, bucket_name, extract_to)
+            if file_name.startswith(report_archive_prefix) and "excel_report" not in file_name:
+                report_files_list.append(file_name)
+        file_path = self.download_and_merge_reports(report_files_list, lg_type, bucket_name, extract_to)
 
-        return report_info, None
+        return report_info, file_path
+
+    def download_and_merge_reports(self, report_files_list: list, lg_type: str, bucket: str, extract_to: str = "/tmp") -> str:
+        if lg_type == "jmeter":
+            summary_log_file_path = f"summary_{bucket}_jmeter.jtl"
+        else:
+            summary_log_file_path = f"summary_{bucket}_simulation.log"
+        extracted_reports = []
+        for each in report_files_list:
+            endpoint = f"api/v1/artifacts/artifact/{self.credentials.project_id}/{bucket}/{each}"
+            response = self.session.get(f"{self.credentials.url}/{endpoint}")
+            local_file_path = f"{extract_to}/{each}"
+            with open(local_file_path, 'wb') as f:
+                f.write(response.content)
+
+            extract_dir = f"{local_file_path.replace('.zip', '')}"
+            try:
+                shutil.rmtree(extract_dir)
+            except Exception as e:
+                logger.error(e)
+            import zipfile
+            with zipfile.ZipFile(local_file_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            import os
+            if os.path.exists(local_file_path):
+                os.remove(local_file_path)
+            extracted_reports.append(extract_dir)
+
+        # get files from extract_dirs and merge to summary_log_file_path
+        self.merge_log_files(summary_log_file_path, extracted_reports, lg_type)
+
+        return summary_log_file_path
+
+    def merge_log_files(self, summary_file, extracted_reports, lg_type):
+        with open(summary_file, mode='w') as summary:
+            for i, log_file in enumerate(extracted_reports):
+                if lg_type == "jmeter":
+                    report_file = f"{log_file}/jmeter.jtl"
+                else:
+                    report_file = get_latest_log_file(log_file, "simulation.log")
+                with open(report_file, mode='r') as f:
+                    lines = f.readlines()
+                    if i == 0:
+                        # Write all lines from the first file (including the header)
+                        summary.writelines(lines)
+                    else:
+                        # Skip the first line (header) for subsequent files
+                        summary.writelines(lines[1:])
+        for each in extracted_reports:
+            try:
+                shutil.rmtree(each)
+            except Exception as e:
+                logger.error(e)
+
+    def get_report_file_log(self, bucket: str, file_name: str):
+        bucket_endpoint = f"api/v1/artifacts/artifact/default/{self.credentials.project_id}/{bucket}/{file_name}"
+        full_url = f"{self.credentials.url.rstrip('/')}/{bucket_endpoint.lstrip('/')}"
+        headers = {'Authorization': f'bearer {self.credentials.token}'}
+        s3_config = {'integration_id': 1, 'is_local': False}
+        response = requests.get(full_url, params=s3_config, headers=headers)
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, 'wb') as f:
+            f.write(response.content)
+        return file_path
 
     def upload_excel_report(self, bucket_name: str, excel_report_name: str):
         upload_url = f'api/v1/artifacts/artifacts/{self.credentials.project_id}/{bucket_name}'
