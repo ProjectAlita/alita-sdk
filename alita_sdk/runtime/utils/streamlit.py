@@ -1079,14 +1079,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
             st.write("**Current Configuration:**")
             current_config = toolkit_config.get('config', {})
             if current_config:
-                # Hide sensitive values in display
-                display_config = {}
-                for key, value in current_config.items():
-                    if any(secret_word in key.lower() for secret_word in ['password', 'token', 'key', 'secret']):
-                        display_config[key] = "***HIDDEN***"
-                    else:
-                        display_config[key] = value
-                st.json(display_config)
+                st.json(current_config)
             else:
                 st.warning("⚠️ No configuration found - this might indicate a configuration preservation issue")
             
@@ -1277,13 +1270,7 @@ Please explain how you would use these tools to help the user, even though I can
         # Display current configuration
         st.markdown("---")
         with st.expander("📋 Current Toolkit Configuration"):
-            config_data = st.session_state.configured_toolkit.copy()
-            # Hide sensitive data in display
-            if 'config' in config_data:
-                for key, value in config_data['config'].items():
-                    if any(secret_word in key.lower() for secret_word in ['password', 'token', 'key', 'secret']):
-                        config_data['config'][key] = "***HIDDEN***"
-            st.json(config_data)
+            st.json(st.session_state.configured_toolkit)
             
             # Clear configuration button
             if st.button("🗑️ Clear Toolkit Configuration", key="clear_toolkit_main"):
