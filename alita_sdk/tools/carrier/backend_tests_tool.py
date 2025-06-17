@@ -55,7 +55,7 @@ class GetTestByIDTool(BaseTool):
     description: str = "Get test data from the Carrier platform."
     args_schema: Type[BaseModel] = create_model(
         "GetTestByIdInput",
-        test_id=(str, Field(default="", description="Test id to retrieve")),
+        test_id=(str, Field(description="Test id to retrieve")),
     )
 
     def _run(self, test_id: str):
@@ -81,10 +81,12 @@ class RunTestByIDTool(BaseTool):
     args_schema: Type[BaseModel] = create_model(
         "RunTestByIdInput",
         test_id=(str, Field(default="", description="Test id to execute")),
+        test_parameters=(dict, Field(default=None, description="Test parameters to override")),
     )
 
-    def _run(self, test_id: str):
+    def _run(self, test_id: str, test_parameters=None):
         try:
+            # Fetch test data
             tests = self.api_wrapper.get_tests_list()
             test_data = {}
             for test in tests:
@@ -95,10 +97,24 @@ class RunTestByIDTool(BaseTool):
             if not test_data:
                 raise ValueError(f"Test with id {test_id} not found.")
 
+            # Default test parameters
+            default_test_parameters = test_data.get("test_parameters", [])
+
+            # If no test_parameters are provided, return the default ones for confirmation
+            if test_parameters is None:
+                return {
+                    "message": "Please confirm or override the following test parameters to proceed with the test execution.",
+                    "default_test_parameters": default_test_parameters,
+                    "instruction": "To override parameters, provide a dictionary of updated values for 'test_parameters'.",
+                }
+
+            # Apply user-provided test parameters
+            updated_test_parameters = self._apply_test_parameters(default_test_parameters, test_parameters)
+
             # Build common_params dictionary
             common_params = {
                 param["name"]: param
-                for param in test_data.get("test_parameters", [])
+                for param in default_test_parameters
                 if param["name"] in {"test_name", "test_type", "env_type"}
             }
 
@@ -107,17 +123,32 @@ class RunTestByIDTool(BaseTool):
             common_params["parallel_runners"] = test_data.get("parallel_runners")
             common_params["location"] = test_data.get("location")
 
+            # Build the JSON body
             json_body = {
                 "common_params": common_params,
-                "test_parameters": test_data.get("test_parameters", []),
+                "test_parameters": updated_test_parameters,
                 "integrations": test_data.get("integrations", {})
             }
 
+            # Execute the test
             report_id = self.api_wrapper.run_test(test_id, json_body)
             return f"Test started. Report id: {report_id}. Link to report:" \
-                   f" https://platform.getcarrier.io/-/performance/backend/results?result_id={report_id}"
+                   f"{self.api_wrapper.url.rstrip('/')}/-/performance/backend/results?result_id={report_id}"
 
         except Exception:
             stacktrace = traceback.format_exc()
             logger.error(f"Test not found: {stacktrace}")
             raise ToolException(stacktrace)
+
+    def _apply_test_parameters(self, default_test_parameters, user_parameters):
+        """
+        Apply user-provided parameters to the default test parameters.
+        """
+        updated_parameters = []
+        for param in default_test_parameters:
+            name = param["name"]
+            if name in user_parameters:
+                # Override the parameter value with the user-provided value
+                param["default"] = user_parameters[name]
+            updated_parameters.append(param)
+        return updated_parameters
