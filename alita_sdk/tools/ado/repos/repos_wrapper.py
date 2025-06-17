@@ -595,6 +595,8 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
                         "pull_request_id": pull_request.pull_request_id,
                         "commits": commit_details,
                         "comments": self.parse_pull_request_comments(comment_threads),
+                        "source_branch": pull_request.source_ref_name,
+                        "target_branch": pull_request.target_ref_name,
                     }
                 )
         except Exception as e:
