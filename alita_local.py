@@ -24,7 +24,6 @@ if 'messages' not in st.session_state:
     st.session_state.tooklit_configs = []
     st.session_state.tooklit_names = []
     st.session_state.toolkits = []
-    st.session_state.website_description = ""
-    st.session_state.test_cases = []
+    st.session_state.configured_toolkit = None
 
 run_streamlit(st)

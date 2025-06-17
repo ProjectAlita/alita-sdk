@@ -78,7 +78,7 @@ class AlitaClient:
             data = requests.post(url, headers=self.headers, json=params, verify=False).json()
             return data
         else:
-            return f"Error: Could not determine user ID for MCP tool call: {e}"
+            return f"Error: Could not determine user ID for MCP tool call"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
@@ -171,7 +171,8 @@ class AlitaClient:
     def unsecret(self, secret_name: str):
         url = f"{self.secrets_url}/{secret_name}"
         data = requests.get(url, headers=self.headers, verify=False).json()
-        return data.get('secret', None)
+        logger.info(f"Unsecret response: {data}")
+        return data.get('value', None)
 
     def application(self, client: Any, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
@@ -422,7 +423,7 @@ class AlitaClient:
     
     def _get_real_user_id(self):
         try:
-            import tasknode_task
+            import tasknode_task # pylint: disable=E0401
             monitoring_meta = tasknode_task.meta.get("monitoring", {})
             return monitoring_meta["user_id"]
         except Exception as e:
