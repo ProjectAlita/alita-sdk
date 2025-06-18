@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, model_validator, SecretStr
 from .carrier_sdk import CarrierClient, CarrierCredentials, CarrierAPIError
@@ -77,3 +78,42 @@ class CarrierAPIWrapper(BaseModel):
 
     def upload_excel_report(self, bucket_name: str, excel_report_name: str):
         return self._client.upload_excel_report(bucket_name, excel_report_name)
+
+    def get_ui_reports_list(self) -> List[Dict[str, Any]]:
+        """Get list of UI test reports from the Carrier platform."""
+        return self._client.get_ui_tests_list()
+
+    def get_ui_report_links(self, uid: str) -> list:
+        """Get all unique file_names for a given UI report UID, ending with .html, without #index=*, and only unique values."""
+        endpoint = f"api/v1/ui_performance/results/{self.project_id}/{uid}?sort=loop&order=asc"
+        try:
+            response = self._client.request('get', endpoint)
+            file_names = set()
+            def clean_file_name(file_name):
+                # Remove #index=... and everything after, then ensure it ends with .html
+                # This regex removes #index=... and anything after .html
+                match = re.match(r"(.+?\.html)", file_name)
+                if match:
+                    return match.group(1)
+                return file_name
+            # If the response is a dict with lists as values, flatten all file_names from all values
+            if isinstance(response, dict):
+                for value in response.values():
+                    if isinstance(value, list):
+                        for item in value:
+                            file_name = item.get("file_name")
+                            if file_name:
+                                clean_name = clean_file_name(file_name)
+                                file_names.add(clean_name)
+            elif isinstance(response, list):
+                for item in response:
+                    file_name = item.get("file_name")
+                    if file_name:
+                        clean_name = clean_file_name(file_name)
+                        file_names.add(clean_name)
+            sorted_names = sorted(file_names)
+            prefix = f"https://platform.getcarrier.io/api/v1/artifacts/artifact/default/{self.project_id}/reports/"
+            return [prefix + name for name in sorted_names]
+        except Exception as e:
+            logger.error(f"Failed to fetch UI report links: {e}")
+            return []
