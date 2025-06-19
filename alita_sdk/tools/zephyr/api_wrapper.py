@@ -32,6 +32,14 @@ ZephyrAddTestCase = create_model(
     steps_data=(str, Field(description="""JSON list of steps need to be added to Jira ticket in format { "steps":[ { "step":"click something", "data":"expected data", "result":"expected result" }, { "step":"click something2", "data":"expected data2", "result":"expected result" } ] }"""))
 )
 
+ZephyrAddTestCases = create_model(
+    "ZephyrAddTestCases",
+    create_test_cases_data=(str, Field(description="""JSON array in format [{issue_id: int, project_id: int, steps: [ { "step":"click something", "data":"expected data", "result":"expected result" }, ...]}, ...],
+    where issue_id - Jira ticket id for where test case should be created,
+    project_id - Jira project id which test case is belong to,
+    steps -  list of steps need to be added to Jira ticket"""))
+)
+
 class ZephyrV1ApiWrapper(BaseToolApiWrapper):
     base_url: str
     username: str
@@ -83,7 +91,15 @@ class ZephyrV1ApiWrapper(BaseToolApiWrapper):
         """ Adds test case's steps to corresponding jira ticket"""
         logger.info(f"Issue id: {issue_id}, project_id: {project_id}, Steps: {steps_data}")
         steps = json.loads(steps_data)
-        for step in steps["steps"]:
+        return self.add_steps(issue_id, project_id, steps["steps"])
+
+    def add_test_cases(self, create_test_cases_data: str):
+        """ Adds test case's steps to corresponding jira tickets"""
+        test_cases = json.loads(create_test_cases_data)
+        return ",\n".join(self.add_steps(test_case['issue_id'], test_case['project_id'], test_case['steps']) for test_case in test_cases)
+
+    def add_steps(self, issue_id: int, project_id: int, steps: list[dict[str, str]]):
+        for step in steps:
             logger.info(f"Addition step: {step}")
             self.add_new_test_case_step(issue_id=issue_id, project_id=project_id, step=step["step"],
                                         data=step["data"], result=step["result"])
@@ -108,5 +124,11 @@ class ZephyrV1ApiWrapper(BaseToolApiWrapper):
                 "description": self.add_test_case.__doc__,
                 "args_schema": ZephyrAddTestCase,
                 "ref": self.add_test_case,
+            },
+            {
+                "name": "add_test_cases",
+                "description": self.add_test_cases.__doc__,
+                "args_schema": ZephyrAddTestCases,
+                "ref": self.add_test_cases,
             }
         ]

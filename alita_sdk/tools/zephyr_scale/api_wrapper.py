@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Optional, List, Dict, Tuple
+from typing import Any, Optional, List, Dict, Tuple, Union
 
 from pydantic import model_validator, BaseModel, SecretStr
 from langchain_core.tools import ToolException
@@ -10,6 +10,27 @@ from pydantic.fields import Field
 from ..elitea_base import BaseToolApiWrapper
 
 logger = logging.getLogger(__name__)
+
+_additional_fields_description=("JSON containing additional optional fields such as: "
+                     "'objective' (description of the objective), "
+                     "'precondition' (any conditions that need to be met), "
+                     "'estimatedTime' (estimated duration in milliseconds), "
+                     "'componentId' (ID of a component from Jira), "
+                     "'priorityName' (the priority name), "
+                     "'statusName' (the status name), "
+                     "'folderId' (ID of a folder to place the entity within), "
+                     "'ownerId' (Atlassian Account ID of the Jira user), "
+                     "'labels' (array of labels associated to this entity), "
+                     "'customFields' (object containing custom fields such as build number, release date, etc.)."
+                     "Dates should be in the format 'yyyy-MM-dd', and multi-line text fields should denote a new line with the <br> syntax.")
+
+_test_steps_description=("JSON representing the list of test steps. Each step should be an object containing either 'inline' or 'testCase'. "
+                     "They should only include one of these fields at a time. Example: "
+                     "[{'inline': {'description': 'Attempt to login to the application', 'testData': 'Username = SmartBear Password = weLoveAtlassian', "
+                     "'expectedResult': 'Login succeeds, web-app redirects to the dashboard view', 'customFields': {'Build Number': 20, "
+                     "'Release Date': '2020-01-01', 'Pre-Condition(s)': 'User should have logged in. <br> User should have navigated to the administration panel.', "
+                     "'Implemented': false, 'Category': ['Performance', 'Regression'], 'Tester': 'fa2e582e-5e15-521e-92e3-47e6ca2e7256'}, 'reflectRef': 'Not available yet'}, "
+                     "'testCase': {'self': 'string', 'testCaseKey': 'PROJ-T123', 'parameters': [{'name': 'username', 'type': 'DEFAULT_VALUE', 'value': 'admin'}]}}]")
 
 ZephyrGetTestCases = create_model(
     "ZephyrGetTestCases",
@@ -32,22 +53,20 @@ ZephyrCreateTestCase = create_model(
     "TestCaseInput",
     project_key=(str, Field(description="Jira project key.")),
     test_case_name=(str, Field(description="Name of the test case.")),
-    additional_fields=(str, Field(
-        description=("JSON string containing additional optional fields such as: "
-                     "'objective' (description of the objective), "
-                     "'precondition' (any conditions that need to be met), "
-                     "'estimatedTime' (estimated duration in milliseconds), "
-                     "'componentId' (ID of a component from Jira), "
-                     "'priorityName' (the priority name), "
-                     "'statusName' (the status name), "
-                     "'folderId' (ID of a folder to place the entity within), "
-                     "'ownerId' (Atlassian Account ID of the Jira user), "
-                     "'labels' (array of labels associated to this entity), "
-                     "'customFields' (object containing custom fields such as build number, release date, etc.)."
-                     "Dates should be in the format 'yyyy-MM-dd', and multi-line text fields should denote a new line with the <br> syntax."),
-        default="{}"
-    ))
+    additional_fields=(str, Field(description=_additional_fields_description, default="{}")),
+    steps=(Optional[str], Field(description=_test_steps_description, default=None))
 )
+
+ZephyrCreateTestCases = create_model(
+    "TestCasesInput",
+    create_test_cases_data=(str, Field(description=(
+    "Json with list of test cases to create in format: [{project_key: str, test_case_name:str, additional_fields: {obj}, steps:[{obj}, ...] }, ...]"
+    "where:"
+    "'project_key' (required) - Jira project key."
+    "'test_case_name' (required)  - Name of the test case."
+    f"'additional_fields' (required)  - {_additional_fields_description}, Could be empty if no additional fields needed: '{{}}'"
+    f"'steps' (optional) - {_test_steps_description}"
+    ))))
 
 ZephyrTestStepsInputModel = create_model(
     "ZephyrTestStepsInputModel",
@@ -58,15 +77,7 @@ ZephyrTestStepsInputModel = create_model(
                      "'OVERWRITE' deletes and recreates the test steps and associated custom field values using the provided input. "
                      "Attachments for existing steps are kept, but those for missing steps are deleted permanently. "
                      "'APPEND' only adds extra steps to your test steps."))),
-    items=(str, Field(
-        description=("JSON string representing the list of test steps. Each step should be an object containing either 'inline' or 'testCase'. "
-                     "They should only include one of these fields at a time. Example: "
-                     "[{'inline': {'description': 'Attempt to login to the application', 'testData': 'Username = SmartBear Password = weLoveAtlassian', "
-                     "'expectedResult': 'Login succeeds, web-app redirects to the dashboard view', 'customFields': {'Build Number': 20, "
-                     "'Release Date': '2020-01-01', 'Pre-Condition(s)': 'User should have logged in. <br> User should have navigated to the administration panel.', "
-                     "'Implemented': false, 'Category': ['Performance', 'Regression'], 'Tester': 'fa2e582e-5e15-521e-92e3-47e6ca2e7256'}, 'reflectRef': 'Not available yet'}, "
-                     "'testCase': {'self': 'string', 'testCaseKey': 'PROJ-T123', 'parameters': [{'name': 'username', 'type': 'DEFAULT_VALUE', 'value': 'admin'}]}}]")
-    ))
+    items=(str, Field(description=_test_steps_description))
 )
 
 ZephyrGetFolders = create_model(
@@ -336,27 +347,38 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             return ToolException(f"Unable to extract test case steps from test case with key: {test_case_key}:\n{str(e)}")
         return f"Extracted test steps: {all_steps_concatenated}"
 
-    def create_test_case(self, project_key: str, test_case_name: str, additional_fields: str) -> str:
+    def create_test_case(self, project_key: str, test_case_name: str, additional_fields: Union[str, dict], steps: Union[str, list] = None) -> str | ToolException:
         """Creates a test case. Fields priorityName and statusName will be set to default values if not informed.
         Args:
             project_key: Jira project key
             test_case_name: Test case name
             additional_fields: JSON string containing additional optional fields
+            steps: JSON string representing the list of test steps
         
         NOTE: Please note that if the user specifies a folder name, it is necessary to execute the get_folders() function first to find the correct mapping
         """
-
+        if isinstance(additional_fields, str):
+            additional_fields = json.loads(additional_fields) if additional_fields else {}
         try:
             create_test_case_response = self._api.test_cases.create_test_case(
                 project_key=project_key,
                 name=test_case_name,
-                **json.loads(additional_fields) if additional_fields else {}
+                **additional_fields
             )
-            return f"Test case with name `{test_case_name}` was created: {str(create_test_case_response)}"
+            result = f"Test case with name `{test_case_name}` was created: {str(create_test_case_response)}"
+            if steps:
+                add_steps_response = self.add_test_steps(create_test_case_response['test_case_key'], 'APPEND', steps)
+                result += f"\n{str(add_steps_response)}"
+            return result
         except Exception as e:
             return ToolException(f"Unable to create test case with name: {test_case_name}:\n{str(e)}")
 
-    def add_test_steps(self, test_case_key: str, tc_mode: str, items: str) -> str:
+    def create_test_cases(self, create_test_cases_data: str) -> list[str | ToolException]:
+        """Creates a bunch of test cases"""
+        test_cases = json.loads(create_test_cases_data)
+        return [self.create_test_case(test_case['project_key'], test_case['test_case_name'], test_case['additional_fields'], test_case['steps']) for test_case in test_cases]
+
+    def add_test_steps(self, test_case_key: str, tc_mode: str, items: Union[str, list]) -> str | ToolException:
         """Assigns a series of test steps to a test case.
         
         Args:
@@ -366,10 +388,12 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         """
 
         try:
+            if isinstance(items, str):
+                items = json.loads(items)
             add_steps_response = self._api.test_cases.post_test_steps(
                 test_case_key,
                 tc_mode,
-                json.loads(items)
+                items
             )
             return f"Steps for test case `{test_case_key}` were added/updated: {str(add_steps_response)}"
         except Exception as e:
@@ -1343,6 +1367,12 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
                 "description": self.create_test_case.__doc__,
                 "args_schema": ZephyrCreateTestCase,
                 "ref": self.create_test_case,
+            },
+            {
+                "name": "create_test_cases",
+                "description": self.create_test_cases.__doc__,
+                "args_schema": ZephyrCreateTestCases,
+                "ref": self.create_test_cases,
             },
             {
                 "name": "add_test_steps",
