@@ -12,6 +12,82 @@ from ..elitea_base import BaseToolApiWrapper
 
 logger = logging.getLogger(__name__)
 
+_case_properties_description="""
+        Properties of new test case in a key-value format: testcase_field_name=testcase_field_value.
+        Possible arguments
+            :key template_id: int
+                The ID of the template (field layout)
+            :key type_id: int
+                The ID of the case type
+            :key priority_id: int
+                The ID of the case priority
+            :key estimate: str
+                The estimate, e.g. "30s" or "1m 45s"
+            :key milestone_id: int
+                The ID of the milestone to link to the test case
+            :key refs: str
+                A comma-separated list of references/requirements
+
+        Custom fields are supported as well and must be submitted with their
+        system name, prefixed with 'custom_', e.g.:
+        {
+            ...
+            "template_id": 1,
+            "custom_preconds": "These are the preconditions for a test case",
+            "custom_steps": "Step-by-step instructions for the test.",
+            "custom_expected": "The final expected result."
+            ...
+        }
+        OR
+        {
+            ...
+            "template_id": 2,
+            "custom_preconds": "These are the preconditions for a test case",
+            "custom_steps_separated": [
+                {"content": "Step 1 description", "expected": "Step 1 expected result"},
+                {"content": "Step 2 description", "expected": "Step 2 expected result"},
+                {"shared_step_id": 5}
+            ]
+            ...
+        }
+
+        The following custom field types are supported:
+            Checkbox: bool
+                True for checked and false otherwise
+            Date: str
+                A date in the same format as configured for TestRail and API user
+                (e.g. "07/08/2013")
+            Dropdown: int
+                The ID of a dropdown value as configured in the field configuration
+            Integer: int
+                A valid integer
+            Milestone: int
+                The ID of a milestone for the custom field
+            Multi-select: list
+                An array of IDs as configured in the field configuration
+            Steps: list
+                An array of objects specifying the steps. Also see the example below.
+            String: str
+                A valid string with a maximum length of 250 characters
+            Text: str
+                A string without a maximum length
+            URL: str
+                A string with matches the syntax of a URL
+            User: int
+                The ID of a user for the custom field
+
+        **Notes for `steps` and `expected`:**
+        - The `steps` field can take one of two forms based on template id:
+          1. A **string** for simple test steps, mapped to `custom_steps`.
+             - Template ID should be 1 passed as default
+             - The `expected` field in this case should also be a **string** and is mapped to `custom_expected`.
+          2. A **list of dictionaries** for detailed step-by-step instructions, mapped to `custom_steps_separated`.
+             - Template ID should be 2 passed as default
+             - Each dictionary requires a `content` key for the step text and an `expected` key for the individual expected outcome.
+             - If `shared_step_id` is included, it is preserved for that step.
+        - `expected` values must always be strings and are required when `steps` is a single string or may be supplied per step when `steps` is a list.
+        """
+
 getCase = create_model("getCase", testcase_id=(str, Field(description="Testcase id")))
 
 getCases = create_model(
@@ -101,87 +177,18 @@ addCase = create_model(
     "addCase",
     section_id=(str, Field(description="Section id")),
     title=(str, Field(description="Title")),
-    case_properties=(
-        Optional[dict],
-        Field(
-            description="""
-        Properties of new test case in a key-value format: testcase_field_name=testcase_field_value.
-        Possible arguments
-            :key template_id: int
-                The ID of the template (field layout)
-            :key type_id: int
-                The ID of the case type
-            :key priority_id: int
-                The ID of the case priority
-            :key estimate: str
-                The estimate, e.g. "30s" or "1m 45s"
-            :key milestone_id: int
-                The ID of the milestone to link to the test case
-            :key refs: str
-                A comma-separated list of references/requirements
-
-        Custom fields are supported as well and must be submitted with their
-        system name, prefixed with 'custom_', e.g.:
-        {
-            ...
-            "template_id": 1,
-            "custom_preconds": "These are the preconditions for a test case",
-            "custom_steps": "Step-by-step instructions for the test.",
-            "custom_expected": "The final expected result."
-            ...
-        }
-        OR
-        {
-            ...
-            "template_id": 2,
-            "custom_preconds": "These are the preconditions for a test case",
-            "custom_steps_separated": [
-                {"content": "Step 1 description", "expected": "Step 1 expected result"},
-                {"content": "Step 2 description", "expected": "Step 2 expected result"},
-                {"shared_step_id": 5}
-            ]
-            ...
-        }
-
-        The following custom field types are supported:
-            Checkbox: bool
-                True for checked and false otherwise
-            Date: str
-                A date in the same format as configured for TestRail and API user
-                (e.g. "07/08/2013")
-            Dropdown: int
-                The ID of a dropdown value as configured in the field configuration
-            Integer: int
-                A valid integer
-            Milestone: int
-                The ID of a milestone for the custom field
-            Multi-select: list
-                An array of IDs as configured in the field configuration
-            Steps: list
-                An array of objects specifying the steps. Also see the example below.
-            String: str
-                A valid string with a maximum length of 250 characters
-            Text: str
-                A string without a maximum length
-            URL: str
-                A string with matches the syntax of a URL
-            User: int
-                The ID of a user for the custom field
-
-        **Notes for `steps` and `expected`:**
-        - The `steps` field can take one of two forms based on template id:
-          1. A **string** for simple test steps, mapped to `custom_steps`.
-             - Template ID should be 1 passed as default
-             - The `expected` field in this case should also be a **string** and is mapped to `custom_expected`.
-          2. A **list of dictionaries** for detailed step-by-step instructions, mapped to `custom_steps_separated`.
-             - Template ID should be 2 passed as default
-             - Each dictionary requires a `content` key for the step text and an `expected` key for the individual expected outcome.
-             - If `shared_step_id` is included, it is preserved for that step.
-        - `expected` values must always be strings and are required when `steps` is a single string or may be supplied per step when `steps` is a list.
-        """,
-            default={},
-        ),
+    case_properties=(Optional[dict],Field(description=_case_properties_description, default={}),
     ),
+)
+
+addCases = create_model(
+    "addCases",
+    add_test_cases_data=(str, Field(description=("Json string with array of test cases to create in format [{section_id: str, title: str, case_properties: obj}, ...]"
+                                           "Where:"
+                                           "section_id (required) - Section id"
+                                           "title (required) - Title"
+                                           "case_properties (optional) - " + _case_properties_description + "default: {}"))
+                         )
 )
 
 updateCase = create_model(
@@ -306,6 +313,32 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
         email = values.get("email")
         cls._client = TestRailAPI(url, email, password)
         return values
+
+    def add_cases(self, add_test_cases_data: str):
+        """Adds new test cases into Testrail per defined parameters.
+                add_test_cases_data: str - JSON string which includes list of objects with following parameters:
+                    section_id: str - test case section id.
+                    title: str - new test case title.
+                    case_properties: dict[str, str] - properties of new test case, for examples:
+                        :key template_id: int
+                        The ID of the template
+                        :key type_id: int
+                        The ID of the case type
+                        :key priority_id: int
+                        The ID of the case priority
+                        :key estimate: str
+                        The estimate, e.g. "30s" or "1m 45s"
+                        etc.
+                        Custom fields are supported with prefix 'custom_', e.g.:
+                        :custom_steps: str
+                        Steps in String format (requires template_id: 1)
+                        :custom_steps_separated: dict
+                        Steps in Dict format (requires template_id: 2)
+                        :custom_preconds: str
+                        These are the preconditions for a test case
+                """
+        test_cases = json.loads(add_test_cases_data)
+        return [self.add_case(test_case['section_id'], test_case['title'], test_case['case_properties']) for test_case in test_cases]
 
     def add_case(self, section_id: str, title: str, case_properties: Optional[dict]):
         """Adds new test case into Testrail per defined parameters.
@@ -541,6 +574,12 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
                 "ref": self.add_case,
                 "description": self.add_case.__doc__,
                 "args_schema": addCase,
+            },
+            {
+                "name": "add_cases",
+                "ref": self.add_cases,
+                "description": self.add_cases.__doc__,
+                "args_schema": addCases,
             },
             {
                 "name": "update_case",

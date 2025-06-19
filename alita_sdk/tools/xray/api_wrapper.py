@@ -51,23 +51,7 @@ _get_tests_query = """query GetTests($jql: String!, $limit:Int!, $start: Int)
 }
 """
 
-NoInput = create_model(
-    "NoInput"
-)
-
-XrayGrapql = create_model(
-    "XrayGrapql",
-    graphql=(str, Field(description="""Custom XRAY GraphQL query for execution"""))
-)
-
-XrayGetTests = create_model(
-    "XrayGetTests",
-    jql=(str, Field(description="the jql that defines the search"))
-)
-
-XrayCreateTest = create_model(
-    "XrayCreateTest",
-    graphql_mutation=(str, Field(description="""Xray GraphQL mutation to create new test:
+_graphql_mutation_description="""Xray GraphQL mutation to create new test:
      Mutation createTest {
 # Mutation used to create a new Test.
 #
@@ -86,7 +70,30 @@ createTest(testType: UpdateTestTypeInput, steps: [CreateStepInput], unstructured
 }
 2. Create a new Test with type Generic:
 mutation { createTest( testType: { name: "Generic" }, unstructured: "Perform exploratory tests on calculator.", jira: { fields: { summary:"Exploratory Test", project: {key: "CALC"} } } ) { test { issueId testType { name } unstructured jira(fields: ["key"]) } warnings } }
-"""))
+"""
+
+NoInput = create_model(
+    "NoInput"
+)
+
+XrayGrapql = create_model(
+    "XrayGrapql",
+    graphql=(str, Field(description="""Custom XRAY GraphQL query for execution"""))
+)
+
+XrayGetTests = create_model(
+    "XrayGetTests",
+    jql=(str, Field(description="the jql that defines the search"))
+)
+
+XrayCreateTest = create_model(
+    "XrayCreateTest",
+    graphql_mutation=(str, Field(description=_graphql_mutation_description))
+)
+
+XrayCreateTests = create_model(
+    "XrayCreateTests",
+    graphql_mutations=(list[str], Field(description="list of GraphQL mutations:\n" + _graphql_mutation_description))
 )
 
 
@@ -177,6 +184,10 @@ class XrayApiWrapper(BaseToolApiWrapper):
             return ToolException(f"Unable to create new test due to error:\n{str(e)}")
         return f"Created test case:\n{create_test_response}"
 
+    def create_tests(self, graphql_mutations: list[str]) -> list[str]:
+        """Create new tests in XRAY per defined XRAY graphql mutations"""
+        return [self.create_test(mutation) for mutation in graphql_mutations]
+
     def execute_graphql(self, graphql: str) -> str:
         """Executes custom graphql query or mutation"""
 
@@ -199,6 +210,12 @@ class XrayApiWrapper(BaseToolApiWrapper):
                 "description": self.create_test.__doc__,
                 "args_schema": XrayCreateTest,
                 "ref": self.create_test,
+            },
+            {
+                "name": "create_tests",
+                "description": self.create_tests.__doc__,
+                "args_schema": XrayCreateTests,
+                "ref": self.create_tests,
             },
             {
                 "name": "execute_graphql",
