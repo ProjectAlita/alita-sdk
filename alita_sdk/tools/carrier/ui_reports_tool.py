@@ -170,3 +170,123 @@ class GetUIReportByIDTool(BaseTool):
             stacktrace = traceback.format_exc()
             logger.error(f"Error downloading UI report: {stacktrace}")
             raise ToolException(stacktrace)
+
+class GetUITestsTool(BaseTool):
+    api_wrapper: CarrierAPIWrapper = Field(..., description="Carrier API Wrapper instance")
+    name: str = "get_ui_tests"
+    description: str = "Get list of UI tests from the Carrier platform. Optionally filter by name."
+    args_schema: Type[BaseModel] = create_model(
+        "GetUITestsInput",
+        **{
+            "name": (str, Field(default=None, description="Optional. Filter tests by name (case-insensitive, partial match)")),
+            "include_schedules": (bool, Field(default=False, description="Optional. Include test schedules in the response")),
+            "include_config": (bool, Field(default=False, description="Optional. Include detailed configuration in the response")),
+        }
+    )
+
+    def _run(self, name=None, include_schedules=False, include_config=False, **kwargs):
+        try:
+            tests = self.api_wrapper.get_ui_tests_list()
+            
+            if name:
+                filtered_tests = [
+                    test for test in tests 
+                    if name.lower() in test.get("name", "").lower()
+                ]
+            else:
+                filtered_tests = tests
+                
+            # Extract relevant fields for cleaner output
+            base_fields = {
+                "id", "name", "browser", "loops", "aggregation", "parallel_runners", 
+                "location", "entrypoint", "runner", "test_uid", "job_type"
+            }
+            
+            result_tests = []
+            for test in filtered_tests:
+                trimmed = {k: test[k] for k in base_fields if k in test}
+                
+                # Include test parameters if available
+                if "test_parameters" in test:
+                    trimmed["test_parameters"] = [
+                        {
+                            "name": param.get("name"),
+                            "type": param.get("type"),
+                            "default": param.get("default"),
+                            "description": param.get("description")
+                        }
+                        for param in test.get("test_parameters", [])
+                    ]
+                
+                # Extract key info from env_vars
+                env_vars = test.get("env_vars", {})
+                if env_vars:
+                    trimmed["environment"] = env_vars.get("ENV")
+                    trimmed["custom_cmd"] = env_vars.get("custom_cmd")
+                    # Add resource allocation info
+                    trimmed["resources"] = {
+                        "cpu": env_vars.get("cpu_quota"),
+                        "memory": env_vars.get("memory_quota"),
+                    }
+                
+                # Add source info
+                if "source" in test:
+                    source = test["source"]
+                    trimmed["source"] = {
+                        "type": source.get("name"),
+                        "repo": source.get("repo"),
+                        "branch": source.get("branch"),
+                    }
+                
+                # Include detailed config if requested
+                if include_config:
+                    # Add cloud settings
+                    if "integrations" in test and "clouds" in test["integrations"]:
+                        clouds = test["integrations"]["clouds"]
+                        for cloud_name, cloud_config in clouds.items():
+                            trimmed["cloud"] = {
+                                "provider": cloud_name,
+                                "region": cloud_config.get("region_name"),
+                                "instance_type": cloud_config.get("ec2_instance_type"),
+                                "image_id": cloud_config.get("image_id"),
+                            }
+
+                    # Add reporter integrations
+                    if "integrations" in test and "reporters" in test["integrations"]:
+                        reporters = test["integrations"]["reporters"]
+                        reporters_info = {}
+                        for reporter_name, reporter_config in reporters.items():
+                            if reporter_name == "reporter_email":
+                                reporters_info["email_recipients"] = reporter_config.get("recipients", [])
+                        if reporters_info:
+                            trimmed["reporters"] = reporters_info
+                
+                # Include schedules if requested
+                if include_schedules and "schedules" in test:
+                    active_schedules = []
+                    inactive_schedules = []
+                    
+                    for schedule in test.get("schedules", []):
+                        schedule_info = {
+                            "id": schedule.get("id"),
+                            "name": schedule.get("name"),
+                            "cron": schedule.get("cron")
+                        }
+                        
+                        if schedule.get("active"):
+                            active_schedules.append(schedule_info)
+                        else:
+                            inactive_schedules.append(schedule_info)
+                    
+                    trimmed["schedules"] = {
+                        "active": active_schedules,
+                        "inactive": inactive_schedules
+                    }
+                
+                result_tests.append(trimmed)
+                
+            return json.dumps(result_tests)
+        except Exception:
+            stacktrace = traceback.format_exc()
+            logger.error(f"Error fetching UI tests list: {stacktrace}")
+            raise ToolException(stacktrace)

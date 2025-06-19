@@ -199,6 +199,11 @@ class CarrierClient(BaseModel):
         requests.post(full_url, params=s3_config, allow_redirects=True, files=files, headers=headers)
 
     def get_ui_tests_list(self) -> List[Dict[str, Any]]:
+        """Get list of UI tests from the Carrier platform."""
+        endpoint = f"api/v1/ui_performance/tests/{self.credentials.project_id}"
+        return self.request('get', endpoint).get("rows", [])
+
+    def get_ui_reports_list(self) -> List[Dict[str, Any]]:
             """Get list of UI test reports from the Carrier platform."""
             endpoint = f"api/v1/ui_performance/reports/{self.credentials.project_id}"
             return self.request('get', endpoint).get("rows", [])

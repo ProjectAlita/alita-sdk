@@ -83,6 +83,10 @@ class CarrierAPIWrapper(BaseModel):
         """Get list of UI test reports from the Carrier platform."""
         return self._client.get_ui_tests_list()
 
+    def get_ui_tests_list(self) -> List[Dict[str, Any]]:
+        """Get list of UI tests from the Carrier platform."""
+        return self._client.get_ui_tests_list()
+
     def get_ui_report_links(self, uid: str) -> list:
         """Get all unique file_names for a given UI report UID, ending with .html, without #index=*, and only unique values."""
         endpoint = f"api/v1/ui_performance/results/{self.project_id}/{uid}?sort=loop&order=asc"
