@@ -55,7 +55,8 @@ class RallyToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["project management", "agile", "issue tracking"]
                 }
             })
         )

@@ -62,3 +62,4 @@ class ElasticToolkit(BaseToolkit):
 
     def get_tools(self) -> list[BaseTool]:
         return self.tools
+

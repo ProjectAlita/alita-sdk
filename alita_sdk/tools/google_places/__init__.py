@@ -31,7 +31,7 @@ class GooglePlacesToolkit(BaseToolkit):
             api_key=(SecretStr, Field(description="Google Places API key", json_schema_extra={'secret': True, 'max_toolkit_length': GooglePlacesToolkit.toolkit_max_length})),
             results_count=(Optional[int], Field(description="Results number to show", default=None)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Google Places", "icon_url": "gplaces-icon.svg"}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Google Places", "icon_url": "gplaces-icon.svg", "categories": ["location", "places", "search"]}})
         )
 
     @classmethod

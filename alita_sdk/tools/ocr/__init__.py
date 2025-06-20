@@ -36,7 +36,7 @@ class OCRToolkit(BaseToolkit):
             structured_output=(bool, Field(description="Whether to return structured JSON output", default=False)),
             expected_fields=(dict, Field(description="Expected fields for structured output", default={})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "OCR", "icon_url": None, "hidden": True}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "OCR", "icon_url": None, "hidden": True, "categories": ["ocr", "document processing", "image analysis"]}})
         )
 
     @classmethod
@@ -60,3 +60,4 @@ class OCRToolkit(BaseToolkit):
 
     def get_tools(self) -> list[BaseTool]:
         return self.tools
+

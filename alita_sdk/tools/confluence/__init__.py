@@ -86,7 +86,8 @@ class ConfluenceToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["documentation", "collaboration"]
                 }
             })
         )

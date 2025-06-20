@@ -46,7 +46,7 @@ class AdvancedJiraMiningToolkit(BaseToolkit):
             is_jira_cloud=(bool, Field(default=True, title="Cloud", description="JIRA Cloud")),
             verify_ssl=(bool, Field(default=True, title="Verify SSL", description="Verify SSL")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__={'json_schema_extra': {'metadata': {"label": "Advanced JIRA mining", "icon_url": "jira-icon.svg", "hidden": True}}}
+            __config__={'json_schema_extra': {'metadata': {"label": "Advanced JIRA mining", "icon_url": "jira-icon.svg", "hidden": True, "categories": ["project management", "data mining", "issue tracking"]}}}
         )
 
     @classmethod

@@ -58,7 +58,8 @@ class ServiceNowToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["it service management"]
                 }
             })
         )

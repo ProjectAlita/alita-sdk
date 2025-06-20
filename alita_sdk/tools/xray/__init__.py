@@ -39,7 +39,7 @@ class XrayToolkit(BaseToolkit):
             client_secret=(SecretStr, Field(description="Client secret", json_schema_extra={'secret': True})),
             limit=(Optional[int], Field(description="Limit", default=100)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__={'json_schema_extra': {'metadata': {"label": "XRAY cloud", "icon_url": "xray.svg"}}}
+            __config__={'json_schema_extra': {'metadata': {"label": "XRAY cloud", "icon_url": "xray.svg", "categories": ["test case management"]}}}
         )
 
     @classmethod

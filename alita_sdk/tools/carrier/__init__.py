@@ -42,10 +42,7 @@ class AlitaCarrierToolkit(BaseToolkit):
                     "label": "Carrier",
                     "version": "2.0.1",
                     "icon_url": "carrier.svg",
-                    "capabilities": {
-                        "total_tools": len(selected_tools),
-                        "tool_categories": ["Ticket Management", "Reporting", "Audit Logs"]
-                    }
+                    "categories": ["ticket management", "reporting", "audit logs"],
                 }
             })
         )

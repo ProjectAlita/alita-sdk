@@ -34,6 +34,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                     'metadata': {
                         "label": "ADO boards",
                         "icon_url": None,
+                        "categories": ["work item tracking", "issue tracking", "ado"],
                         "sections": {
                             "auth": {
                                 "required": True,
@@ -76,3 +77,4 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
 
     def get_tools(self):
         return self.tools
+
