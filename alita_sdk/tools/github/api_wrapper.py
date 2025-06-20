@@ -12,7 +12,7 @@ from .schemas import (
     GitHubRepoConfig
 )
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper
+from ..elitea_base import BaseCodeToolApiWrapper
 
 from langchain_core.callbacks import dispatch_custom_event
 
@@ -31,74 +31,8 @@ from .tool_prompts import (
 from pydantic import create_model
 from typing import Literal
 
-indexGitHubRepoParams = create_model(
-    "indexGitHubRepoParams",
-    whitelist=(Optional[List[str]], Field(description="File extensions or paths to include. Defaults to all files if None.", default=None)),
-    blacklist=(Optional[List[str]], Field(description="File extensions or paths to exclude. Defaults to no exclusions if None.", default=None)),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-)
 
-searchGitHubIndexParams = create_model(
-    "searchGitHubIndexParams",
-    query=(str, Field(description="Query text to search in the index")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-    filter=(Optional[dict | str], Field(
-        description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
-        default={},
-        examples=["{\"repository\": \"owner/repo\"}", "{\"branch\": \"main\"}"]
-    )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
-    reranker=(Optional[dict], Field(
-        description="Reranker configuration. Can be a dictionary with reranking parameters.",
-        default={}
-    )),
-    full_text_search=(Optional[Dict[str, Any]], Field(
-        description="Full text search parameters. Can be a dictionary with search options.",
-        default=None
-    )),
-    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
-        description="Reranking configuration. Can be a dictionary with reranking settings.",
-        default=None
-    )),
-    extended_search=(Optional[List[str]], Field(
-        description="List of additional fields to include in the search results.",
-        default=None
-    )),
-)
-
-stepbackSearchGitHubIndexParams = create_model(
-    "stepbackSearchGitHubIndexParams",
-    query=(str, Field(description="Query text to search in the index")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-    messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
-    filter=(Optional[dict | str], Field(
-        description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
-        default={},
-        examples=["{\"repository\": \"owner/repo\"}", "{\"branch\": \"main\"}"]
-    )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
-    reranker=(Optional[dict], Field(
-        description="Reranker configuration. Can be a dictionary with reranking parameters.",
-        default={}
-    )),
-    full_text_search=(Optional[Dict[str, Any]], Field(
-        description="Full text search parameters. Can be a dictionary with search options.",
-        default=None
-    )),
-    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
-        description="Reranking configuration. Can be a dictionary with reranking settings.",
-        default=None
-    )),
-    extended_search=(Optional[List[str]], Field(
-        description="List of additional fields to include in the search results.",
-        default=None
-    )),
-)
-
-
-class AlitaGitHubAPIWrapper(BaseVectorStoreToolApiWrapper):
+class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
     """
     Wrapper for GitHub API that integrates both REST and GraphQL functionality.
     """
@@ -217,32 +151,27 @@ class AlitaGitHubAPIWrapper(BaseVectorStoreToolApiWrapper):
         else:
             graphql_tools = self.graphql_client_instance.get_available_tools()
             
-        vector_store_tools = [
-            {
-                "name": "index_data",
-                "ref": self.index_data,
-                "mode": "index_data",
-                "description": self.index_data.__doc__,
-                "args_schema": indexGitHubRepoParams
-            },
-            {
-                "name": "search_index",
-                "ref": self.search_index,
-                "mode": "search_index",
-                "description": self.search_index.__doc__,
-                "args_schema": searchGitHubIndexParams
-            },
-            {
-                "name": "stepback_search_index",
-                "ref": self.stepback_search_index,
-                "mode": "stepback_search_index",
-                "description": self.stepback_search_index.__doc__,
-                "args_schema": stepbackSearchGitHubIndexParams
-            }
-        ]
+        # Add vector search tools from base class (includes index_data + search tools)
+        vector_search_tools = self._get_vector_search_tools()
         
-        tools = github_tools + graphql_tools + vector_store_tools
+        tools = github_tools + graphql_tools + vector_search_tools
         return tools
+
+    def _get_files(self, path: str = "", branch: str = None):
+        """Get list of files from GitHub repository."""
+        if not self.github_client_instance:
+            raise ValueError("GitHub client not initialized")
+        
+        # Use the GitHub client's method to get files
+        return self.github_client_instance._get_files(path, branch or self.active_branch)
+
+    def _read_file(self, file_path: str, branch: str):
+        """Read file content from GitHub repository."""
+        if not self.github_client_instance:
+            raise ValueError("GitHub client not initialized")
+        
+        # Use the GitHub client's method to read file
+        return self.github_client_instance._read_file(file_path, branch)
 
     def run(self, name: str, *args: Any, **kwargs: Any):
         for tool in self.get_available_tools():
@@ -264,24 +193,3 @@ class AlitaGitHubAPIWrapper(BaseVectorStoreToolApiWrapper):
                          raise ValueError(f"Argument mismatch for tool '{name}'. Error: {e}") from e
         else:
             raise ValueError(f"Unknown tool name: {name}")
-
-    def index_data(self,
-                   whitelist: Optional[List[str]] = None,
-                   blacklist: Optional[List[str]] = None,
-                   collection_suffix: str = "",
-                   **kwargs) -> str:
-        """Index GitHub repository files in the vector store using code parsing."""
-        
-        try:
-            from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
-        except ImportError:
-            from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-        
-        documents = self.github_client_instance.loader(
-            branch=self.active_branch,
-            whitelist=whitelist,
-            blacklist=blacklist,
-            repo_name=self.github_repository
-        )
-        vectorstore = self._init_vector_store(collection_suffix)
-        return vectorstore.index_documents(documents)

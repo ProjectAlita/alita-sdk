@@ -19,6 +19,84 @@ LoaderSchema = create_model(
                Field(description="A list of file extensions or paths to exclude. If None, no files are excluded."))
 )
 
+# Base Vector Store Schema Models
+BaseIndexParams = create_model(
+    "BaseIndexParams",
+    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
+)
+
+BaseCodeIndexParams = create_model(
+    "BaseCodeIndexParams",
+    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
+    branch=(Optional[str], Field(description="Branch to index files from. Defaults to active branch if None.", default=None)),
+    whitelist=(Optional[List[str]], Field(description="File extensions or paths to include. Defaults to all files if None.", default=None)),
+    blacklist=(Optional[List[str]], Field(description="File extensions or paths to exclude. Defaults to no exclusions if None.", default=None)),
+)
+
+BaseSearchParams = create_model(
+    "BaseSearchParams",
+    query=(str, Field(description="Query text to search in the index")),
+    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
+    filter=(Optional[dict | str], Field(
+        description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
+        default={},
+        examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
+    )),
+    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
+    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
+    reranker=(Optional[dict], Field(
+        description="Reranker configuration. Can be a dictionary with reranking parameters.",
+        default={}
+    )),
+    full_text_search=(Optional[Dict[str, Any]], Field(
+        description="Full text search parameters. Can be a dictionary with search options.",
+        default=None
+    )),
+    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
+        description="Reranking configuration. Can be a dictionary with reranking settings.",
+        default=None
+    )),
+    extended_search=(Optional[List[str]], Field(
+        description="List of additional fields to include in the search results.",
+        default=None
+    )),
+)
+
+BaseStepbackSearchParams = create_model(
+    "BaseStepbackSearchParams",
+    query=(str, Field(description="Query text to search in the index")),
+    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
+    messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
+    filter=(Optional[dict | str], Field(
+        description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
+        default={},
+        examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
+    )),
+    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
+    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
+    reranker=(Optional[dict], Field(
+        description="Reranker configuration. Can be a dictionary with reranking parameters.",
+        default={}
+    )),
+    full_text_search=(Optional[Dict[str, Any]], Field(
+        description="Full text search parameters. Can be a dictionary with search options.",
+        default=None
+    )),
+    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
+        description="Reranking configuration. Can be a dictionary with reranking settings.",
+        default=None
+    )),
+    extended_search=(Optional[List[str]], Field(
+        description="List of additional fields to include in the search results.",
+        default=None
+    )),
+)
+
+
 class BaseToolApiWrapper(BaseModel):
 
     def get_available_tools(self):
@@ -195,6 +273,59 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             extended_search=extended_search
         )
 
+    def stepback_summary_index(self,
+                     query: str,
+                     messages: List[Dict[str, Any]] = [],
+                     collection_suffix: str = "",
+                     filter: dict | str = {}, cut_off: float = 0.5,
+                     search_top: int = 10, reranker: dict = {},
+                     full_text_search: Optional[Dict[str, Any]] = None,
+                     reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
+                     extended_search: Optional[List[str]] = None,
+                     **kwargs):
+        """ Generates a summary of indexed documents using stepback technique."""
+        vectorstore = self._init_vector_store(collection_suffix)
+        return vectorstore.stepback_summary(
+            query, 
+            messages, 
+            self.doctype, 
+            filter=filter, 
+            cut_off=cut_off, 
+            search_top=search_top,
+            full_text_search=full_text_search, 
+            reranking_config=reranking_config, 
+            extended_search=extended_search
+        )
+
+    def _get_vector_search_tools(self):
+        """
+        Returns the standardized vector search tools (search operations only).
+        Index operations are toolkit-specific and should be added manually to each toolkit.
+        
+        Returns:
+            List of tool dictionaries with name, ref, description, and args_schema
+        """
+        return [
+            {
+                "name": "search_index",
+                "ref": self.search_index,
+                "description": self.search_index.__doc__,
+                "args_schema": BaseSearchParams
+            },
+            {
+                "name": "stepback_search_index",
+                "ref": self.stepback_search_index,
+                "description": self.stepback_search_index.__doc__,
+                "args_schema": BaseStepbackSearchParams
+            },
+            {
+                "name": "stepback_summary_index",
+                "ref": self.stepback_summary_index,
+                "description": self.stepback_summary_index.__doc__,
+                "args_schema": BaseStepbackSearchParams
+            }
+        ]
+
 
 class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
 
@@ -281,10 +412,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
                    **kwargs) -> str:
         """Index repository files in the vector store using code parsing."""
         
-        try:
-            from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
-        except ImportError:
-            from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+        
         
         documents = self.loader(
             branch=branch,
@@ -293,3 +421,24 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         )
         vectorstore = self._init_vector_store(collection_suffix)
         return vectorstore.index_documents(documents)
+
+    def _get_vector_search_tools(self):
+        """
+        Override the base method to include the index_data tool for code-based toolkits.
+        
+        Returns:
+            List: A list of vector search tools including index_data and search tools.
+        """
+        # Get the base search tools (search_index, stepback_search_index, stepback_summary_index)
+        base_tools = super()._get_vector_search_tools()
+        
+        # Add the index_data tool specific to code toolkits
+        index_tool = {
+            "name": "index_data",
+            "ref": self.index_data,
+            "description": self.index_data.__doc__,
+            "args_schema": BaseCodeIndexParams
+        }
+        
+        # Return index_data tool first, then the search tools
+        return [index_tool] + base_tools

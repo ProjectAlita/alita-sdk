@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage
 from markdownify import markdownify
 from langchain_community.document_loaders.confluence import ContentFormat
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
 from ..llm.img_utils import ImageDescriptionCache
 from ..utils import is_cookie_token, parse_cookie_string
 
@@ -162,12 +162,9 @@ pageId = create_model(
 
 indexPagesParams = create_model(
     "indexPagesParams",
-    # embedding_model=(Optional[str], Field(description="Embedding model", default="HuggingFaceEmbeddings")),
-    # embedding_model_params=(Optional[dict], Field(description="Embedding model parameters",
-    #                                               default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+    __base__=BaseIndexParams,
     content_format=(Literal['view', 'storage', 'export_view', 'editor', 'anonymous'], 
                     Field(description="The format of the content to be retrieved.")),
-
     ### Loader Parameters
     page_ids=(Optional[List[str]], Field(description="List of page IDs to retrieve.", default=None)),
     label=(Optional[str], Field(description="Label to filter pages.", default=None)),
@@ -179,77 +176,13 @@ indexPagesParams = create_model(
     include_attachments=(Optional[bool], Field(description="Include attachments.", default=False)),
     include_comments=(Optional[bool], Field(description="Include comments.", default=False)),
     include_labels=(Optional[bool], Field(description="Include labels.", default=True)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
     ocr_languages=(Optional[str], Field(description="OCR languages for processing attachments.", default='eng')),
     keep_markdown_format=(Optional[bool], Field(description="Keep the markdown format.", default=True)),
     keep_newlines=(Optional[bool], Field(description="Keep newlines in the content.", default=True)),
     bins_with_llm=(Optional[bool], Field(description="Use LLM for processing binary files.", default=False)),
-    
     ### Chunking Parameters
     chunking_tool=(Literal['markdown', 'statistical', 'proposal'], Field(description="Name of chunking tool", default="markdown")),
     chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
-)
-
-searchIndexParams = create_model(
-    "searchIndexParams",
-    query=(str, Field(description="Query text to search in the index")),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-    filter=(Optional[dict | str], Field(
-        description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
-        default={},
-        examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
-    )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
-    reranker=(Optional[dict], Field(
-        description="Reranker configuration. Can be a dictionary with reranking parameters.",
-        default={}
-    )),
-    full_text_search=(Optional[Dict[str, Any]], Field(
-        description="Full text search parameters. Can be a dictionary with search options.",
-        default=None
-    )),
-    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
-        description="Reranking configuration. Can be a dictionary with reranking settings.",
-        default=None
-    )),
-    extended_search=(Optional[List[str]], Field(
-        description="List of additional fields to include in the search results.",
-        default=None
-    )),
-)
-
-stepbackSearchIndexParams = create_model(
-    "stepbackSearchIndexParams",
-    query=(str, Field(description="Query text to search in the index")),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-    messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
-    filter=(Optional[dict | str], Field(
-        description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
-        default={},
-        examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
-    )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
-    reranker=(Optional[dict], Field(
-        description="Reranker configuration. Can be a dictionary with reranking parameters.",
-        default={}
-    )),
-    full_text_search=(Optional[Dict[str, Any]], Field(
-        description="Full text search parameters. Can be a dictionary with search options.",
-        default=None
-    )),
-    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
-        description="Reranking configuration. Can be a dictionary with reranking settings.",
-        default=None
-    )),
-    extended_search=(Optional[List[str]], Field(
-        description="List of additional fields to include in the search results.",
-        default=None
-    )),
 )
 
 GetPageWithImageDescriptions = create_model(
@@ -1470,7 +1403,8 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             return f"Error processing page with images: {str(e)}"
 
     def get_available_tools(self):
-        return [
+        # Confluence-specific tools
+        confluence_tools = [
             {
                 "name": "create_page",
                 "ref": self.create_page,
@@ -1574,27 +1508,21 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                 "ref": self.execute_generic_confluence,
             },
             {
-                "name": "index_data",
-                "ref": self.index_data,
-                "description": self.index_data.__doc__,
-                "args_schema": indexPagesParams,
-            },
-            {
-                "name": "search_index",
-                "ref": self.search_index,
-                "description": self.search_index.__doc__,
-                "args_schema": searchIndexParams,
-            },
-            {
-                "name": "stepback_search_index",
-                "ref": self.stepback_search_index,
-                "description": self.stepback_search_index.__doc__,
-                "args_schema": stepbackSearchIndexParams,
-            },
-            {
                 "name": "get_page_id_by_title",
                 "ref": self.get_page_id_by_title,
                 "description": self.get_page_id_by_title.__doc__,
                 "args_schema": getPageIdByTitleInput,
+            },
+            # Confluence-specific vector store indexing
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexPagesParams,
             }
         ]
+        
+        # Add standardized vector search tools from base class
+        vector_search_tools = self._get_vector_search_tools()
+        
+        return confluence_tools + vector_search_tools
