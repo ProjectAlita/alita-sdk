@@ -41,7 +41,7 @@ class SQLToolkit(BaseToolkit):
             password=(SecretStr, Field(description="Database password", json_schema_extra={'secret': True})),
             database_name=(str, Field(description="Database name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': SQLToolkit.toolkit_max_length})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "SQL", "icon_url": "sql-icon.svg"}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "SQL", "icon_url": "sql-icon.svg", "categories": ["database", "query"]}})
         )
 
     @classmethod
@@ -65,3 +65,4 @@ class SQLToolkit(BaseToolkit):
 
     def get_tools(self) -> list[BaseTool]:
         return self.tools
+

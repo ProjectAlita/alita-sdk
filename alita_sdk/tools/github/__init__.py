@@ -71,7 +71,8 @@ class AlitaGitHubToolkit(BaseToolkit):
                                     }
                                 ]
                             },
-                        }
+                        },
+                        "categories": ["source control", "code hosting"]
                     },
                 }
             ),
@@ -120,3 +121,4 @@ class AlitaGitHubToolkit(BaseToolkit):
 
     def get_tools(self):
         return self.tools
+
