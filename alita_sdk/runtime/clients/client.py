@@ -9,6 +9,7 @@ from langchain_core.messages import (
     SystemMessage, BaseMessage,
 )
 from langchain_core.tools import ToolException
+from langgraph.store.base import BaseStore
 
 from ..langchain.assistant import Assistant as LangChainAssistant
 # from ..llamaindex.assistant import Assistant as LLamaAssistant
@@ -178,7 +179,7 @@ class AlitaClient:
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                     app_type=None, memory=None, runtime='langchain',
                     application_variables: Optional[dict] = None,
-                    version_details: Optional[dict] = None):
+                    version_details: Optional[dict] = None, store: Optional[BaseStore] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -210,11 +211,11 @@ class AlitaClient:
             app_type = "openai"
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, client, chat_history, app_type,
-                                      tools=tools, memory=memory)
+                                      tools=tools, memory=memory, store=store)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, client,
                                       chat_history, app_type,
-                                      tools=tools, memory=memory).runnable()
+                                      tools=tools, memory=memory, store=store).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 
