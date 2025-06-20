@@ -7,7 +7,7 @@ langchain-openai~=0.3.0
 langgraph-checkpoint-sqlite~=2.0.0
 langgraph-checkpoint-postgres~=2.0.1
 langsmith==0.1.144
-langgraph~=0.2.53
+langgraph~=0.4.8
 langchain_chroma~=0.2.2
 langchain-unstructured~=0.1.6
 langchain-postgres~=0.0.13
