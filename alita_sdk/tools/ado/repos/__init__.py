@@ -72,7 +72,8 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["ado", "repos"],
                 }}}
         )
 

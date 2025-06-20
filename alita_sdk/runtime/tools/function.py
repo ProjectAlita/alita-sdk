@@ -7,8 +7,6 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from typing import Any, Optional, Union, Annotated
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from langgraph.prebuilt import InjectedStore
-from langgraph.store.base import BaseStore
 from pydantic import ValidationError
 from ..langchain.utils import propagate_the_input_mapping
 

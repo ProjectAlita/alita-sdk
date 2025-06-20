@@ -31,7 +31,7 @@ class PandasToolkit(BaseToolkit):
             name,
             bucket_name=(str, Field(default=None, title="Bucket name", description="Bucket where the content file is stored", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': PandasToolkit.toolkit_max_length})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Pandas", "icon_url": "pandas-icon.svg"}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Pandas", "icon_url": "pandas-icon.svg", "categories": ["data analysis"]}})
         )
 
     @classmethod
@@ -55,3 +55,4 @@ class PandasToolkit(BaseToolkit):
 
     def get_tools(self):
         return self.tools
+
