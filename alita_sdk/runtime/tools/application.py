@@ -13,7 +13,7 @@ logger = getLogger(__name__)
 applicationToolSchema = create_model(
     "applicatrionSchema", 
     task = (str, FieldInfo(description="Task for Application")), 
-    chat_history = (Optional[list[BaseMessage]], FieldInfo(description="Chat History relevant for Application"))
+    chat_history = (Optional[list[BaseMessage]], FieldInfo(description="Chat History relevant for Application", default=[]))
 )
 
 def formulate_query(kwargs):
@@ -31,7 +31,11 @@ def formulate_query(kwargs):
             chat_history = []
             for each in kwargs.get('chat_history')[:]:
                 chat_history.append(AIMessage(each))
-    return {"input": kwargs.get('task'), "chat_history": chat_history}
+    result = {"input": kwargs.get('task'), "chat_history": chat_history}
+    for key, value in kwargs.items():
+        if key not in ("task", "chat_history"):
+            result[key] = value
+    return result
     
     
 
@@ -46,7 +50,14 @@ class Application(BaseTool):
     @classmethod
     def remove_spaces(cls, v):
         return clean_string(v)
-    
+
+    def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        """Override default invoke to preserve all fields, not just args_schema"""
+        schema_values = self.args_schema(**input).model_dump() if self.args_schema else {}
+        extras = {k: v for k, v in input.items() if k not in schema_values}
+        all_kwargs = {**kwargs, **extras, **schema_values}
+        return self._run(*config, **all_kwargs)
+
     def _run(self, *args, **kwargs):
         response = self.application.invoke(formulate_query(kwargs))
         if self.return_type == "str":
