@@ -67,6 +67,10 @@ class CarrierAPIWrapper(BaseModel):
     def run_test(self, test_id: str, json_body):
         return self._client.run_test(test_id, json_body)
 
+    def run_ui_test(self, test_id: str, json_body):
+        """Run a UI test with the given test ID and JSON body."""
+        return self._client.run_ui_test(test_id, json_body)
+
     def get_engagements_list(self) -> List[Dict[str, Any]]:
         return self._client.get_engagements_list()
 
