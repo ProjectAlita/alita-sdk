@@ -31,6 +31,7 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
                 {
                     "label": "ADO plans",
                     "icon_url": "ado-plans.svg",
+                    "categories": ["test management", "ado", "test plans"],
                     "sections": {
                         "auth": {
                             "required": True,
