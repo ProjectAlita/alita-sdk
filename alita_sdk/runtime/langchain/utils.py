@@ -169,13 +169,12 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
             source = state
             var_dict = create_params(input_variables, source)
 
-        if value['value']:
-            if value['type'] == 'fstring':
-                input_data[key] = value['value'].format(**var_dict)
-            elif value['type'] == 'fixed':
-                input_data[key] = value['value']
-            else:
-                input_data[key] = source.get(value['value'], "")
+        if value['type'] == 'fstring':
+            input_data[key] = value['value'].format(**var_dict)
+        elif value['type'] == 'fixed':
+            input_data[key] = value['value']
+        else:
+            input_data[key] = source.get(value['value'], "")
     return input_data
 
 
