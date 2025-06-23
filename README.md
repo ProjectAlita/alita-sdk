@@ -121,3 +121,31 @@ Using Elitea toolkits and tools with Streamlit for Local Development
 Actually, toolkits are part of the Alita SDK (`alita-sdk/tools`), so you can use them in your local development environment as well.
 To debug it, you can use the `alita_local.py` file, which is a Streamlit application that allows you 
 to interact with your agents and toolkits by setting the breakpoints in the code of corresponding tool.
+
+# Example of agent's debugging with Streamlit:
+Assume we try to debug the user's agent called `Questionnaire` with the `Confluence` toolkit and `get_pages_with_label` method.
+Pre-requisites:
+- Make sure you have set correct variables in your `.env` file
+- Set the breakpoints in the `alita_sdk/tools/confluence/api_wrapper.py` file, in the `get_pages_with_label` method
+
+1. Run the Streamlit app (using debug):
+    ```bash
+    streamlit run alita_local.py
+    ```
+2. Login into the application with your credentials (populated from .env file)
+   - Enter your deployment URL, API key, and project ID (optionally)
+   - Click "Login" to authenticate with the Alita Platform
+
+   ![login](docs/readme_imgs/login.png "login")
+3. Select `Questionnaire` agent
+
+   ![agent_selection](docs/readme_imgs/agent_selection.png "agent_selection")
+4. Query the agent with the required prompt:
+   ```
+   get pages with label `ai-mb`
+   ```
+5. Debug the agent's code:
+   - The Streamlit app will call the `get_pages_with_label` method of the `Confluence` toolkit
+   - The execution will stop at the breakpoint you set in the `alita_sdk/tools/confluence/api_wrapper.py` file
+   - You can inspect variables, step through the code, and analyze the flow of execution
+![debugging](docs/readme_imgs/debugging.png "debugging")
