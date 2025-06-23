@@ -30,7 +30,11 @@ class SalesforceToolkit(BaseToolkit):
             client_secret=(SecretStr, Field(description="Salesforce Connected App Client Secret", json_schema_extra={'secret': True})),
             api_version=(str, Field(description="Salesforce API Version", default='v59.0')),
             selected_tools=(List[Literal[tuple(available_tools)]], Field(default=[], json_schema_extra={'args_schemas': available_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Salesforce", "icon_url": "salesforce-icon.svg"}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {
+                "label": "Salesforce", "icon_url": "salesforce-icon.svg",
+                "categories": ["crm", "sales"],
+                "extra_categories": ["customer relationship management", "cloud computing", "marketing automation", "salesforce"]
+                                                                  }})
         )
 
     @classmethod

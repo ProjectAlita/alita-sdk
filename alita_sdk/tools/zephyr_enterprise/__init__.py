@@ -30,7 +30,12 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
             base_url=(str, Field(description="Zephyr Enterprise base URL", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ZephyrEnterpriseToolkit.toolkit_max_length })),
             token=(SecretStr, Field(description="API token", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], []),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Zephyr Enterprise", "icon_url": "zephyr.svg", "categories": ["test case management", "qa", "test management"]}})
+            __config__=ConfigDict(json_schema_extra={
+                'metadata': {
+                    "label": "Zephyr Enterprise", "icon_url": "zephyr.svg",
+                    "categories": ["test management", "qa"],
+                    "extra_categories": ["test automation", "test case management", "test planning"]
+                }})
         )
 
     @classmethod

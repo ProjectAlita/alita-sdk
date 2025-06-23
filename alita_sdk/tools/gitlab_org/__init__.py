@@ -50,7 +50,9 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["code management", "code"],
+                    "extra_categories": ["gitlab", "git", "repository", "code", "version control"],
                 }
             })
         )

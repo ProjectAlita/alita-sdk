@@ -72,7 +72,8 @@ class AlitaGitHubToolkit(BaseToolkit):
                                 ]
                             },
                         },
-                        "categories": ["source control", "code hosting"]
+                        "categories": ["code", "code management"],
+                        "extra_categories": ["github", "git", "repository", "code", "version control"],
                     },
                 }
             ),

@@ -32,7 +32,9 @@ class TestIOToolkit(BaseToolkit):
             endpoint=(str, Field(description="TestIO endpoint", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': TOOLKIT_MAX_LENGTH})),
             api_key=(SecretStr, Field(description="API key", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "TestIO", "icon_url": "testio-icon.svg"}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "TestIO", "icon_url": "testio-icon.svg",
+                                                                  "categories": ["test management", "qa"],
+                                                                  "extra_categories": ["test automation", "test case management", "test planning"]}})
         )
 
     @classmethod

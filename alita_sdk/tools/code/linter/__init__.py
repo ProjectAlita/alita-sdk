@@ -28,7 +28,8 @@ class PythonLinterToolkit(BaseToolkit):
             name,
             error_codes=(str, Field(description="Error codes to be used by the linter")),
             __config__={'json_schema_extra': {'metadata': {"label": "Python Linter", "icon_url": None, "hidden": True,
-                                                           "categories": ["code analysis", "linter", "quality"]}}}
+                                                           "categories": ["code", "code quality"],
+                                                           "extra_categories": ["code linter", "python linter"]}}}
         )
 
     @classmethod
