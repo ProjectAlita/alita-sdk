@@ -34,7 +34,14 @@ class ZephyrToolkit(BaseToolkit):
             username=(str, Field(description="Username")),
             password=(SecretStr, Field(description="Password", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__={'json_schema_extra': {'metadata': {"label": "Zephyr", "icon_url": "zephyr.svg", "hidden": True, "categories": ["test case management"]}}}
+            __config__={
+                'json_schema_extra':
+                    {
+                        'metadata': {
+                            "label": "Zephyr", "icon_url": "zephyr.svg", "hidden": True,
+                            "categories": ["test management", "qa"],
+                            "extra_categories": ["test automation", "test case management", "test planning"]
+                        }}}
         )
 
     @classmethod

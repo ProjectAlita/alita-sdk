@@ -48,7 +48,8 @@ class ZephyrScaleToolkit(BaseToolkit):
                     'metadata': {
                         "label": "Zephyr Scale",
                         "icon_url": "zephyr.svg",
-                        "categories": ["test case management", "qa", "test management"],
+                        "categories": ["test management", "qa"],
+                        "extra_categories": ["test automation", "test case management", "test planning"],
                         "sections": {
                             "auth": {
                                 "required": True,

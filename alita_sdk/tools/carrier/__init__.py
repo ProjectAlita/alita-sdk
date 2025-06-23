@@ -42,7 +42,8 @@ class AlitaCarrierToolkit(BaseToolkit):
                     "label": "Carrier",
                     "version": "2.0.1",
                     "icon_url": "carrier.svg",
-                    "categories": ["ticket management", "reporting", "audit logs"],
+                    "categories": ["project management", "reporting", "auditing"],
+                    "extra_categories": ["carrier", "ticket management", "log management"],
                 }
             })
         )

@@ -45,7 +45,13 @@ class AzureSearchToolkit(BaseToolkit):
             openai_api_key=(Optional[str], Field(description="Azure OpenAI API Key", default=None, json_schema_extra={'secret': True})),
             model_name=(str, Field(description="Model name for Embeddings model", default=None)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Azure Search", "icon_url": None, "hidden": True}})
+            __config__=ConfigDict(json_schema_extra={
+                'metadata': {
+                    "label": "Azure Search", "icon_url": None, "hidden": True,
+                    "categories": ["ado"],
+                    "extra_categories": ["azure cognitive search", "vector database", "knowledge base"]
+                }
+            })
         )
 
     @classmethod
