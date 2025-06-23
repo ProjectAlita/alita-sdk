@@ -15,23 +15,28 @@ Before you begin, ensure you have the following requirements met:
 Installation
 ------------
 
-First, you need to install the Langchain library. Alita SDK depends on Langchain for its core functionalities. You can install Langchain using pip:
+It is recommended to use a Python virtual environment to avoid dependency conflicts and keep your environment isolated.
 
+### 1. Create and activate a virtual environment
+
+For **Unix/macOS**:
 ```bash
-pip install langchain
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-Next, clone the Alita SDK repository (assuming it's available on GitHub or another source):
-
-```bash
-git clone https://github.com/ProjectAlita/alita-sdk.git
-cd alita-sdk
+For **Windows**:
+```bat
+python -m venv .venv
+venv\Scripts\activate
 ```
 
-Install the SDK along with its dependencies:
+### 2. Install dependencies
+
+Install all required dependencies for the SDK and toolkits:
 
 ```bash
-pip install -r requirements.txt
+pip install -r req_bkup/requirements-all.txt
 ```
 
 Environment Setup
@@ -43,9 +48,11 @@ Before running your Alita agents, set up your environment variables. Create a `.
 DEPLOYMENT_URL=<your_deployment_url>
 API_KEY=<your_api_key>
 PROJECT_ID=<your_project_id>
-INTEGRATION_UID=<your_integration_uid>
-MODEL_NAME=<your_model_name>
 ```
+
+NOTE: these variables can be grabbed from your Elitea platform configuration page.
+![Platform configuration](docs/readme_imgs/platform_config.png "Platform configuration")
+
 
 
 Using SDK with Streamlit for Local Development
@@ -63,8 +70,12 @@ To use the SDK with Streamlit for local development, follow these steps:
     streamlit run alita_local.py
     ```
 
-Note: If **streamlite** throws an error related to **pytorch**, add this `--server.fileWatcherType none` extra arguments.   
-Sometimes it try to index **pytorch** modules and since they are **C** modules it raises an exception. 
+Note: If **streamlit** throws an error related to **pytorch**, add this `--server.fileWatcherType none` extra arguments.
+Sometimes it tries to index **pytorch** modules, and since they are **C** modules it raises an exception.
+
+Example of launch configuration for Streamlit:
+Important: Make sure to set the correct path to your `.env` file and streamlit.
+![Launch configuration example](docs/readme_imgs/launch_config.png "Launch configuration")
 
 Streamlit Web Application
 ------------------------
@@ -90,7 +101,7 @@ The Alita SDK includes a Streamlit web application that provides a user-friendly
    - After authentication, you'll see a list of available agents
    - Select an agent from the dropdown menu
    - Specify a version name (default: 'latest')
-   - Optionally select an agent type and add custom tools
+   - Optionally, select an agent type and add custom tools
    - Click "Load Agent" to initialize the agent
 
 3. **Interacting with the Agent**:
@@ -104,23 +115,9 @@ The Alita SDK includes a Streamlit web application that provides a user-friendly
 
 This web application simplifies the process of testing and interacting with your Alita agents, making development and debugging more efficient.
 
-Adding Alita-Tools to PYTHONPATH
---------------------------------
+Using Elitea toolkits and tools with Streamlit for Local Development
+----------------------------------------------
 
-If you have another repository containing Alita tools, you can add it to your PYTHONPATH to make the tools available to your project. For example:
-
-1. Clone the repository containing the Alita tools:
-    ```bash
-    git clone https://github.com/yourusername/alita-tools.git
-    ```
-
-2. Add the repository to your PYTHONPATH:
-    ```bash
-    export PYTHONPATH=$PYTHONPATH:/path/to/alita-tools
-    ```
-
-3. Verify that the tools are accessible in your project:
-    ```python
-    import sys
-    print(sys.path)
-    ```
+Actually, toolkits are part of the Alita SDK (`alita-sdk/tools`), so you can use them in your local development environment as well.
+To debug it, you can use the `alita_local.py` file, which is a Streamlit application that allows you 
+to interact with your agents and toolkits by setting the breakpoints in the code of corresponding tool.
