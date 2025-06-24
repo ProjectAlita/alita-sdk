@@ -217,3 +217,13 @@ class CarrierClient(BaseModel):
         """Get list of available locations/cloud settings from the Carrier platform."""
         endpoint = f"api/v1/shared/locations/{self.credentials.project_id}"
         return self.request('get', endpoint)
+
+    def update_ui_test(self, test_id: str, json_body) -> Dict[str, Any]:
+        """Update UI test configuration and schedule."""
+        endpoint = f"api/v1/ui_performance/test/{self.credentials.project_id}/{test_id}"
+        return self.request('put', endpoint, json=json_body)
+
+    def get_ui_test_details(self, test_id: str) -> Dict[str, Any]:
+        """Get detailed UI test configuration by test ID."""
+        endpoint = f"api/v1/ui_performance/test/{self.credentials.project_id}/{test_id}"
+        return self.request('get', endpoint)

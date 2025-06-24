@@ -129,3 +129,11 @@ class CarrierAPIWrapper(BaseModel):
         except Exception as e:
             logger.error(f"Failed to fetch UI report links: {e}")
             return []
+
+    def update_ui_test(self, test_id: str, json_body) -> Dict[str, Any]:
+        """Update UI test configuration and schedule."""
+        return self._client.update_ui_test(test_id, json_body)
+
+    def get_ui_test_details(self, test_id: str) -> Dict[str, Any]:
+        """Get detailed UI test configuration by test ID."""
+        return self._client.get_ui_test_details(test_id)

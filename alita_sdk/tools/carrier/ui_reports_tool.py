@@ -199,12 +199,16 @@ class GetUITestsTool(BaseTool):
             # Extract relevant fields for cleaner output
             base_fields = {
                 "id", "name", "browser", "loops", "aggregation", "parallel_runners", 
-                "location", "entrypoint", "runner", "test_uid", "job_type"
+                "location", "entrypoint", "runner", "job_type"
             }
             
             result_tests = []
             for test in filtered_tests:
                 trimmed = {k: test[k] for k in base_fields if k in test}
+                
+                # Add test_uid separately with a clear label to avoid confusion with id
+                if "test_uid" in test:
+                    trimmed["test_uid"] = test["test_uid"]
                 
                 # Include test parameters if available
                 if "test_parameters" in test:
