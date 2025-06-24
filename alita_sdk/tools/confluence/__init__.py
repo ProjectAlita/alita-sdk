@@ -87,8 +87,8 @@ class ConfluenceToolkit(BaseToolkit):
                             ]
                         }
                     },
-                    "categories": ["documentation", "atlassian"],
-                    "extra_categories": ["confluence", "wiki", "knowledge base", "documentation"]
+                         "categories": ["documentation"],
+                    "extra_categories": ["confluence", "wiki", "knowledge base", "documentation", "atlassian"]
                 }
             })
         )

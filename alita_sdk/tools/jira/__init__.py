@@ -79,7 +79,7 @@ class JiraToolkit(BaseToolkit):
                             ]
                         }
                     },
-                    "categories": ["project management", "atlassian"],
+                    "categories": ["project management"],
                     "extra_categories": ["jira", "atlassian", "issue tracking", "project management", "task management"],
                 }
             })

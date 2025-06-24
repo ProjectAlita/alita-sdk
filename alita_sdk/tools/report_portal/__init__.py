@@ -35,7 +35,7 @@ class ReportPortalToolkit(BaseToolkit):
             api_key=(SecretStr, Field(description="User API key", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Report Portal", "icon_url": "reportportal-icon.svg",
-                                                                  "categories": ["reporting", "test management", "qa"],
+                                                                  "categories": ["testing"],
                                                                   "extra_categories": ["test reporting", "test automation"]}})
         )
 

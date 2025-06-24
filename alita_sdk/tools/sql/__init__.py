@@ -46,7 +46,7 @@ class SQLToolkit(BaseToolkit):
                                       'metadata':
                                           {
                                               "label": "SQL", "icon_url": "sql-icon.svg",
-                                              "categories": ["database"],
+                                              "categories": ["development"],
                                               "extra_categories": ["sql", "data management", "data analysis"]}})
         )
 

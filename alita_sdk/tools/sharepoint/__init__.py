@@ -35,7 +35,7 @@ class SharepointToolkit(BaseToolkit):
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Sharepoint", "icon_url": "sharepoint.svg",
-                    "categories": ["office", "document"],
+                    "categories": ["office"],
                     "extra_categories": ["microsoft", "cloud storage", "team collaboration", "content management"]
         }})
         )

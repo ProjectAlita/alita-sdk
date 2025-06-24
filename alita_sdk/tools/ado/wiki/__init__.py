@@ -34,7 +34,7 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                     'metadata': {
                         "label": "ADO wiki",
                         "icon_url": None,
-                        "categories": ["documentation", "ado"],
+                        "categories": ["documentation"],
                         "extra_categories": ["knowledge base", "documentation management", "wiki"],
                         "sections": {
                             "auth": {

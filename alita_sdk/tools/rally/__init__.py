@@ -56,8 +56,8 @@ class RallyToolkit(BaseToolkit):
                             ]
                         }
                     },
-                    "categories": ["project management", "qa", "test management"],
-                    "extra_categories": ["agile management", "scrum", "kanban"]
+                    "categories": ["project management"],
+                    "extra_categories": ["agile management", "test management", "scrum", "kanban"]
                 }
             })
         )

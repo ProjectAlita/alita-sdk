@@ -32,7 +32,7 @@ class OpenApiToolkit(BaseToolkit):
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata':
                                                          {"label": "OpenAPI", "icon_url": None,
-                                                          "categories": ["api"],
+                                                          "categories": ["testing"],
                                                           "extra_categories": [ "openapi", "swagger"]}})
         )
 

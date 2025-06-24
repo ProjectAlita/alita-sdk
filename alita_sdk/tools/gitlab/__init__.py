@@ -54,7 +54,7 @@ class AlitaGitlabToolkit(BaseToolkit):
                             ]
                         }
                     },
-                    "categories": ["code management", "code"],
+                    "categories": ["code repositories"],
                     "extra_categories": ["gitlab", "git", "repository", "code", "version control"],
                 }
             })

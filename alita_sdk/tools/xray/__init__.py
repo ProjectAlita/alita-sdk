@@ -43,7 +43,7 @@ class XrayToolkit(BaseToolkit):
                             {
                                 'metadata': {
                                     "label": "XRAY cloud", "icon_url": "xray.svg",
-                                    "categories": ["test management", "qa"],
+                                "categories": ["test management"],
                                     "extra_categories": ["test automation", "test case management", "test planning"]
                                 }
                             }

@@ -52,8 +52,8 @@ class PPTXToolkit(BaseToolkit):
                 'metadata': {
                     "label": "PPTX",
                     "icon_url": None,
-                    "categories": ["document", "office"],
-                    "extra_categories": ["presentation", "office automation"]
+                    "categories": ["office"],
+                    "extra_categories": ["presentation", "office automation", "document"]
                 }
             })
         )

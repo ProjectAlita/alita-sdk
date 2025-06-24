@@ -33,7 +33,7 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Zephyr Enterprise", "icon_url": "zephyr.svg",
-                    "categories": ["test management", "qa"],
+                    "categories": ["test management"],
                     "extra_categories": ["test automation", "test case management", "test planning"]
                 }})
         )

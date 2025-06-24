@@ -32,7 +32,7 @@ class SalesforceToolkit(BaseToolkit):
             selected_tools=(List[Literal[tuple(available_tools)]], Field(default=[], json_schema_extra={'args_schemas': available_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {
                 "label": "Salesforce", "icon_url": "salesforce-icon.svg",
-                "categories": ["crm", "sales"],
+                "categories": ["other"],
                 "extra_categories": ["customer relationship management", "cloud computing", "marketing automation", "salesforce"]
                                                                   }})
         )
