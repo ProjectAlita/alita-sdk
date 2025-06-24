@@ -66,7 +66,7 @@ class FigmaToolkit(BaseToolkit):
                                  ]
                              }
                          },
-                         "categories": ["design"],
+                         "categories": ["other"],
                          "extra_categories": ["figma", "design", "ui/ux", "prototyping", "collaboration"],
                      }
                  }

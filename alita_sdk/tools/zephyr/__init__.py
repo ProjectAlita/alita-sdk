@@ -39,7 +39,7 @@ class ZephyrToolkit(BaseToolkit):
                     {
                         'metadata': {
                             "label": "Zephyr", "icon_url": "zephyr.svg", "hidden": True,
-                            "categories": ["test management", "qa"],
+                            "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
                         }}}
         )

@@ -51,7 +51,7 @@ class AdvancedJiraMiningToolkit(BaseToolkit):
                     {'metadata':
                          {
                              "label": "Advanced JIRA mining", "icon_url": "jira-icon.svg", "hidden": True,
-                             "categories": ["project management", "test management"],
+                             "categories": ["project management"],
                              "extra_categories": ["jira", "confluence", "issue tracking", "agile management"],
                          }
                     }

@@ -34,7 +34,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                     'metadata': {
                         "label": "ADO boards",
                         "icon_url": None,
-                        "categories": ["test management", "ado"],
+                        "categories": ["project management"],
                         "extra_categories": ["work item management", "issue tracking", "agile boards"],
                         "sections": {
                             "auth": {

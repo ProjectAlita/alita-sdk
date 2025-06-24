@@ -50,7 +50,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
                 'metadata':
                     {
                         "label": "Bitbucket", "icon_url": "bitbucket-icon.svg",
-                        "categories": ["code management", "code", "atlassian"],
+                        "categories": ["code repositories"],
                         "extra_categories": ["bitbucket", "git", "repository", "code", "version control"],
                     }
             })

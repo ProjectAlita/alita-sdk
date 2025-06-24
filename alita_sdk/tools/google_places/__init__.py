@@ -36,7 +36,7 @@ class GooglePlacesToolkit(BaseToolkit):
                                       'metadata':
                                           {
                                               "label": "Google Places", "icon_url": "gplaces-icon.svg",
-                                              "categories": ["google"],
+                                              "categories": ["other"],
                                               "extra_categories": ["google", "places", "maps", "location",
                                                                    "geolocation"],
                                           }

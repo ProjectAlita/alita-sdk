@@ -48,7 +48,7 @@ class AzureSearchToolkit(BaseToolkit):
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Azure Search", "icon_url": None, "hidden": True,
-                    "categories": ["ado"],
+                    "categories": ["other"],
                     "extra_categories": ["azure cognitive search", "vector database", "knowledge base"]
                 }
             })

@@ -47,7 +47,7 @@ class TestrailToolkit(BaseToolkit):
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata':
                                                          {"label": "Testrail", "icon_url": "testrail-icon.svg",
-                                                          "categories": ["test management", "qa"],
+                                                          "categories": ["test management"],
                                                           "extra_categories": ["quality assurance", "test case management", "test planning"]
                                                           }})
         )

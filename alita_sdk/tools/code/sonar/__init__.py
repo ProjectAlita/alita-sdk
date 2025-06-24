@@ -37,7 +37,7 @@ class SonarToolkit(BaseToolkit):
                                       'metadata':
                                           {
                                               "label": "Sonar", "icon_url": "sonar-icon.svg",
-                                              "categories": ["code quality", "code"],
+                                              "categories": ["development"],
                                               "extra_categories": ["code quality", "code security", "code coverage", "quality", "sonarqube"]
                                           }
                                   })
