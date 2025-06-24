@@ -58,7 +58,9 @@ class ServiceNowToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["other"],
+                    "extra_categories": ["incident management", "problem management", "change management", "service catalog"]
                 }
             })
         )

@@ -34,7 +34,7 @@ class KeycloakToolkit(BaseToolkit):
             client_id=(str, Field(default="", title="Client ID", description="Keycloak client ID")),
             client_secret=(SecretStr, Field(default="", title="Client sercet", description="Keycloak client secret", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Keycloak", "icon_url": None, "hidden": True}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Keycloak", "icon_url": None, "hidden": True, "categories": ["authentication", "identity management"]}})
         )
 
     @classmethod
@@ -58,3 +58,4 @@ class KeycloakToolkit(BaseToolkit):
 
     def get_tools(self) -> list[BaseTool]:
         return self.tools
+

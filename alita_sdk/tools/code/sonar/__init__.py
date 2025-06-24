@@ -32,7 +32,15 @@ class SonarToolkit(BaseToolkit):
             sonar_token=(SecretStr, Field(description="SonarQube user token for authentication", json_schema_extra={'secret': True})),
             sonar_project_name=(str, Field(description="Project name of the desired repository")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Sonar", "icon_url": "sonar-icon.svg"}})
+            __config__=ConfigDict(json_schema_extra=
+                                  {
+                                      'metadata':
+                                          {
+                                              "label": "Sonar", "icon_url": "sonar-icon.svg",
+                                              "categories": ["development"],
+                                              "extra_categories": ["code quality", "code security", "code coverage", "quality", "sonarqube"]
+                                          }
+                                  })
         )
 
     @classmethod
@@ -56,3 +64,4 @@ class SonarToolkit(BaseToolkit):
 
     def get_tools(self) -> list[BaseTool]:
         return self.tools
+

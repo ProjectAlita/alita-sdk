@@ -30,7 +30,10 @@ class OpenApiToolkit(BaseToolkit):
             spec=(str, Field(default="", title="Specification", description="OpenAPI specification")),
             api_key=(str, Field(default="", title="API key", description="API key", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "OpenAPI", "icon_url": None}})
+            __config__=ConfigDict(json_schema_extra={'metadata':
+                                                         {"label": "OpenAPI", "icon_url": None,
+                                                          "categories": ["testing"],
+                                                          "extra_categories": [ "openapi", "swagger"]}})
         )
 
     @classmethod

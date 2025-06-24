@@ -72,7 +72,9 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["code repositories"],
+                    "extra_categories": ["code", "repository", "version control"]
                 }}}
         )
 

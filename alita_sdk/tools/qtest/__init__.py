@@ -36,7 +36,9 @@ class QtestToolkit(BaseToolkit):
             qtest_project_id=(int, Field(description="QTest project id", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': QtestToolkit.toolkit_max_length})),
             qtest_api_token=(SecretStr, Field(description="QTest API token", json_schema_extra={'secret': True, 'configuration': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "QTest", "icon_url": "qtest.svg"}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "QTest", "icon_url": "qtest.svg",
+                                                                  "categories": ["test management"],
+                                                                  "extra_categories": ["quality assurance", "test case management", "test planning"]}})
         )
 
         @check_connection_response

@@ -51,7 +51,7 @@ class JiraToolkit(BaseToolkit):
             api_key=(Optional[SecretStr], Field(description="API key", default=None, json_schema_extra={'secret': True, 'configuration': True})),
             username=(Optional[str], Field(description="Jira Username", default=None, json_schema_extra={'configuration': True})),
             token=(Optional[SecretStr], Field(description="Jira token", default=None, json_schema_extra={'secret': True, 'configuration': True})),
-            limit=(int, Field(description="Limit issues", default=5)),
+            limit=(int, Field(description="Limit issues")),
             labels=(Optional[str], Field(
                 description="List of comma separated labels used for labeling of agent's created or updated entities",
                 default=None,
@@ -78,7 +78,9 @@ class JiraToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "categories": ["project management"],
+                    "extra_categories": ["jira", "atlassian", "issue tracking", "project management", "task management"],
                 }
             })
         )

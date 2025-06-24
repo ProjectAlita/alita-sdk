@@ -51,7 +51,9 @@ class PPTXToolkit(BaseToolkit):
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "PPTX",
-                    "icon_url": None
+                    "icon_url": None,
+                    "categories": ["office"],
+                    "extra_categories": ["presentation", "office automation", "document"]
                 }
             })
         )
@@ -95,3 +97,4 @@ class PPTXToolkit(BaseToolkit):
         Return all tools in the toolkit.
         """
         return self.tools
+

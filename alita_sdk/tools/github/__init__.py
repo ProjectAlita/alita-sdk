@@ -71,7 +71,9 @@ class AlitaGitHubToolkit(BaseToolkit):
                                     }
                                 ]
                             },
-                        }
+                        },
+                        "categories": ["code repositories"],
+                        "extra_categories": ["github", "git", "repository", "code", "version control"],
                     },
                 }
             ),
@@ -120,3 +122,4 @@ class AlitaGitHubToolkit(BaseToolkit):
 
     def get_tools(self):
         return self.tools
+

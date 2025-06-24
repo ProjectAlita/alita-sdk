@@ -27,6 +27,9 @@ class PythonLinterToolkit(BaseToolkit):
         return create_model(
             name,
             error_codes=(str, Field(description="Error codes to be used by the linter")),
+            __config__={'json_schema_extra': {'metadata': {"label": "Python Linter", "icon_url": None, "hidden": True,
+                                                           "categories": ["development"],
+                                                           "extra_categories": ["code linter", "python linter"]}}}
         )
 
     @classmethod
@@ -51,3 +54,4 @@ class PythonLinterToolkit(BaseToolkit):
 
     def get_tools(self) -> list[BaseTool]:
         return self.tools
+

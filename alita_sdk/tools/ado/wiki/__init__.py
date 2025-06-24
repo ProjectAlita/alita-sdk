@@ -31,22 +31,23 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={
                 'json_schema_extra': {
-                    'metadata':
-                        {
-                            "label": "ADO wiki",
-                            "icon_url": None,
-                            "sections": {
-                                "auth": {
-                                    "required": True,
-                                    "subsections": [
-                                        {
-                                            "name": "Token",
-                                            "fields": ["token"]
-                                        }
-                                    ]
-                                }
+                    'metadata': {
+                        "label": "ADO wiki",
+                        "icon_url": None,
+                        "categories": ["documentation"],
+                        "extra_categories": ["knowledge base", "documentation management", "wiki"],
+                        "sections": {
+                            "auth": {
+                                "required": True,
+                                "subsections": [
+                                    {
+                                        "name": "Token",
+                                        "fields": ["token"]
+                                    }
+                                ]
                             }
                         }
+                    }
                 }
             }
         )
@@ -76,3 +77,4 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
 
     def get_tools(self):
         return self.tools
+

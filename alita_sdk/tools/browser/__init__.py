@@ -50,7 +50,7 @@ class BrowserToolkit(BaseToolkit):
 
         return create_model(
             name,
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Browser", "icon_url": None}}),
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Browser", "icon_url": None, "categories": ["testing"], "extra_categories": ["web scraping", "search", "crawler"]}}),
             google_cse_id=(Optional[str], Field(description="Google CSE id", default=None)),
             google_api_key=(Optional[SecretStr],
                             Field(description="Google API key", default=None, json_schema_extra={'secret': True})),
