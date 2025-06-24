@@ -13,7 +13,7 @@ logger = logging.getLogger("carrier_ui_reports_tool")
 class GetUIReportsTool(BaseTool):
     api_wrapper: CarrierAPIWrapper = Field(..., description="Carrier API Wrapper instance")
     name: str = "get_ui_reports"
-    description: str = "Get list of UI test reports from the Carrier platform. Optionally filter by tag and time range."
+    description: str = "Get list of UI test reports from the Carrier platform. Optionally filter by time range."
     args_schema: Type[BaseModel] = create_model(
         "GetUIReportsInput",
         report_id=(str, Field(description="UI Report id to retrieve")),

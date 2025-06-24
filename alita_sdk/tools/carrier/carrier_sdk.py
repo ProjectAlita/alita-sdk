@@ -212,3 +212,8 @@ class CarrierClient(BaseModel):
             """Get list of UI test reports from the Carrier platform."""
             endpoint = f"api/v1/ui_performance/reports/{self.credentials.project_id}"
             return self.request('get', endpoint).get("rows", [])
+
+    def get_locations(self) -> Dict[str, Any]:
+        """Get list of available locations/cloud settings from the Carrier platform."""
+        endpoint = f"api/v1/shared/locations/{self.credentials.project_id}"
+        return self.request('get', endpoint)

@@ -85,11 +85,15 @@ class CarrierAPIWrapper(BaseModel):
 
     def get_ui_reports_list(self) -> List[Dict[str, Any]]:
         """Get list of UI test reports from the Carrier platform."""
-        return self._client.get_ui_tests_list()
+        return self._client.get_ui_reports_list()
 
     def get_ui_tests_list(self) -> List[Dict[str, Any]]:
         """Get list of UI tests from the Carrier platform."""
         return self._client.get_ui_tests_list()
+
+    def get_locations(self) -> Dict[str, Any]:
+        """Get list of available locations/cloud settings from the Carrier platform."""
+        return self._client.get_locations()
 
     def get_ui_report_links(self, uid: str) -> list:
         """Get all unique file_names for a given UI report UID, ending with .html, without #index=*, and only unique values."""
