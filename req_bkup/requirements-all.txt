@@ -92,3 +92,4 @@ wikipedia==1.4.0
 yagmail==0.15.293
 yarl==1.17.1
 zephyr-python-api==0.1.0
+langmem==0.0.27
