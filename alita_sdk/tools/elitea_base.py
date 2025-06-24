@@ -5,7 +5,7 @@ import traceback
 from typing import Any, Optional, List, Dict
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, create_model, Field
-from .utils import TOOLKIT_SPLITTER
+from .utils import TOOLKIT_SPLITTER, TOOL_NAME_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +99,15 @@ BaseStepbackSearchParams = create_model(
 
 class BaseToolApiWrapper(BaseModel):
 
+    def toolkit_config_schema(self):
+        raise NotImplementedError("Subclasses should implement this method")
+
     def get_available_tools(self):
         raise NotImplementedError("Subclasses should implement this method")
+    
+    def get_max_toolkit_length(self):
+        longest_tool_name_length = max(len(tool["name"]) for tool in self.get_available_tools())
+        return TOOL_NAME_LIMIT - longest_tool_name_length - len(TOOLKIT_SPLITTER)
 
     def run(self, mode: str, *args: Any, **kwargs: Any):
         if TOOLKIT_SPLITTER in mode:

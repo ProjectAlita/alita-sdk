@@ -1,6 +1,7 @@
 import logging
 from importlib import import_module
 
+from .base.tool import BaseAction
 from .github import get_tools as get_github, AlitaGitHubToolkit
 from .openapi import get_tools as get_openapi
 from .jira import get_tools as get_jira, JiraToolkit
@@ -8,6 +9,7 @@ from .confluence import get_tools as get_confluence, ConfluenceToolkit
 from .servicenow import get_tools as get_service_now, ServiceNowToolkit
 from .gitlab import get_tools as get_gitlab, AlitaGitlabToolkit
 from .gitlab_org import get_tools as get_gitlab_org, AlitaGitlabSpaceToolkit
+from .utils import get_max_toolkit_length, TOOLKIT_SPLITTER, clean_string
 from .zephyr import get_tools as get_zephyr, ZephyrToolkit
 from .browser import get_tools as get_browser, BrowserToolkit
 from .report_portal import get_tools as get_report_portal, ReportPortalToolkit
@@ -43,7 +45,8 @@ from .figma import get_tools as get_figma, FigmaToolkit
 from .salesforce import get_tools as get_salesforce, SalesforceToolkit
 from .carrier import get_tools as get_carrier, AlitaCarrierToolkit
 from .ocr import get_tools as get_ocr, OCRToolkit
-from .pptx import get_tools as get_pptx, PPTXToolkit
+from .pptx import get_tools as get_pptx, PPTXToolkit, PPTXWrapper
+from .zephyr_squad.api_wrapper import ZephyrSquadApiWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +101,8 @@ def get_tools(tools_list, alita: 'AlitaClient', llm: 'LLMLikeObject', *args, **k
             tools.extend(get_zephyr_scale(tool))
         elif tool['type'] == 'zephyr_enterprise':
             tools.extend(get_zephyr_enterprise(tool))
+        elif tool['type'] == 'zephyr_squad':
+            extend_by_toolkit(tools, tool, ZephyrSquadApiWrapper)
         elif tool['type'] == 'rally':
             tools.extend(get_rally(tool))
         elif tool['type'] == 'sql':
@@ -157,6 +162,7 @@ def get_toolkits():
         ZephyrScaleToolkit.toolkit_config_schema(),
         ZephyrEnterpriseToolkit.toolkit_config_schema(),
         ZephyrToolkit.toolkit_config_schema(),
+        ZephyrSquadApiWrapper.model_construct().toolkit_config_schema(),
         AlitaYagmailToolkit.toolkit_config_schema(),
         SharepointToolkit.toolkit_config_schema(),
         AzureDevOpsReposToolkit.toolkit_config_schema(),
@@ -176,3 +182,24 @@ def get_toolkits():
         OCRToolkit.toolkit_config_schema(),
         PPTXToolkit.toolkit_config_schema(),
     ]
+
+def extend_by_toolkit(tools, tool, api_wrapper_cls):
+    """
+    Get list of tools for the toolkit by its specified ApiWrapper.
+
+    TODO doc
+    """
+    selected_tools = tool['settings'].get('selected_tools', [])
+    toolkit_name = tool.get('toolkit_name', None)
+    api_wrapper = api_wrapper_cls(**tool["settings"])
+    max_toolkit_length = api_wrapper.get_max_toolkit_length()
+    prefix = clean_string(toolkit_name, max_toolkit_length) + TOOLKIT_SPLITTER if toolkit_name else ''
+    #
+    for tool_item in api_wrapper.get_available_tools():
+        if not selected_tools or tool_item["name"] in selected_tools:
+            tools.append(BaseAction(
+                api_wrapper=api_wrapper,
+                name=prefix + tool_item["name"],
+                description=tool_item["description"],
+                args_schema=tool_item["args_schema"]
+            ))
