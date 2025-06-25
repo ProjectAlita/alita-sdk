@@ -176,7 +176,7 @@ class CreateUIExcelReportTool(BaseTool):
         except Exception as e:
             logger.error(f"Error processing UI report: {e}")
             raise ToolException(f"Error processing UI report: {e}")
-    
+        
     def _create_worksheet_name(self, json_file_name):
         """Create a valid worksheet name from JSON file name."""
         # Remove .json extension
@@ -190,7 +190,16 @@ class CreateUIExcelReportTool(BaseTool):
         name = name.replace('/', '_').replace('\\', '_').replace('[', '_').replace(']', '_')
         name = name.replace('*', '_').replace('?', '_').replace(':', '_')
         
-        # Truncate if too long
+        # Extract only the timestamp part (remove everything after the time)
+        # Expected format: "24Jun2025_02_14_37_user-flow.re" -> "24Jun2025_02_14_37"
+        parts = name.split('_')
+        if len(parts) >= 4:
+            # Keep first 4 parts which should be: date + 3 time parts
+            # Example: ["24Jun2025", "02", "14", "37", "user-flow.re"] -> ["24Jun2025", "02", "14", "37"]
+            timestamp_parts = parts[:4]
+            name = '_'.join(timestamp_parts)
+        
+        # Ensure it's within Excel's 31 character limit
         if len(name) > 31:
             name = name[:31]
         
