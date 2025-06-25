@@ -1,178 +1,205 @@
 import logging
 from importlib import import_module
 
-from .github import get_tools as get_github, AlitaGitHubToolkit
-from .openapi import get_tools as get_openapi
-from .jira import get_tools as get_jira, JiraToolkit
-from .confluence import get_tools as get_confluence, ConfluenceToolkit
-from .servicenow import get_tools as get_service_now, ServiceNowToolkit
-from .gitlab import get_tools as get_gitlab, AlitaGitlabToolkit
-from .gitlab_org import get_tools as get_gitlab_org, AlitaGitlabSpaceToolkit
-from .zephyr import get_tools as get_zephyr, ZephyrToolkit
-from .browser import get_tools as get_browser, BrowserToolkit
-from .report_portal import get_tools as get_report_portal, ReportPortalToolkit
-from .bitbucket import get_tools as get_bitbucket, AlitaBitbucketToolkit
-from .testrail import get_tools as get_testrail, TestrailToolkit
-from .testio import get_tools as get_testio, TestIOToolkit
-from .xray import get_tools as get_xray_cloud, XrayToolkit
-from .sharepoint import get_tools as get_sharepoint, SharepointToolkit
-from .qtest import get_tools as get_qtest, QtestToolkit
-from .zephyr_scale import get_tools as get_zephyr_scale, ZephyrScaleToolkit
-from .zephyr_enterprise import get_tools as get_zephyr_enterprise, ZephyrEnterpriseToolkit
-from .ado import get_tools as get_ado
-from .ado.repos import get_tools as  get_ado_repo,  AzureDevOpsReposToolkit
-from .ado.test_plan import AzureDevOpsPlansToolkit
-from .ado.work_item import AzureDevOpsWorkItemsToolkit
-from .ado.wiki import AzureDevOpsWikiToolkit
-from .rally import get_tools as get_rally, RallyToolkit
-from .sql import get_tools as get_sql, SQLToolkit
-from .code.sonar import get_tools as get_sonar, SonarToolkit
-from .google_places import get_tools as get_google_places, GooglePlacesToolkit
-from .yagmail import get_tools as get_yagmail, AlitaYagmailToolkit
-from .cloud.aws import AWSToolkit
-from .cloud.azure import AzureToolkit
-from .cloud.gcp import GCPToolkit
-from .cloud.k8s import KubernetesToolkit
-from .custom_open_api import OpenApiToolkit as CustomOpenApiToolkit
-from .elastic import ElasticToolkit
-from .keycloak import KeycloakToolkit
-from .localgit import AlitaLocalGitToolkit
-from .pandas import get_tools as get_pandas, PandasToolkit
-from .azure_ai.search import AzureSearchToolkit, get_tools as get_azure_search
-from .figma import get_tools as get_figma, FigmaToolkit
-from .salesforce import get_tools as get_salesforce, SalesforceToolkit
-from .carrier import get_tools as get_carrier, AlitaCarrierToolkit
-from .ocr import get_tools as get_ocr, OCRToolkit
-from .pptx import get_tools as get_pptx, PPTXToolkit
-
 logger = logging.getLogger(__name__)
 
-def get_tools(tools_list, alita: 'AlitaClient', llm: 'LLMLikeObject', *args, **kwargs):
+# Available tools and toolkits - populated by safe imports
+AVAILABLE_TOOLS = {}
+AVAILABLE_TOOLKITS = {}
+FAILED_IMPORTS = {}
+
+def _safe_import_tool(tool_name, module_path, get_tools_name=None, toolkit_class_name=None):
+    """Safely import a tool module and register available functions/classes."""
+    try:
+        module = __import__(f'alita_sdk.tools.{module_path}', fromlist=[''])
+        
+        imported = {}
+        if get_tools_name and hasattr(module, get_tools_name):
+            imported['get_tools'] = getattr(module, get_tools_name)
+            
+        if toolkit_class_name and hasattr(module, toolkit_class_name):
+            imported['toolkit_class'] = getattr(module, toolkit_class_name)
+            AVAILABLE_TOOLKITS[toolkit_class_name] = getattr(module, toolkit_class_name)
+            
+        if imported:
+            AVAILABLE_TOOLS[tool_name] = imported
+            logger.debug(f"Successfully imported {tool_name}")
+        
+    except Exception as e:
+        FAILED_IMPORTS[tool_name] = str(e)
+        logger.debug(f"Failed to import {tool_name}: {e}")
+
+# Safe imports for all tools
+_safe_import_tool('github', 'github', 'get_tools', 'AlitaGitHubToolkit')
+_safe_import_tool('openapi', 'openapi', 'get_tools')
+_safe_import_tool('jira', 'jira', 'get_tools', 'JiraToolkit')
+_safe_import_tool('confluence', 'confluence', 'get_tools', 'ConfluenceToolkit')
+_safe_import_tool('service_now', 'servicenow', 'get_tools', 'ServiceNowToolkit')
+_safe_import_tool('gitlab', 'gitlab', 'get_tools', 'AlitaGitlabToolkit')
+_safe_import_tool('gitlab_org', 'gitlab_org', 'get_tools', 'AlitaGitlabSpaceToolkit')
+_safe_import_tool('zephyr', 'zephyr', 'get_tools', 'ZephyrToolkit')
+_safe_import_tool('browser', 'browser', 'get_tools', 'BrowserToolkit')
+_safe_import_tool('report_portal', 'report_portal', 'get_tools', 'ReportPortalToolkit')
+_safe_import_tool('bitbucket', 'bitbucket', 'get_tools', 'AlitaBitbucketToolkit')
+_safe_import_tool('testrail', 'testrail', 'get_tools', 'TestrailToolkit')
+_safe_import_tool('testio', 'testio', 'get_tools', 'TestIOToolkit')
+_safe_import_tool('xray_cloud', 'xray', 'get_tools', 'XrayToolkit')
+_safe_import_tool('sharepoint', 'sharepoint', 'get_tools', 'SharepointToolkit')
+_safe_import_tool('qtest', 'qtest', 'get_tools', 'QtestToolkit')
+_safe_import_tool('zephyr_scale', 'zephyr_scale', 'get_tools', 'ZephyrScaleToolkit')
+_safe_import_tool('zephyr_enterprise', 'zephyr_enterprise', 'get_tools', 'ZephyrEnterpriseToolkit')
+_safe_import_tool('ado', 'ado', 'get_tools')
+_safe_import_tool('ado_repos', 'ado.repos', 'get_tools', 'AzureDevOpsReposToolkit')
+_safe_import_tool('ado_plans', 'ado.test_plan', None, 'AzureDevOpsPlansToolkit')
+_safe_import_tool('ado_work_items', 'ado.work_item', None, 'AzureDevOpsWorkItemsToolkit')
+_safe_import_tool('ado_wiki', 'ado.wiki', None, 'AzureDevOpsWikiToolkit')
+_safe_import_tool('rally', 'rally', 'get_tools', 'RallyToolkit')
+_safe_import_tool('sql', 'sql', 'get_tools', 'SQLToolkit')
+_safe_import_tool('sonar', 'code.sonar', 'get_tools', 'SonarToolkit')
+_safe_import_tool('google_places', 'google_places', 'get_tools', 'GooglePlacesToolkit')
+_safe_import_tool('yagmail', 'yagmail', 'get_tools', 'AlitaYagmailToolkit')
+_safe_import_tool('aws', 'cloud.aws', None, 'AWSToolkit')
+_safe_import_tool('azure', 'cloud.azure', None, 'AzureToolkit')
+_safe_import_tool('gcp', 'cloud.gcp', None, 'GCPToolkit')
+_safe_import_tool('k8s', 'cloud.k8s', None, 'KubernetesToolkit')
+_safe_import_tool('custom_open_api', 'custom_open_api', None, 'OpenApiToolkit')
+_safe_import_tool('elastic', 'elastic', None, 'ElasticToolkit')
+_safe_import_tool('keycloak', 'keycloak', None, 'KeycloakToolkit')
+_safe_import_tool('localgit', 'localgit', None, 'AlitaLocalGitToolkit')
+_safe_import_tool('pandas', 'pandas', 'get_tools', 'PandasToolkit')
+_safe_import_tool('azure_search', 'azure_ai.search', 'get_tools', 'AzureSearchToolkit')
+_safe_import_tool('figma', 'figma', 'get_tools', 'FigmaToolkit')
+_safe_import_tool('salesforce', 'salesforce', 'get_tools', 'SalesforceToolkit')
+_safe_import_tool('carrier', 'carrier', 'get_tools', 'AlitaCarrierToolkit')
+_safe_import_tool('ocr', 'ocr', 'get_tools', 'OCRToolkit')
+_safe_import_tool('pptx', 'pptx', 'get_tools', 'PPTXToolkit')
+_safe_import_tool('postman', 'postman', 'get_tools', 'PostmanToolkit')
+
+# Log import summary
+available_count = len(AVAILABLE_TOOLS)
+total_attempted = len(AVAILABLE_TOOLS) + len(FAILED_IMPORTS)
+logger.info(f"Tool imports completed: {available_count}/{total_attempted} successful")
+
+def get_tools(tools_list, alita, llm, *args, **kwargs):
     tools = []
     for tool in tools_list:
         # validate tool name syntax - it cannot be started with _
         for tool_name in tool.get('settings', {}).get('selected_tools', []):
             if isinstance(tool_name, str) and tool_name.startswith('_'):
                 raise ValueError(f"Tool name '{tool_name}' from toolkit '{tool.get('type', '')}' cannot start with '_'")
+        
         tool['settings']['alita'] = alita
         tool['settings']['llm'] = llm
-        if tool['type'] == 'openapi':
-            tools.extend(get_openapi(tool))
-        elif tool['type'] == 'github':
-            tools.extend(get_github(tool))
-        elif tool['type'] == 'jira':
-            tools.extend(get_jira(tool))
-        elif tool['type'] == 'confluence':
-            tools.extend(get_confluence(tool))
-        elif tool['type'] == 'service_now':
-            tools.extend(get_service_now(tool))
-        elif tool['type'] == 'gitlab':
-            tools.extend(get_gitlab(tool))
-        elif tool['type'] == 'gitlab_org':
-            tools.extend(get_gitlab_org(tool))
-        elif tool['type'] == 'zephyr':
-            tools.extend(get_zephyr(tool))
-        elif tool['type'] == 'browser':
-            tools.extend(get_browser(tool))
-        elif tool['type'] == 'yagmail':
-            tools.extend(get_yagmail(tool))
-        elif tool['type'] == 'report_portal':
-            tools.extend(get_report_portal(tool))
-        elif tool['type'] == 'bitbucket':
-            tools.extend(get_bitbucket(tool))
-        elif tool['type'] == 'testrail':
-            tools.extend(get_testrail(tool))
-        elif tool['type'] in ['ado_boards', 'ado_wiki', 'ado_plans']:
-            tools.extend(get_ado(tool['type'], tool))
-        elif tool['type'] in ['ado_repos', 'azure_devops_repos']:
-            tools.extend(get_ado_repo(tool))
-        elif tool['type'] == 'testio':
-            tools.extend(get_testio(tool))
-        elif tool['type'] == 'xray_cloud':
-            tools.extend(get_xray_cloud(tool))
-        elif tool['type'] == 'sharepoint':
-            tools.extend(get_sharepoint(tool))
-        elif tool['type'] == 'qtest':
-            tools.extend(get_qtest(tool))
-        elif tool['type'] == 'zephyr_scale':
-            tools.extend(get_zephyr_scale(tool))
-        elif tool['type'] == 'zephyr_enterprise':
-            tools.extend(get_zephyr_enterprise(tool))
-        elif tool['type'] == 'rally':
-            tools.extend(get_rally(tool))
-        elif tool['type'] == 'sql':
-            tools.extend(get_sql(tool))
-        elif tool['type'] == 'sonar':
-            tools.extend(get_sonar(tool))
-        elif tool['type'] == 'google_places':
-            tools.extend(get_google_places(tool))
-        elif tool['type'] == 'azure_search':
-            tools.extend(get_azure_search(tool))
-        elif tool['type'] == 'pandas':
-            tools.extend(get_pandas(tool))
-        elif tool['type'] == 'figma':
-            tools.extend(get_figma(tool))
-        elif tool['type'] == 'salesforce':
-            tools.extend(get_salesforce(tool))
-        elif tool['type'] == 'carrier':
-            tools.extend(get_carrier(tool))
-        elif tool['type'] == 'ocr':
-            tools.extend(get_ocr(tool))
-        elif tool['type'] == 'pptx':
-            tools.extend(get_pptx(tool))
+        tool_type = tool['type']
+        
+        # Check if tool is available and has get_tools function
+        if tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
+            try:
+                get_tools_func = AVAILABLE_TOOLS[tool_type]['get_tools']
+                
+                # Handle special cases for ADO tools
+                if tool_type in ['ado_boards', 'ado_wiki', 'ado_plans']:
+                    tools.extend(get_tools_func(tool_type, tool))
+                else:
+                    tools.extend(get_tools_func(tool))
+                    
+            except Exception as e:
+                logger.error(f"Error getting tools for {tool_type}: {e}")
+                
+        # Handle ADO repos special case (it might be requested as azure_devops_repos)
+        elif tool_type in ['ado_repos', 'azure_devops_repos'] and 'ado_repos' in AVAILABLE_TOOLS:
+            try:
+                get_tools_func = AVAILABLE_TOOLS['ado_repos']['get_tools']
+                tools.extend(get_tools_func(tool))
+            except Exception as e:
+                logger.error(f"Error getting ADO repos tools: {e}")
+                
+        # Handle custom modules
+        elif tool.get("settings", {}).get("module"):
+            try:
+                settings = tool.get("settings", {})
+                mod = import_module(settings.pop("module"))
+                tkitclass = getattr(mod, settings.pop("class"))
+                toolkit = tkitclass.get_toolkit(**tool["settings"])
+                tools.extend(toolkit.get_tools())
+            except Exception as e:
+                logger.error(f"Error in getting custom toolkit: {e}")
+                
         else:
-            if tool.get("settings", {}).get("module"):
-                try:
-                    settings = tool.get("settings", {})
-                    mod = import_module(settings.pop("module"))
-                    tkitclass = getattr(mod, settings.pop("class"))
-                    toolkit = tkitclass.get_toolkit(**tool["settings"])
-                    tools.extend(toolkit.get_tools())
-                except Exception as e:
-                    logger.error(f"Error in getting toolkit: {e}")
+            # Tool not available or not found
+            if tool_type in FAILED_IMPORTS:
+                logger.warning(f"Tool '{tool_type}' is not available: {FAILED_IMPORTS[tool_type]}")
+            else:
+                logger.warning(f"Unknown tool type: {tool_type}")
+                
     return tools
 
 def get_toolkits():
-    return [
-        AlitaGitHubToolkit.toolkit_config_schema(),
-        TestrailToolkit.toolkit_config_schema(),
-        JiraToolkit.toolkit_config_schema(),
-        AzureDevOpsPlansToolkit.toolkit_config_schema(),
-        AzureDevOpsWikiToolkit.toolkit_config_schema(),
-        AzureDevOpsWorkItemsToolkit.toolkit_config_schema(),
-        RallyToolkit.toolkit_config_schema(),
-        QtestToolkit.toolkit_config_schema(),
-        ReportPortalToolkit.toolkit_config_schema(),
-        TestIOToolkit.toolkit_config_schema(),
-        SQLToolkit.toolkit_config_schema(),
-        SonarToolkit.toolkit_config_schema(),
-        GooglePlacesToolkit.toolkit_config_schema(),
-        BrowserToolkit.toolkit_config_schema(),
-        XrayToolkit.toolkit_config_schema(),
-        AlitaGitlabToolkit.toolkit_config_schema(),
-        ConfluenceToolkit.toolkit_config_schema(),
-        ServiceNowToolkit.toolkit_config_schema(),
-        AlitaBitbucketToolkit.toolkit_config_schema(),
-        AlitaGitlabSpaceToolkit.toolkit_config_schema(),
-        ZephyrScaleToolkit.toolkit_config_schema(),
-        ZephyrEnterpriseToolkit.toolkit_config_schema(),
-        ZephyrToolkit.toolkit_config_schema(),
-        AlitaYagmailToolkit.toolkit_config_schema(),
-        SharepointToolkit.toolkit_config_schema(),
-        AzureDevOpsReposToolkit.toolkit_config_schema(),
-        AWSToolkit.toolkit_config_schema(),
-        AzureToolkit.toolkit_config_schema(),
-        GCPToolkit.toolkit_config_schema(),
-        KubernetesToolkit.toolkit_config_schema(),
-        CustomOpenApiToolkit.toolkit_config_schema(),
-        ElasticToolkit.toolkit_config_schema(),
-        KeycloakToolkit.toolkit_config_schema(),
-        AlitaLocalGitToolkit.toolkit_config_schema(),
-        PandasToolkit.toolkit_config_schema(),
-        AzureSearchToolkit.toolkit_config_schema(),
-        FigmaToolkit.toolkit_config_schema(),
-        SalesforceToolkit.toolkit_config_schema(),
-        AlitaCarrierToolkit.toolkit_config_schema(),
-        OCRToolkit.toolkit_config_schema(),
-        PPTXToolkit.toolkit_config_schema(),
-    ]
+    """Return toolkit configurations for all successfully imported toolkits."""
+    toolkit_configs = []
+    
+    for toolkit_name, toolkit_class in AVAILABLE_TOOLKITS.items():
+        try:
+            if hasattr(toolkit_class, 'toolkit_config_schema'):
+                toolkit_configs.append(toolkit_class.toolkit_config_schema())
+            else:
+                logger.debug(f"Toolkit {toolkit_name} does not have toolkit_config_schema method")
+        except Exception as e:
+            logger.error(f"Error getting config schema for {toolkit_name}: {e}")
+    
+    logger.info(f"Successfully loaded {len(toolkit_configs)} toolkit configurations")
+    return toolkit_configs
+
+def get_available_tools():
+    """Return list of available tool types."""
+    return list(AVAILABLE_TOOLS.keys())
+
+def get_failed_imports():
+    """Return dictionary of failed imports and their error messages."""
+    return FAILED_IMPORTS.copy()
+
+def get_available_toolkits():
+    """Return list of available toolkit class names."""
+    return list(AVAILABLE_TOOLKITS.keys())
+
+def diagnose_imports():
+    """Print diagnostic information about tool imports."""
+    available_count = len(AVAILABLE_TOOLS)
+    failed_count = len(FAILED_IMPORTS)
+    total_count = available_count + failed_count
+    
+    print(f"=== Tool Import Diagnostic ===")
+    print(f"Total tools: {total_count}")
+    print(f"Successfully imported: {available_count}")
+    print(f"Failed imports: {failed_count}")
+    print(f"Success rate: {(available_count/total_count*100):.1f}%")
+    
+    if AVAILABLE_TOOLS:
+        print(f"\n✅ Available tools ({len(AVAILABLE_TOOLS)}):")
+        for tool_name in sorted(AVAILABLE_TOOLS.keys()):
+            functions = []
+            if 'get_tools' in AVAILABLE_TOOLS[tool_name]:
+                functions.append('get_tools')
+            if 'toolkit_class' in AVAILABLE_TOOLS[tool_name]:
+                functions.append('toolkit')
+            print(f"  - {tool_name}: {', '.join(functions)}")
+    
+    if FAILED_IMPORTS:
+        print(f"\n❌ Failed imports ({len(FAILED_IMPORTS)}):")
+        for tool_name, error in FAILED_IMPORTS.items():
+            print(f"  - {tool_name}: {error}")
+    
+    if AVAILABLE_TOOLKITS:
+        print(f"\n🔧 Available toolkits ({len(AVAILABLE_TOOLKITS)}):")
+        for toolkit_name in sorted(AVAILABLE_TOOLKITS.keys()):
+            print(f"  - {toolkit_name}")
+
+# Export useful functions
+__all__ = [
+    'get_tools',
+    'get_toolkits',
+    'get_available_tools',
+    'get_failed_imports', 
+    'get_available_toolkits',
+    'diagnose_imports'
+]

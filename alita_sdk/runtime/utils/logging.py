@@ -1,7 +1,12 @@
 import logging
 from functools import wraps
 
-from langchain_core.callbacks import dispatch_custom_event
+try:
+    from langchain_core.callbacks import dispatch_custom_event
+except ImportError:
+    # Fallback stub if langchain_core is unavailable
+    def dispatch_custom_event(name: str, data: dict):  # pragma: no cover
+        pass
 
 
 class StreamlitCallbackHandler(logging.Handler):
@@ -42,6 +47,7 @@ def setup_streamlit_logging(
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
     return handler
 
