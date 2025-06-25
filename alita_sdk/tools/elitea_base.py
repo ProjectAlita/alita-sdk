@@ -179,7 +179,9 @@ class BaseToolApiWrapper(BaseModel):
                     # Re-raise with the user-friendly message while preserving the original exception
                     raise ToolException(user_friendly_message) from e
         else:
-            raise ValueError(f"Unknown mode: {mode}")
+            raise ValueError(f"Unknown mode: {mode}. "
+                             f"Available modes: {', '.join([tool['name'] for tool in self.get_available_tools()])}. "
+                             f"Review the tool's name in your request.")
 
 
 class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):

@@ -311,4 +311,7 @@ To test your toolkit, you can use the Streamlit application (`alita_local.py`) t
 - Choose your toolkit from the dropdown menu.
 - Adjust the configuration parameters as needed, and then test the tools by sending queries to them.
 
+**NOTE**: use `function mode` for testing of required tool.
+
 ![custom_toolkit_config](docs/readme_imgs/custom_toolkit_config.png "custom_toolkit_config")
+![custom_toolkit_testing_interface](docs/readme_imgs/toolkit_testing_interface.png "custom_toolkit_testing_interface")

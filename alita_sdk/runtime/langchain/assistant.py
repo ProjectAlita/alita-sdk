@@ -5,8 +5,9 @@ from typing import Any, Optional
 from langchain.agents import (
     AgentExecutor, create_openai_tools_agent,
     create_json_chat_agent)
+from langgraph.store.base import BaseStore
+
 from .agents.xml_chat import create_xml_chat_agent
-# from ..langchain.mixedAgentRenderes import render_react_text_description_and_args
 from .langraph_agent import create_graph
 from langchain_core.messages import (
     BaseMessage, SystemMessage, HumanMessage
@@ -28,7 +29,8 @@ class Assistant:
                  chat_history: list[BaseMessage] = [],
                  app_type: str = "openai",
                  tools: Optional[list] = [],
-                 memory: Optional[Any] = None):
+                 memory: Optional[Any] = None,
+                 store: Optional[BaseStore] = None):
 
         self.client = copy(client)
         self.client.max_tokens = data['llm_settings']['max_tokens']
@@ -40,6 +42,7 @@ class Assistant:
 
         self.app_type = app_type
         self.memory = memory
+        self.store = store
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
@@ -58,7 +61,10 @@ class Assistant:
             raise ToolException("Non-pipeline agents cannot have pipelines as a toolkits. "
                                 "Review toolkits configuration or use pipeline as master agent.")
 
-        self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client)
+        # configure memory store if memory tool is defined
+        memory_tool = next((tool for tool in data['tools'] if tool['type'] == 'memory'), None)
+        self._configure_store(memory_tool)
+        self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client, memory_store=self.store)
         if app_type == "pipeline":
             self.prompt = data['instructions']
         else:
@@ -93,6 +99,18 @@ class Assistant:
                 logger.info(f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
             except Exception as e:
                 logger.info(f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
+
+    def _configure_store(self, memory_tool: dict | None) -> None:
+        """
+        Configure the memory store based on a memory_tool definition.
+        Only creates a new store if one does not already exist.
+        """
+        if not memory_tool or self.store is not None:
+            return
+        from .store_manager import get_manager
+        conn_str = memory_tool.get('settings', {}).get('connection_string', '')
+        store = get_manager().get_store(conn_str)
+        self.store = store
 
     def runnable(self):
         if self.app_type == 'pipeline':

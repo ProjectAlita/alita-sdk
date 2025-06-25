@@ -1,4 +1,6 @@
 from typing import List, Any, Optional
+
+from langgraph.store.base import BaseStore
 from pydantic import create_model, BaseModel, Field
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
@@ -19,8 +21,8 @@ class ApplicationToolkit(BaseToolkit):
         )
     
     @classmethod
-    def get_toolkit(cls, client: Any, application_id: int, application_version_id: int, app_api_key: str, 
-                    selected_tools: list[str] = []):
+    def get_toolkit(cls, client: Any, application_id: int, application_version_id: int, app_api_key: str,
+                    selected_tools: list[str] = [], store: Optional[BaseStore] = None):
         from ..llms.alita import AlitaChatModel
         
         app_details = client.get_app_details(application_id)
@@ -37,7 +39,7 @@ class ApplicationToolkit(BaseToolkit):
             "temperature": version_details['llm_settings']['temperature'],
         }
 
-        app = client.application(AlitaChatModel(**settings), application_id, application_version_id)
+        app = client.application(AlitaChatModel(**settings), application_id, application_version_id, store=store)
         return cls(tools=[Application(name=app_details.get("name"), 
                                       description=app_details.get("description"), 
                                       application=app, 

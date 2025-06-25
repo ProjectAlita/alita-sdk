@@ -1,0 +1,91 @@
+name: Update Indexer Worker Dependencies
+
+on:
+  workflow_run:
+    workflows: ["Publish to PyPI 📦"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      create-pr:
+        description: "Create a pull request? (false = push to main)"
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  update-dependencies:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Get current version
+        id: get_version
+        run: |
+          VERSION=$(python -c "import build.util; print(build.util.project_wheel_metadata('.').get('Version'))")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # - name: Install SSH key
+      #   uses: webfactory/ssh-agent@v0.8.0
+      #   with:
+      #     ssh-private-key: ${{ secrets.INDEXER_WORKER_DEPLOYMENT_KEY }}
+
+      - name: Checkout indexer_worker
+        uses: actions/checkout@v4
+        with:
+          repository: ProjectAlita/indexer_worker
+          ssh-key: ${{ secrets.INDEXER_WORKER_DEPLOYMENT_KEY }}
+          path: indexer_worker
+
+      - name: Update requirements.txt
+        run: |
+          cd indexer_worker
+          # Update alita-sdk version
+          sed -i "s/alita-sdk[all]==[0-9.]*/alita-sdk[all]==${{ steps.get_version.outputs.version }}/" requirements.txt
+
+      - name: Commit and push changes
+        if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.create-pr == false)
+        run: |
+          cd indexer_worker
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add requirements.txt
+          git commit -m "chore: update alita-sdk to version ${{ steps.get_version.outputs.version }}"
+          git push
+
+      - name: Create Pull Request
+        if: github.event_name == 'workflow_dispatch' && inputs.create-pr == true
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update alita-sdk to version ${{ steps.get_version.outputs.version }}"
+          title: "Update alita-sdk to version ${{ steps.get_version.outputs.version }}"
+          body: |
+            This PR updates the following dependencies to version ${{ steps.get_version.outputs.version }}:
+            - alita-sdk
+            
+            This update was automatically triggered by the release of a new version.
+          branch: update-dependencies
+          base: main
+          delete-branch: true
+          
+      - name: Show version bump annotation
+        run: |
+          echo "::notice title=Version Bump::Updating sdk version to ${{ steps.get_version.outputs.version }}"
