@@ -9,13 +9,13 @@ import pymupdf
 from langchain_core.tools import ToolException
 from transformers import BlipProcessor, BlipForConditionalGeneration
 
-def parse_file_content(file_name, file_content, is_capture_image: bool = False, page_number: int = None):
+def parse_file_content(file_name, file_content, is_capture_image: bool = False, page_number: int = None, sheet_name: str = None):
     if file_name.endswith('.txt'):
         return parse_txt(file_content)
     elif file_name.endswith('.docx'):
         return read_docx_from_bytes(file_content)
     elif file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-        return parse_excel(file_content)
+        return parse_excel(file_content, sheet_name)
     elif file_name.endswith('.pdf'):
         return parse_pdf(file_content, page_number, is_capture_image)
     elif file_name.endswith('.pptx'):
@@ -30,14 +30,24 @@ def parse_txt(file_content):
     except Exception as e:
         return ToolException(f"Error decoding file content: {e}")
 
-def parse_excel(file_content):
+def parse_excel(file_content, sheet_name = None):
     try:
         excel_file = io.BytesIO(file_content)
-        df = pd.read_excel(excel_file)
-        df.fillna('', inplace=True)
-        return df.to_string()
+        if sheet_name:
+            return parse_sheet(excel_file, sheet_name)
+        dfs = pd.read_excel(excel_file, sheet_name=sheet_name)
+        result = []
+        for sheet_name, df in dfs.items():
+            df.fillna('', inplace=True)
+            result.append(f"=== Sheet: {sheet_name} ===\n{df.to_string(index=False)}")
+        return "\n\n".join(result)
     except Exception as e:
         return ToolException(f"Error reading Excel file: {e}")
+
+def parse_sheet(excel_file, sheet_name):
+    df = pd.read_excel(excel_file, sheet_name=sheet_name)
+    df.fillna('', inplace=True)
+    return df.to_string()
 
 def parse_pdf(file_content, page_number, is_capture_image):
     with pymupdf.open(stream=file_content, filetype="pdf") as report:
