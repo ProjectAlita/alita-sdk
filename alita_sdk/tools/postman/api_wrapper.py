@@ -1,7 +1,8 @@
+import copy
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from traceback import format_exc
 
 import requests
@@ -234,6 +235,18 @@ PostmanMoveRequest = create_model(
         description="New folder path", default=None))
 )
 
+PostmanGetRequest = create_model(
+    "PostmanGetRequest",
+    request_path=(str, Field(
+        description="The path to the request (e.g., 'API/Users/Get User' or 'applications/recommendations')"))
+)
+
+PostmanGetRequestScript = create_model(
+    "PostmanGetRequestScript",
+    request_path=(str, Field(description="Path to the request (folder/requestName)")),
+    script_type=(str, Field(description="The type of script to retrieve: 'test' or 'prerequest'", default="prerequest"))
+)
+
 
 class PostmanApiWrapper(BaseToolApiWrapper):
     """Wrapper for Postman API."""
@@ -283,8 +296,14 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             return {}
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {e}")
-            raise ToolException(f"Postman API request failed: {str(e)}")
+            error_details = ""
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_details = f" Response content: {e.response.text}"
+                except:
+                    error_details = f" Response status: {e.response.status_code}"
+            logger.error(f"Request failed: {e}{error_details}")
+            raise ToolException(f"Postman API request failed: {str(e)}{error_details}")
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode JSON response: {e}")
             raise ToolException(
@@ -320,6 +339,20 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 "description": "Get detailed information about all requests in a folder",
                 "args_schema": PostmanGetFolderRequests,
                 "ref": self.get_folder_requests
+            },
+            {
+                "name": "get_request",
+                "mode": "get_request",
+                "description": "Get a specific request by path",
+                "args_schema": PostmanGetRequest,
+                "ref": self.get_request
+            },
+            {
+                "name": "get_request_script",
+                "mode": "get_request_script",
+                "description": "Get the test or pre-request script content for a specific request",
+                "args_schema": PostmanGetRequestScript,
+                "ref": self.get_request_script
             },
             {
                 "name": "search_requests",
@@ -891,35 +924,60 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             logger.error(f"Exception when creating folder: {stacktrace}")
             raise ToolException(f"Unable to create folder '{name}': {str(e)}")
 
+    def _get_folder_id(self, folder_path: str) -> str:
+        """Helper method to get folder ID by path."""
+        collection = self._make_request(
+            'GET', f'/collections/{self.collection_id}')
+        collection_data = collection["collection"]
+
+        # Find the folder
+        folders = self.analyzer.find_folders_by_path(
+            collection_data["item"], folder_path)
+        if not folders:
+            raise ToolException(f"Folder '{folder_path}' not found")
+
+        folder = folders[0]
+
+        # Get the folder ID
+        folder_id = folder.get("id")
+        if not folder_id:
+            # If ID is not available directly, try to use the item ID
+            if "_postman_id" in folder:
+                folder_id = folder["_postman_id"]
+            else:
+                raise ToolException(f"Folder ID not found for '{folder_path}'")
+
+        return folder_id
+
     def update_folder(self, folder_path: str, name: str = None,
                       description: str = None, auth: Dict = None, **kwargs) -> str:
-        """Update folder properties."""
+        """Update folder properties using the direct folder endpoint."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
-
-            # Find the folder
-            folders = self.analyzer.find_folders_by_path(
-                collection_data["item"], folder_path)
-            if not folders:
-                raise ToolException(f"Folder '{folder_path}' not found")
-
-            folder = folders[0]
-
-            # Update fields if provided
+            # Get the folder ID
+            folder_id = self._get_folder_id(folder_path)
+            
+            # Create update payload
+            folder_update = {}
             if name:
-                folder["name"] = name
+                folder_update["name"] = name
             if description is not None:
-                folder["description"] = description
+                folder_update["description"] = description
             if auth is not None:
-                folder["auth"] = auth
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Folder '{folder_path}' updated successfully"}, indent=2)
+                folder_update["auth"] = auth
+                
+            # Only update if we have properties to change
+            if folder_update:
+                # Update folder using the direct API endpoint
+                response = self._make_request('PUT', f'/collections/{self.collection_id}/folders/{folder_id}',
+                                            json=folder_update)
+                return json.dumps({"success": True, "message": f"Folder '{folder_path}' updated successfully"}, indent=2)
+            else:
+                return json.dumps({"success": True, "message": f"No changes requested for folder '{folder_path}'"}, indent=2)
+        except Exception as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when updating folder: {stacktrace}")
+            raise ToolException(
+                f"Unable to update folder '{folder_path}': {str(e)}")
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating folder: {stacktrace}")
@@ -1063,24 +1121,18 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_name(self, request_path: str, name: str, **kwargs) -> str:
         """Update request name."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Create update payload
+            request_update = {
+                "name": name
+            }
 
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update name
-            request_item["name"] = name
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' name updated successfully"}, indent=2)
+            # Update the name field
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                          json=request_update)
+            return json.dumps({"success": True, "message": f"Request '{request_path}' name updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request name: {stacktrace}")
@@ -1090,24 +1142,18 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_method(self, request_path: str, method: str, **kwargs) -> str:
         """Update request HTTP method."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Create update payload
+            request_update = {
+                "method": method.upper()
+            }
 
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update method
-            request_item["request"]["method"] = method.upper()
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' method updated successfully"}, indent=2)
+            # Update the method field
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                          json=request_update)
+            return json.dumps({"success": True, "message": f"Request '{request_path}' method updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request method: {stacktrace}")
@@ -1117,51 +1163,63 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_url(self, request_path: str, url: str, **kwargs) -> str:
         """Update request URL."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Create update payload
+            request_update = {
+                "url": url
+            }
 
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update URL
-            request_item["request"]["url"] = url
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' URL updated successfully"}, indent=2)
+            # Update the URL field
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                          json=request_update)
+            return json.dumps({"success": True, "message": f"Request '{request_path}' URL updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request URL: {stacktrace}")
             raise ToolException(
                 f"Unable to update request '{request_path}' URL: {str(e)}")
 
+    def _get_request_item_and_id(self, request_path: str) -> Tuple[Dict, str, Dict]:
+        """Helper method to get request item and ID by path. Returns (request_item, request_id, collection_data)."""
+        collection = self._make_request(
+            'GET', f'/collections/{self.collection_id}')
+        collection_data = collection["collection"]
+
+        # Find the request
+        request_item = self.analyzer.find_request_by_path(
+            collection_data["item"], request_path)
+        if not request_item:
+            raise ToolException(f"Request '{request_path}' not found")
+
+        # Get the request ID
+        request_id = request_item.get("id")
+        if not request_id:
+            # If ID is not available directly, try to use the full item ID path
+            if "_postman_id" in request_item:
+                request_id = request_item["_postman_id"]
+            else:
+                raise ToolException(f"Request ID not found for '{request_path}'")
+
+        return request_item, request_id, collection_data
+        
     def update_request_description(self, request_path: str, description: str, **kwargs) -> str:
         """Update request description."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # For description update, we need to properly format the payload
+            # according to Postman API requirements
+            request_update = {
+                "description": description
+            }
 
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update description
-            request_item["request"]["description"] = description
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' description updated successfully"}, indent=2)
+            # Update only the description field
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                          json=request_update)
+            return json.dumps({"success": True, "message": f"Request '{request_path}' description updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request description: {stacktrace}")
@@ -1171,24 +1229,18 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_headers(self, request_path: str, headers: List[Dict], **kwargs) -> str:
         """Update request headers."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Create update payload
+            request_update = {
+                "header": headers
+            }
 
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update headers
-            request_item["request"]["header"] = headers
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' headers updated successfully"}, indent=2)
+            # Update the headers field
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                          json=request_update)
+            return json.dumps({"success": True, "message": f"Request '{request_path}' headers updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request headers: {stacktrace}")
@@ -1198,24 +1250,18 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_body(self, request_path: str, body: Dict, **kwargs) -> str:
         """Update request body."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Create update payload
+            request_update = {
+                "body": body
+            }
 
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update body
-            request_item["request"]["body"] = body
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' body updated successfully"}, indent=2)
+            # Update the body field
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                          json=request_update)
+            return json.dumps({"success": True, "message": f"Request '{request_path}' body updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request body: {stacktrace}")
@@ -1225,24 +1271,18 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_auth(self, request_path: str, auth: Dict, **kwargs) -> str:
         """Update request authentication."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Create update payload
+            request_update = {
+                "auth": auth
+            }
 
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update auth
-            request_item["request"]["auth"] = auth
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' auth updated successfully"}, indent=2)
+            # Update the auth field
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                          json=request_update)
+            return json.dumps({"success": True, "message": f"Request '{request_path}' auth updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request auth: {stacktrace}")
@@ -1252,35 +1292,34 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_tests(self, request_path: str, tests: str, **kwargs) -> str:
         """Update request test scripts."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
-
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update test events
-            events = request_item.get("event", [])
-            # Remove existing test events
-            events = [e for e in events if e.get("listen") != "test"]
-            if tests:
-                events.append({
-                    "listen": "test",
-                    "script": {
-                        "exec": tests.split('\n'),
-                        "type": "text/javascript"
-                    }
-                })
-            request_item["event"] = events
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' tests updated successfully"}, indent=2)
+            # Get the request ID
+            _, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Get current request to preserve existing data
+            current_request = self._make_request('GET', f'/collections/{self.collection_id}/requests/{request_id}')
+            request_data = current_request.get("data", {})
+            
+            # Prepare the events array - preserve any non-test events
+            events = [event for event in request_data.get("events", []) if event.get("listen") != "test"]
+            
+            # Add the new test script
+            events.append({
+                "listen": "test",
+                "script": {
+                    "type": "text/javascript",
+                    "exec": tests.strip().split('\n')
+                }
+            })
+            
+            # Update the events array in the request data
+            request_data["events"] = events
+            
+            # Update the request using the individual request endpoint
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                        json=request_data)
+            
+            logger.info(f"Test script updated successfully for request '{request_path}'")
+            return json.dumps({"success": True, "message": f"Request '{request_path}' tests updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request tests: {stacktrace}")
@@ -1290,35 +1329,34 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_pre_script(self, request_path: str, pre_request_script: str, **kwargs) -> str:
         """Update request pre-request scripts."""
         try:
-            # Get current collection
-            collection = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
-            collection_data = collection["collection"]
-
-            # Find the request
-            request_item = self.analyzer.find_request_by_path(
-                collection_data["item"], request_path)
-            if not request_item:
-                raise ToolException(f"Request '{request_path}' not found")
-
-            # Update prerequest events
-            events = request_item.get("event", [])
-            # Remove existing prerequest events
-            events = [e for e in events if e.get("listen") != "prerequest"]
-            if pre_request_script:
-                events.append({
-                    "listen": "prerequest",
-                    "script": {
-                        "exec": pre_request_script.split('\n'),
-                        "type": "text/javascript"
-                    }
-                })
-            request_item["event"] = events
-
-            # Update collection
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
-                                          json={"collection": collection_data})
-            return json.dumps({"message": f"Request '{request_path}' pre-script updated successfully"}, indent=2)
+            # Get the request ID
+            _, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Get current request to preserve existing data
+            current_request = self._make_request('GET', f'/collections/{self.collection_id}/requests/{request_id}')
+            request_data = current_request.get("data", {})
+            
+            # Prepare the events array - preserve any non-prerequest events
+            events = [event for event in request_data.get("events", []) if event.get("listen") != "prerequest"]
+            
+            # Add the new prerequest script
+            events.append({
+                "listen": "prerequest",
+                "script": {
+                    "type": "text/javascript",
+                    "exec": pre_request_script.strip().split('\n')
+                }
+            })
+            
+            # Update the events array in the request data
+            request_data["events"] = events
+            
+            # Update the request using the individual request endpoint
+            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
+                                        json=request_data)
+            
+            logger.info(f"Pre-request script updated successfully for request '{request_path}'")
+            return json.dumps({"success": True, "message": f"Request '{request_path}' pre-script updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request pre-script: {stacktrace}")
@@ -1444,41 +1482,70 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     # HELPER METHODS
     # =================================================================
 
-
-
-    def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """Make HTTP request to Postman API."""
-        url = f"{self.base_url.rstrip('/')}{endpoint}"
-
+    def get_request(self, request_path: str, **kwargs) -> str:
+        """Get a specific request by path.
+        
+        Uses the _get_request_item_and_id helper to find the request and then fetches complete
+        information using the Postman API endpoint for individual requests.
+        """
         try:
-            logger.info(f"Making {method.upper()} request to {url}")
-            response = self.session.request(method, url, timeout=self.timeout, **kwargs)
-            response.raise_for_status()
-
-            if response.content:
-                return response.json()
-            return {}
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {e}")
-            raise ToolException(f"Postman API request failed: {str(e)}")
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode JSON response: {e}")
+            # Get request item and ID
+            _, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Fetch the complete request information from the API
+            response = self._make_request(
+                'GET', f'/collections/{self.collection_id}/requests/{request_id}'
+            )
+            
+            return json.dumps(response, indent=2)
+        except Exception as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when getting request: {stacktrace}")
             raise ToolException(
-                f"Invalid JSON response from Postman API: {str(e)}")
+                f"Unable to get request '{request_path}': {str(e)}")
 
-
-
-
-
-    # =================================================================
-    # HELPER METHODS
-    # =================================================================
-
-        for item in items:
-            if item.get('request'):  # This is a request
-                analysis = self.analyzer.perform_request_analysis(item)
-                requests.append(analysis)
-
-        return requests
-
+    def get_request_script(self, request_path: str, script_type: str = "prerequest", **kwargs) -> str:
+        """
+        Get the script (pre-request or test) for a request by path.
+        
+        Args:
+            request_path: Path to the request within the collection
+            script_type: The type of script to retrieve ("prerequest" or "test")
+            
+        Returns:
+            The script content as JSON string, or an error message if the script doesn't exist
+        """
+        try:
+            # Get the request ID and fetch current request data
+            _, request_id, _ = self._get_request_item_and_id(request_path)
+            
+            # Get current request to have the latest version with updated scripts
+            current_request = self._make_request('GET', f'/collections/{self.collection_id}/requests/{request_id}')
+            request_data = current_request.get("data", {})
+            
+            # Find the script by type
+            script_content = None
+            for event in request_data.get("events", []):
+                if event.get("listen") == script_type:
+                    script = event.get("script", {})
+                    exec_content = script.get("exec", [])
+                    if isinstance(exec_content, list):
+                        script_content = "\n".join(exec_content)
+                    else:
+                        script_content = str(exec_content)
+                    break
+            
+            if script_content is None:
+                return json.dumps({"success": False, "message": f"No {script_type} script found for request '{request_path}'"}, indent=2)
+            
+            return json.dumps({
+                "success": True,
+                "script_type": script_type, 
+                "script_content": script_content, 
+                "request_path": request_path
+            }, indent=2)
+                
+        except Exception as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when getting request {script_type} script: {stacktrace}")
+            raise ToolException(f"Unable to get {script_type} script for request '{request_path}': {str(e)}")
