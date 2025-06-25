@@ -138,6 +138,10 @@ class CarrierAPIWrapper(BaseModel):
         """Get detailed UI test configuration by test ID."""
         return self._client.get_ui_test_details(test_id)
 
+    def create_ui_test(self, json_body: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new UI test."""
+        return self._client.create_ui_test(json_body)
+
     def get_ui_report_json_files(self, uid: str) -> list:
         """Get all JSON file names for a given UI report UID for Excel processing."""
         endpoint = f"api/v1/ui_performance/results/{self.project_id}/{uid}?sort=loop&order=asc"

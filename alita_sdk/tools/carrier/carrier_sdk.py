@@ -209,9 +209,9 @@ class CarrierClient(BaseModel):
         return self.request('get', endpoint).get("rows", [])
 
     def get_ui_reports_list(self) -> List[Dict[str, Any]]:
-            """Get list of UI test reports from the Carrier platform."""
-            endpoint = f"api/v1/ui_performance/reports/{self.credentials.project_id}"
-            return self.request('get', endpoint).get("rows", [])
+        """Get list of UI test reports from the Carrier platform."""
+        endpoint = f"api/v1/ui_performance/reports/{self.credentials.project_id}"
+        return self.request('get', endpoint).get("rows", [])
 
     def get_locations(self) -> Dict[str, Any]:
         """Get list of available locations/cloud settings from the Carrier platform."""
@@ -227,3 +227,37 @@ class CarrierClient(BaseModel):
         """Get detailed UI test configuration by test ID."""
         endpoint = f"api/v1/ui_performance/test/{self.credentials.project_id}/{test_id}"
         return self.request('get', endpoint)
+
+    def create_ui_test(self, json_body: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new UI test."""
+        endpoint = f"api/v1/ui_performance/tests/{self.credentials.project_id}"
+        
+        # Print full JSON POST body for debugging
+        print("=" * 60)
+        print("DEBUG: Full JSON POST body for create_ui_test:")
+        print("=" * 60)
+        print(json.dumps(json_body, indent=2))
+        print("=" * 60)
+        
+        # Use multipart/form-data with data field containing the JSON body
+        form_data = {'data': json.dumps(json_body)}
+        
+        # Temporarily remove Content-Type header to let requests set it for multipart
+        original_headers = self.session.headers.copy()
+        if 'Content-Type' in self.session.headers:
+            del self.session.headers['Content-Type']
+        
+        try:
+            full_url = f"{self.credentials.url.rstrip('/')}/{endpoint.lstrip('/')}"
+            response = self.session.post(full_url, data=form_data)
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as http_err:
+            logger.error(f"HTTP {response.status_code} error: {response.text[:500]}")
+            raise CarrierAPIError(f"Request to {full_url} failed with status {response.status_code}")
+        except json.JSONDecodeError:
+            logger.error(f"Response was not valid JSON. Body:\n{response.text[:500]}")
+            raise CarrierAPIError("Server returned non-JSON response")
+        finally:
+            # Restore original headers
+            self.session.headers.update(original_headers)

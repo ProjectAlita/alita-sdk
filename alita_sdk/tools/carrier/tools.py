@@ -6,6 +6,7 @@ from .ui_reports_tool import GetUIReportsTool, GetUIReportByIDTool, GetUITestsTo
 from .run_ui_test_tool import RunUITestTool
 from .update_ui_test_schedule_tool import UpdateUITestScheduleTool
 from .create_ui_excel_report_tool import CreateUIExcelReportTool
+from .create_ui_test_tool import CreateUITestTool
 
 __all__ = [
     {"name": "get_ticket_list", "tool": FetchTicketsTool},
@@ -21,5 +22,6 @@ __all__ = [
     {"name": "get_ui_tests", "tool": GetUITestsTool},
     {"name": "run_ui_test", "tool": RunUITestTool},
     {"name": "update_ui_test_schedule", "tool": UpdateUITestScheduleTool},
-    {"name": "create_ui_excel_report", "tool": CreateUIExcelReportTool}
+    {"name": "create_ui_excel_report", "tool": CreateUIExcelReportTool},
+    {"name": "create_ui_test", "tool": CreateUITestTool}
 ]
