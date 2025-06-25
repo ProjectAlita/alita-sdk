@@ -123,15 +123,17 @@ class CarrierClient(BaseModel):
         for file_name in file_list:
             if file_name.startswith(report_archive_prefix) and "excel_report" not in file_name:
                 report_files_list.append(file_name)
-        file_path = self.download_and_merge_reports(report_files_list, lg_type, bucket_name, extract_to)
+        test_log_file_path, errors_log_file_path = self.download_and_merge_reports(report_files_list, lg_type, bucket_name, extract_to)
 
-        return report_info, file_path
+        return report_info, test_log_file_path, errors_log_file_path
 
-    def download_and_merge_reports(self, report_files_list: list, lg_type: str, bucket: str, extract_to: str = "/tmp") -> str:
+    def download_and_merge_reports(self, report_files_list: list, lg_type: str, bucket: str, extract_to: str = "/tmp"):
         if lg_type == "jmeter":
             summary_log_file_path = f"summary_{bucket}_jmeter.jtl"
+            error_log_file_path = f"error_{bucket}_jmeter.log"
         else:
             summary_log_file_path = f"summary_{bucket}_simulation.log"
+            error_log_file_path = f"error_{bucket}_simulation.log"
         extracted_reports = []
         for each in report_files_list:
             endpoint = f"api/v1/artifacts/artifact/{self.credentials.project_id}/{bucket}/{each}"
@@ -153,10 +155,21 @@ class CarrierClient(BaseModel):
                 os.remove(local_file_path)
             extracted_reports.append(extract_dir)
 
-        # get files from extract_dirs and merge to summary_log_file_path
+        # get files from extract_dirs and merge to summary_log_file_path and error_log_file_path
         self.merge_log_files(summary_log_file_path, extracted_reports, lg_type)
+        try:
+            self.merge_error_files(error_log_file_path, extracted_reports)
+        except Exception as e:
+            logger.error(f"Failed to merge errors log: {e}")
 
-        return summary_log_file_path
+        # Clean up
+        for each in extracted_reports:
+            try:
+                shutil.rmtree(each)
+            except Exception as e:
+                logger.error(e)
+
+        return summary_log_file_path, error_log_file_path
 
     def merge_log_files(self, summary_file, extracted_reports, lg_type):
         with open(summary_file, mode='w') as summary:
@@ -173,11 +186,14 @@ class CarrierClient(BaseModel):
                     else:
                         # Skip the first line (header) for subsequent files
                         summary.writelines(lines[1:])
-        for each in extracted_reports:
-            try:
-                shutil.rmtree(each)
-            except Exception as e:
-                logger.error(e)
+
+    def merge_error_files(self, error_file, extracted_reports):
+        with open(error_file, mode='w') as summary_errors:
+            for i, log_file in enumerate(extracted_reports):
+                report_file = f"{log_file}/simulation-errors.log"
+                with open(report_file, mode='r') as f:
+                    lines = f.readlines()
+                    summary_errors.writelines(lines)
 
     def get_report_file_log(self, bucket: str, file_name: str):
         bucket_endpoint = f"api/v1/artifacts/artifact/default/{self.credentials.project_id}/{bucket}/{file_name}"
@@ -190,10 +206,10 @@ class CarrierClient(BaseModel):
             f.write(response.content)
         return file_path
 
-    def upload_excel_report(self, bucket_name: str, excel_report_name: str):
+    def upload_file(self, bucket_name: str, file_name: str):
         upload_url = f'api/v1/artifacts/artifacts/{self.credentials.project_id}/{bucket_name}'
         full_url = f"{self.credentials.url.rstrip('/')}/{upload_url.lstrip('/')}"
-        files = {'file': open(excel_report_name, 'rb')}
+        files = {'file': open(file_name, 'rb')}
         headers = {'Authorization': f'bearer {self.credentials.token}'}
         s3_config = {'integration_id': 1, 'is_local': False}
         requests.post(full_url, params=s3_config, allow_redirects=True, files=files, headers=headers)
@@ -204,6 +220,6 @@ class CarrierClient(BaseModel):
         return self.request('get', endpoint).get("rows", [])
 
     def get_ui_reports_list(self) -> List[Dict[str, Any]]:
-            """Get list of UI test reports from the Carrier platform."""
-            endpoint = f"api/v1/ui_performance/reports/{self.credentials.project_id}"
-            return self.request('get', endpoint).get("rows", [])
+        """Get list of UI test reports from the Carrier platform."""
+        endpoint = f"api/v1/ui_performance/reports/{self.credentials.project_id}"
+        return self.request('get', endpoint).get("rows", [])
