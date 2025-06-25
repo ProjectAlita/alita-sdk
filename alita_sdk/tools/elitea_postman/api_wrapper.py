@@ -242,7 +242,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             'X-API-Key': self.api_key.get_secret_value(),
             'Content-Type': 'application/json',
         })
-        self._session.timeout = self.timeout
+        # Removed ineffective timeout assignment. Timeout will be enforced in `_make_request`.
 
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Make HTTP request to Postman API."""
