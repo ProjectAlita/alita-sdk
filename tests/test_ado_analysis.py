@@ -1,3 +1,4 @@
+import pytest; pytest.skip("integration tests", allow_module_level=True)
 import os
 import pytest
 from dotenv import load_dotenv

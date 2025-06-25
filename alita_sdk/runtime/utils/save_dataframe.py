@@ -6,13 +6,16 @@ from typing import Any, Dict, Optional
 from langchain_core.tools import ToolException
 import pandas as pd
 
-from ..tools.artifact import ArtifactWrapper
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - avoid heavy imports at runtime
+    from ..tools.artifact import ArtifactWrapper
 
 logger = logging.getLogger(__name__)
 
 
 def save_dataframe_to_artifact(
-    artifacts_wrapper: ArtifactWrapper,
+    artifacts_wrapper: 'ArtifactWrapper',
     df: pd.DataFrame,
     target_file: str,
     csv_options: Optional[Dict[str, Any]] = None,
