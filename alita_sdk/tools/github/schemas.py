@@ -149,7 +149,21 @@ GetCommits = create_model(
     path=(Optional[str], Field(description="The file path to filter commits by", default=None)),
     since=(Optional[str], Field(description="Only commits after this date will be returned (ISO format)", default=None)),
     until=(Optional[str], Field(description="Only commits before this date will be returned (ISO format)", default=None)),
-    author=(Optional[str], Field(description="The author of the commits", default=None))
+    author=(Optional[str], Field(description="The author of the commits", default=None)),
+    max_count=(Optional[int], Field(description="Maximum number of commits to return (default: 30)", default=30))
+)
+
+GetCommitChanges = create_model(
+    "GetCommitChanges",
+    sha=(str, Field(description="The commit SHA to get changed files for")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
+)
+
+ApplyGitPatch = create_model(
+    "ApplyGitPatch",
+    patch_content=(str, Field(description="The git patch content in unified diff format")),
+    commit_message=(Optional[str], Field(description="Commit message for the patch application", default="Apply git patch")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
 )
 
 TriggerWorkflow = create_model(
