@@ -16,7 +16,6 @@ from langchain_core.prompts import MessagesPlaceholder
 from .constants import REACT_ADDON, REACT_VARS, XML_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
-from ..toolkits.tools import get_tools
 from langchain_core.tools import BaseTool, ToolException
 
 logger = logging.getLogger(__name__)
@@ -62,8 +61,11 @@ class Assistant:
                                 "Review toolkits configuration or use pipeline as master agent.")
 
         # configure memory store if memory tool is defined
-        memory_tool = next((tool for tool in data['tools'] if tool['type'] == 'memory'), None)
-        self._configure_store(memory_tool)
+        # memory_tool = next((tool for tool in data['tools'] if tool['type'] == 'memory'), None)
+        # self._configure_store(memory_tool)
+        
+        # Lazy import to avoid circular dependency
+        from ..toolkits.tools import get_tools
         self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client, memory_store=self.store)
         if app_type == "pipeline":
             self.prompt = data['instructions']
