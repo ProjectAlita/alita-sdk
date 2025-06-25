@@ -9,13 +9,13 @@ This package contains three main modules:
 
 __version__ = "0.3.142"
 
-# Import key components
-from .runtime import *
-from .tools import *
-from .community import *
+__all__ = ["runtime", "tools", "community"]
 
-__all__ = [
-    "runtime",
-    "tools",
-    "community",
-]
+import importlib
+
+def __getattr__(name):
+    if name in __all__:
+        module = importlib.import_module(f".{name}", __name__)
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__} has no attribute {name}")

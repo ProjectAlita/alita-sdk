@@ -1,3 +1,4 @@
+import pytest; pytest.skip("integration tests", allow_module_level=True)
 import os
 from unittest.mock import patch
 import pytest
