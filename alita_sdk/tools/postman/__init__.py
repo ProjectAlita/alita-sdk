@@ -60,7 +60,7 @@ class PostmanToolkit(BaseToolkit):
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(
                 default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {
-                                  "label": "Elitea Postman", "icon_url": "postman.svg"}})
+                                  "label": "Postman", "icon_url": "postman.svg"}})
         )
 
         @check_connection_response
