@@ -469,7 +469,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 collection['collection']['item'], folder_path)
 
             if not folders:
-                return json.dumps({"error": f"Folder '{folder_path}' not found"}, indent=2)
+                raise ToolException(f"Folder '{folder_path}' not found in collection '{collection_id}'.")
 
             folder = folders[0]
             requests = self._extract_requests_from_items(
