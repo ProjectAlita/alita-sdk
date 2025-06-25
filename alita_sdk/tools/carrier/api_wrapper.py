@@ -137,3 +137,51 @@ class CarrierAPIWrapper(BaseModel):
     def get_ui_test_details(self, test_id: str) -> Dict[str, Any]:
         """Get detailed UI test configuration by test ID."""
         return self._client.get_ui_test_details(test_id)
+
+    def get_ui_report_json_files(self, uid: str) -> list:
+        """Get all JSON file names for a given UI report UID for Excel processing."""
+        endpoint = f"api/v1/ui_performance/results/{self.project_id}/{uid}?sort=loop&order=asc"
+        try:
+            response = self._client.request('get', endpoint)
+            file_names = set()
+            
+            def clean_file_name(file_name):
+                # Extract JSON files only and clean the names
+                if file_name.endswith('.json'):
+                    return file_name
+                return None
+            
+            # If the response is a dict with lists as values, flatten all file_names from all values
+            if isinstance(response, dict):
+                for value in response.values():
+                    if isinstance(value, list):
+                        for item in value:
+                            file_name = item.get("file_name")
+                            if file_name:
+                                clean_name = clean_file_name(file_name)
+                                if clean_name:
+                                    file_names.add(clean_name)
+            elif isinstance(response, list):
+                for item in response:
+                    file_name = item.get("file_name")
+                    if file_name:
+                        clean_name = clean_file_name(file_name)
+                        if clean_name:
+                            file_names.add(clean_name)
+            
+            sorted_names = sorted(file_names)
+            prefix = f"https://platform.getcarrier.io/api/v1/artifacts/artifact/default/{self.project_id}/reports/"
+            return [prefix + name for name in sorted_names]
+        except Exception as e:
+            logger.error(f"Failed to fetch UI report JSON files: {e}")
+            return []
+
+    def download_ui_report_json(self, bucket: str, file_name: str) -> str:
+        """Download UI report JSON file content."""
+        endpoint = f"api/v1/artifacts/artifact/default/{self.project_id}/{bucket}/{file_name}"
+        try:
+            response = self._client.request('get', endpoint)
+            return response
+        except Exception as e:
+            logger.error(f"Failed to download UI report JSON: {e}")
+            return None
