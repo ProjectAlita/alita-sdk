@@ -37,10 +37,10 @@ langchain-openai~=0.3.0
 langchain-postgres~=0.0.13
 langchain-unstructured~=0.1.6
 langchain<=0.3.22
+langgraph>=0.4.8
 langgraph-checkpoint-postgres~=2.0.1
 langgraph-checkpoint-sqlite~=2.0.0
-langgraph~=0.2.53
-langsmith==0.1.144
+langsmith>=0.3.45
 lxml==5.2.2
 mammoth==1.9.0
 markdown==3.5.1
@@ -92,3 +92,4 @@ wikipedia==1.4.0
 yagmail==0.15.293
 yarl==1.17.1
 zephyr-python-api==0.1.0
+langmem==0.0.27
