@@ -250,7 +250,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
 
         try:
             logger.info(f"Making {method.upper()} request to {url}")
-            response = self._session.request(method, url, **kwargs)
+            response = self._session.request(method, url, timeout=self.timeout, **kwargs)
             response.raise_for_status()
 
             if response.content:
