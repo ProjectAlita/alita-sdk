@@ -95,7 +95,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
     # Add community tools
     tools += community_tools(tools_list, alita_client, llm)
     # Add alita tools
-    tools += alita_tools(tools_list, alita_client, llm)
+    tools += alita_tools(tools_list, alita_client, llm, memory_store)
     # Add MCP tools
     tools += _mcp_tools(tools_list, alita_client)
     
