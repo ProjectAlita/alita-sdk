@@ -11,6 +11,12 @@ from openpyxl.cell.rich_text import TextBlock, CellRichText
 
 
 def tokenize(s):
+    if s is None:
+        return []
+    if not isinstance(s, str):
+        s = str(s)
+    if not s.strip():
+        return []
     return re.split(r'\s+', s)
 
 
@@ -65,7 +71,8 @@ def equalize_markdown(s1, s2):
         if prev.a + prev.size != match.a:
             for i in range(prev.a + prev.size, match.a):
                 if len(l1[i]):
-                    res1 += ['~~' + l1[i] + '~~']  # Removed text marked with strikethrough
+                    # Removed text marked with strikethrough
+                    res1 += ['~~' + l1[i] + '~~']
 
         # Handle added text in s2
         if prev.b + prev.size != match.b:
@@ -97,7 +104,8 @@ def equalize_openpyxl(s1, s2):
         if prev.a + prev.size != match.a:
             for i in range(prev.a + prev.size, match.a):
                 if len(l1[i]):
-                    res1.append(TextBlock(strikethrough, l1[i]))  # Removed text
+                    # Removed text
+                    res1.append(TextBlock(strikethrough, l1[i]))
         # Handle added text in s2
         if prev.b + prev.size != match.b:
             for i in range(prev.b + prev.size, match.b):
@@ -173,12 +181,15 @@ def download_nltk(target, force=False):
     #
     state.nltk_punkt_downloaded = True
 
+
 def bytes_to_base64(bt: bytes) -> str:
     return base64.b64encode(bt).decode('utf-8')
+
 
 def path_to_base64(path) -> str:
     with open(path, 'rb') as binary_file:
         return base64.b64encode(binary_file.read()).decode('utf-8')
+
 
 def image_to_byte_array(image: Image) -> bytes:
     raw_bytes = io.BytesIO()
