@@ -1,5 +1,8 @@
 import logging
 from importlib import import_module
+from typing import Optional
+
+from langgraph.store.base import BaseStore
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +77,14 @@ _safe_import_tool('carrier', 'carrier', 'get_tools', 'AlitaCarrierToolkit')
 _safe_import_tool('ocr', 'ocr', 'get_tools', 'OCRToolkit')
 _safe_import_tool('pptx', 'pptx', 'get_tools', 'PPTXToolkit')
 _safe_import_tool('postman', 'postman', 'get_tools', 'PostmanToolkit')
+_safe_import_tool('memory', 'memory', 'get_tools', 'MemoryToolkit')
 
 # Log import summary
 available_count = len(AVAILABLE_TOOLS)
 total_attempted = len(AVAILABLE_TOOLS) + len(FAILED_IMPORTS)
 logger.info(f"Tool imports completed: {available_count}/{total_attempted} successful")
 
-def get_tools(tools_list, alita, llm, *args, **kwargs):
+def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, **kwargs):
     tools = []
     for tool in tools_list:
         # validate tool name syntax - it cannot be started with _
@@ -90,6 +94,7 @@ def get_tools(tools_list, alita, llm, *args, **kwargs):
         
         tool['settings']['alita'] = alita
         tool['settings']['llm'] = llm
+        tool['settings']['store'] = store
         tool_type = tool['type']
         
         # Check if tool is available and has get_tools function
