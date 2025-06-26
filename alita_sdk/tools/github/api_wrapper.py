@@ -51,7 +51,9 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
 
     # Add LLM instance
     llm: Optional[Any] = None
-
+    # Alita instance
+    alita: Optional[Any] = None
+    
     # Vector store configuration
     connection_string: Optional[SecretStr] = None
     collection_name: Optional[str] = None
@@ -109,7 +111,7 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
         )
 
         # Initialize GitHub client with keyword arguments
-        github_client = GitHubClient(auth_config=auth_config, repo_config=repo_config)
+        github_client = GitHubClient(auth_config=auth_config, repo_config=repo_config, alita=values.get("alita"))
         # Initialize GraphQL client with keyword argument
         graphql_client = GraphQLClientWrapper(github_graphql_instance=github_client.github_api._Github__requester)
         # Set client attributes on the class (renamed from _github_client to github_client_instance)

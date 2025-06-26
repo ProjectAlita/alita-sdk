@@ -34,10 +34,11 @@ from .schemas import (
     SearchIssues,
     CreateIssue,
     UpdateIssue,
-    LoaderSchema,
     GetCommits,
     GetCommitChanges,
+    GetCommitsDiff,
     ApplyGitPatch,
+    ApplyGitPatchFromArtifact,
     TriggerWorkflow,
     GetWorkflowStatus,
     GetWorkflowLogs,
@@ -91,6 +92,9 @@ class GitHubClient(BaseModel):
     # Adding auth config and repo config as optional fields for initialization
     auth_config: Optional[GitHubAuthConfig] = Field(default=None, exclude=True)
     repo_config: Optional[GitHubRepoConfig] = Field(default=None, exclude=True)
+    
+    # Alita instance
+    alita: Optional[Any] = Field(default=None, exclude=True)
 
     @model_validator(mode='before')
     def initialize_github_client(cls, values):
@@ -388,6 +392,111 @@ class GitHubClient(BaseModel):
         except Exception as e:
             # Return error as JSON instead of plain text
             return {"error": str(e), "message": f"Unable to retrieve commit changes due to error: {str(e)}"}
+        
+    def get_commits_diff(self, base_sha: str, head_sha: str, repo_name: Optional[str] = None) -> str:
+        """
+        Retrieves the diff between two commits.
+
+        Parameters:
+            base_sha (str): The base commit SHA to compare from.
+            head_sha (str): The head commit SHA to compare to.
+            repo_name (Optional[str]): Name of the repository in format 'owner/repo'.
+
+        Returns:
+            str: A detailed diff comparison between the two commits or an error message.
+        """
+        try:
+            # Get the repository
+            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            
+            # Get the comparison between the two commits
+            comparison = repo.compare(base_sha, head_sha)
+            
+            # Extract comparison information
+            diff_info = {
+                "base_commit": {
+                    "sha": comparison.base_commit.sha,
+                    "message": comparison.base_commit.commit.message,
+                    "author": comparison.base_commit.commit.author.name,
+                    "date": comparison.base_commit.commit.author.date.isoformat()
+                },
+                "head_commit": {
+                    "sha": comparison.head_commit.sha,
+                    "message": comparison.head_commit.commit.message,
+                    "author": comparison.head_commit.commit.author.name,
+                    "date": comparison.head_commit.commit.author.date.isoformat()
+                },
+                "status": comparison.status,  # ahead, behind, identical, or diverged
+                "ahead_by": comparison.ahead_by,
+                "behind_by": comparison.behind_by,
+                "total_commits": comparison.total_commits,
+                "commits": [],
+                "files": []
+            }
+            
+            # Get commits in the comparison
+            for commit in comparison.commits:
+                commit_info = {
+                    "sha": commit.sha,
+                    "message": commit.commit.message,
+                    "author": commit.commit.author.name,
+                    "date": commit.commit.author.date.isoformat(),
+                    "url": commit.html_url
+                }
+                diff_info["commits"].append(commit_info)
+            
+            # Get changed files information
+            for file in comparison.files:
+                file_info = {
+                    "filename": file.filename,
+                    "status": file.status,  # added, modified, removed, renamed
+                    "additions": file.additions,
+                    "deletions": file.deletions,
+                    "changes": file.changes,
+                    "patch": file.patch if hasattr(file, 'patch') and file.patch else None,
+                    "blob_url": file.blob_url if hasattr(file, 'blob_url') else None,
+                    "raw_url": file.raw_url if hasattr(file, 'raw_url') else None
+                }
+                
+                # Add previous filename for renamed files
+                if file.status == "renamed" and hasattr(file, 'previous_filename'):
+                    file_info["previous_filename"] = file.previous_filename
+                    
+                diff_info["files"].append(file_info)
+            
+            # Add summary statistics
+            diff_info["summary"] = {
+                "total_files_changed": len(diff_info["files"]),
+                "total_additions": sum(f["additions"] for f in diff_info["files"]),
+                "total_deletions": sum(f["deletions"] for f in diff_info["files"])
+            }
+            
+            return diff_info
+
+        except Exception as e:
+            # Return error as JSON instead of plain text
+            return {"error": str(e), "message": f"Unable to retrieve diff between commits due to error: {str(e)}"}
+        
+    def apply_git_patch_from_file(self, bucket_name: str, file_name: str, commit_message: Optional[str] = "Apply git patch", repo_name: Optional[str] = None) -> str:
+        """Applies a git patch from a file stored in a specified bucket.
+
+        Args:
+            bucket_name (str): The name of the bucket where the patch file is stored.
+            file_name (str): The name of the patch file to apply.
+            commit_message (Optional[str], optional): The commit message for the patch application. Defaults to "Apply git patch".
+            repo_name (Optional[str], optional): The name of the repository to apply the patch to. Defaults to None.
+
+        Returns:
+            str: A summary of the applied changes or an error message.
+        """
+        try:
+            patch_content = self.alita.download_artifact(bucket_name, file_name)
+            if not patch_content or not isinstance(patch_content, str):
+                return {"error": "Patch file not found", "message": f"Patch file '{file_name}' not found in bucket '{bucket_name}'."}
+            # Apply the git patch using the content
+            return self.apply_git_patch(patch_content, commit_message, repo_name)
+        except Exception as e:
+            return {"error": str(e), "message": f"Unable to download patch file: {str(e)}"}
 
     def apply_git_patch(self, patch_content: str, commit_message: Optional[str] = "Apply git patch", repo_name: Optional[str] = None) -> str:
         """
@@ -1903,11 +2012,25 @@ class GitHubClient(BaseModel):
                 "args_schema": GetCommitChanges,
             },
             {
+                "ref": self.get_commits_diff,
+                "name": "get_commits_diff",
+                "mode": "get_commits_diff",
+                "description": self.get_commits_diff.__doc__,
+                "args_schema": GetCommitsDiff,
+            },
+            {
                 "ref": self.apply_git_patch,
                 "name": "apply_git_patch",
                 "mode": "apply_git_patch",
                 "description": self.apply_git_patch.__doc__,
                 "args_schema": ApplyGitPatch,
+            },
+            {
+                "ref": self.apply_git_patch_from_file,
+                "name": "apply_git_patch_from_file",
+                "mode": "apply_git_patch_from_file",
+                "description": self.apply_git_patch_from_file.__doc__,
+                "args_schema": ApplyGitPatchFromArtifact,
             },
             {
                 "ref": self.trigger_workflow,

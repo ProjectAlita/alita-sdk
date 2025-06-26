@@ -159,10 +159,25 @@ GetCommitChanges = create_model(
     repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
 )
 
+GetCommitsDiff = create_model(
+    "GetCommitsDiff",
+    base_sha=(str, Field(description="The base commit SHA to compare from")),
+    head_sha=(str, Field(description="The head commit SHA to compare to")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
+)
+
 ApplyGitPatch = create_model(
     "ApplyGitPatch",
     patch_content=(str, Field(description="The git patch content in unified diff format")),
     commit_message=(Optional[str], Field(description="Commit message for the patch application", default="Apply git patch")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
+)
+
+ApplyGitPatchFromArtifact = create_model(
+    "ApplyGitPatchFromArtifact",
+    bucket_name=(str, Field(description="Name of the artifact bucket containing the patch file")),
+    file_name=(str, Field(description="Name of the patch file to download and apply")),
+    commit_message=(Optional[str], Field(description="Commit message for the patch application", default="Apply git patch from artifact")),
     repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
 )
 
