@@ -67,6 +67,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 selected_tools=[],
                 llm=llm
             ))
+            # move on tools level
         # elif tool['type'] == 'memory':
         #     if memory_store is None:
         #         raise ToolException(f"Memory store is not provided for memory tool: {tool['name']}")
