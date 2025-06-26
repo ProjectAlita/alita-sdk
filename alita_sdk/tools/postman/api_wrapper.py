@@ -1370,33 +1370,30 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_tests(self, request_path: str, tests: str, **kwargs) -> str:
         """Update request test scripts."""
         try:
-            # Get the request ID
-            _, request_id, _ = self._get_request_item_and_id(request_path)
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
             
-            # Get current request to preserve existing data
-            current_request = self._make_request('GET', f'/collections/{self.collection_id}/requests/{request_id}')
-            request_data = current_request.get("data", {})
+            # Get existing events and preserve non-test events
+            existing_events = request_item.get("event", [])
+            events = [event for event in existing_events if event.get("listen") != "test"]
             
-            # Prepare the events array - preserve any non-test events
-            events = [event for event in request_data.get("events", []) if event.get("listen") != "test"]
-            
-            # Add the new test script
+            # Add the new test script using the official API format
             events.append({
                 "listen": "test",
                 "script": {
-                    "type": "text/javascript",
-                    "exec": tests.strip().split('\n')
+                    "exec": tests.strip().split('\n'),
+                    "type": "text/javascript"
                 }
             })
             
-            # Update the events array in the request data
-            request_data["events"] = events
-            
-            # Update the request using the individual request endpoint
+            # Create update payload using the events array format from official spec
+            request_update = {
+                "events": events
+            }
+
+            # Update using the individual request endpoint with proper events format
             response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
-                                        json=request_data)
-            
-            logger.info(f"Test script updated successfully for request '{request_path}'")
+                                          json=request_update)
             return json.dumps({"success": True, "message": f"Request '{request_path}' tests updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
@@ -1407,33 +1404,30 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def update_request_pre_script(self, request_path: str, pre_request_script: str, **kwargs) -> str:
         """Update request pre-request scripts."""
         try:
-            # Get the request ID
-            _, request_id, _ = self._get_request_item_and_id(request_path)
+            # Get request item and ID
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
             
-            # Get current request to preserve existing data
-            current_request = self._make_request('GET', f'/collections/{self.collection_id}/requests/{request_id}')
-            request_data = current_request.get("data", {})
+            # Get existing events and preserve non-prerequest events
+            existing_events = request_item.get("event", [])
+            events = [event for event in existing_events if event.get("listen") != "prerequest"]
             
-            # Prepare the events array - preserve any non-prerequest events
-            events = [event for event in request_data.get("events", []) if event.get("listen") != "prerequest"]
-            
-            # Add the new prerequest script
+            # Add the new prerequest script using the official API format
             events.append({
                 "listen": "prerequest",
                 "script": {
-                    "type": "text/javascript",
-                    "exec": pre_request_script.strip().split('\n')
+                    "exec": pre_request_script.strip().split('\n'),
+                    "type": "text/javascript"
                 }
             })
             
-            # Update the events array in the request data
-            request_data["events"] = events
-            
-            # Update the request using the individual request endpoint
+            # Create update payload using the events array format from official spec
+            request_update = {
+                "events": events
+            }
+
+            # Update using the individual request endpoint with proper events format
             response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
-                                        json=request_data)
-            
-            logger.info(f"Pre-request script updated successfully for request '{request_path}'")
+                                          json=request_update)
             return json.dumps({"success": True, "message": f"Request '{request_path}' pre-script updated successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
@@ -1612,16 +1606,14 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             The script content as JSON string, or an error message if the script doesn't exist
         """
         try:
-            # Get the request ID and fetch current request data
-            _, request_id, _ = self._get_request_item_and_id(request_path)
+            # Get the request item from the collection and also try individual endpoint
+            request_item, request_id, _ = self._get_request_item_and_id(request_path)
             
-            # Get current request to have the latest version with updated scripts
-            current_request = self._make_request('GET', f'/collections/{self.collection_id}/requests/{request_id}')
-            request_data = current_request.get("data", {})
-            
-            # Find the script by type
             script_content = None
-            for event in request_data.get("events", []):
+            
+            # Method 1: Check events array (modern format)
+            events = request_item.get("event", [])
+            for event in events:
                 if event.get("listen") == script_type:
                     script = event.get("script", {})
                     exec_content = script.get("exec", [])
@@ -1631,13 +1623,25 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                         script_content = str(exec_content)
                     break
             
+            # Method 2: If not found in events, try individual request endpoint for direct fields
             if script_content is None:
+                try:
+                    individual_request = self._make_request('GET', f'/collections/{self.collection_id}/requests/{request_id}')
+                    if script_type == "test":
+                        script_content = individual_request.get("tests", "")
+                    elif script_type == "prerequest":
+                        script_content = individual_request.get("preRequestScript", "")
+                except:
+                    # If individual endpoint fails, that's okay, we'll fall back to not found
+                    pass
+            
+            if not script_content or script_content.strip() == "":
                 return json.dumps({"success": False, "message": f"No {script_type} script found for request '{request_path}'"}, indent=2)
             
             return json.dumps({
                 "success": True,
                 "script_type": script_type, 
-                "script_content": script_content, 
+                "script_content": script_content.strip(), 
                 "request_path": request_path
             }, indent=2)
                 
