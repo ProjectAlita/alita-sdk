@@ -80,22 +80,28 @@ class RunTestByIDTool(BaseTool):
     description: str = "Execute test plan from the Carrier platform."
     args_schema: Type[BaseModel] = create_model(
         "RunTestByIdInput",
-        test_id=(str, Field(default="", description="Test id to execute")),
+        test_id=(str, Field(default=None, description="Test id to execute")),
+        name=(str, Field(default=None, description="Test name to execute")),
         test_parameters=(dict, Field(default=None, description="Test parameters to override")),
     )
 
-    def _run(self, test_id: str, test_parameters=None):
+    def _run(self, test_id=None, name=None, test_parameters=None):
         try:
+            if not test_id and not name:
+                return {"message": "Please provide test id or test name to start"}
+
             # Fetch test data
             tests = self.api_wrapper.get_tests_list()
-            test_data = {}
-            for test in tests:
-                if test_id == str(test["id"]):
-                    test_data = test
-                    break
+
+            # Find the test data based on test_id or name
+            test_data = next(
+                (test for test in tests if
+                 (test_id and str(test["id"]) == test_id) or (name and str(test["name"]) == name)),
+                None
+            )
 
             if not test_data:
-                raise ValueError(f"Test with id {test_id} not found.")
+                raise ValueError(f"Test with id {test_id} or name {name} not found.")
 
             # Default test parameters
             default_test_parameters = test_data.get("test_parameters", [])
