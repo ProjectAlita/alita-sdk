@@ -13,7 +13,7 @@ logger = logging.getLogger("carrier_ui_reports_tool")
 class GetUIReportsTool(BaseTool):
     api_wrapper: CarrierAPIWrapper = Field(..., description="Carrier API Wrapper instance")
     name: str = "get_ui_reports"
-    description: str = "Get list of UI test reports from the Carrier platform. Optionally filter by tag and time range."
+    description: str = "Get list of UI test reports from the Carrier platform. Optionally filter by time range."
     args_schema: Type[BaseModel] = create_model(
         "GetUIReportsInput",
         report_id=(str, Field(description="UI Report id to retrieve")),
@@ -199,12 +199,16 @@ class GetUITestsTool(BaseTool):
             # Extract relevant fields for cleaner output
             base_fields = {
                 "id", "name", "browser", "loops", "aggregation", "parallel_runners", 
-                "location", "entrypoint", "runner", "test_uid", "job_type"
+                "location", "entrypoint", "runner", "job_type"
             }
             
             result_tests = []
             for test in filtered_tests:
                 trimmed = {k: test[k] for k in base_fields if k in test}
+                
+                # Add test_uid separately with a clear label to avoid confusion with id
+                if "test_uid" in test:
+                    trimmed["test_uid"] = test["test_uid"]
                 
                 # Include test parameters if available
                 if "test_parameters" in test:
