@@ -61,8 +61,8 @@ class Assistant:
                                 "Review toolkits configuration or use pipeline as master agent.")
 
         # configure memory store if memory tool is defined
-        memory_tool = next((tool for tool in data['tools'] if tool['type'] == 'memory'), None)
-        self._configure_store(memory_tool)
+        # memory_tool = next((tool for tool in data['tools'] if tool['type'] == 'memory'), None)
+        # self._configure_store(memory_tool)
         
         # Lazy import to avoid circular dependency
         from ..toolkits.tools import get_tools
