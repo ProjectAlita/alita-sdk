@@ -15,13 +15,6 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 
 name = "memory"
 
-def get_tools(tool):
-    return MemoryToolkit().get_toolkit(
-        namespace=tool['settings'].get('namespace', str(tool['id'])),
-        store=tool['settings'].get('store', None),
-        toolkit_name=tool.get('toolkit_name', '')
-).get_tools()
-
 class MemoryToolkit(BaseToolkit):
     tools: List[BaseTool] = []
 
