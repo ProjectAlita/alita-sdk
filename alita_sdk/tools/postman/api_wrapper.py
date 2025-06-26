@@ -256,6 +256,12 @@ PostmanGetRequestScript = create_model(
     script_type=(str, Field(description="The type of script to retrieve: 'test' or 'prerequest'", default="prerequest"))
 )
 
+PostmanExecuteRequest = create_model(
+    "PostmanExecuteRequest",
+    request_path=(str, Field(description="The path to the request in the collection (e.g., 'API/Users/Get User')")),
+    override_variables=(Optional[Dict[str, Any]], Field(description="Optional variables to override environment/collection variables", default=None))
+)
+
 
 class PostmanApiWrapper(BaseToolApiWrapper):
     """Wrapper for Postman API."""
@@ -264,6 +270,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     base_url: str = "https://api.getpostman.com"
     collection_id: Optional[str] = None
     workspace_id: Optional[str] = None
+    environment_config: dict = {}
     timeout: int = 30
     session: Any = None
     analyzer: PostmanAnalyzer = None
@@ -317,6 +324,108 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             logger.error(f"Failed to decode JSON response: {e}")
             raise ToolException(
                 f"Invalid JSON response from Postman API: {str(e)}")
+
+    def _apply_authentication(self, headers, params, all_variables, resolve_variables):
+        """Apply authentication based on environment_config auth settings.
+        
+        Supports multiple authentication types:
+        - bearer: Bearer token in Authorization header
+        - basic: Basic authentication in Authorization header  
+        - api_key: API key in header, query parameter, or cookie
+        - oauth2: OAuth2 access token in Authorization header
+        - custom: Custom headers, cookies, or query parameters
+        
+        Required format:
+        environment_config = {
+            "auth": {
+                "type": "bearer|basic|api_key|oauth2|custom",
+                "params": {
+                    # type-specific parameters
+                }
+            }
+        }
+        """
+        import base64
+        
+        # Handle structured auth configuration only - no backward compatibility
+        auth_config = self.environment_config.get('auth')
+        if auth_config and isinstance(auth_config, dict):
+            auth_type = auth_config.get('type', '').lower()
+            auth_params = auth_config.get('params', {})
+            
+            if auth_type == 'bearer':
+                # Bearer token authentication
+                token = resolve_variables(str(auth_params.get('token', '')))
+                if token:
+                    headers['Authorization'] = f'Bearer {token}'
+                    
+            elif auth_type == 'basic':
+                # Basic authentication
+                username = resolve_variables(str(auth_params.get('username', '')))
+                password = resolve_variables(str(auth_params.get('password', '')))
+                if username and password:
+                    credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+                    headers['Authorization'] = f'Basic {credentials}'
+                    
+            elif auth_type == 'api_key':
+                # API key authentication
+                key_name = resolve_variables(str(auth_params.get('key', '')))
+                key_value = resolve_variables(str(auth_params.get('value', '')))
+                key_location = auth_params.get('in', 'header').lower()
+                
+                if key_name and key_value:
+                    if key_location == 'header':
+                        headers[key_name] = key_value
+                    elif key_location == 'query':
+                        params[key_name] = key_value
+                    elif key_location == 'cookie':
+                        # Add to Cookie header
+                        existing_cookies = headers.get('Cookie', '')
+                        new_cookie = f"{key_name}={key_value}"
+                        if existing_cookies:
+                            headers['Cookie'] = f"{existing_cookies}; {new_cookie}"
+                        else:
+                            headers['Cookie'] = new_cookie
+                            
+            elif auth_type == 'oauth2':
+                # OAuth2 access token
+                access_token = resolve_variables(str(auth_params.get('access_token', '')))
+                if access_token:
+                    headers['Authorization'] = f'Bearer {access_token}'
+                    
+            elif auth_type == 'custom':
+                # Custom authentication - allows full control
+                custom_headers = auth_params.get('headers', {})
+                custom_cookies = auth_params.get('cookies', {})
+                custom_query = auth_params.get('query', {})
+                
+                # Add custom headers
+                for key, value in custom_headers.items():
+                    resolved_key = resolve_variables(str(key))
+                    resolved_value = resolve_variables(str(value))
+                    headers[resolved_key] = resolved_value
+                
+                # Add custom query parameters
+                for key, value in custom_query.items():
+                    resolved_key = resolve_variables(str(key))
+                    resolved_value = resolve_variables(str(value))
+                    params[resolved_key] = resolved_value
+                
+                # Add custom cookies
+                if custom_cookies:
+                    cookie_parts = []
+                    for key, value in custom_cookies.items():
+                        resolved_key = resolve_variables(str(key))
+                        resolved_value = resolve_variables(str(value))
+                        cookie_parts.append(f"{resolved_key}={resolved_value}")
+                    
+                    existing_cookies = headers.get('Cookie', '')
+                    new_cookies = "; ".join(cookie_parts)
+                    if existing_cookies:
+                        headers['Cookie'] = f"{existing_cookies}; {new_cookies}"
+                    else:
+                        headers['Cookie'] = new_cookies
+
 
     def get_available_tools(self):
         """Return list of available tools with their configurations."""
@@ -397,6 +506,13 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 "description": "Analyze collection, folder, or request for API quality, best practices, and issues",
                 "args_schema": PostmanAnalyze,
                 "ref": self.analyze
+            },
+            {
+                "name": "execute_request",
+                "mode": "execute_request",
+                "description": "Execute a Postman request with environment variables and custom configuration",
+                "args_schema": PostmanExecuteRequest,
+                "ref": self.execute_request
             },
             # {
             #     "name": "create_collection",
@@ -582,6 +698,224 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             stacktrace = format_exc()
             logger.error(f"Exception when getting collections: {stacktrace}")
             raise ToolException(f"Unable to get collections: {str(e)}")
+
+    def execute_request(self, request_path: str, override_variables: Dict = None, **kwargs) -> str:
+        """Execute a Postman request with environment variables and custom configuration.
+        
+        This method uses the environment_config to make actual HTTP requests 
+        using the requests library with structured authentication.
+        
+        Args:
+            request_path: The path to the request in the collection
+            override_variables: Optional variables to override environment/collection variables
+        
+        Returns:
+            JSON string with comprehensive response data
+        """
+        try:
+            import time
+            from urllib.parse import urlencode, parse_qs, urlparse
+            
+            # Get the request from the collection
+            request_item, _, collection_data = self._get_request_item_and_id(request_path)
+            request_data = request_item.get('request', {})
+            
+            # Gather all variables from different sources
+            all_variables = {}
+            
+            # 1. Start with environment_config variables (lowest priority)
+            all_variables.update(self.environment_config)
+            
+            # 2. Add collection variables
+            collection_variables = collection_data.get('variable', [])
+            for var in collection_variables:
+                if isinstance(var, dict) and 'key' in var:
+                    all_variables[var['key']] = var.get('value', '')
+            
+            # 3. Add override variables (highest priority)
+            if override_variables:
+                all_variables.update(override_variables)
+            
+            # Helper function to resolve variables in strings
+            def resolve_variables(text):
+                if not isinstance(text, str):
+                    return text
+                
+                # Replace {{variable}} patterns
+                import re
+                def replace_var(match):
+                    var_name = match.group(1)
+                    return str(all_variables.get(var_name, match.group(0)))
+                
+                return re.sub(r'\{\{([^}]+)\}\}', replace_var, text)
+            
+            # Prepare the request
+            method = request_data.get('method', 'GET').upper()
+            
+            # Handle URL
+            url_data = request_data.get('url', '')
+            if isinstance(url_data, str):
+                url = resolve_variables(url_data)
+                params = {}
+            else:
+                # URL is an object
+                raw_url = resolve_variables(url_data.get('raw', ''))
+                url = raw_url
+                
+                # Extract query parameters
+                params = {}
+                query_params = url_data.get('query', [])
+                for param in query_params:
+                    if isinstance(param, dict) and not param.get('disabled', False):
+                        key = resolve_variables(param.get('key', ''))
+                        value = resolve_variables(param.get('value', ''))
+                        if key:
+                            params[key] = value
+            
+            # Prepare headers
+            headers = {}
+            
+            # Handle authentication from environment_config
+            self._apply_authentication(headers, params, all_variables, resolve_variables)
+            
+            # Add headers from request
+            request_headers = request_data.get('header', [])
+            for header in request_headers:
+                if isinstance(header, dict) and not header.get('disabled', False):
+                    key = resolve_variables(header.get('key', ''))
+                    value = resolve_variables(header.get('value', ''))
+                    if key:
+                        headers[key] = value
+            
+            # Prepare body
+            body = None
+            content_type = headers.get('Content-Type', '').lower()
+            
+            request_body = request_data.get('body', {})
+            if request_body:
+                body_mode = request_body.get('mode', '')
+                
+                if body_mode == 'raw':
+                    raw_body = request_body.get('raw', '')
+                    body = resolve_variables(raw_body)
+                    
+                    # Try to parse as JSON if content type suggests it
+                    if 'application/json' in content_type:
+                        try:
+                            # Validate JSON
+                            json.loads(body)
+                        except json.JSONDecodeError:
+                            logger.warning("Body is not valid JSON despite Content-Type")
+                    
+                elif body_mode == 'formdata':
+                    # Handle form data
+                    form_data = {}
+                    formdata_items = request_body.get('formdata', [])
+                    for item in formdata_items:
+                        if isinstance(item, dict) and not item.get('disabled', False):
+                            key = resolve_variables(item.get('key', ''))
+                            value = resolve_variables(item.get('value', ''))
+                            if key:
+                                form_data[key] = value
+                    body = form_data
+                    
+                elif body_mode == 'urlencoded':
+                    # Handle URL encoded data
+                    urlencoded_data = {}
+                    urlencoded_items = request_body.get('urlencoded', [])
+                    for item in urlencoded_items:
+                        if isinstance(item, dict) and not item.get('disabled', False):
+                            key = resolve_variables(item.get('key', ''))
+                            value = resolve_variables(item.get('value', ''))
+                            if key:
+                                urlencoded_data[key] = value
+                    body = urlencode(urlencoded_data)
+                    if 'content-type' not in [h.lower() for h in headers.keys()]:
+                        headers['Content-Type'] = 'application/x-www-form-urlencoded'
+            
+            # Execute the request
+            start_time = time.time()
+            
+            logger.info(f"Executing {method} request to {url}")
+            
+            # Create a new session for this request (separate from Postman API session)
+            exec_session = requests.Session()
+            
+            # Prepare request kwargs
+            request_kwargs = {
+                'timeout': self.timeout,
+                'params': params if params else None,
+                'headers': headers if headers else None
+            }
+            
+            # Add body based on content type and method
+            if body is not None and method in ['POST', 'PUT', 'PATCH']:
+                if isinstance(body, dict):
+                    # Form data
+                    request_kwargs['data'] = body
+                elif isinstance(body, str):
+                    if 'application/json' in content_type:
+                        request_kwargs['json'] = json.loads(body) if body.strip() else {}
+                    else:
+                        request_kwargs['data'] = body
+                else:
+                    request_kwargs['data'] = body
+            
+            # Execute the request
+            response = exec_session.request(method, url, **request_kwargs)
+            
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
+            # Parse response
+            response_data = {
+                "request": {
+                    "path": request_path,
+                    "method": method,
+                    "url": url,
+                    "headers": dict(headers) if headers else {},
+                    "params": dict(params) if params else {},
+                    "body": body if body is not None else None
+                },
+                "response": {
+                    "status_code": response.status_code,
+                    "status_text": response.reason,
+                    "headers": dict(response.headers),
+                    "elapsed_time_seconds": round(elapsed_time, 3),
+                    "size_bytes": len(response.content)
+                },
+                "variables_used": dict(all_variables),
+                "success": response.ok
+            }
+            
+            # Add response body
+            try:
+                # Try to parse as JSON
+                response_data["response"]["body"] = response.json()
+                response_data["response"]["content_type"] = "application/json"
+            except json.JSONDecodeError:
+                # Fall back to text
+                try:
+                    response_data["response"]["body"] = response.text
+                    response_data["response"]["content_type"] = "text/plain"
+                except UnicodeDecodeError:
+                    # Binary content
+                    response_data["response"]["body"] = f"<binary content: {len(response.content)} bytes>"
+                    response_data["response"]["content_type"] = "binary"
+            
+            # Add error details if request failed
+            if not response.ok:
+                response_data["error"] = {
+                    "message": f"HTTP {response.status_code}: {response.reason}",
+                    "status_code": response.status_code
+                }
+            
+            return json.dumps(response_data, indent=2)
+            
+        except Exception as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when executing request: {stacktrace}")
+            raise ToolException(f"Unable to execute request '{request_path}': {str(e)}")
 
     def get_collection(self, **kwargs) -> str:
         """Get a specific collection by ID."""
@@ -1699,6 +2033,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 # Check if this is a folder (has 'item' property) or a request
                 if 'item' in item:
                     # This is a folder
+                   
                     result['items'][current_path] = {
                         "type": "folder",
                         "id": item.get('id'),

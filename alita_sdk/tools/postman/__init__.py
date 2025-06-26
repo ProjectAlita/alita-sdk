@@ -1,4 +1,5 @@
 from typing import List, Literal, Optional, Type
+import json
 
 import requests
 from langchain_core.tools import BaseToolkit, BaseTool
@@ -25,6 +26,8 @@ class PostmanAction(BaseAction):
         return v.replace(' ', '')
 
 def get_tools(tool):
+    # Parse environment_config if it's a string (from UI)
+    environment_config = tool['settings'].get('environment_config', {})
     toolkit = PostmanToolkit.get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         api_key=tool['settings'].get('api_key', None),
@@ -32,6 +35,7 @@ def get_tools(tool):
             'base_url', 'https://api.getpostman.com'),
         collection_id=tool['settings'].get('collection_id', None),
         workspace_id=tool['settings'].get('workspace_id', None),
+        environment_config=environment_config,
         toolkit_name=tool.get('toolkit_name')
     )
     return toolkit.tools
@@ -57,6 +61,9 @@ class PostmanToolkit(BaseToolkit):
                            'toolkit_name': True, 'max_toolkit_length': PostmanToolkit.toolkit_max_length})),
             workspace_id=(str, Field(description="Default workspace ID",
                           default="", json_schema_extra={'configuration': True})),
+            environment_config=(dict, Field(
+                description="JSON configuration for request execution (auth headers, project IDs, base URLs, etc.)",
+                default={})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(
                 default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {
