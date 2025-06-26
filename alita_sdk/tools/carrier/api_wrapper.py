@@ -142,6 +142,10 @@ class CarrierAPIWrapper(BaseModel):
         """Create a new UI test."""
         return self._client.create_ui_test(json_body)
 
+    def cancel_ui_test(self, test_id: str) -> Dict[str, Any]:
+        """Cancel a UI test by setting its status to Canceled."""
+        return self._client.cancel_ui_test(test_id)
+
     def get_ui_report_json_files(self, uid: str) -> list:
         """Get all JSON file names for a given UI report UID for Excel processing."""
         endpoint = f"api/v1/ui_performance/results/{self.project_id}/{uid}?sort=loop&order=asc"

@@ -261,3 +261,17 @@ class CarrierClient(BaseModel):
         finally:
             # Restore original headers
             self.session.headers.update(original_headers)
+
+    def cancel_ui_test(self, test_id: str) -> Dict[str, Any]:
+        """Cancel a UI test by setting its status to Canceled."""
+        endpoint = f"api/v1/ui_performance/report_status/{self.credentials.project_id}/{test_id}"
+        
+        cancel_body = {
+            "test_status": {
+                "status": "Canceled",
+                "percentage": 100,
+                "description": "Test was canceled"
+            }
+        }
+        
+        return self.request('put', endpoint, json=cancel_body)
