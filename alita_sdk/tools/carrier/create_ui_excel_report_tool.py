@@ -148,7 +148,7 @@ class CreateUIExcelReportTool(BaseTool):
             bucket_name = report_name.replace("_", "").replace(" ", "").lower()
             excel_file_basename = os.path.basename(excel_file_name)
             
-            self.api_wrapper.upload_excel_report(bucket_name, excel_file_name)
+            self.api_wrapper.upload_file(bucket_name, excel_file_name)
             
             # Clean up temporary file
             if os.path.exists(excel_file_name):

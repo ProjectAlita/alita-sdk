@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime
 import json
+import zipfile
+from itertools import islice
 import traceback
 from typing import Type
 from langchain_core.tools import BaseTool, ToolException
@@ -78,14 +80,31 @@ class GetReportByIDTool(BaseTool):
 
     def _run(self, report_id: str):
         try:
-            reports = self.api_wrapper.get_reports_list()
-            report_data = {}
-            for report in reports:
-                if report_id == str(report["id"]):
-                    report_data = report
-                    break
+            report, test_log_file_path, errors_log_file_path = self.api_wrapper.get_report_file_name(report_id)
+            try:
+                with open(errors_log_file_path, mode='r') as f:
+                    # Use islice to read up to 100 lines
+                    errors = list(islice(f, 100))
+                report["errors_log"] = errors
+                # Archive with errors log file path
+                zip_file_path = f'/tmp/{report["build_id"]}_error_log_archive.zip'
 
-            return json.dumps(report_data)
+                # Create zip archive
+                with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    arcname = os.path.basename(errors_log_file_path)
+                    zipf.write(errors_log_file_path, arcname)
+
+                bucket_name = report["name"].replace("_", "").replace(" ", "").lower()
+                self.api_wrapper.upload_file(bucket_name, zip_file_path)
+                report["link_to_errors_file"] = f"{self.api_wrapper.url.rstrip('/')}/api/v1/artifacts/artifact/default/" \
+                                                f"{self.api_wrapper.project_id}/{bucket_name}/" \
+                                                f"{zip_file_path.replace('/tmp/', '')}"
+            except Exception as e:
+                logger.error(e)
+                report["errors_log"] = []
+                report["link_to_errors_file"] = "link is not available"
+
+            return json.dumps(report)
         except Exception:
             stacktrace = traceback.format_exc()
             logger.error(f"Error downloading reports: {stacktrace}")
@@ -164,17 +183,17 @@ class CreateExcelReportTool(BaseTool):
 
     def _process_report_by_id(self, report_id, parameters):
         """Process report using report ID."""
-        report, file_path = self.api_wrapper.get_report_file_name(report_id)
+        report, test_log_file_path, errors_log_file_path = self.api_wrapper.get_report_file_name(report_id)
         carrier_report = f"{self.api_wrapper.url.rstrip('/')}/-/performance/backend/results?result_id={report_id}"
         lg_type = report.get("lg_type")
         excel_report_file_name = f'/tmp/reports_test_results_{report["build_id"]}_excel_report.xlsx'
         bucket_name = report["name"].replace("_", "").replace(" ", "").lower()
 
-        result_stats_j = self._parse_report(file_path, lg_type, parameters["think_time"], is_absolute_file_path=True)
+        result_stats_j = self._parse_report(test_log_file_path, lg_type, parameters["think_time"], is_absolute_file_path=True)
         calc_thr_j = self._calculate_thresholds(result_stats_j, parameters)
 
         return self._generate_and_upload_report(
-            result_stats_j, carrier_report, calc_thr_j, parameters, excel_report_file_name, bucket_name, file_path
+            result_stats_j, carrier_report, calc_thr_j, parameters, excel_report_file_name, bucket_name, test_log_file_path
         )
 
     def _process_report_by_file(self, bucket, file_name, parameters):
@@ -233,7 +252,7 @@ class CreateExcelReportTool(BaseTool):
         excel_reporter_object.prepare_headers_and_titles()
         excel_reporter_object.write_to_excel(result_stats_j, carrier_report, calc_thr_j, parameters["pct"])
 
-        self.api_wrapper.upload_excel_report(bucket_name, excel_report_file_name)
+        self.api_wrapper.upload_file(bucket_name, excel_report_file_name)
 
         # Clean up
         self._cleanup(file_path, excel_report_file_name)
