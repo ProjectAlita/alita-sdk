@@ -1,6 +1,8 @@
 import threading
 import atexit
 import logging
+from urllib.parse import urlparse, unquote
+
 from psycopg import Connection
 from langgraph.store.postgres import PostgresStore
 
@@ -18,11 +20,30 @@ class StoreManager:
                     cls._instance._stores = {}
         return cls._instance
 
+    def _parse_connection_string(self, conn_str: str) -> dict:
+        """
+        Parse the connection string from SQLAlchemy style to args dict.
+        """
+        if conn_str.startswith("postgresql+psycopg://"):
+            url = conn_str[len("postgresql+psycopg://"):]
+
+        parsed = urlparse(f"//{url}")
+
+        return {
+            "user": unquote(parsed.username) if parsed.username else None,
+            "password": unquote(parsed.password) if parsed.password else None,
+            "host": parsed.hostname,
+            "port": parsed.port,
+            "dbname": parsed.path.lstrip("/") if parsed.path else None
+        }
+
     def get_store(self, conn_str: str) -> PostgresStore:
         store = self._stores.get(conn_str)
         if store is None:
             logger.info(f"Creating new PostgresStore for connection: {conn_str}")
-            conn = Connection.connect(conn_str, autocommit=True, prepare_threshold=0)
+            conn_params = self._parse_connection_string(conn_str)
+            conn_params.update({'autocommit': True, 'prepare_threshold': 0})
+            conn = Connection.connect(**conn_params)
             store = PostgresStore(conn)
             store.setup()
             self._stores[conn_str] = store
