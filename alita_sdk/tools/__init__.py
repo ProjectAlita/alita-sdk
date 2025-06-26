@@ -74,6 +74,7 @@ _safe_import_tool('carrier', 'carrier', 'get_tools', 'AlitaCarrierToolkit')
 _safe_import_tool('ocr', 'ocr', 'get_tools', 'OCRToolkit')
 _safe_import_tool('pptx', 'pptx', 'get_tools', 'PPTXToolkit')
 _safe_import_tool('postman', 'postman', 'get_tools', 'PostmanToolkit')
+_safe_import_tool('zephyr_squad', 'zephyr_squad', 'get_tools', 'ZephyrSquadToolkit')
 
 # Log import summary
 available_count = len(AVAILABLE_TOOLS)
