@@ -3,7 +3,7 @@ import re
 import fnmatch
 import tiktoken
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -34,8 +34,11 @@ from .schemas import (
     SearchIssues,
     CreateIssue,
     UpdateIssue,
-    LoaderSchema,
     GetCommits,
+    GetCommitChanges,
+    GetCommitsDiff,
+    ApplyGitPatch,
+    ApplyGitPatchFromArtifact,
     TriggerWorkflow,
     GetWorkflowStatus,
     GetWorkflowLogs,
@@ -89,6 +92,9 @@ class GitHubClient(BaseModel):
     # Adding auth config and repo config as optional fields for initialization
     auth_config: Optional[GitHubAuthConfig] = Field(default=None, exclude=True)
     repo_config: Optional[GitHubRepoConfig] = Field(default=None, exclude=True)
+    
+    # Alita instance
+    alita: Optional[Any] = Field(default=None, exclude=True)
 
     @model_validator(mode='before')
     def initialize_github_client(cls, values):
@@ -277,6 +283,7 @@ class GitHubClient(BaseModel):
             until: Optional[str] = None,
             author: Optional[str] = None,
             repo_name: Optional[str] = None,
+            max_count: Optional[int] = 30,
     ) -> str:
         """
         Retrieves a list of commits from the repository.
@@ -288,6 +295,7 @@ class GitHubClient(BaseModel):
             until (Optional[str]): Only commits before this date (ISO format) will be returned.
             author (Optional[str]): The author of the commits.
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'.
+            max_count (Optional[int]): Maximum number of commits to return (default: 30).
 
         Returns:
             str: A list of commit data or an error message.
@@ -309,22 +317,565 @@ class GitHubClient(BaseModel):
             commits = repo.get_commits(**params)
 
             # Convert the commits to a list of dictionaries for easier processing
-            commit_list = [
-                {
+            # Limit the number of commits based on max_count
+            commit_list = []
+            count = 0
+            for commit in commits:
+                if count >= max_count:
+                    break
+                commit_list.append({
                     "sha": commit.sha,
                     "author": commit.commit.author.name,
                     "date": commit.commit.author.date.isoformat(),
                     "message": commit.commit.message,
                     "url": commit.html_url,
-                }
-                for commit in commits
-            ]
+                })
+                count += 1
 
             return commit_list
 
         except Exception as e:
             # Return error as JSON instead of plain text
             return {"error": str(e), "message": f"Unable to retrieve commits due to error: {str(e)}"}
+
+    def get_commit_changes(self, sha: str, repo_name: Optional[str] = None) -> str:
+        """
+        Retrieves the files changed in a specific commit.
+
+        Parameters:
+            sha (str): The commit SHA to get changed files for.
+            repo_name (Optional[str]): Name of the repository in format 'owner/repo'.
+
+        Returns:
+            str: A list of changed files with their status and changes or an error message.
+        """
+        try:
+            # Get the repository
+            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            
+            # Get the specific commit
+            commit = repo.get_commit(sha)
+            
+            # Extract changed files information
+            changed_files = []
+            for file in commit.files:
+                file_info = {
+                    "filename": file.filename,
+                    "status": file.status,  # added, modified, removed, renamed
+                    "additions": file.additions,
+                    "deletions": file.deletions,
+                    "changes": file.changes,
+                    "patch": file.patch if hasattr(file, 'patch') and file.patch else None,
+                    "blob_url": file.blob_url if hasattr(file, 'blob_url') else None,
+                    "raw_url": file.raw_url if hasattr(file, 'raw_url') else None
+                }
+                
+                # Add previous filename for renamed files
+                if file.status == "renamed" and hasattr(file, 'previous_filename'):
+                    file_info["previous_filename"] = file.previous_filename
+                    
+                changed_files.append(file_info)
+            
+            result = {
+                "commit_sha": commit.sha,
+                "commit_message": commit.commit.message,
+                "author": commit.commit.author.name,
+                "date": commit.commit.author.date.isoformat(),
+                "total_files_changed": len(changed_files),
+                "total_additions": sum(f["additions"] for f in changed_files),
+                "total_deletions": sum(f["deletions"] for f in changed_files),
+                "files": changed_files
+            }
+            
+            return result
+
+        except Exception as e:
+            # Return error as JSON instead of plain text
+            return {"error": str(e), "message": f"Unable to retrieve commit changes due to error: {str(e)}"}
+        
+    def get_commits_diff(self, base_sha: str, head_sha: str, repo_name: Optional[str] = None) -> str:
+        """
+        Retrieves the diff between two commits.
+
+        Parameters:
+            base_sha (str): The base commit SHA to compare from.
+            head_sha (str): The head commit SHA to compare to.
+            repo_name (Optional[str]): Name of the repository in format 'owner/repo'.
+
+        Returns:
+            str: A detailed diff comparison between the two commits or an error message.
+        """
+        try:
+            # Get the repository
+            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            
+            # Get the comparison between the two commits
+            comparison = repo.compare(base_sha, head_sha)
+            
+            # Extract comparison information
+            diff_info = {
+                "base_commit": {
+                    "sha": comparison.base_commit.sha,
+                    "message": comparison.base_commit.commit.message,
+                    "author": comparison.base_commit.commit.author.name,
+                    "date": comparison.base_commit.commit.author.date.isoformat()
+                },
+                "head_commit": {
+                    "sha": comparison.head_commit.sha,
+                    "message": comparison.head_commit.commit.message,
+                    "author": comparison.head_commit.commit.author.name,
+                    "date": comparison.head_commit.commit.author.date.isoformat()
+                },
+                "status": comparison.status,  # ahead, behind, identical, or diverged
+                "ahead_by": comparison.ahead_by,
+                "behind_by": comparison.behind_by,
+                "total_commits": comparison.total_commits,
+                "commits": [],
+                "files": []
+            }
+            
+            # Get commits in the comparison
+            for commit in comparison.commits:
+                commit_info = {
+                    "sha": commit.sha,
+                    "message": commit.commit.message,
+                    "author": commit.commit.author.name,
+                    "date": commit.commit.author.date.isoformat(),
+                    "url": commit.html_url
+                }
+                diff_info["commits"].append(commit_info)
+            
+            # Get changed files information
+            for file in comparison.files:
+                file_info = {
+                    "filename": file.filename,
+                    "status": file.status,  # added, modified, removed, renamed
+                    "additions": file.additions,
+                    "deletions": file.deletions,
+                    "changes": file.changes,
+                    "patch": file.patch if hasattr(file, 'patch') and file.patch else None,
+                    "blob_url": file.blob_url if hasattr(file, 'blob_url') else None,
+                    "raw_url": file.raw_url if hasattr(file, 'raw_url') else None
+                }
+                
+                # Add previous filename for renamed files
+                if file.status == "renamed" and hasattr(file, 'previous_filename'):
+                    file_info["previous_filename"] = file.previous_filename
+                    
+                diff_info["files"].append(file_info)
+            
+            # Add summary statistics
+            diff_info["summary"] = {
+                "total_files_changed": len(diff_info["files"]),
+                "total_additions": sum(f["additions"] for f in diff_info["files"]),
+                "total_deletions": sum(f["deletions"] for f in diff_info["files"])
+            }
+            
+            return diff_info
+
+        except Exception as e:
+            # Return error as JSON instead of plain text
+            return {"error": str(e), "message": f"Unable to retrieve diff between commits due to error: {str(e)}"}
+        
+    def apply_git_patch_from_file(self, bucket_name: str, file_name: str, commit_message: Optional[str] = "Apply git patch", repo_name: Optional[str] = None) -> str:
+        """Applies a git patch from a file stored in a specified bucket.
+
+        Args:
+            bucket_name (str): The name of the bucket where the patch file is stored.
+            file_name (str): The name of the patch file to apply.
+            commit_message (Optional[str], optional): The commit message for the patch application. Defaults to "Apply git patch".
+            repo_name (Optional[str], optional): The name of the repository to apply the patch to. Defaults to None.
+
+        Returns:
+            str: A summary of the applied changes or an error message.
+        """
+        try:
+            patch_content = self.alita.download_artifact(bucket_name, file_name)
+            if not patch_content or not isinstance(patch_content, str):
+                return {"error": "Patch file not found", "message": f"Patch file '{file_name}' not found in bucket '{bucket_name}'."}
+            # Apply the git patch using the content
+            return self.apply_git_patch(patch_content, commit_message, repo_name)
+        except Exception as e:
+            return {"error": str(e), "message": f"Unable to download patch file: {str(e)}"}
+
+    def apply_git_patch(self, patch_content: str, commit_message: Optional[str] = "Apply git patch", repo_name: Optional[str] = None) -> str:
+        """
+        Applies a git patch to the repository by parsing the unified diff format and updating files accordingly.
+
+        Parameters:
+            patch_content (str): The git patch content in unified diff format
+            commit_message (Optional[str]): Commit message for the patch application
+            repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+
+        Returns:
+            str: A summary of applied changes or error message
+        """
+        import re
+        
+        try:
+            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            branch = self.active_branch
+
+            if branch == self.github_base_branch:
+                return {
+                    "error": "Cannot apply patch",
+                    "message": f"You're attempting to commit directly to the {self.github_base_branch} branch, which is protected. Please create a new branch and try again."
+                }
+
+            # Parse the patch content to extract file changes
+            changes = self._parse_git_patch(patch_content)
+            
+            if not changes:
+                return {
+                    "error": "No valid changes found",
+                    "message": "The patch content does not contain any valid file changes."
+                }
+
+            applied_changes = []
+            failed_changes = []
+
+            for change in changes:
+                try:
+                    if change['operation'] == 'create':
+                        # Create new file
+                        repo.create_file(
+                            path=change['file_path'],
+                            message=f"{commit_message} - Create {change['file_path']}",
+                            content=change['new_content'],
+                            branch=branch
+                        )
+                        applied_changes.append(f"Created: {change['file_path']}")
+
+                    elif change['operation'] == 'delete':
+                        # Delete file
+                        try:
+                            file = repo.get_contents(change['file_path'], ref=branch)
+                            repo.delete_file(
+                                path=change['file_path'],
+                                message=f"{commit_message} - Delete {change['file_path']}",
+                                sha=file.sha,
+                                branch=branch
+                            )
+                            applied_changes.append(f"Deleted: {change['file_path']}")
+                        except Exception:
+                            failed_changes.append(f"Failed to delete {change['file_path']} - file not found")
+
+                    elif change['operation'] == 'modify':
+                        # Modify existing file
+                        try:
+                            file = repo.get_contents(change['file_path'], ref=branch)
+                            current_content = file.decoded_content.decode("utf-8")
+                            
+                            # Apply the patch changes
+                            new_content = self._apply_patch_to_content(current_content, change['hunks'])
+                            
+                            if new_content != current_content:
+                                repo.update_file(
+                                    path=change['file_path'],
+                                    message=f"{commit_message} - Update {change['file_path']}",
+                                    content=new_content,
+                                    sha=file.sha,
+                                    branch=branch
+                                )
+                                applied_changes.append(f"Modified: {change['file_path']}")
+                            else:
+                                failed_changes.append(f"No changes applied to {change['file_path']} - patch may not match current content")
+                        except Exception as e:
+                            failed_changes.append(f"Failed to modify {change['file_path']}: {str(e)}")
+
+                    elif change['operation'] == 'rename':
+                        # Handle file rename (delete old, create new)
+                        try:
+                            # Delete old file
+                            old_file = repo.get_contents(change['old_file_path'], ref=branch)
+                            old_content = old_file.decoded_content.decode("utf-8")
+                            
+                            # Apply changes to content if there are any
+                            if change.get('hunks'):
+                                new_content = self._apply_patch_to_content(old_content, change['hunks'])
+                            else:
+                                new_content = old_content
+                            
+                            # Create new file
+                            repo.create_file(
+                                path=change['file_path'],
+                                message=f"{commit_message} - Rename {change['old_file_path']} to {change['file_path']}",
+                                content=new_content,
+                                branch=branch
+                            )
+                            
+                            # Delete old file
+                            repo.delete_file(
+                                path=change['old_file_path'],
+                                message=f"{commit_message} - Remove old file {change['old_file_path']}",
+                                sha=old_file.sha,
+                                branch=branch
+                            )
+                            
+                            applied_changes.append(f"Renamed: {change['old_file_path']} → {change['file_path']}")
+                        except Exception as e:
+                            failed_changes.append(f"Failed to rename {change.get('old_file_path', 'unknown')} to {change['file_path']}: {str(e)}")
+
+                except Exception as e:
+                    failed_changes.append(f"Failed to process {change.get('file_path', 'unknown file')}: {str(e)}")
+
+            # Return summary
+            result = {
+                "success": len(applied_changes) > 0,
+                "applied_changes": applied_changes,
+                "failed_changes": failed_changes,
+                "total_changes": len(changes),
+                "successful_changes": len(applied_changes),
+                "failed_count": len(failed_changes)
+            }
+
+            if failed_changes:
+                result["message"] = f"Patch partially applied. {len(applied_changes)} successful, {len(failed_changes)} failed."
+            else:
+                result["message"] = f"Patch successfully applied. {len(applied_changes)} changes made."
+
+            return result
+
+        except Exception as e:
+            return {
+                "error": str(e),
+                "message": f"Unable to apply git patch due to error: {str(e)}"
+            }
+
+    def _parse_git_patch(self, patch_content: str) -> List[Dict]:
+        """
+        Parse git patch content in unified diff format and extract file changes.
+        
+        Parameters:
+            patch_content (str): The patch content to parse
+            
+        Returns:
+            List[Dict]: List of change dictionaries
+        """
+        import re
+        
+        changes = []
+        lines = patch_content.strip().split('\n')
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            
+            # Look for diff --git lines
+            if line.startswith('diff --git'):
+                change = self._parse_file_change(lines, i)
+                if change:
+                    changes.append(change)
+                    i = change.get('next_index', i + 1)
+                else:
+                    i += 1
+            else:
+                i += 1
+                
+        return changes
+
+    def _parse_file_change(self, lines: List[str], start_index: int) -> Optional[Dict]:
+        """
+        Parse a single file change from patch lines.
+        
+        Parameters:
+            lines (List[str]): All patch lines
+            start_index (int): Starting index for this file change
+            
+        Returns:
+            Optional[Dict]: Parsed file change or None if invalid
+        """
+        import re
+        
+        if start_index >= len(lines):
+            return None
+            
+        diff_line = lines[start_index]
+        
+        # Extract file paths from diff line
+        match = re.match(r'diff --git a/(.+) b/(.+)', diff_line)
+        if not match:
+            return None
+            
+        old_path = match.group(1)
+        new_path = match.group(2)
+        
+        change = {
+            'old_file_path': old_path,
+            'file_path': new_path,
+            'hunks': [],
+            'next_index': start_index + 1
+        }
+        
+        i = start_index + 1
+        
+        # Process header lines (index, ---, +++, etc.)
+        while i < len(lines):
+            line = lines[i]
+            
+            if line.startswith('new file mode'):
+                change['operation'] = 'create'
+            elif line.startswith('deleted file mode'):
+                change['operation'] = 'delete'
+            elif line.startswith('rename from'):
+                change['operation'] = 'rename'
+            elif line.startswith('index '):
+                pass  # Skip index lines
+            elif line.startswith('--- '):
+                pass  # Skip old file reference
+            elif line.startswith('+++ '):
+                pass  # Skip new file reference
+            elif line.startswith('@@'):
+                # Found a hunk, parse it
+                hunk, next_i = self._parse_hunk(lines, i)
+                if hunk:
+                    change['hunks'].append(hunk)
+                i = next_i
+                continue
+            elif line.startswith('diff --git') or line.startswith('Binary files'):
+                # Start of next file or binary file
+                break
+            elif line.strip() == '':
+                pass  # Skip empty lines
+            else:
+                # Unknown line, continue
+                pass
+                
+            i += 1
+            
+        # Determine operation if not set
+        if 'operation' not in change:
+            if old_path == new_path:
+                change['operation'] = 'modify'
+            else:
+                change['operation'] = 'rename'
+                
+        change['next_index'] = i
+        
+        # For new files, extract content from hunks
+        if change['operation'] == 'create' and change['hunks']:
+            content_lines = []
+            for hunk in change['hunks']:
+                for line in hunk['lines']:
+                    if line.startswith('+') and not line.startswith('+++'):
+                        content_lines.append(line[1:])  # Remove + prefix
+            change['new_content'] = '\n'.join(content_lines)
+            
+        return change
+
+    def _parse_hunk(self, lines: List[str], start_index: int) -> Tuple[Optional[Dict], int]:
+        """
+        Parse a single hunk from patch lines.
+        
+        Parameters:
+            lines (List[str]): All patch lines  
+            start_index (int): Starting index for this hunk
+            
+        Returns:
+            Tuple[Optional[Dict], int]: Parsed hunk and next index
+        """
+        import re
+        
+        if start_index >= len(lines):
+            return None, start_index + 1
+            
+        hunk_header = lines[start_index]
+        
+        # Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
+        match = re.match(r'@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', hunk_header)
+        if not match:
+            return None, start_index + 1
+            
+        old_start = int(match.group(1))
+        old_count = int(match.group(2)) if match.group(2) else 1
+        new_start = int(match.group(3))
+        new_count = int(match.group(4)) if match.group(4) else 1
+        
+        hunk = {
+            'old_start': old_start,
+            'old_count': old_count,
+            'new_start': new_start,
+            'new_count': new_count,
+            'lines': []
+        }
+        
+        i = start_index + 1
+        
+        # Collect hunk lines
+        while i < len(lines):
+            line = lines[i]
+            
+            if line.startswith('@@') or line.startswith('diff --git') or line.startswith('Binary files'):
+                # Start of next hunk or file
+                break
+            elif line.startswith(' ') or line.startswith('+') or line.startswith('-'):
+                # Context, addition, or deletion line
+                hunk['lines'].append(line)
+            elif line.strip() == '':
+                # Empty line in hunk
+                hunk['lines'].append(line)
+            else:
+                # Unknown line, stop parsing this hunk
+                break
+                
+            i += 1
+            
+        return hunk, i
+
+    def _apply_patch_to_content(self, original_content: str, hunks: List[Dict]) -> str:
+        """
+        Apply patch hunks to original content.
+        
+        Parameters:
+            original_content (str): Original file content
+            hunks (List[Dict]): List of patch hunks
+            
+        Returns:
+            str: Modified content
+        """
+        if not hunks:
+            return original_content
+            
+        lines = original_content.split('\n')
+        result_lines = []
+        
+        # Sort hunks by line number
+        sorted_hunks = sorted(hunks, key=lambda h: h['old_start'])
+        
+        current_line = 0
+        
+        for hunk in sorted_hunks:
+            # Add lines before this hunk
+            while current_line < hunk['old_start'] - 1:
+                if current_line < len(lines):
+                    result_lines.append(lines[current_line])
+                current_line += 1
+                
+            # Apply hunk changes
+            old_line_in_hunk = 0
+            
+            for patch_line in hunk['lines']:
+                if patch_line.startswith(' '):
+                    # Context line - should match original
+                    context_line = patch_line[1:]
+                    if current_line < len(lines):
+                        result_lines.append(lines[current_line])
+                        current_line += 1
+                    old_line_in_hunk += 1
+                elif patch_line.startswith('-'):
+                    # Deletion - skip original line
+                    current_line += 1
+                    old_line_in_hunk += 1
+                elif patch_line.startswith('+'):
+                    # Addition - add new line
+                    result_lines.append(patch_line[1:])
+                    
+        # Add remaining lines
+        while current_line < len(lines):
+            result_lines.append(lines[current_line])
+            current_line += 1
+            
+        return '\n'.join(result_lines)
 
     def get_pull_request(self, pr_number: str, repo_name: Optional[str] = None) -> str:
         """
@@ -1452,6 +2003,34 @@ class GitHubClient(BaseModel):
                 "mode": "get_commits",
                 "description": self.get_commits.__doc__,
                 "args_schema": GetCommits,
+            },
+            {
+                "ref": self.get_commit_changes,
+                "name": "get_commit_changes",
+                "mode": "get_commit_changes",
+                "description": self.get_commit_changes.__doc__,
+                "args_schema": GetCommitChanges,
+            },
+            {
+                "ref": self.get_commits_diff,
+                "name": "get_commits_diff",
+                "mode": "get_commits_diff",
+                "description": self.get_commits_diff.__doc__,
+                "args_schema": GetCommitsDiff,
+            },
+            {
+                "ref": self.apply_git_patch,
+                "name": "apply_git_patch",
+                "mode": "apply_git_patch",
+                "description": self.apply_git_patch.__doc__,
+                "args_schema": ApplyGitPatch,
+            },
+            {
+                "ref": self.apply_git_patch_from_file,
+                "name": "apply_git_patch_from_file",
+                "mode": "apply_git_patch_from_file",
+                "description": self.apply_git_patch_from_file.__doc__,
+                "args_schema": ApplyGitPatchFromArtifact,
             },
             {
                 "ref": self.trigger_workflow,

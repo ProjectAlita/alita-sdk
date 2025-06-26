@@ -30,7 +30,11 @@ from langchain_core.language_models import BaseChatModel  # pylint: disable=E040
 from langchain_core.messages import AIMessage, AIMessageChunk  # pylint: disable=E0401
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult  # pylint: disable=E0401
 
-from ..langchain.tools import log
+try:
+    from ..langchain.tools import log
+except ImportError:
+    import logging as _logging
+    log = _logging.getLogger(__name__)
 
 
 class PreloadedEmbeddings(Embeddings):

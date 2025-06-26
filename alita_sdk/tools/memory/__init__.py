@@ -2,7 +2,15 @@ from typing import Optional, List
 
 from langchain_core.tools import BaseToolkit, BaseTool
 from langgraph.store.postgres import PostgresStore
-from langmem import create_manage_memory_tool, create_search_memory_tool
+try:
+    from langmem import create_manage_memory_tool, create_search_memory_tool
+except ImportError:
+    # langmem is optional; define stubs to avoid import errors
+    def create_manage_memory_tool(*args, **kwargs):  # pragma: no cover
+        raise ImportError("langmem is required for MemoryToolkit")
+
+    def create_search_memory_tool(*args, **kwargs):  # pragma: no cover
+        raise ImportError("langmem is required for MemoryToolkit")
 from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 
 name = "memory"

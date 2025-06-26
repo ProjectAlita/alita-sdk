@@ -23,8 +23,8 @@ class ArtifactWrapper(BaseToolApiWrapper):
     def create_file(self, filename: str, filedata: str, bucket_name = None):
         return self.artifact.create(filename, filedata, bucket_name)
 
-    def read_file(self, filename: str, bucket_name = None, is_capture_image: bool = False, page_number: int = None):
-        return self.artifact.get(filename, bucket_name, is_capture_image, page_number)
+    def read_file(self, filename: str, bucket_name = None, is_capture_image: bool = False, page_number: int = None, sheet_name: str = None):
+        return self.artifact.get(filename, bucket_name, is_capture_image, page_number, sheet_name)
 
     def delete_file(self, filename: str, bucket_name = None):
         return self.artifact.delete(filename, bucket_name)
@@ -75,6 +75,9 @@ class ArtifactWrapper(BaseToolApiWrapper):
                                             default=False)),
                     page_number=(Optional[int], Field(
                         description="Specifies which page to read. If it is None, then full document will be read.",
+                        default=None)),
+                    sheet_name=(Optional[str], Field(
+                        description="Specifies which sheet to read. If it is None, then full document will be read.",
                         default=None))
                 )
             },

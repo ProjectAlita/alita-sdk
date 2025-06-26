@@ -149,7 +149,36 @@ GetCommits = create_model(
     path=(Optional[str], Field(description="The file path to filter commits by", default=None)),
     since=(Optional[str], Field(description="Only commits after this date will be returned (ISO format)", default=None)),
     until=(Optional[str], Field(description="Only commits before this date will be returned (ISO format)", default=None)),
-    author=(Optional[str], Field(description="The author of the commits", default=None))
+    author=(Optional[str], Field(description="The author of the commits", default=None)),
+    max_count=(Optional[int], Field(description="Maximum number of commits to return (default: 30)", default=30))
+)
+
+GetCommitChanges = create_model(
+    "GetCommitChanges",
+    sha=(str, Field(description="The commit SHA to get changed files for")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
+)
+
+GetCommitsDiff = create_model(
+    "GetCommitsDiff",
+    base_sha=(str, Field(description="The base commit SHA to compare from")),
+    head_sha=(str, Field(description="The head commit SHA to compare to")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
+)
+
+ApplyGitPatch = create_model(
+    "ApplyGitPatch",
+    patch_content=(str, Field(description="The git patch content in unified diff format")),
+    commit_message=(Optional[str], Field(description="Commit message for the patch application", default="Apply git patch")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
+)
+
+ApplyGitPatchFromArtifact = create_model(
+    "ApplyGitPatchFromArtifact",
+    bucket_name=(str, Field(description="Name of the artifact bucket containing the patch file")),
+    file_name=(str, Field(description="Name of the patch file to download and apply")),
+    commit_message=(Optional[str], Field(description="Commit message for the patch application", default="Apply git patch from artifact")),
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
 )
 
 TriggerWorkflow = create_model(

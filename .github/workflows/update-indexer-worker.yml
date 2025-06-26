@@ -58,7 +58,7 @@ jobs:
         run: |
           cd indexer_worker
           # Update alita-sdk version
-          sed -i "s/alita-sdk[all]==[0-9.]*/alita-sdk[all]==${{ steps.get_version.outputs.version }}/" requirements.txt
+          sed -i "s/alita-sdk\[all\]==[0-9.]*/alita-sdk\[all\]==${{ steps.get_version.outputs.version }}/" requirements.txt
 
       - name: Commit and push changes
         if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.create-pr == false)

@@ -14,7 +14,7 @@ from .vectorstore import VectorStoreToolkit
 from ..tools.mcp_server_tool import McpServerTool
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
-from ...tools.memory import MemoryToolkit
+# from ...tools.memory import MemoryToolkit
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def get_toolkits():
         # DatasourcesToolkit.toolkit_config_schema(),
         # ApplicationToolkit.toolkit_config_schema(),
         ArtifactToolkit.toolkit_config_schema(),
-        MemoryToolkit.toolkit_config_schema(),
+        # MemoryToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema()
     ]
 
@@ -67,14 +67,15 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 selected_tools=[],
                 llm=llm
             ))
-        elif tool['type'] == 'memory':
-            if memory_store is None:
-                raise ToolException(f"Memory store is not provided for memory tool: {tool['name']}")
-            tools += MemoryToolkit.get_toolkit(
-                namespace=tool['settings'].get('namespace', str(tool['id'])),
-                store=memory_store,
-                toolkit_name=tool.get('toolkit_name', '')
-            ).get_tools()
+            # move on tools level
+        # elif tool['type'] == 'memory':
+        #     if memory_store is None:
+        #         raise ToolException(f"Memory store is not provided for memory tool: {tool['name']}")
+        #     tools += MemoryToolkit.get_toolkit(
+        #         namespace=tool['settings'].get('namespace', str(tool['id'])),
+        #         store=memory_store,
+        #         toolkit_name=tool.get('toolkit_name', '')
+        #     ).get_tools()
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
                 client=alita_client,
