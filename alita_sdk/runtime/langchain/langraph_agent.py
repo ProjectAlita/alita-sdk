@@ -328,6 +328,7 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         auto_validate=False,
         debug=debug,
         store=store,
+        schema_to_mapper=state_class
     )
 
     compiled.attach_node(START, None)
