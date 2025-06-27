@@ -491,8 +491,16 @@ class GitHubClient(BaseModel):
         """
         try:
             patch_content = self.alita.download_artifact(bucket_name, file_name)
-            if not patch_content or not isinstance(patch_content, str):
+            
+            if not patch_content:
                 return {"error": "Patch file not found", "message": f"Patch file '{file_name}' not found in bucket '{bucket_name}'."}
+            
+            # Convert bytes to string if necessary
+            if isinstance(patch_content, bytes):
+                patch_content = patch_content.decode('utf-8')
+            elif not isinstance(patch_content, str):
+                return {"error": "Invalid patch content", "message": f"Patch file '{file_name}' contains invalid content type."}
+            
             # Apply the git patch using the content
             return self.apply_git_patch(patch_content, commit_message, repo_name)
         except Exception as e:
