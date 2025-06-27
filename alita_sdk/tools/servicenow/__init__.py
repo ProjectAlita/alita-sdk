@@ -46,7 +46,7 @@ class ServiceNowToolkit(BaseToolkit):
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "ServiceNow",
-                    "icon_url": None,
+                    "icon_url": "service-now.svg",
                     "hidden": False,
                     "sections": {
                         "auth": {

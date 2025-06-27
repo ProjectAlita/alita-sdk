@@ -51,7 +51,7 @@ class PPTXToolkit(BaseToolkit):
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "PPTX",
-                    "icon_url": None,
+                    "icon_url": "pptx.svg",
                     "categories": ["office"],
                     "extra_categories": ["presentation", "office automation", "document"]
                 }

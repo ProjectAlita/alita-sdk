@@ -18,6 +18,7 @@ name = "memory"
 def get_tools(tool):
     return MemoryToolkit().get_toolkit(
         namespace=tool['settings'].get('namespace', str(tool['id'])),
+        username=tool['settings'].get('username', ''),
         store=tool['settings'].get('store', None),
         toolkit_name=tool.get('toolkit_name', '')
 ).get_tools()
@@ -31,13 +32,14 @@ class MemoryToolkit(BaseToolkit):
         return create_model(
             name,
             namespace=(str, Field(description="Memory namespace", json_schema_extra={'toolkit_name': True})),
+            username=(Optional[str], Field(description="Username", default='Tester', json_schema_extra={'hidden': True})),
             connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
                                                           default=None,
                                                           json_schema_extra={'secret': True})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Memory",
-                    "icon_url": "jira-icon.svg",
+                    "icon_url": "memory.svg",
                     "categories": ["other"],
                     "extra_categories": ["long-term memory", "langmem"],
                 }
