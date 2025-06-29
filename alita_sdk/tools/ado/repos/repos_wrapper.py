@@ -191,10 +191,14 @@ class ArgsSchema(Enum):
         "CreatePullRequest",
         pull_request_title=(str, Field(description="Title of the pull request")),
         pull_request_body=(str, Field(description="Body of the pull request")),
-        branch_name=(
+        target_branch=(
             str,
-            Field(description="The name of the branch, e.g. `my_branch`."),
+            Field(description="The name of the target branch, e.g. `my_branch`."),
         ),
+        source_branch=(
+            str,
+            Field(description="The name of the source branch, e.g. `feature_branch`."),
+        )
     )
     GetCommits = create_model(
         "GetCommits",
@@ -1041,7 +1045,7 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
             return ToolException(msg)
 
     def create_pr(
-            self, pull_request_title: str, pull_request_body: str, branch_name: str
+            self, pull_request_title: str, pull_request_body: str, target_branch: str, source_branch: str
     ) -> str:
         """
         Creates a pull request in Azure DevOps from the active branch to the base branch mentioned in params.
@@ -1049,18 +1053,19 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
         Parameters:
             pull_request_title (str): Title of the pull request.
             pull_request_body (str): Description/body of the pull request.
-            branch_name (str): The name of the branch which is used as target branch for pull request.
+            target_branch (str): The name of the branch which is used as target branch for pull request.
+            source_branch (str): The name of the source branch which is used as source branch for pull request.
 
         Returns:
             str: A success or failure message.
         """
-        if self.active_branch == branch_name:
-            return f"Cannot create a pull request because the source branch '{self.active_branch}' is the same as the target branch '{branch_name}'"
+        if source_branch == target_branch:
+            return f"Cannot create a pull request because the source branch '{source_branch}' is the same as the target branch '{target_branch}'"
 
         try:
             pull_request = {
-                "sourceRefName": f"refs/heads/{self.active_branch}",
-                "targetRefName": f"refs/heads/{branch_name}",
+                "sourceRefName": f"refs/heads/{source_branch}",
+                "targetRefName": f"refs/heads/{target_branch}",
                 "title": pull_request_title,
                 "description": pull_request_body,
                 "reviewers": [],
