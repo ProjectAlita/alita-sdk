@@ -5,7 +5,7 @@ from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import ToolCall
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from typing import Any, Optional, Union, Annotated
+from typing import Any, Optional, Union
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 from ..langchain.utils import propagate_the_input_mapping
@@ -44,13 +44,13 @@ class FunctionTool(BaseTool):
                 }, config=config
             )
             logger.info(f"ToolNode response: {tool_result}")
-            if not self.output_variables:
-                return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
-            else:
-                if self.output_variables[0] == "messages":
-                    return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
-                else:
-                    return { self.output_variables[0]: tool_result }
+            #
+            # Always put result to messages
+            output = {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
+            if self.output_variables and self.output_variables[0] != "messages":
+                # Put result also to variable if any and it is not 'messages'
+                output[self.output_variables[0]] = tool_result
+            return output
         except ValidationError:
             return {"messages": [
                 {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
