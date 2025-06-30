@@ -155,9 +155,6 @@ class RunUITestTool(BaseTool):
                 post_data = self._prepare_post_data_with_overrides(test_details, cpu_quota, memory_quota, cloud_settings, custom_cmd, loops)
             
             # Execute the UI test
-            print("=" * 60)
-            print(f"POST data for running UI test (ID: {ui_test_id}): {json.dumps(post_data, indent=2)}")
-            print("=" * 60)
             result_id = self.api_wrapper.run_ui_test(str(ui_test_id), post_data)
             
             # Show location info in success message
@@ -194,89 +191,6 @@ class RunUITestTool(BaseTool):
         except Exception:
             stacktrace = traceback.format_exc()
             logger.error(f"Error fetching UI tests list: {stacktrace}")
-            raise ToolException(stacktrace)
-    
-    def _get_ui_test_details(self, test_id: int):
-        """Get detailed test configuration using API wrapper."""
-        try:
-            return self.api_wrapper.get_ui_test_details(str(test_id))
-        except Exception:
-            stacktrace = traceback.format_exc()
-            logger.error(f"Error getting UI test details: {stacktrace}")
-            return None
-      
-    def _show_test_parameter_info(self, test_data, test_id):
-        """Show information about test parameters that can be changed."""
-        try:
-            # Get current default values from test data
-            env_vars = test_data.get("env_vars", {})
-            
-            info_message = []
-            info_message.append(f"Test '{test_data.get('name')}' (ID: {test_id}) found!")
-            info_message.append("\nCurrent default parameters:")
-            info_message.append(f"- loops: 1 (default override)")
-            info_message.append(f"- cpu_quota: {env_vars.get('cpu_quota', 'Not set')}")
-            info_message.append(f"- memory_quota: {env_vars.get('memory_quota', 'Not set')}")
-            info_message.append(f"- cloud_settings: {env_vars.get('cloud_settings', 'Not set')}")
-            info_message.append(f"- custom_cmd: {env_vars.get('custom_cmd', 'Not set')}")
-              # Always try to get and display available cloud settings - this is critical information
-            info_message.append("\n" + "="*60)
-            info_message.append("🏃 AVAILABLE RUNNERS - CHOOSE ONE FOR cloud_settings:")
-            info_message.append("="*60)
-            
-            try:
-                locations_data = self.api_wrapper.get_locations()
-                if not locations_data:
-                    info_message.append("⚠️  Could not fetch locations data - API returned empty response")
-                else:
-                    cloud_regions = locations_data.get("cloud_regions", [])
-                    public_regions = locations_data.get("public_regions", [])
-                    project_regions = locations_data.get("project_regions", [])
-                      # Add public regions information (these are the most commonly used)
-                    info_message.append("\n🌐 PUBLIC REGIONS (use these names):")
-                    if public_regions:
-                        for region in public_regions:
-                            info_message.append(f"  ✅ '{region}'")
-                    else:
-                        info_message.append("  ❌ No public regions available")
-                    
-                    # Add project regions information
-                    if project_regions:
-                        info_message.append("\n🏢 PROJECT REGIONS (use these names):")
-                        for region in project_regions:
-                            info_message.append(f"  ✅ '{region}'")
-                    
-                    # Add cloud regions information
-                    if cloud_regions:
-                        info_message.append("\n☁️  CLOUD REGIONS (advanced - use full names):")
-                        for region in cloud_regions:
-                            region_name = region.get("name", "Unknown")
-                            info_message.append(f"  ✅ '{region_name}'")
-                        
-            except Exception as e:
-                logger.error(f"Error fetching locations: {e}")
-                info_message.append("❌ ERROR: Could not fetch available runners!")
-                info_message.append(f"   Reason: {str(e)}")
-                info_message.append("   Please check your API connection and try again.")
-            
-            info_message.append("="*60)            
-            info_message.append("\n📋 HOW TO USE:")
-            info_message.append("To run this test with custom parameters, specify the values you want to change.")
-            info_message.append("\n💡 EXAMPLES:")
-            info_message.append("  • Use default runner: cloud_settings='default'")
-            info_message.append("  • Change loops: loops=5")
-            info_message.append("  • Change resources: cpu_quota='2', memory_quota='4Gi'")
-            info_message.append("  • Full example: loops=3, cloud_settings='default', cpu_quota='2'")
-            info_message.append("\n📝 RUNNER TYPES:")
-            info_message.append("  • Public regions: Use empty cloud_settings {}, location = runner name")
-            info_message.append("  • Project regions: Use empty cloud_settings {}, location = runner name") 
-            info_message.append("  • Cloud regions: Use full cloud configuration object")
-            
-            return "\n".join(info_message)
-            
-        except Exception:
-            stacktrace = traceback.format_exc()
-            logger.error(f"Error showing test parameter info: {stacktrace}")
             raise ToolException(stacktrace)
     
     def _prepare_post_data_default(self, test_details):
@@ -424,7 +338,10 @@ class RunUITestTool(BaseTool):
                     # Use empty cloud_settings as fallback
                     final_cloud_settings = {}
                     final_location = cloud_settings if cloud_settings else location
-            
+            else:
+                # If no cloud_settings provided, use default from test details
+                final_cloud_settings = env_vars.get("cloud_settings", {})
+
             # Prepare the POST request body with overrides
             post_data = {
                 "common_params": {
