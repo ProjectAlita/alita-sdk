@@ -163,7 +163,7 @@ pageId = create_model(
 indexPagesParams = create_model(
     "indexPagesParams",
     __base__=BaseIndexParams,
-    content_format=(Literal['view', 'storage', 'export_view', 'editor', 'anonymous'], 
+    content_format=(Literal['view', 'storage', 'export_view', 'editor', 'anonymous'],
                     Field(description="The format of the content to be retrieved.")),
     ### Loader Parameters
     page_ids=(Optional[List[str]], Field(description="List of page IDs to retrieve.", default=None)),
@@ -194,6 +194,13 @@ GetPageWithImageDescriptions = create_model(
     context_radius=(Optional[int], Field(
         description="Number of characters to include before and after each image for context. Default is 500",
         default=500))
+)
+
+GetPageAttachmentsInput = create_model(
+    "GetPageAttachmentsInput",
+    page_id=(str, Field(description="Confluence page ID from which attachments will be retrieved")),
+    max_content_length=(int, Field(default=10000, description="Maximum number of characters to return for attachment content. Content will be truncated if longer. Default is 10000.")),
+    custom_prompt=(Optional[str], Field(default=None, description="Custom prompt to use for LLM-based analysis of attachments (images, pdfs, etc). If not provided, a default prompt will be used.")),
 )
 
 
@@ -710,6 +717,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             metadata=metadata,
         )
 
+    # todo: refactor this method since file processing is not working (self.process_pdf, self.process_image, etc. are not defined)
     def process_attachment(
             self,
             page_id: str,
@@ -893,7 +901,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
         except ImportError:
             from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-        
+
         loader_params = {
             'url': self.base_url,
             'space_key': self.space,
@@ -919,7 +927,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
 
         chunker = chunkers.get(chunking_tool)
-        
+
         chunking_config = chunking_config or {}
 
         if chunker:
@@ -929,7 +937,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                 # Set required fields that should come from the instance
                 chunking_config['embedding'] = embedding
                 chunking_config['llm'] = self.llm
-                
+
                 try:
                     # Validate the configuration using the appropriate Pydantic model
                     validated_config = config_model(**chunking_config)
@@ -941,13 +949,13 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                 # Fallback for chunkers without models
                 chunking_config['embedding'] = embedding
                 chunking_config['llm'] = self.llm
-                
+
             documents = chunker(documents, chunking_config)
-        
+
         # passing embedding to avoid re-initialization
-        vectorstore = self._init_vector_store(collection_suffix, embeddings=embedding) 
+        vectorstore = self._init_vector_store(collection_suffix, embeddings=embedding)
         return vectorstore.index_documents(documents)
-        
+
 
     def _download_image(self, image_url):
         """
@@ -1094,7 +1102,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         """
         return """
         ## Image Analysis Task:
-        Analyze this image in detail, paying special attention to contextual information provided about it. 
+        Analyze this image in detail, paying special attention to contextual information provided about it.
         Focus on:
         1. Visual elements and their arrangement
         2. Any text visible in the image
@@ -1159,14 +1167,32 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             return cached_description
 
         try:
-            from io import BytesIO
-            from PIL import Image, UnidentifiedImageError
-
             # Get the LLM instance
             llm = self.llm
             if not llm:
                 return "[LLM not available for image processing]"
 
+            # If image_data is empty or None, do text-only analysis
+            if not image_data:
+                prompt = custom_prompt if custom_prompt else self._get_default_image_analysis_prompt()
+                if image_name or context_text:
+                    prompt += "\n\n## Additional Context Information:\n"
+                    if image_name:
+                        prompt += f"- Image Name/Reference: {image_name}\n"
+                    if context_text:
+                        prompt += f"- Surrounding Content: {context_text}\n"
+                    prompt += "\nPlease incorporate this contextual information in your description when relevant."
+                result = llm.invoke([
+                    HumanMessage(
+                        content=[{"type": "text", "text": prompt}]
+                    )
+                ])
+                description = result.content
+                self._image_cache.set(image_data, description, image_name)
+                return description
+
+            from io import BytesIO
+            from PIL import Image, UnidentifiedImageError
             # Try to load and validate the image with PIL
             try:
                 bio = BytesIO(image_data)
@@ -1402,6 +1428,251 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error processing page with images: {stacktrace}")
             return f"Error processing page with images: {str(e)}"
 
+    def get_page_attachments(self, page_id: str, max_content_length: int = 10000, custom_prompt: str = None):
+        """
+        Retrieve all attachments for a Confluence page, including core metadata (with creator, created, updated), comments,
+        file content, and LLM-based analysis for supported types.
+        Returns a list of dicts, each with keys: metadata, comments, content, llm_analysis.
+        """
+        try:
+            attachments = self.client.get_attachments_from_content(page_id)
+            if not attachments or not attachments.get('results'):
+                return f"No attachments found for page ID {page_id}."
+
+            # Get attachment history for created/updated info
+            history_map = {}
+            for attachment in attachments['results']:
+                try:
+                    hist = self.client.history(attachment['id'])
+                    history_map[attachment['id']] = hist
+                except Exception as e:
+                    logger.warning(f"Failed to fetch history for attachment {attachment.get('title', '')}: {str(e)}")
+                    history_map[attachment['id']] = None
+
+            results = []
+            for attachment in attachments['results']:
+                media_type = attachment.get('metadata', {}).get('mediaType', '')
+                # Core metadata extraction with history
+                hist = history_map.get(attachment['id']) or {}
+                created_by = hist.get('createdBy', {}).get('displayName', '') if hist else attachment.get('creator', {}).get('displayName', '')
+                created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
+                last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
+                metadata = {
+                    'name': attachment.get('title', ''),
+                    'size': attachment.get('extensions', {}).get('fileSize', None),
+                    'creator': created_by,
+                    'created': created_date,
+                    'updated': last_updated,
+                    'media_type': media_type,
+                    'labels': [label['name'] for label in attachment.get('metadata', {}).get('labels', {}).get('results', [])],
+                    'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get('_links', {}).get('download') else None
+                }
+                # Fetch comments for the attachment
+                comments = []
+                try:
+                    comments_response = self.client.get_comments_for_attachment(attachment['id'])
+                    if comments_response and 'results' in comments_response:
+                        for comment in comments_response['results']:
+                            comments.append({
+                                'id': comment.get('id'),
+                                'author': comment.get('creator', {}).get('displayName', ''),
+                                'created': comment.get('created', ''),
+                                'body': comment.get('body', {}).get('storage', {}).get('value', '')
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch comments for attachment {attachment.get('title', '')}: {str(e)}")
+
+                content = None
+                llm_analysis = None
+                title = attachment.get('title', '')
+                download_url = self.base_url.rstrip('/') + attachment['_links']['download']
+
+                # --- Begin: Raw content for xml, json, markdown, txt ---
+                # Check by media type or file extension
+                file_ext = title.lower().split('.')[-1] if '.' in title else ''
+                is_text_type = (
+                    media_type in [
+                        'application/xml', 'text/xml',
+                        'application/json', 'text/json',
+                        'text/markdown', 'text/x-markdown',
+                        'text/plain', 'text/csv',
+                        'text/html', 'image/svg+xml',
+                        'application/vnd.ms-excel',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'application/msword',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        'application/vnd.ms-excel.sheet.macroEnabled.12',
+                        'application/csv', 'application/x-csv',
+                        'text/x-csv',
+                        'application/doc',  'application/docx',
+                        'application/xls', 'application/xlsx',
+                        'application/svg', 'application/html',
+                    ]
+                    or file_ext in [
+                        'xml', 'json', 'md', 'markdown', 'txt',
+                        'csv', 'xls', 'xlsx', 'svg', 'html', 'htm', 'doc', 'docx'
+                    ]
+                )
+                if is_text_type:
+                    try:
+                        resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
+                        if resp.status_code == 200:
+                            # Try utf-8, fallback to latin1
+                            try:
+                                content = resp.content.decode('utf-8')
+                            except UnicodeDecodeError:
+                                content = resp.content.decode('latin1')
+                        else:
+                            content = f"[Failed to download: HTTP {resp.status_code}]"
+                    except Exception as e:
+                        content = f"[Error downloading content: {str(e)}]"
+
+                    # For some types, try to extract text if possible
+                    if file_ext in ['doc', 'docx']:
+                        try:
+                            import io
+                            if file_ext == 'docx':
+                                try:
+                                    from docx import Document as DocxDocument
+                                    docx_file = io.BytesIO(resp.content)
+                                    doc = DocxDocument(docx_file)
+                                    paragraphs = [p.text for p in doc.paragraphs]
+                                    content = '\n'.join(paragraphs)
+                                except Exception as e:
+                                    content = f"[Error extracting docx: {str(e)}]"
+                            elif file_ext == 'doc':
+                                try:
+                                    import textract
+                                    content = textract.process(None, extension='doc', input_data=resp.content).decode('utf-8')
+                                except Exception as e:
+                                    content = f"[Error extracting doc: {str(e)}]"
+                        except ImportError:
+                            content = "[python-docx or textract not installed for doc/docx extraction]"
+                    elif file_ext in ['csv']:
+                        try:
+                            import io
+                            import csv
+                            csv_file = io.StringIO(content)
+                            reader = csv.reader(csv_file)
+                            content = '\n'.join([', '.join(row) for row in reader])
+                        except Exception as e:
+                            content = f"[Error extracting csv: {str(e)}]"
+                    elif file_ext in ['xls', 'xlsx']:
+                        try:
+                            import io
+                            import pandas as pd
+                            excel_file = io.BytesIO(resp.content)
+                            df = pd.read_excel(excel_file, sheet_name=None)
+                            content = ''
+                            for sheet, data in df.items():
+                                content += f"\n--- Sheet: {sheet} ---\n"
+                                content += data.to_csv(index=False)
+                        except Exception as e:
+                            content = f"[Error extracting xls/xlsx: {str(e)}]"
+                    elif file_ext in ['svg'] or media_type == 'image/svg+xml':
+                        # SVG is XML, so just return as text
+                        pass
+                    elif file_ext in ['html', 'htm'] or media_type in ['text/html', 'application/html']:
+                        try:
+                            from bs4 import BeautifulSoup
+                            soup = BeautifulSoup(content, 'html.parser')
+                            content = soup.get_text(separator=' ', strip=True)
+                        except Exception as e:
+                            content = f"[Error extracting html: {str(e)}]"
+
+                    # Truncate content if longer than max_content_length
+                    if content and isinstance(content, str) and len(content) > max_content_length:
+                        content = content[:max_content_length] + f"\n...[truncated, showing first {max_content_length} characters]"
+
+                    # No LLM analysis for these types
+                    results.append({
+                        'metadata': metadata,
+                        'comments': comments,
+                        'content': content,
+                        'llm_analysis': llm_analysis
+                    })
+                    continue
+                # --- End: Raw content for xml, json, markdown, txt ---
+
+                # Download content for supported types
+                if media_type.startswith('image/') or media_type == 'application/pdf' or media_type.startswith('application/vnd.jgraph.mxfile'):
+                    if media_type == 'application/pdf':
+                        try:
+                            from pdf2image import convert_from_bytes
+                        except ImportError:
+                            logger.warning("pdf2image is not installed. Please install it to process PDF attachments.")
+                            llm_analysis = '[pdf2image not installed]'
+                            image_data = None
+                        else:
+                            image_data = self._download_image(download_url)
+                            if image_data:
+                                try:
+                                    pdf_images = convert_from_bytes(image_data)
+                                    llm_analysis = []
+                                    for idx, img in enumerate(pdf_images):
+                                        from io import BytesIO
+                                        img_buffer = BytesIO()
+                                        img.save(img_buffer, format='PNG')
+                                        img_buffer.seek(0)
+                                        page_context = f"Attachment: {title} (type: {media_type}, page {idx+1})"
+                                        page_analysis = self._process_image_with_llm(img_buffer.getvalue(), f"{title} (page {idx+1})", page_context, custom_prompt)
+                                        llm_analysis.append(page_analysis)
+                                    llm_analysis = '\n'.join(llm_analysis)
+                                except Exception as e:
+                                    logger.error(f"Failed to process PDF pages: {str(e)}")
+                                    llm_analysis = f"[Error processing PDF: {str(e)}]"
+                            else:
+                                content = None
+                                llm_analysis = None
+                    elif media_type.startswith('application/vnd.jgraph.mxfile'):
+                        # Handle drawio (mxfile): base64 decode & decompress, then run LLM
+                        image_data = self._download_image(download_url)
+                        if image_data:
+                            try:
+                                import xml.etree.ElementTree as ET
+                                import base64
+                                import zlib
+                                xml_str = image_data.decode("utf-8")
+                                root = ET.fromstring(xml_str)
+                                diagram_node = root.find("diagram")
+                                if diagram_node is not None and diagram_node.text:
+                                    diagram_base64 = diagram_node.text
+                                else:
+                                    diagram_base64 = None
+
+                                compressed = base64.b64decode(diagram_base64)
+                                xml_bytes = zlib.decompress(compressed, -15)
+                                xml_string = xml_bytes.decode('utf-8')
+
+                                # Use LLM to analyze the diagram XML string as text
+                                context_text = f"Attachment: {title} (type: {media_type})\nDrawio XML Content: {xml_string[:2000]}"  # Limit context for LLM
+                                llm_analysis = self._process_image_with_llm(b"", title, context_text, custom_prompt)  # Pass empty image, just analyze text
+                            except Exception as e:
+                                logger.error(f"Failed to convert drawio to image: {str(e)}")
+                                llm_analysis = f"[Error processing drawio: {str(e)}]"
+                        else:
+                            content = None
+                            llm_analysis = None
+                    else:
+                        image_data = self._download_image(download_url)
+                        if image_data:
+                            context_text = f"Attachment: {title} (type: {media_type})"
+                            llm_analysis = self._process_image_with_llm(image_data, title, context_text, custom_prompt)
+
+                if llm_analysis and isinstance(llm_analysis, str) and len(llm_analysis) > max_content_length:
+                        llm_analysis = llm_analysis[:max_content_length] + f"\n...[truncated, showing first {max_content_length} characters]"
+
+                results.append({
+                    'metadata': metadata,
+                    'comments': comments,
+                    'content': content,
+                    'llm_analysis': llm_analysis
+                })
+            return results
+        except Exception as e:
+            logger.error(f"Error retrieving attachments for page {page_id}: {str(e)}")
+            return f"Error retrieving attachments: {str(e)}"
+
     def get_available_tools(self):
         # Confluence-specific tools
         confluence_tools = [
@@ -1519,10 +1790,16 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                 "ref": self.index_data,
                 "description": self.index_data.__doc__,
                 "args_schema": indexPagesParams,
+            },
+            {
+                "name": "get_page_attachments",
+                "ref": self.get_page_attachments,
+                "description": self.get_page_attachments.__doc__,
+                "args_schema": GetPageAttachmentsInput,
             }
         ]
-        
+
         # Add standardized vector search tools from base class
         vector_search_tools = self._get_vector_search_tools()
-        
+
         return confluence_tools + vector_search_tools
