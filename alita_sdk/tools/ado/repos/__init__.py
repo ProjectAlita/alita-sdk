@@ -4,10 +4,9 @@ from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, Field, create_model, SecretStr
 
 import requests
-from alita_tools.utils import check_connection_response
 from ...base.tool import BaseAction
 from .repos_wrapper import ReposApiWrapper
-from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
 
 name = "ado_repos"
 
