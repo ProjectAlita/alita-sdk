@@ -54,7 +54,7 @@ _safe_import_tool('zephyr_enterprise', 'zephyr_enterprise', 'get_tools', 'Zephyr
 _safe_import_tool('ado', 'ado', 'get_tools')
 _safe_import_tool('ado_repos', 'ado.repos', 'get_tools', 'AzureDevOpsReposToolkit')
 _safe_import_tool('ado_plans', 'ado.test_plan', None, 'AzureDevOpsPlansToolkit')
-_safe_import_tool('ado_work_items', 'ado.work_item', None, 'AzureDevOpsWorkItemsToolkit')
+_safe_import_tool('ado_boards', 'ado.work_item', None, 'AzureDevOpsWorkItemsToolkit')
 _safe_import_tool('ado_wiki', 'ado.wiki', None, 'AzureDevOpsWikiToolkit')
 _safe_import_tool('rally', 'rally', 'get_tools', 'RallyToolkit')
 _safe_import_tool('sql', 'sql', 'get_tools', 'SQLToolkit')
@@ -97,17 +97,16 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
         tool['settings']['llm'] = llm
         tool['settings']['store'] = store
         tool_type = tool['type']
-        
+
+        # Handle special cases for ADO tools
+        if tool_type in ['ado_boards', 'ado_wiki', 'ado_plans']:
+            tools.extend(AVAILABLE_TOOLS['ado']['get_tools'](tool_type, tool))
+
         # Check if tool is available and has get_tools function
-        if tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
+        elif tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
             try:
                 get_tools_func = AVAILABLE_TOOLS[tool_type]['get_tools']
-                
-                # Handle special cases for ADO tools
-                if tool_type in ['ado_boards', 'ado_wiki', 'ado_plans']:
-                    tools.extend(get_tools_func(tool_type, tool))
-                else:
-                    tools.extend(get_tools_func(tool))
+                tools.extend(get_tools_func(tool))
                     
             except Exception as e:
                 logger.error(f"Error getting tools for {tool_type}: {e}")
