@@ -43,7 +43,8 @@ ReadFile = create_model(
 UpdateFile = create_model(
     "UpdateFile",
     file_query=(str, Field(description="File path and content to update with OLD and NEW markers")),
-    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository."))
+    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository.")),
+    commit_message=(Optional[str], Field(default=None, description="Commit message for the update operation")),
 )
 
 CreateFile = create_model(

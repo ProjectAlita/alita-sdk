@@ -1136,7 +1136,7 @@ class GitHubClient(BaseModel):
 
         return paired_contents
 
-    def update_file(self, file_query: str, repo_name: Optional[str] = None) -> str:
+    def update_file(self, file_query: str, repo_name: Optional[str] = None, commit_message: Optional[str] = None) -> str:
         """
         Updates a file with new content.
         Parameters:
@@ -1183,7 +1183,7 @@ class GitHubClient(BaseModel):
 
             repo.update_file(
                 path=file_path,
-                message=f"Update {file_path}",
+                message=commit_message if commit_message else f"Update {file_path}",
                 content=updated_file_content,
                 branch=branch,
                 sha=repo.get_contents(file_path, ref=branch).sha,
