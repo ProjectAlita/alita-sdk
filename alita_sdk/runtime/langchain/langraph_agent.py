@@ -285,7 +285,7 @@ class StateModifierNode(Runnable):
 
 
 
-def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None, state_class=None):
+def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None, state_class=None, output_variables=None):
     # prepare output channels
     if interrupt_after is None:
         interrupt_after = []
@@ -328,7 +328,8 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         auto_validate=False,
         debug=debug,
         store=store,
-        schema_to_mapper=state_class
+        schema_to_mapper=state_class,
+        output_variables=output_variables
     )
 
     compiled.attach_node(START, None)
@@ -597,13 +598,16 @@ def create_graph(
         lg_builder, memory, store, debug,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
-        state_class={state_class: None}
+        state_class={state_class: None},
+        output_variables=node.get('output', [])
     )
     return compiled.validate()
 
 
 class LangGraphAgentRunnable(CompiledStateGraph):
-    builder: CompiledStateGraph
+    def __init__(self, *args, output_variables=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.output_variables = output_variables
 
     def invoke(self, input: Union[dict[str, Any], Any],
                config: Optional[RunnableConfig] = None,
@@ -624,7 +628,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            output = result['messages'][-1].content
+            if self.output_variables and self.output_variables[0] != "messages":
+                # If output_variables are specified, use the value of first one or use the last messages as default
+                output = result.get(self.output_variables[0], result['messages'][-1].content)
+            else:
+                output = result['messages'][-1].content
         except:
             output = list(result.values())[-1]
         thread_id = None
