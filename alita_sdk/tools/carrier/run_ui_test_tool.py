@@ -18,7 +18,7 @@ class RunUITestTool(BaseTool):
                         "Provide either test ID or test name, or leave empty to see available tests. "
                         "When no custom parameters are provided, the tool will show default configuration and ask for confirmation. "
                         "You can override parameters like cpu_quota, memory_quota, cloud_settings, custom_cmd, or loops. "
-                        "Use 'proceed_with_defaults=true' to run with default parameters without showing configuration.")
+                        )
     args_schema: Type[BaseModel] = create_model(
         "RunUITestInput",
         test_id=(str, Field(default="", description="Test ID to execute")),
@@ -28,7 +28,8 @@ class RunUITestTool(BaseTool):
         cloud_settings=(str, Field(default=None, description="Cloud settings name for the test runner")),
         custom_cmd=(str, Field(default=None, description="Custom command to run with the test")),
         loops=(str, Field(default=None, description="Number of loops to run the test")),
-        proceed_with_defaults=(bool, Field(default=False, description="Proceed with default configuration without showing parameters")),
+        proceed_with_defaults=(bool, Field(default=False, description="Proceed with default configuration. True ONLY when user directly wants to run the test with default parameters." \
+        " If cpu_quota, memory_quota, cloud_settings, custom_cmd, or loops are provided, proceed_with_defaults must be False")),
     )
     
     def _run(self, test_id: str = "", test_name: str = "", 
@@ -39,10 +40,6 @@ class RunUITestTool(BaseTool):
             # Check if neither test_id nor test_name is provided
             if (not test_id or test_id.strip() == "") and (not test_name or test_name.strip() == ""):
                 return self._missing_input_response()
-            
-            # Check if user wants to see the list of tests (can be in test_name field)
-            if test_name.lower() in ["show me the list of ui tests", "list ui tests", "show ui tests"]:
-                return self._show_ui_tests_list()
               
             # Get UI tests list only when we need to search for and run a test
             ui_tests = self.api_wrapper.get_ui_tests_list()
@@ -115,10 +112,13 @@ class RunUITestTool(BaseTool):
                 
                 return "\n".join(error_message)
             
-            # Check if custom parameters are provided (only allowed ones)
+            # Check if custom parameters are provided (including cloud_settings)
             has_custom_params = any([cpu_quota is not None, memory_quota is not None, 
-                                   custom_cmd is not None, loops is not None])
+                                   cloud_settings is not None, custom_cmd is not None, loops is not None])
             
+            if has_custom_params:
+                proceed_with_defaults = False  # If any custom params are provided, do not proceed with defaults
+
             # Get detailed test configuration from API (not from UI tests list)
             test_details = self.api_wrapper.get_ui_test_details(str(ui_test_id))
             
@@ -137,12 +137,16 @@ class RunUITestTool(BaseTool):
                 error_message.append("Please choose a valid location name from the list above.")
                 return "\n".join(error_message)
             
-            # If no custom parameters provided and no cloud_settings, check if user wants to proceed with defaults
-            if not has_custom_params and not cloud_settings:
+            # If no custom parameters provided, check if user wants to proceed with defaults
+            if not has_custom_params:
                 if not proceed_with_defaults:
                     # Show default configuration and ask user if they want to change anything
                     default_message = self._show_default_configuration_message(test_details)
-                    return default_message + "\n\nTo proceed with default configuration, add 'proceed_with_defaults=true' parameter, or specify any parameters you want to override."
+                    if isinstance(default_message, dict) and "message" in default_message:
+                        message_str = "\n".join(default_message["message"])
+                    else:
+                        message_str = str(default_message)
+                    return message_str + "\n\nTo proceed with default configuration, type `Run test with default configuration` or specify any parameters you want to override."
                 else:
                     # User confirmed to proceed with defaults
                     post_data = self._prepare_post_data_default(test_details)
@@ -394,6 +398,7 @@ class RunUITestTool(BaseTool):
                         
                         if found_cloud_region:
                             # Extract cloud settings details for scenario 2
+                            # cloud_name = found_cloud_region.get("name", "")
                             cloud_config = found_cloud_region.get("cloud_settings", {})
                             final_cloud_settings = {
                                 "integration_name": cloud_config.get("integration_name"),
@@ -408,7 +413,7 @@ class RunUITestTool(BaseTool):
                                 "instance_type": "spot",
                                 "ec2_instance_type": "t2.xlarge"
                             }
-                            final_location = location  # Keep original location for cloud regions
+                            final_location = found_cloud_region.get("name")
                         else:
                             # If no match found, treat as public region fallback
                             final_cloud_settings = {}
@@ -465,13 +470,17 @@ class RunUITestTool(BaseTool):
             location_info = "Available runners/locations for cloud_settings:\n" + "\n".join(available_locations)
             
             return {
-                "message": "Please provide test ID or test name of your UI test.",
+                "message": {
+                    "text": (
+                        "Please provide test ID or test name of your UI test.\n\n"
+                        "Available UI tests:\n" + available_tests + "\n\n"
+                        "Available runners/locations for cloud_settings:\n" + location_info
+                    ),
+                },
                 "parameters": {
                     "test_id": None,
                     "test_name": None,
-                },
-                "available_tests": available_tests,
-                "available_locations": location_info
+                }
             }
         except Exception:
             return {
@@ -495,9 +504,6 @@ class RunUITestTool(BaseTool):
             available_locations = self._get_available_locations()
             
             message = []
-            message.append("=" * 60)
-            message.append(f"UI Test: '{test_name}' - DEFAULT CONFIGURATION")
-            message.append("=" * 60)
             message.append("Current default parameters:")
             message.append(f"  • CPU Quota: {env_vars.get('cpu_quota', 'Not set')}")
             message.append(f"  • Memory Quota: {env_vars.get('memory_quota', 'Not set')}")
@@ -514,9 +520,8 @@ class RunUITestTool(BaseTool):
             message.append("")
             message.append("Available runners/locations:")
             message.extend(available_locations)
-            message.append("=" * 60)
             
-            return "\n".join(message)
+            return {"message": message}
             
         except Exception:
             stacktrace = traceback.format_exc()
