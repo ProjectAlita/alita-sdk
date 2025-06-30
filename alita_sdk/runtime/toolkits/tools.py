@@ -113,7 +113,7 @@ def _mcp_tools(tools_list, alita):
             toolkit_conf = toolkit_lookup.get(toolkit_name)
             #
             if not toolkit_conf:
-                logger.warning(f"Toolkit '{toolkit_name}' not found in available toolkits.")
+                logger.debug(f"Toolkit '{toolkit_name}' not found in available MCP toolkits. Skipping...")
                 continue
             #
             available_tools = toolkit_conf.get("tools", [])
