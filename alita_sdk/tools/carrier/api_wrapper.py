@@ -64,6 +64,9 @@ class CarrierAPIWrapper(BaseModel):
     def get_tests_list(self) -> List[Dict[str, Any]]:
         return self._client.get_tests_list()
 
+    def create_test(self, data: dict):
+        return self._client.create_test(data)
+
     def run_test(self, test_id: str, json_body):
         return self._client.run_test(test_id, json_body)
 
