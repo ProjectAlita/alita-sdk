@@ -3,6 +3,8 @@ from typing import List, Literal, Optional
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, Field, create_model, SecretStr
 
+import requests
+from alita_tools.utils import check_connection_response
 from ...base.tool import BaseAction
 from .repos_wrapper import ReposApiWrapper
 from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
@@ -43,7 +45,7 @@ class AzureDevOpsReposToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in ReposApiWrapper.model_construct().get_available_tools()}
         AzureDevOpsReposToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
-        return create_model(
+        m = create_model(
             name,
             organization_url=(Optional[str], Field(default="", title="Organization URL", description="ADO organization url")),
             project=(Optional[str], Field(default="", title="Project", description="ADO project")),
@@ -77,6 +79,18 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                     "extra_categories": ["code", "repository", "version control"]
                 }}}
         )
+
+        @check_connection_response
+        def check_connection(self):
+            response = requests.get(
+                f'{self.organization_url}/{self.project}/_apis/git/repositories/{self.repository_id}?api-version=7.0',
+                headers = {'Authorization': f'Bearer {self.token}'},
+                timeout=5
+            )
+            return response
+
+        m.check_connection = check_connection
+        return m
 
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
