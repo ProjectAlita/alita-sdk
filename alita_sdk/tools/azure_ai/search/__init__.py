@@ -4,7 +4,8 @@ from .api_wrapper import AzureSearchApiWrapper
 from ...base.tool import BaseAction
 from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
-from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+import requests
 
 logger = getLogger(__name__)
 
@@ -35,12 +36,12 @@ class AzureSearchToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in AzureSearchApiWrapper.model_construct().get_available_tools()}
         AzureSearchToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
-        return create_model(
+        m = create_model(
             name,
-            api_key=(SecretStr, Field(description="API key", json_schema_extra={'secret': True})),
+            api_key=(SecretStr, Field(description="API key", json_schema_extra={'secret': True, 'configuration': True})),
             endpoint=(str, Field(description="Azure Search endpoint")),
             index_name=(str, Field(description="Azure Search index name")),
-            api_base=(Optional[str], Field(description="Azure OpenAI base URL", default=None, json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AzureSearchToolkit.toolkit_max_length})),
+            api_base=(Optional[str], Field(description="Azure OpenAI base URL", default=None, json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AzureSearchToolkit.toolkit_max_length, 'configuration': True})),
             api_version=(Optional[str], Field(description="API version", default=None)),
             openai_api_key=(Optional[str], Field(description="Azure OpenAI API Key", default=None, json_schema_extra={'secret': True})),
             model_name=(str, Field(description="Model name for Embeddings model", default=None)),
@@ -53,6 +54,16 @@ class AzureSearchToolkit(BaseToolkit):
                 }
             })
         )
+
+        @check_connection_response
+        def check_connection(self):
+            response = requests.get(f"{self.api_base}/openai/deployments", headers={
+                "api-key": self.api_key
+            })
+            return response
+
+        m.check_connection = check_connection
+        return m
 
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):

@@ -1,10 +1,14 @@
 from typing import Dict, List, Literal, Optional
+
+from requests.auth import HTTPBasicAuth
+
 from .api_wrapper import BitbucketAPIWrapper
 from .tools import __all__
 from langchain_core.tools import BaseToolkit
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict, create_model, SecretStr
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+import requests
 
 
 name = "bitbucket"
@@ -35,14 +39,14 @@ class AlitaBitbucketToolkit(BaseToolkit):
             default = t['tool'].__pydantic_fields__['args_schema'].default
             selected_tools[t['name']] = default.schema() if default else default
         AlitaBitbucketToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
-        return create_model(
+        m = create_model(
             name,
-            url=(str, Field(description="Bitbucket URL")),
-            project=(str, Field(description="Project/Workspace")),
-            repository=(str, Field(description="Repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length})),
+            url=(str, Field(description="Bitbucket URL", json_schema_extra={'configuration': True})),
+            project=(str, Field(description="Project/Workspace", json_schema_extra={'configuration': True})),
+            repository=(str, Field(description="Repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length, 'configuration': True})),
             branch=(str, Field(description="Main branch", default="main")),
-            username=(str, Field(description="Username")),
-            password=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True})),
+            username=(str, Field(description="Username", json_schema_extra={'configuration': True})),
+            password=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True, 'configuration': True})),
             cloud=(Optional[bool], Field(description="Hosting Option", default=None)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
@@ -55,6 +59,18 @@ class AlitaBitbucketToolkit(BaseToolkit):
                     }
             })
         )
+
+        @check_connection_response
+        def check_connection(self):
+            if self.cloud:
+                request_url = f"{self.url}/2.0/repositories/{self.project}/{self.repository}"
+            else:
+                request_url = f"{self.url}/rest/api/1.0/projects/{self.project}/repos/{self.repository}"
+            response = requests.get(request_url, auth=HTTPBasicAuth(self.username, self.password))
+            return response
+
+        m.check_connection = check_connection
+        return m
 
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
