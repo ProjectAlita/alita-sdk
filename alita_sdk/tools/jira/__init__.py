@@ -41,9 +41,9 @@ class JiraToolkit(BaseToolkit):
             headers = {'Accept': 'application/json'}
             auth = None
             if self.token:
-                headers['Authorization'] = f'Bearer {self.token.get_secret_value()}'
+                headers['Authorization'] = f'Bearer {self.token}'
             elif self.username and self.api_key:
-                auth = (self.username, self.api_key.get_secret_value())
+                auth = (self.username, self.api_key)
             else:
                 raise ValueError('Jira connection requires either token or username+api_key')
             response = requests.get(url, headers=headers, auth=auth, timeout=5, verify=getattr(self, 'verify_ssl', True))
