@@ -3,8 +3,9 @@ from .ado_wrapper import AzureDevOpsApiWrapper  # Import the API wrapper for Azu
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import create_model, BaseModel, Field, SecretStr
 
+import requests
 from ...base.tool import BaseAction
-from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
 
 name = "ado_boards"
 
@@ -16,16 +17,16 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in AzureDevOpsApiWrapper.model_construct().get_available_tools()}
         AzureDevOpsWorkItemsToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
-        return create_model(
+        m = create_model(
             name,
             name=(str, Field(description="Toolkit name",
                              json_schema_extra={
                                  'toolkit_name': True,
                                  'max_toolkit_length': AzureDevOpsWorkItemsToolkit.toolkit_max_length})
                   ),
-            organization_url=(str, Field(description="ADO organization url")),
-            project=(str, Field(description="ADO project", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AzureDevOpsWorkItemsToolkit.toolkit_max_length})),
-            token=(SecretStr, Field(description="ADO token", json_schema_extra={'secret': True})),
+            organization_url=(str, Field(description="ADO organization url", json_schema_extra={'configuration': True})),
+            project=(str, Field(description="ADO project", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AzureDevOpsWorkItemsToolkit.toolkit_max_length, 'configuration': True})),
+            token=(SecretStr, Field(description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
             limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={
@@ -50,6 +51,18 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                 }
             }
         )
+
+        @check_connection_response
+        def check_connection(self):
+            response = requests.get(
+                f'{self.organization_url}/{self.project}/_apis/wit/workitemtypes?api-version=7.0',
+                headers={'Authorization': f'Bearer {self.token}'},
+                timeout=5
+            )
+            return response
+
+        m.check_connection = check_connection
+        return m
 
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
