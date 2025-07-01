@@ -25,7 +25,12 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                                  'toolkit_name': True,
                                  'max_toolkit_length': AzureDevOpsWikiToolkit.toolkit_max_length})
                   ),
-            organization_url=(str, Field(description="ADO organization url", json_schema_extra={'configuration': True})),
+            organization_url=(str, Field(default="", title="Organization URL",
+                                                   description="ADO organization url",
+                                                   json_schema_extra={
+                                                       'configuration': True,
+                                                       "configuration_title": True
+                                                   })),
             project=(str, Field(description="ADO project", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AzureDevOpsWikiToolkit.toolkit_max_length, 'configuration': True})),
             token=(SecretStr, Field(description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]],

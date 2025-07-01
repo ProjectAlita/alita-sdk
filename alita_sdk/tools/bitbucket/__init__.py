@@ -41,7 +41,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
         AlitaBitbucketToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            url=(str, Field(description="Bitbucket URL", json_schema_extra={'configuration': True})),
+            url=(str, Field(description="Bitbucket URL", json_schema_extra={'configuration': True, 'configuration_title': True})),
             project=(str, Field(description="Project/Workspace", json_schema_extra={'configuration': True})),
             repository=(str, Field(description="Repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length, 'configuration': True})),
             branch=(str, Field(description="Main branch", default="main")),
