@@ -3,8 +3,9 @@ from .api_wrapper import JiraApiWrapper
 from langchain_core.tools import BaseTool, BaseToolkit
 from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+import requests
 
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list
+from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
 
 name = "jira"
 
@@ -33,7 +34,22 @@ class JiraToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in JiraApiWrapper.model_construct().get_available_tools()}
         JiraToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
-        return create_model(
+
+        @check_connection_response
+        def check_connection(self):
+            url = self.base_url.rstrip('/') + '/rest/api/2/myself'
+            headers = {'Accept': 'application/json'}
+            auth = None
+            if self.token:
+                headers['Authorization'] = f'Bearer {self.token.get_secret_value()}'
+            elif self.username and self.api_key:
+                auth = (self.username, self.api_key.get_secret_value())
+            else:
+                raise ValueError('Jira connection requires either token or username+api_key')
+            response = requests.get(url, headers=headers, auth=auth, timeout=5, verify=getattr(self, 'verify_ssl', True))
+            return response
+
+        model = create_model(
             name,
             base_url=(
                 str,
@@ -84,6 +100,8 @@ class JiraToolkit(BaseToolkit):
                 }
             })
         )
+        model.check_connection = check_connection
+        return model
 
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):

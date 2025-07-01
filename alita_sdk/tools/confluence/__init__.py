@@ -4,7 +4,8 @@ from .api_wrapper import ConfluenceAPIWrapper
 from langchain_core.tools import BaseTool
 from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list
+from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
+import requests
 
 name = "confluence"
 
@@ -43,7 +44,21 @@ class ConfluenceToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           ConfluenceAPIWrapper.model_construct().get_available_tools()}
         ConfluenceToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
-        return create_model(
+
+        @check_connection_response
+        def check_connection(self):
+            url = self.base_url.rstrip('/') + '/wiki/rest/api/space'
+            headers = {'Accept': 'application/json'}
+            auth = None
+            if self.token:
+                headers['Authorization'] = f'Bearer {self.token.get_secret_value()}'
+            elif self.username and self.api_key:
+                auth = (self.username, self.api_key.get_secret_value())
+            else:
+                raise ValueError('Confluence connection requires either token or username+api_key')
+            response = requests.get(url, headers=headers, auth=auth, timeout=5, verify=getattr(self, 'verify_ssl', True))
+            return response
+        model = create_model(
             name,
             base_url=(str, Field(description="Confluence URL", json_schema_extra={'configuration': True, 'configuration_title': True})),
             token=(SecretStr, Field(description="Token", default=None, json_schema_extra={'secret': True, 'configuration': True})),
@@ -92,6 +107,8 @@ class ConfluenceToolkit(BaseToolkit):
                 }
             })
         )
+        model.check_connection = check_connection
+        return model
 
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
