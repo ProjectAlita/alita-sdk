@@ -1507,6 +1507,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                         'application/doc',  'application/docx',
                         'application/xls', 'application/xlsx',
                         'application/svg', 'application/html',
+                        'application/octet-stream'
                     ]
                     or file_ext in [
                         'xml', 'json', 'md', 'markdown', 'txt',
