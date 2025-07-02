@@ -1,7 +1,7 @@
 import logging
 import json
 import traceback
-from typing import Type, Optional, List, Dict
+from typing import Type, Optional, List, Dict, Union
 from langchain_core.tools import BaseTool, ToolException
 from pydantic.fields import Field
 from pydantic import create_model, BaseModel
@@ -81,7 +81,14 @@ class RunTestByIDTool(BaseTool):
         "RunTestByIdInput",
         test_id=(str, Field(default=None, description="Test id to execute")),
         name=(str, Field(default=None, description="Test name to execute")),
-        test_parameters=(dict, Field(default=None, description="Test parameters to override")),
+        test_parameters=(list, Field(
+            default=None,
+            description=(
+                "Test parameters to override. Provide as a list of dictionaries, "
+                "e.g., [{'vUsers': '5', 'duration': '120'}]. Each dictionary should "
+                "contain parameter names and their values."
+            )
+        )),
     )
 
     def _run(self, test_id=None, name=None, test_parameters=None):
@@ -110,8 +117,11 @@ class RunTestByIDTool(BaseTool):
                 return {
                     "message": "Please confirm or override the following test parameters to proceed with the test execution.",
                     "default_test_parameters": default_test_parameters,
-                    "instruction": "To override parameters, provide a dictionary of updated values for 'test_parameters'.",
+                    "instruction": "To override parameters, provide a list of dictionaries for 'test_parameters', e.g., [{'vUsers': '5', 'duration': '120'}].",
                 }
+
+            # Normalize test_parameters if provided in an incorrect format
+            test_parameters = self._normalize_test_parameters(test_parameters)
 
             # Apply user-provided test parameters
             updated_test_parameters = self._apply_test_parameters(default_test_parameters, test_parameters)
@@ -145,6 +155,37 @@ class RunTestByIDTool(BaseTool):
             logger.error(f"Test not found: {stacktrace}")
             raise ToolException(stacktrace)
 
+    def _normalize_test_parameters(self, test_parameters):
+        """
+        Normalize test_parameters to ensure they are in the correct list-of-dictionaries format.
+        If test_parameters are provided as a list of strings (e.g., ['vUsers=5', 'duration=120']),
+        convert them to a list of dictionaries (e.g., [{'vUsers': '5', 'duration': '120'}]).
+        """
+        if isinstance(test_parameters, list):
+            # Check if the list contains strings in the format "key=value"
+            if all(isinstance(param, str) and "=" in param for param in test_parameters):
+                normalized_parameters = []
+                for param in test_parameters:
+                    name, value = param.split("=", 1)
+                    normalized_parameters.append({name.strip(): value.strip()})
+                return normalized_parameters
+            # Check if the list already contains dictionaries
+            elif all(isinstance(param, dict) for param in test_parameters):
+                return test_parameters
+            else:
+                raise ValueError(
+                    "Invalid format for test_parameters. Provide as a list of 'key=value' strings "
+                    "or a list of dictionaries."
+                )
+        elif isinstance(test_parameters, dict):
+            # Convert a single dictionary to a list of dictionaries
+            return [test_parameters]
+        else:
+            raise ValueError(
+                "Invalid format for test_parameters. Provide as a list of 'key=value' strings "
+                "or a list of dictionaries."
+            )
+
     def _apply_test_parameters(self, default_test_parameters, user_parameters):
         """
         Apply user-provided parameters to the default test parameters.
@@ -152,10 +193,18 @@ class RunTestByIDTool(BaseTool):
         updated_parameters = []
         for param in default_test_parameters:
             name = param["name"]
-            if name in user_parameters:
+            # Find the matching user parameter
+            user_param = next((p for p in user_parameters if name in p), None)
+            if user_param:
                 # Override the parameter value with the user-provided value
-                param["default"] = user_parameters[name]
-            updated_parameters.append(param)
+                param["default"] = user_param[name]
+            # Ensure the parameter structure remains consistent
+            updated_parameters.append({
+                "name": param["name"],
+                "type": param["type"],
+                "description": param["description"],
+                "default": param["default"]
+            })
         return updated_parameters
 
 
@@ -184,9 +233,30 @@ class CreateBackendTestInput(BaseModel):
             "password": "your_password",
         },
     )
-    test_parameters: Optional[List[str]] = Field(
+    test_parameters: Optional[List[Dict[str, str]]] = Field(
         None,
-        description="Test parameters in the format 'name=default_value'. For example: ['VUSERS=5', 'DURATION=60']",
+        description=(
+            "Test parameters as a list of dictionaries. Each dictionary should include the following keys:\n"
+            "- 'name' (required): The name of the parameter (e.g., 'VUSERS').\n"
+            "- 'default' (required): The value of the parameter (e.g., '5')."
+        ),
+        example=[
+            {"name": "VUSERS", "default": "5"},
+            {"name": "DURATION", "default": "60"},
+            {"name": "RAMP_UP", "default": "30"},
+        ],
+    )
+    email_integration: Optional[Dict[str, Optional[Union[int, List[str]]]]] = Field(
+        None,
+        description=(
+            "Email integration configuration. The dictionary should include the following keys:\n"
+            "- 'integration_id' (required): The ID of the selected email integration (integer).\n"
+            "- 'recipients' (required): A list of email addresses to receive notifications."
+        ),
+        example={
+            "integration_id": 1,
+            "recipients": ["example@example.com", "user@example.com"],
+        },
     )
 
 
@@ -197,19 +267,21 @@ class CreateBackendTestTool(BaseTool):
     args_schema: Type[BaseModel] = CreateBackendTestInput
 
     def _run(self, test_name=None, test_type=None, env_type=None, entrypoint=None, custom_cmd=None, runner=None,
-             source=None, test_parameters=None):
+             source=None, test_parameters=None, email_integration=None):
         try:
             # Validate required fields
             if not test_name:
                 return {"message": "Please provide test name"}
             if not test_type:
-                return {"message": "Please provide performance test type (capacity, baseline, response time, stable, stress, etc)"}
+                return {
+                    "message": "Please provide performance test type (capacity, baseline, response time, stable, stress, etc)"}
             if not env_type:
                 return {"message": "Please provide test env (stage, prod, dev, etc)"}
             if not entrypoint:
                 return {"message": "Please provide test entrypoint (JMeter script path or Gatling simulation path)"}
             if not custom_cmd:
-                return {"message": "Please provide custom_cmd. This parameter is optional. (e.g., -l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report)"}
+                return {
+                    "message": "Please provide custom_cmd. This parameter is optional. (e.g., -l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report)"}
 
             # Validate runner
             available_runners = {
@@ -274,41 +346,6 @@ class CreateBackendTestTool(BaseTool):
                     },
                 }
 
-            # Validate required fields in the source dictionary
-            required_source_fields = ["name", "repo"]
-            missing_fields = [field for field in required_source_fields if field not in source or not source[field]]
-
-            if missing_fields:
-                return {
-                    "message": (
-                        f"The following required fields are missing or empty in the 'source' configuration: {', '.join(missing_fields)}."
-                    ),
-                    "instructions": (
-                        "Ensure the 'source' parameter is a dictionary with the following keys:\n"
-                        "- 'name' (required): The type of source (e.g., 'git_https').\n"
-                        "- 'repo' (required): The URL of the Git repository.\n"
-                        "- 'branch' (optional): The branch of the repository to use.\n"
-                        "- 'username' (optional): The username for accessing the repository.\n"
-                        "- 'password' (optional): The password or token for accessing the repository."
-                    ),
-                    "example_source": {
-                        "name": "git_https",
-                        "repo": "https://your_git_repo.git",
-                        "branch": "main",
-                        "username": "",
-                        "password": "",
-                    },
-                }
-
-            # Ensure optional fields are present in the source dictionary
-            source = {
-                "name": source.get("name"),
-                "repo": source.get("repo"),
-                "branch": source.get("branch", ""),  # Default to empty string if not provided
-                "username": source.get("username", ""),  # Default to empty string if not provided
-                "password": source.get("password", ""),  # Default to empty string if not provided
-            }
-
             # Validate test_parameters
             if test_parameters is None:
                 return {
@@ -316,31 +353,49 @@ class CreateBackendTestTool(BaseTool):
                         "Do you want to add test parameters? Test parameters allow you to configure the test with specific values."
                     ),
                     "instructions": (
-                        "Provide test parameters in the format 'name=default_value'. For example:\n"
-                        "- VUSERS=5\n"
-                        "- DURATION=60\n"
-                        "You can provide multiple parameters separated by commas, e.g., 'VUSERS=5, DURATION=60'.\n"
+                        "Provide test parameters as a list of dictionaries in the format:\n"
+                        "- {'name': 'VUSERS', 'default': '5'}\n"
+                        "- {'name': 'DURATION', 'default': '60'}\n"
+                        "- {'name': 'RAMP_UP', 'default': '30'}\n"
+                        "You can provide multiple parameters as a list, e.g., [{'name': 'VUSERS', 'default': '5'}, {'name': 'DURATION', 'default': '60'}].\n"
                         "If no parameters are needed, respond with 'no'."
                     ),
                     "example_parameters": [
-                        {"name": "VUSERS", "default": "5", "type": "string", "description": "", "action": ""},
-                        {"name": "DURATION", "default": "60", "type": "string", "description": "", "action": ""},
+                        {"name": "VUSERS", "default": "5"},
+                        {"name": "DURATION", "default": "60"},
+                        {"name": "RAMP_UP", "default": "30"},
                     ],
                 }
 
-            # Parse test_parameters
-            parsed_test_parameters = []
-            if isinstance(test_parameters, list):
-                for param in test_parameters:
-                    if "=" in param:
-                        name, default = param.split("=", 1)
-                        parsed_test_parameters.append({
-                            "name": name.strip(),
-                            "default": default.strip(),
-                            "type": "string",
-                            "description": "",
-                            "action": "",
-                        })
+            # Ensure test_parameters is an empty list if the user indicates no parameters are needed
+            if isinstance(test_parameters, str) and test_parameters.lower() == "no":
+                test_parameters = []
+
+            # Fetch available integrations
+            integrations_list = self.api_wrapper.get_integrations(name="reporter_email")
+
+            # Validate email_integration
+            if email_integration is None:
+                # Return instructions for configuring email integration
+                return {
+                    "message": "Do you want to configure email integration?",
+                    "instructions": (
+                        "If yes, select an integration from the available options below and provide email recipients.\n"
+                        "If no, respond with 'no'."
+                    ),
+                    "available_integrations": [
+                        {
+                            "id": integration["id"],
+                            "name": integration["config"]["name"],
+                            "description": integration["section"]["integration_description"],
+                        }
+                        for integration in integrations_list
+                    ],
+                    "example_response": {
+                        "integration_id": 1,
+                        "recipients": ["example@example.com", "user@example.com"],
+                    },
+                }
 
             # Prepare the final data dictionary
             data = {
@@ -362,17 +417,20 @@ class CreateBackendTestTool(BaseTool):
                     "customization": {},
                     "location": "default",  # TODO update location
                 },
-                "test_parameters": parsed_test_parameters,
-                "integrations": {},
+                "test_parameters": test_parameters,
+                "integrations": {
+                    "reporters": {
+                        "reporter_email": {
+                            "id": email_integration["integration_id"],
+                            "is_local": True,
+                            "project_id": integrations_list[0]["project_id"],  # Example project_id
+                            "recipients": email_integration["recipients"],
+                        }
+                    }
+                },
                 "scheduling": [],
                 "run_test": False,
             }
-
-            # Debugging output
-            print("*********************************")
-            print("Final data:")
-            print(data)
-            print("*********************************")
 
             response = self.api_wrapper.create_test(data)
             try:
