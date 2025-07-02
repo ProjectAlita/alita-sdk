@@ -81,9 +81,27 @@ class CarrierClient(BaseModel):
         endpoint = f"api/v1/backend_performance/tests/{self.credentials.project_id}"
         return self.request('get', endpoint).get("rows", [])
 
+    def create_test(self, data):
+        endpoint = f"api/v1/backend_performance/tests/{self.credentials.project_id}"
+        full_url = f"{self.credentials.url.rstrip('/')}/{endpoint.lstrip('/')}"
+        headers = {'Authorization': f'bearer {self.credentials.token}'}
+        from json import dumps
+        # Serialize the `data` dictionary into a JSON string
+        form_data = {"data": dumps(data)}
+        # Send the POST request
+        res = requests.post(full_url, headers=headers, data=form_data)
+        print("************************* response")
+        print(res.text)
+        print("**********************************")
+        return res
+
     def run_test(self, test_id: str, json_body):
         endpoint = f"api/v1/backend_performance/test/{self.credentials.project_id}/{test_id}"
         return self.request('post', endpoint, json=json_body).get("result_id", "")
+
+    def get_integrations(self, name: str):
+        endpoint = f"api/v1/integrations/integrations/{self.credentials.project_id}?name={name}"
+        return self.request('get', endpoint)
 
     def run_ui_test(self, test_id: str, json_body):
         """Run a UI test with the given test ID and JSON body."""
