@@ -10,29 +10,23 @@ from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 logger = logging.getLogger(__name__)
 
 SendMessageModel = create_model(
-                    "SendMessageModel",
-                    slack_token=(SecretStr, Field( description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")),
-                    channel_id=(str, Field(description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")),
+                    "SendMessageModel",                    
                     message=(str, Field(description="The message text to send."))
                     )
 
 ReadMessagesModel = create_model(
-                    "ReadMessagesModel",
-                    slack_token=(SecretStr, Field( description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")),
-                    channel_id=(str, Field( description="Channel ID, user ID, or conversation ID to read messages from.")),
+                    "ReadMessagesModel",                    
                     limit=(int, Field(default=10, description="The number of messages to fetch (default is 10)."))
                     )
 
 CreateChannelModel = create_model(
-                    "CreateChannelModel",  
-                    slack_token=(SecretStr, Field(description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")),
+                    "CreateChannelModel",                     
                     channel_name=(str, Field(description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")),
                     is_private=(bool, Field(default=False, description="Whether to make the channel private (default: False)."))
                     )
 
 ListUsersModel = create_model(
-                    "ListUsersModel",
-                    slack_token=(SecretStr, Field(description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****"))
+                    "ListUsersModel"                 
                     )
 
 
@@ -41,36 +35,59 @@ class SlackApiWrapper(BaseToolApiWrapper):
     """
     Slack API wrapper for interacting with Slack channels and messages.
     """
-    
-    def send_message(self, slack_token : SecretStr, channel_id: str, message: str):
+    slack_token: Optional[SecretStr] = Field(default=None,description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")
+    channel_id: Optional[str] = Field(default=None, description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")
+
+    @model_validator(mode="after")
+    @classmethod
+    def validate_toolkit(cls, values):
+        token = values.slack_token.get_secret_value() if values.slack_token else None
+        if not token:
+            logging.error("Slack token is required.")
+            raise ValueError("Slack token is required.")
+        try:
+            cls._client = WebClient(token=token)
+            logging.info("Authenticated with Slack token.")
+        except Exception as e:
+            logging.error(f"Failed to authenticate with Slack: {str(e)}")
+            raise ValueError(f"Failed to authenticate with Slack: {str(e)}")
+        return values
+
+    def _get_client(self):
+        if not self._client:
+            self._client = WebClient(token=self.slack_token.get_secret_value())
+        return self._client
+
+
+    def send_message(self, message: str):
         """
         Sends a message to a specified Slack channel, user, or conversation.
         """
         
         try:
-            client = WebClient(token=slack_token.get_secret_value())
-            response = client.chat_postMessage(channel=channel_id, text=message)
-            logger.info(f"Message sent to {channel_id}: {message}")
-            return f"Message sent successfully to {channel_id}."
+
+            client = self._get_client()
+            response = client.chat_postMessage(channel=self.channel_id, text=message)
+            logger.info(f"Message sent to {self.channel_id}: {message}")
+            return f"Message sent successfully to {self.channel_id}."
         
         except SlackApiError as e:
-            logger.error(f"Failed to send message to {channel_id}: {e.response['error']}")
+            logger.error(f"Failed to send message to {self.channel_id}: {e.response['error']}")
             return f"Received the error :  {e.response['error']}"
 
-    def read_messages(self, slack_token : SecretStr, channel_id: str, limit=10):
+    def read_messages(self, limit=10):
         """
         Reads the latest messages from a Slack channel or conversation.
-
-        :param channel_id: str: Slack Channel ID (e.g., 'C12345678' for public channels, 'D12345678' for DMs)
+       
         :param limit: int: The number of messages to fetch (default is 10)
         :return: list: Returns a list of messages with metadata.
         """
         try:
 
-            client = WebClient(token=slack_token.get_secret_value())
+            client = self._get_client()
             # Fetch conversation history
             response = client.conversations_history(
-                channel=channel_id,
+                channel=self.channel_id,
                 limit=limit )
             
             # Extract messages from the response
@@ -80,21 +97,20 @@ class SlackApiWrapper(BaseToolApiWrapper):
             
         except SlackApiError as e:
             # Handle errors from the Slack API
-            logger.error(f"Failed to read message from {channel_id}: {e.response['error']}")
+            logger.error(f"Failed to read message from {self.channel_id}: {e.response['error']}")
             return f"Received the error :  {e.response['error']}"
         
-    def create_slack_channel(sself, slack_token : SecretStr, channel_name: str, is_private=False):
+    def create_slack_channel(self,  channel_name: str, is_private=False):
         """
         Creates a new Slack channel.
 
-        :param slack_token: str: Slack Bot OAuth Token (e.g., xoxb-xxx).
         :param channel_name: str: Desired name for the channel (e.g., "my-new-channel").
         :param is_private: bool: Whether to make the channel private (default: False).
         :return: dict: Slack API response or error message.
         """
-        client = WebClient(token=slack_token.get_secret_value())
 
         try:
+            client = self._get_client()
             response = client.conversations_create(
                 name=channel_name,
                 is_private=is_private
@@ -106,17 +122,18 @@ class SlackApiWrapper(BaseToolApiWrapper):
             error_message = e.response.get("error", "unknown_error")
             print(f"Failed to create channel '{channel_name}': {error_message}")
             return {"success": False, "error": error_message}
-    def list_users(self, slack_token: SecretStr):
+    
+    def list_users(self):
         """
         Lists all users in the Slack workspace.
 
-        :param slack_token: str: Slack Bot OAuth Token (e.g., xoxb-xxx).
         :return: list: List of users with their IDs and names.
         """
-        client = WebClient(token=slack_token.get_secret_value())
-        print(client.auth_test())
+        
         
         try:
+            client = self._get_client()
+            print(client.auth_test())
             response = client.users_list()
             users = response["members"]
             return [{"id": user["id"], "name": user["name"]} for user in users if not user["is_bot"]]
