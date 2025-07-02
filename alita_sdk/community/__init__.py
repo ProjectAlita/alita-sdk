@@ -11,7 +11,7 @@ import importlib
 __all__ = []
 
 # Standard module imports with fallback
-_modules = ['utils', 'analysis', 'browseruse', 'deep_researcher', 'eda']
+_modules = ['utils', 'analysis', 'deep_researcher', 'eda']
 
 for module_name in _modules:
     try:
@@ -26,8 +26,7 @@ _toolkits = [
     ('analysis.jira_analyse', 'AnalyseJira'),
     ('analysis.ado_analyse', 'AnalyseAdo'), 
     ('analysis.gitlab_analyse', 'AnalyseGitLab'),
-    ('analysis.github_analyse', 'AnalyseGithub'),
-    ('browseruse', 'BrowserUseToolkit')
+    ('analysis.github_analyse', 'AnalyseGithub')
 ]
 
 for module_path, class_name in _toolkits:
@@ -61,8 +60,7 @@ def get_tools(tools_list: list, alita_client, llm) -> list:
         'analyse_jira': 'AnalyseJira',
         'analyse_ado': 'AnalyseAdo',
         'analyse_gitlab': 'AnalyseGitLab', 
-        'analyse_github': 'AnalyseGithub',
-        'browser_use': 'BrowserUseToolkit'
+        'analyse_github': 'AnalyseGithub'
     }
     
     for tool in tools_list:
@@ -72,18 +70,10 @@ def get_tools(tools_list: list, alita_client, llm) -> list:
         if class_name and class_name in globals():
             try:
                 toolkit_class = globals()[class_name]
-                if tool_type == 'browser_use':
-                    toolkit = toolkit_class.get_toolkit(
-                        client=alita_client,
-                        llm=llm,
-                        toolkit_name=tool.get('toolkit_name', ''),
-                        **tool['settings']
-                    )
-                else:
-                    toolkit = toolkit_class.get_toolkit(
-                        client=alita_client,
-                        **tool['settings']
-                    )
+                toolkit = toolkit_class.get_toolkit(
+                    client=alita_client,
+                    **tool['settings']
+                )
                 tools.extend(toolkit.get_tools())
             except Exception:
                 pass  # Fail silently for robustness

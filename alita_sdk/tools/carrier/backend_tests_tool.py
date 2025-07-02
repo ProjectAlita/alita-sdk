@@ -1,7 +1,7 @@
 import logging
 import json
 import traceback
-from typing import Type
+from typing import Type, Optional, List, Dict, Union
 from langchain_core.tools import BaseTool, ToolException
 from pydantic.fields import Field
 from pydantic import create_model, BaseModel
@@ -30,7 +30,6 @@ class GetTestsTool(BaseTool):
 
             trimmed_tests = []
             for test in tests:
-
                 # Keep only desired base fields
                 trimmed = {k: test[k] for k in base_fields if k in test}
 
@@ -82,7 +81,14 @@ class RunTestByIDTool(BaseTool):
         "RunTestByIdInput",
         test_id=(str, Field(default=None, description="Test id to execute")),
         name=(str, Field(default=None, description="Test name to execute")),
-        test_parameters=(dict, Field(default=None, description="Test parameters to override")),
+        test_parameters=(list, Field(
+            default=None,
+            description=(
+                "Test parameters to override. Provide as a list of dictionaries, "
+                "e.g., [{'vUsers': '5', 'duration': '120'}]. Each dictionary should "
+                "contain parameter names and their values."
+            )
+        )),
     )
 
     def _run(self, test_id=None, name=None, test_parameters=None):
@@ -111,8 +117,11 @@ class RunTestByIDTool(BaseTool):
                 return {
                     "message": "Please confirm or override the following test parameters to proceed with the test execution.",
                     "default_test_parameters": default_test_parameters,
-                    "instruction": "To override parameters, provide a dictionary of updated values for 'test_parameters'.",
+                    "instruction": "To override parameters, provide a list of dictionaries for 'test_parameters', e.g., [{'vUsers': '5', 'duration': '120'}].",
                 }
+
+            # Normalize test_parameters if provided in an incorrect format
+            test_parameters = self._normalize_test_parameters(test_parameters)
 
             # Apply user-provided test parameters
             updated_test_parameters = self._apply_test_parameters(default_test_parameters, test_parameters)
@@ -146,6 +155,37 @@ class RunTestByIDTool(BaseTool):
             logger.error(f"Test not found: {stacktrace}")
             raise ToolException(stacktrace)
 
+    def _normalize_test_parameters(self, test_parameters):
+        """
+        Normalize test_parameters to ensure they are in the correct list-of-dictionaries format.
+        If test_parameters are provided as a list of strings (e.g., ['vUsers=5', 'duration=120']),
+        convert them to a list of dictionaries (e.g., [{'vUsers': '5', 'duration': '120'}]).
+        """
+        if isinstance(test_parameters, list):
+            # Check if the list contains strings in the format "key=value"
+            if all(isinstance(param, str) and "=" in param for param in test_parameters):
+                normalized_parameters = []
+                for param in test_parameters:
+                    name, value = param.split("=", 1)
+                    normalized_parameters.append({name.strip(): value.strip()})
+                return normalized_parameters
+            # Check if the list already contains dictionaries
+            elif all(isinstance(param, dict) for param in test_parameters):
+                return test_parameters
+            else:
+                raise ValueError(
+                    "Invalid format for test_parameters. Provide as a list of 'key=value' strings "
+                    "or a list of dictionaries."
+                )
+        elif isinstance(test_parameters, dict):
+            # Convert a single dictionary to a list of dictionaries
+            return [test_parameters]
+        else:
+            raise ValueError(
+                "Invalid format for test_parameters. Provide as a list of 'key=value' strings "
+                "or a list of dictionaries."
+            )
+
     def _apply_test_parameters(self, default_test_parameters, user_parameters):
         """
         Apply user-provided parameters to the default test parameters.
@@ -153,8 +193,269 @@ class RunTestByIDTool(BaseTool):
         updated_parameters = []
         for param in default_test_parameters:
             name = param["name"]
-            if name in user_parameters:
+            # Find the matching user parameter
+            user_param = next((p for p in user_parameters if name in p), None)
+            if user_param:
                 # Override the parameter value with the user-provided value
-                param["default"] = user_parameters[name]
-            updated_parameters.append(param)
+                param["default"] = user_param[name]
+            # Ensure the parameter structure remains consistent
+            updated_parameters.append({
+                "name": param["name"],
+                "type": param["type"],
+                "description": param["description"],
+                "default": param["default"]
+            })
         return updated_parameters
+
+
+class CreateBackendTestInput(BaseModel):
+    test_name: str = Field(..., description="Test name")
+    test_type: str = Field(..., description="Test type")
+    env_type: str = Field(..., description="Env type")
+    entrypoint: str = Field(..., description="Entrypoint for the test (JMeter script path or Gatling simulation path)")
+    custom_cmd: str = Field(..., description="Custom command line to execute the test (e.g., -l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report)")
+    runner: str = Field(..., description="Test runner (Gatling or JMeter)")
+    source: Optional[Dict[str, Optional[str]]] = Field(
+        None,
+        description=(
+            "Test source configuration (Git repo). The dictionary should include the following keys:\n"
+            "- 'name' (required): The type of source (e.g., 'git_https').\n"
+            "- 'repo' (required): The URL of the Git repository.\n"
+            "- 'branch' (optional): The branch of the repository to use.\n"
+            "- 'username' (optional): The username for accessing the repository.\n"
+            "- 'password' (optional): The password or token for accessing the repository."
+        ),
+        example={
+            "name": "git_https",
+            "repo": "https://your_git_repo.git",
+            "branch": "main",
+            "username": "your_username",
+            "password": "your_password",
+        },
+    )
+    test_parameters: Optional[List[Dict[str, str]]] = Field(
+        None,
+        description=(
+            "Test parameters as a list of dictionaries. Each dictionary should include the following keys:\n"
+            "- 'name' (required): The name of the parameter (e.g., 'VUSERS').\n"
+            "- 'default' (required): The value of the parameter (e.g., '5')."
+        ),
+        example=[
+            {"name": "VUSERS", "default": "5"},
+            {"name": "DURATION", "default": "60"},
+            {"name": "RAMP_UP", "default": "30"},
+        ],
+    )
+    email_integration: Optional[Dict[str, Optional[Union[int, List[str]]]]] = Field(
+        None,
+        description=(
+            "Email integration configuration. The dictionary should include the following keys:\n"
+            "- 'integration_id' (required): The ID of the selected email integration (integer).\n"
+            "- 'recipients' (required): A list of email addresses to receive notifications."
+        ),
+        example={
+            "integration_id": 1,
+            "recipients": ["example@example.com", "user@example.com"],
+        },
+    )
+
+
+class CreateBackendTestTool(BaseTool):
+    api_wrapper: CarrierAPIWrapper = Field(..., description="Carrier API Wrapper instance")
+    name: str = "create_backend_test"
+    description: str = "Create a new backend test plan in the Carrier platform."
+    args_schema: Type[BaseModel] = CreateBackendTestInput
+
+    def _run(self, test_name=None, test_type=None, env_type=None, entrypoint=None, custom_cmd=None, runner=None,
+             source=None, test_parameters=None, email_integration=None):
+        try:
+            # Validate required fields
+            if not test_name:
+                return {"message": "Please provide test name"}
+            if not test_type:
+                return {
+                    "message": "Please provide performance test type (capacity, baseline, response time, stable, stress, etc)"}
+            if not env_type:
+                return {"message": "Please provide test env (stage, prod, dev, etc)"}
+            if not entrypoint:
+                return {"message": "Please provide test entrypoint (JMeter script path or Gatling simulation path)"}
+            if not custom_cmd:
+                return {
+                    "message": "Please provide custom_cmd. This parameter is optional. (e.g., -l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report)"}
+
+            # Validate runner
+            available_runners = {
+                "JMeter_v5.6.3": "v5.6.3",
+                "JMeter_v5.5": "v5.5",
+                "Gatling_v3.7": "v3.7",
+                "Gatling_maven": "maven",
+            }
+
+            if not runner:
+                return {
+                    "message": (
+                        "Please provide a valid test runner. The test runner specifies the tool and version to use for running the test."
+                    ),
+                    "instructions": (
+                        "You can choose a test runner by providing either the key or the value from the available options below. "
+                        "For example, you can provide 'JMeter_v5.5' or 'v5.5'."
+                    ),
+                    "available_runners": available_runners,
+                    "example": "For JMeter 5.5, you can provide either 'JMeter_v5.5' or 'v5.5'.",
+                }
+
+            # Normalize the runner input to ensure we always use the value in the final data
+            if runner in available_runners:
+                runner_value = available_runners[runner]  # User provided the key (e.g., 'JMeter_v5.5')
+            elif runner in available_runners.values():
+                runner_value = runner  # User provided the value directly (e.g., 'v5.5')
+            else:
+                return {
+                    "message": (
+                        "Invalid test runner provided. Please choose a valid test runner from the available options."
+                    ),
+                    "instructions": (
+                        "You can choose a test runner by providing either the key or the value from the available options below. "
+                        "For example, you can provide 'JMeter_v5.5' or 'v5.5'."
+                    ),
+                    "available_runners": available_runners,
+                    "example": "For JMeter 5.5, you can provide either 'JMeter_v5.5' or 'v5.5'.",
+                }
+
+            # Validate source
+            if not source:
+                return {
+                    "message": (
+                        "Please provide the test source configuration. The source configuration is required to specify "
+                        "the Git repository details for the test. Ensure all fields are provided in the correct format."
+                    ),
+                    "instructions": (
+                        "The 'source' parameter should be a dictionary with the following keys:\n"
+                        "- 'name' (required): The type of source (e.g., 'git_https').\n"
+                        "- 'repo' (required): The URL of the Git repository.\n"
+                        "- 'branch' (optional): The branch of the repository to use.\n"
+                        "- 'username' (optional): The username for accessing the repository.\n"
+                        "- 'password' (optional): The password or token for accessing the repository."
+                    ),
+                    "example_source": {
+                        "name": "git_https",
+                        "repo": "https://your_git_repo.git",
+                        "branch": "main",
+                        "username": "",
+                        "password": "",
+                    },
+                }
+
+            # Validate test_parameters
+            if test_parameters is None:
+                return {
+                    "message": (
+                        "Do you want to add test parameters? Test parameters allow you to configure the test with specific values."
+                    ),
+                    "instructions": (
+                        "Provide test parameters as a list of dictionaries in the format:\n"
+                        "- {'name': 'VUSERS', 'default': '5'}\n"
+                        "- {'name': 'DURATION', 'default': '60'}\n"
+                        "- {'name': 'RAMP_UP', 'default': '30'}\n"
+                        "You can provide multiple parameters as a list, e.g., [{'name': 'VUSERS', 'default': '5'}, {'name': 'DURATION', 'default': '60'}].\n"
+                        "If no parameters are needed, respond with 'no'."
+                    ),
+                    "example_parameters": [
+                        {"name": "VUSERS", "default": "5"},
+                        {"name": "DURATION", "default": "60"},
+                        {"name": "RAMP_UP", "default": "30"},
+                    ],
+                }
+
+            # Ensure test_parameters is an empty list if the user indicates no parameters are needed
+            if isinstance(test_parameters, str) and test_parameters.lower() == "no":
+                test_parameters = []
+
+            # Fetch available integrations
+            integrations_list = self.api_wrapper.get_integrations(name="reporter_email")
+
+            # Validate email_integration
+            if email_integration is None:
+                # Return instructions for configuring email integration
+                return {
+                    "message": "Do you want to configure email integration?",
+                    "instructions": (
+                        "If yes, select an integration from the available options below and provide email recipients.\n"
+                        "If no, respond with 'no'."
+                    ),
+                    "available_integrations": [
+                        {
+                            "id": integration["id"],
+                            "name": integration["config"]["name"],
+                            "description": integration["section"]["integration_description"],
+                        }
+                        for integration in integrations_list
+                    ],
+                    "example_response": {
+                        "integration_id": 1,
+                        "recipients": ["example@example.com", "user@example.com"],
+                    },
+                }
+
+            # Prepare the final data dictionary
+            data = {
+                "common_params": {
+                    "name": test_name,
+                    "test_type": test_type,
+                    "env_type": env_type,
+                    "entrypoint": entrypoint,
+                    "runner": runner_value,
+                    "source": source,
+                    "env_vars": {
+                        "cpu_quota": 1,
+                        "memory_quota": 4,
+                        "cloud_settings": {},
+                        "custom_cmd": custom_cmd,
+                    },
+                    "parallel_runners": 1,
+                    "cc_env_vars": {},
+                    "customization": {},
+                    "location": "default",  # TODO update location
+                },
+                "test_parameters": test_parameters,
+                "integrations": {
+                    "reporters": {
+                        "reporter_email": {
+                            "id": email_integration["integration_id"],
+                            "is_local": True,
+                            "project_id": integrations_list[0]["project_id"],  # Example project_id
+                            "recipients": email_integration["recipients"],
+                        }
+                    }
+                },
+                "scheduling": [],
+                "run_test": False,
+            }
+
+            response = self.api_wrapper.create_test(data)
+            try:
+                info = "Test created successfully"
+                test_info = response.json()
+            except:
+                info = "Failed to create the test"
+                test_info = response.text
+            return f"{info}. {test_info}"
+
+        except Exception as e:
+            stacktrace = traceback.format_exc()
+            logger.error(f"Error while creating test: {stacktrace}")
+            raise ToolException(stacktrace)
+
+# data = {"common_params":{"name":"toolkit_demo","test_type":"toolkit_demo","env_type":"toolkit_demo",
+#                                      "entrypoint":"tests/BasicEcommerceWithTransaction.jmx","runner":"v5.6.3",
+#                                      "source":{"name":"git_https","repo":"https://git.epam.com/epm-perf/boilerplate.git",
+#                                                "branch":"jmeter","username":"mykhailo_hunko@epam.com",
+#                                                "password":"{{secret.mykhailo_gitlab}}"},
+#                                      "env_vars":{"cpu_quota":2,"memory_quota":6,"cloud_settings":{},
+#                                                  "custom_cmd":"-l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report"},
+#                                      "parallel_runners":1,"cc_env_vars":{},"customization":{},"location":"default"},
+#                     "test_parameters":[{"name":"VUSERS","default":"5","type":"string","description":"","action":""},
+#                                        {"name":"DURATION","default":"60","type":"string","description":"","action":""}],
+#                     "integrations":{"reporters":{"reporter_email":{"id":1,"is_local":True,"project_id":36,
+#                                                                    "recipients":["mykhailo_hunko@epam.com"]}}},
+#                     "scheduling":[],"run_test":True}
