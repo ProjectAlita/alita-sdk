@@ -150,14 +150,15 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
 
         return parsed_items
 
-    def _transform_work_item(self, work_item_json: str):
+    def _transform_work_item(self, work_item_json):
         try:
             # Convert the input JSON to a Python dictionary
-            params = json.loads(work_item_json)
+            if isinstance(work_item_json, str):
+                work_item_json = json.loads(work_item_json)
         except (json.JSONDecodeError, ValueError) as e:
             raise ToolException(f"Issues during attempt to parse work_item_json: {e}")
 
-        if 'fields' not in params:
+        if 'fields' not in work_item_json:
             raise ToolException("The 'fields' property is missing from the work_item_json.")
 
             # Transform the dictionary into a list of JsonPatchOperation objects
@@ -167,11 +168,11 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
                 "path": f"/fields/{field}",
                 "value": value
             }
-            for field, value in params["fields"].items()
+            for field, value in work_item_json["fields"].items()
         ]
         return patch_document
 
-    def create_work_item(self, work_item_json: str, wi_type="Task"):
+    def create_work_item(self, work_item_json, wi_type="Task"):
         """Create a work item in Azure DevOps."""
         try:
             patch_document = self._transform_work_item(work_item_json)
@@ -185,7 +186,10 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
                 project=self.project,
                 type=wi_type
             )
-            return f"Work item {work_item.id} created successfully. View it at {work_item.url}."
+            return {
+                "id": work_item.id,
+                "message": f"Work item {work_item.id} created successfully. View it at {work_item.url}."
+            }
         except Exception as e:
             if "unknown value" in str(e):
                 logger.error(f"Unable to create work item due to incorrect assignee: {e}")

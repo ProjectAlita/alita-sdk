@@ -10,7 +10,9 @@ from langchain_core.tools import ToolException
 from msrest.authentication import BasicAuthentication
 from pydantic import create_model, PrivateAttr, model_validator, SecretStr
 from pydantic.fields import FieldInfo as Field
+import xml.etree.ElementTree as ET
 
+from ..work_item import AzureDevOpsApiWrapper
 from ...elitea_base import BaseToolApiWrapper
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,16 @@ TestCaseAddModel = create_model(
     project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan to which test cases are to be added")),
     suite_id=(int, Field(description="ID of the test suite to which test cases are to be added"))
+)
+
+TestCaseCreateModel = create_model(
+    "TestCaseCreateModel",
+    project=(str, Field(description="Project ID or project name")),
+    plan_id=(int, Field(description="ID of the test plan to which test cases are to be added")),
+    suite_id=(int, Field(description="ID of the test suite to which test cases are to be added")),
+    title=(str, Field(description="Test case title")),
+    description=(str, Field(description="Test case description")),
+    test_steps=(str, Field(description="""Json array with test steps. Example: [{"action": "Some action", "expectedResult": "Some expectation"},...]""")),
 )
 
 TestCaseGetModel = create_model(
@@ -202,16 +214,50 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error getting test suite(s): {e}")
             return ToolException(f"Error getting test suite(s): {e}")
 
-    def add_test_case(self, suite_test_case_create_update_parameters: str, project: str, plan_id: int, suite_id: int):
+    def add_test_case(self, suite_test_case_create_update_parameters, project: str, plan_id: int, suite_id: int):
         """Add a test case to a suite in Azure DevOps."""
         try:
-            params = json.loads(suite_test_case_create_update_parameters)
-            suite_test_case_create_update_params_obj = [SuiteTestCaseCreateUpdateParameters(**param) for param in params]
+            if isinstance(suite_test_case_create_update_parameters, str):
+                suite_test_case_create_update_parameters = json.loads(suite_test_case_create_update_parameters)
+            suite_test_case_create_update_params_obj = [SuiteTestCaseCreateUpdateParameters(**param) for param in suite_test_case_create_update_parameters]
             test_cases = self._client.add_test_cases_to_suite(suite_test_case_create_update_params_obj, project, plan_id, suite_id)
             return [test_case.as_dict() for test_case in test_cases]
         except Exception as e:
             logger.error(f"Error adding test case: {e}")
             return ToolException(f"Error adding test case: {e}")
+
+    def create_test_case(self, project: str, plan_id: int, suite_id: int, title: str, description: str, test_steps: str):
+        """Creates a new test case in specified suite in Azure DevOps."""
+        work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url, token=self.token.get_secret_value(), project=project)
+        work_item_json = self.build_ado_test_case(title, description, json.loads(test_steps))
+        created_work_item_id = work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")['id']
+        return self.add_test_case([{"work_item":{"id":created_work_item_id}}], project, plan_id, suite_id)
+
+    def build_ado_test_case(self, title, description, steps):
+        """
+        :param title: test title
+        :param description: test description
+        :param steps: steps [(action, expected result), ...]
+        :return: JSON with ADO fields
+        """
+        steps_elem = ET.Element("steps")
+
+        for idx, step in enumerate(steps, start=1):
+            step_elem = ET.SubElement(steps_elem, "step", id=str(idx), type="Action")
+            action_elem = ET.SubElement(step_elem, "parameterizedString", isformatted="true")
+            action_elem.text = step["action"]
+            expected_elem = ET.SubElement(step_elem, "parameterizedString", isformatted="true")
+            expected_elem.text = step["expectedResult"]
+
+        steps_xml = ET.tostring(steps_elem, encoding="unicode")
+
+        return {
+            "fields": {
+                "System.Title": title,
+                "System.Description": description,
+                "Microsoft.VSTS.TCM.Steps": steps_xml
+            }
+        }
 
     def get_test_case(self, project: str, plan_id: int, suite_id: int, test_case_id: str):
         """Get a test case from a suite in Azure DevOps."""
@@ -279,6 +325,12 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
                 "description": self.add_test_case.__doc__,
                 "args_schema": TestCaseAddModel,
                 "ref": self.add_test_case,
+            },
+            {
+                "name": "create_test_case",
+                "description": self.create_test_case.__doc__,
+                "args_schema": TestCaseCreateModel,
+                "ref": self.create_test_case,
             },
             {
                 "name": "get_test_case",
