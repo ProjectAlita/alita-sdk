@@ -100,7 +100,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
     tools += _mcp_tools(tools_list, alita_client)
     
     # Sanitize tool names to meet OpenAI's function naming requirements
-    tools = _sanitize_tool_names(tools)
+    # tools = _sanitize_tool_names(tools)
     
     return tools
 
