@@ -99,7 +99,55 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
     # Add MCP tools
     tools += _mcp_tools(tools_list, alita_client)
     
+    # Sanitize tool names to meet OpenAI's function naming requirements
+    tools = _sanitize_tool_names(tools)
+    
     return tools
+
+
+def _sanitize_tool_names(tools: list) -> list:
+    """
+    Sanitize tool names to meet OpenAI's function naming requirements.
+    OpenAI function names must match pattern ^[a-zA-Z0-9_\\.-]+$
+    """
+    import re
+    from langchain_core.tools import BaseTool
+    
+    def sanitize_name(name):
+        """Sanitize a single tool name"""
+        # Replace spaces and other invalid characters with underscores
+        sanitized = re.sub(r'[^a-zA-Z0-9_.-]', '_', name)
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_{2,}', '_', sanitized)
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        return sanitized
+    
+    sanitized_tools = []
+    name_mapping = {}
+    
+    for tool in tools:
+        if isinstance(tool, BaseTool):
+            original_name = tool.name
+            sanitized_name = sanitize_name(original_name)
+            
+            # Only update if the name actually changed
+            if original_name != sanitized_name:
+                logger.info(f"Sanitizing tool name: '{original_name}' -> '{sanitized_name}'")
+                # Create a new tool instance with the sanitized name
+                # We need to be careful here to preserve all other tool properties
+                tool.name = sanitized_name
+                name_mapping[original_name] = sanitized_name
+            
+            sanitized_tools.append(tool)
+        else:
+            # For non-BaseTool objects (like CompiledStateGraph), just pass through
+            sanitized_tools.append(tool)
+    
+    if name_mapping:
+        logger.info(f"Tool name sanitization complete. Mapped {len(name_mapping)} tool names.")
+    
+    return sanitized_tools
 
 
 def _mcp_tools(tools_list, alita):
