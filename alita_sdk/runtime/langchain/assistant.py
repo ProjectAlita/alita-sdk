@@ -30,14 +30,6 @@ class Assistant:
                  memory: Optional[Any] = None,
                  store: Optional[BaseStore] = None):
 
-        self.client = copy(client)
-        self.client.max_tokens = data['llm_settings']['max_tokens']
-        self.client.temperature = data['llm_settings']['temperature']
-        self.client.top_p = data['llm_settings']['top_p']
-        self.client.top_k = data['llm_settings']['top_k']
-        self.client.model_name = data['llm_settings']['model_name']
-        self.client.integration_uid = data['llm_settings']['integration_uid']
-
         self.app_type = app_type
         self.memory = memory
         self.store = store
@@ -45,33 +37,53 @@ class Assistant:
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
 
-        model_type = data["llm_settings"]["indexer_config"]["ai_model"]
-        model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
-        #
-        target_pkg, target_name = model_type.rsplit(".", 1)
-        target_cls = getattr(
-            importlib.import_module(target_pkg),
-            target_name
-        )
-        self.client = target_cls(**model_params)
-        # validate agents compatibility: non-pipeline agents cannot have pipelines as toolkits
-        if app_type != "pipeline" and any(tool['agent_type'] == 'pipeline' for tool in data['tools']):
-            raise ToolException("Non-pipeline agents cannot have pipelines as a toolkits. "
-                                "Review toolkits configuration or use pipeline as master agent.")
+        # For predict agents, use the client as-is since it's already configured
+        if app_type == "predict":
+            self.client = client
+        else:
+            # For other agent types, configure client from llm_settings
+            self.client = copy(client)
+            self.client.max_tokens = data['llm_settings']['max_tokens']
+            self.client.temperature = data['llm_settings']['temperature']
+            self.client.top_p = data['llm_settings']['top_p']
+            self.client.top_k = data['llm_settings']['top_k']
+            self.client.model_name = data['llm_settings']['model_name']
+            self.client.integration_uid = data['llm_settings']['integration_uid']
 
-        # configure memory store if memory tool is defined
-        memory_tool = next((tool for tool in data['tools'] if tool['type'] == 'memory'), None)
-        self._configure_store(memory_tool)
+            model_type = data["llm_settings"]["indexer_config"]["ai_model"]
+            model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
+            #
+            target_pkg, target_name = model_type.rsplit(".", 1)
+            target_cls = getattr(
+                importlib.import_module(target_pkg),
+                target_name
+            )
+            self.client = target_cls(**model_params)
+        # validate agents compatibility: non-pipeline agents cannot have pipelines as toolkits
+        if app_type not in ["pipeline", "predict"]:
+            tools_to_check = data.get('tools', [])
+            if any(tool['agent_type'] == 'pipeline' for tool in tools_to_check):
+                raise ToolException("Non-pipeline agents cannot have pipelines as a toolkits. "
+                                    "Review toolkits configuration or use pipeline as master agent.")
+
+        # configure memory store if memory tool is defined (not needed for predict agents)
+        if app_type != "predict":
+            memory_tool = next((tool for tool in data.get('tools', []) if tool['type'] == 'memory'), None)
+            self._configure_store(memory_tool)
+        else:
+            # For predict agents, initialize memory store to None since they don't use memory
+            self.store = None
         
         # Lazy import to avoid circular dependency
         from ..toolkits.tools import get_tools
+        
         self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client, memory_store=self.store)
+        if tools:
+            self.tools += tools
+        # Handle prompt setup
         if app_type in ["pipeline", "predict", "react"]:
             self.prompt = data['instructions']
-            if tools:
-                self.tools += tools
         else:
-            self.tools += tools
             messages = [SystemMessage(content=data['instructions'])]
             messages.append(MessagesPlaceholder("chat_history"))
             if app_type == "react":
