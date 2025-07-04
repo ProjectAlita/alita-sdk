@@ -6,7 +6,6 @@ from langchain.agents import (
     AgentExecutor, create_openai_tools_agent,
     create_json_chat_agent)
 from langgraph.store.base import BaseStore
-
 from .agents.xml_chat import create_xml_chat_agent
 from .langraph_agent import create_graph
 from langchain_core.messages import (
@@ -67,8 +66,10 @@ class Assistant:
         # Lazy import to avoid circular dependency
         from ..toolkits.tools import get_tools
         self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client, memory_store=self.store)
-        if app_type == "pipeline":
+        if app_type in ["pipeline", "predict", "react"]:
             self.prompt = data['instructions']
+            if tools:
+                self.tools += tools
         else:
             self.tools += tools
             messages = [SystemMessage(content=data['instructions'])]
@@ -121,6 +122,8 @@ class Assistant:
             return self.getOpenAIToolsAgentExecutor()
         elif self.app_type == 'xml':
             return self.getXMLAgentExecutor()
+        elif self.app_type in ['predict', 'react']:
+            return self.getLangGraphReactAgent()
         else:
             self.tools = [EchoTool()] + self.tools
             return self.getAgentExecutor()
@@ -148,6 +151,125 @@ class Assistant:
         simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
         agent = create_openai_tools_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
+
+    def getLangGraphReactAgent(self):
+        """
+        Create a LangGraph react agent using a tool-calling agent pattern.
+        This creates a proper LangGraphAgentRunnable with modern tool support.
+        """
+        # Exclude compiled graph runnables from simple tool agents
+        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        
+        # Set up memory/checkpointer if available
+        checkpointer = None
+        if self.memory is not None:
+            checkpointer = self.memory
+        elif self.store is not None:
+            # Convert store to checkpointer if needed
+            from langgraph.checkpoint.memory import MemorySaver
+            checkpointer = MemorySaver()
+        else:
+            # Ensure we have a checkpointer for conversation persistence
+            from langgraph.checkpoint.memory import MemorySaver
+            checkpointer = MemorySaver()
+            logger.info("Using default MemorySaver for conversation persistence")
+        
+        # Extract all messages from prompt/chat history for LangGraph
+        chat_history_messages = []
+        prompt_instructions = None
+        
+        if hasattr(self.prompt, 'messages') and self.prompt.messages:
+            # Extract all messages from the prompt to use as chat history
+            for message in self.prompt.messages:
+                # Skip placeholders (MessagesPlaceholder instances) as they are not actual messages
+                if hasattr(message, 'variable_name'):  # MessagesPlaceholder has variable_name attribute
+                    continue
+                # Skip template messages (contains {{variable}} patterns)
+                if hasattr(message, 'content') and isinstance(message.content, str) and '{{' in message.content and '}}' in message.content:
+                    continue
+                # Include actual chat history messages
+                chat_history_messages.append(message)
+        
+        # Only use prompt_instructions if explicitly specified (for predict app_type)
+        if self.app_type == "predict" and isinstance(self.prompt, str):
+            prompt_instructions = self.prompt
+        
+        # Create a unified YAML schema with conditional tool binding
+        # Build the base node configuration
+        node_config = {
+            'id': 'agent',
+            'type': 'llm',
+            'prompt': {
+                'template': prompt_instructions or "You are a helpful assistant."
+            },
+            'input': ['messages'],
+            'output': ['messages'],
+            'transition': 'END'
+        }
+        
+        # Add tool binding only if tools are present
+        if simple_tools:
+            tool_names = [tool.name for tool in simple_tools]
+            tool_names_yaml = str(tool_names).replace("'", '"')  # Convert to YAML-compatible format
+            node_config['tool_names'] = tool_names_yaml
+            logger.info("Binding tools: %s", tool_names)
+        
+        # Properly setup the prompt for YAML
+        import yaml
+        escaped_prompt = prompt_instructions or "You are a helpful assistant."
+        
+        # Create the schema as a dictionary first, then convert to YAML
+        state_messages_config = {'type': 'list'}
+        
+        # Only set initial messages if there's actual conversation history (not just system prompts)
+        actual_conversation_messages = [
+            msg for msg in chat_history_messages 
+            if not isinstance(msg, SystemMessage)  # Exclude system messages as they're handled by prompt template
+        ]
+        
+        if actual_conversation_messages:
+            state_messages_config['value'] = actual_conversation_messages
+            logger.info(f"Setting initial conversation history with {len(actual_conversation_messages)} messages")
+        
+        schema_dict = {
+            'name': 'react_agent',
+            'state': {
+                'messages': state_messages_config
+            },
+            'nodes': [{
+                'id': 'agent',
+                'type': 'llm',
+                'prompt': {
+                    'template': escaped_prompt
+                },
+                'input': ['messages'],
+                'output': ['messages'],
+                'transition': 'END'
+            }],
+            'entry_point': 'agent'
+        }
+        
+        # Add tool-specific parameters only if tools exist
+        if simple_tools:
+            schema_dict['nodes'][0]['tool_names'] = tool_names
+        
+        # Convert to YAML string
+        yaml_schema = yaml.dump(schema_dict, default_flow_style=False, allow_unicode=True)
+        
+        # Use create_graph function to build the agent like other graph types
+        from .langraph_agent import create_graph
+    
+        agent = create_graph(
+            client=self.client,
+            yaml_schema=yaml_schema,
+            tools=simple_tools,
+            memory=checkpointer,
+            store=self.store,
+            debug=False,
+            for_subgraph=False
+        )
+        
+        return agent
 
     def pipeline(self):
         memory = self.memory

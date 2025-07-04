@@ -6,7 +6,7 @@ from typing import Dict
 import yaml
 import ast
 from langchain_core.callbacks import dispatch_custom_event
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain_core.runnables import Runnable
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -498,14 +498,36 @@ def create_graph(
                     var: get_type_hints(state_class).get(var, str).__name__
                     for var in output_vars
                 }
+                
+                # Check if tools should be bound to this LLM node
+                tool_names = node.get('tool_names', []) if isinstance(node.get('tool_names'), list) else []
+                
+                # Filter tools if specific tool names are provided
+                available_tools = []
+            
+                if tool_names:
+                    # Filter tools by name
+                    tool_dict = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
+                    available_tools = [tool_dict[name] for name in tool_names if name in tool_dict]
+                    if len(available_tools) != len(tool_names):
+                        missing_tools = [name for name in tool_names if name not in tool_dict]
+                        logger.warning(f"Some tools not found for LLM node {node_id}: {missing_tools}")
+                else:
+                    # Use all available tools
+                    available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
+                
                 lg_builder.add_node(node_id, LLMNode(
-                    client=client, prompt=node.get('prompt', {}),
-                    name=node['id'], return_type='dict',
+                    client=client, 
+                    prompt=node.get('prompt', {}),
+                    name=node['id'], 
+                    return_type='dict',
                     response_key=node.get('response_key', 'messages'),
                     structured_output_dict=output_vars_dict,
                     output_variables=output_vars,
                     input_variables=node.get('input', ['messages']),
-                    structured_output=node.get('structured_output', False)))
+                    structured_output=node.get('structured_output', False),
+                    available_tools=available_tools,
+                    tool_names=tool_names))
             elif node_type == 'router':
                 # Add a RouterNode as an independent node
                 lg_builder.add_node(node_id, RouterNode(
@@ -604,6 +626,29 @@ def create_graph(
     return compiled.validate()
 
 
+def convert_dict_to_message(msg_dict):
+    """Convert a dictionary message to a LangChain message object."""
+    if isinstance(msg_dict, BaseMessage):
+        return msg_dict  # Already a LangChain message
+    
+    if isinstance(msg_dict, dict):
+        role = msg_dict.get('role', 'user')
+        content = msg_dict.get('content', '')
+        
+        if role == 'user':
+            return HumanMessage(content=content)
+        elif role == 'assistant':
+            return AIMessage(content=content)
+        elif role == 'system':
+            return SystemMessage(content=content)
+        else:
+            # Default to HumanMessage for unknown roles
+            return HumanMessage(content=content)
+    
+    # If it's neither dict nor BaseMessage, convert to string and make HumanMessage
+    return HumanMessage(content=str(msg_dict))
+
+
 class LangGraphAgentRunnable(CompiledStateGraph):
     def __init__(self, *args, output_variables=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -612,16 +657,28 @@ class LangGraphAgentRunnable(CompiledStateGraph):
     def invoke(self, input: Union[dict[str, Any], Any],
                config: Optional[RunnableConfig] = None,
                *args, **kwargs):
-
+        logger.info(f"Incomming Input: {input}")
         if not config.get("configurable", {}).get("thread_id"):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")
+        # Handle chat history and current input properly
         if input.get('chat_history') and not input.get('messages'):
-            input['messages'] = input.pop('chat_history')
+            # Convert chat history dict messages to LangChain message objects
+            chat_history = input.pop('chat_history')
+            input['messages'] = [convert_dict_to_message(msg) for msg in chat_history]
+        
+        # Append current input to existing messages instead of overwriting
         if input.get('input'):
-            input['messages'] = [{"role": "user", "content": input.get('input')}]
+            current_message = HumanMessage(content=input.get('input'))
+            if input.get('messages'):
+                # Ensure existing messages are LangChain objects
+                input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]
+                # Append to existing messages
+                input['messages'].append(current_message)
+            else:
+                # No existing messages, create new list
+                input['messages'] = [current_message]
         logging.info(f"Input: {thread_id} - {input}")
-
         if self.checkpointer and self.checkpointer.get_tuple(config):
             self.update_state(config, input)
             result = super().invoke(None, config=config, *args, **kwargs)
