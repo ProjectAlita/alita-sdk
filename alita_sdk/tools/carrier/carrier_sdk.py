@@ -103,6 +103,10 @@ class CarrierClient(BaseModel):
         endpoint = f"api/v1/integrations/integrations/{self.credentials.project_id}?name={name}"
         return self.request('get', endpoint)
 
+    def get_available_locations(self):
+        endpoint = f"api/v1/shared/locations/default/{self.credentials.project_id}"
+        return self.request('get', endpoint)
+
     def run_ui_test(self, test_id: str, json_body):
         """Run a UI test with the given test ID and JSON body."""
         endpoint = f"api/v1/ui_performance/test/{self.credentials.project_id}/{test_id}"

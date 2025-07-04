@@ -79,8 +79,8 @@ class RunTestByIDTool(BaseTool):
     description: str = "Execute test plan from the Carrier platform."
     args_schema: Type[BaseModel] = create_model(
         "RunTestByIdInput",
-        test_id=(str, Field(default=None, description="Test id to execute")),
-        name=(str, Field(default=None, description="Test name to execute")),
+        test_id=(int, Field(default=None, description="Test id to execute. Use test_id if user provide id in int format")),
+        name=(str, Field(default=None, description="Test name to execute. Use name if user provide name in str format")),
         test_parameters=(list, Field(
             default=None,
             description=(
@@ -89,9 +89,26 @@ class RunTestByIDTool(BaseTool):
                 "contain parameter names and their values."
             )
         )),
+        location=(str, Field(
+            default=None,
+            description=(
+                "Location to execute the test. Choose from public_regions, project_regions, "
+                "or cloud_regions. For cloud_regions, additional parameters may be required."
+            )
+        )),
+        cloud_settings=(dict, Field(
+            default={},
+            description=(
+                "Additional parameters for cloud_regions. Provide as a dictionary, "
+                "e.g., {'region_name': 'us-west-1', 'instance_type': 't2.large'}. "
+                "Don't provide this parameter as string! It should be a dictionary!"
+                "If no changes are needed, respond with 'use default'."
+                "Ensure these settings are passed as a valid dictionary not string"
+            )
+        )),
     )
 
-    def _run(self, test_id=None, name=None, test_parameters=None):
+    def _run(self, test_id=None, name=None, test_parameters=None, location=None, cloud_settings=None):
         try:
             if not test_id and not name:
                 return {"message": "Please provide test id or test name to start"}
@@ -115,9 +132,18 @@ class RunTestByIDTool(BaseTool):
             # If no test_parameters are provided, return the default ones for confirmation
             if test_parameters is None:
                 return {
-                    "message": "Please confirm or override the following test parameters to proceed with the test execution.",
+                    "message": "The test requires confirmation or customization of the following parameters before execution.",
                     "default_test_parameters": default_test_parameters,
-                    "instruction": "To override parameters, provide a list of dictionaries for 'test_parameters', e.g., [{'vUsers': '5', 'duration': '120'}].",
+                    "instruction": (
+                        "If the user has already indicated that default parameters should be used, "
+                        "pass 'default_test_parameters' as 'test_parameters' and invoke the '_run' method again without prompting the user.\n"
+                        "If the user wants to proceed with default parameters, respond with 'use default'.\n"
+                        "In this case, the agent should pass 'default_test_parameters' as 'test_parameters' to the tool.\n"
+                        "If the user provides specific overrides, parse them into a list of dictionaries in the following format:\n"
+                        "[{'vUsers': '5', 'duration': '120'}].\n"
+                        "Each dictionary should contain the parameter name and its desired value.\n"
+                        "Ensure that you correctly parse and validate the user's input before invoking the '_run' method."
+                    ),
                 }
 
             # Normalize test_parameters if provided in an incorrect format
@@ -125,6 +151,55 @@ class RunTestByIDTool(BaseTool):
 
             # Apply user-provided test parameters
             updated_test_parameters = self._apply_test_parameters(default_test_parameters, test_parameters)
+
+            # Fetch available locations
+            available_locations = self.api_wrapper.get_available_locations()
+            # If location is not provided, prompt the user with available options
+            if not location:
+                return {
+                    "message": "Please select a location to execute the test.",
+                    "available_locations": {
+                        "public_regions": available_locations["public_regions"],
+                        "project_regions": available_locations["project_regions"],
+                        "cloud_regions": [region["name"] for region in available_locations["cloud_regions"]],
+                    },
+                    "instruction": (
+                        "For public_regions and project_regions, provide the region name. "
+                        "For cloud_regions, provide the region name and optionally override cloud_settings."
+                    )
+                }
+
+            # Handle cloud_regions with additional parameters
+            selected_cloud_region = next(
+                (region for region in available_locations["cloud_regions"] if region["name"] == location),
+                None
+            )
+
+            if selected_cloud_region:
+                # Extract available cloud_settings from the selected cloud region
+                available_cloud_settings = selected_cloud_region["cloud_settings"]
+
+                # Add default values for instance_type and ec2_instance_type
+                available_cloud_settings["instance_type"] = "spot"
+                available_cloud_settings["ec2_instance_type"] = "t2.medium"
+
+                # If cloud_settings are not provided, prompt the user with available parameters
+                if not cloud_settings:
+                    return {
+                        "message": f"Please confirm or override the following cloud settings for the selected location: {location}",
+                        "available_cloud_settings": available_cloud_settings,
+                        "instruction": (
+                            "Provide a dictionary to override cloud settings, e.g., "
+                            "{'region_name': 'us-west-1', 'instance_type': 't2.large'}. "
+                            "Don't provide this parameter as string! It should be a dictionary! "
+                            "Ensure these settings are passed to the 'cloud_settings' argument, not 'test_parameters'."
+                            "Ensure these settings are passed as a valid dictionary not string"
+                        )
+                    }
+
+                # Validate and merge user-provided cloud_settings with available parameters
+                cloud_settings = self._merge_cloud_settings(available_cloud_settings, cloud_settings)
+
 
             # Build common_params dictionary
             common_params = {
@@ -136,7 +211,8 @@ class RunTestByIDTool(BaseTool):
             # Add env_vars, parallel_runners, and location to common_params
             common_params["env_vars"] = test_data.get("env_vars", {})
             common_params["parallel_runners"] = test_data.get("parallel_runners")
-            common_params["location"] = test_data.get("location")
+            common_params["location"] = location
+            common_params["env_vars"]["cloud_settings"] = cloud_settings or {}
 
             # Build the JSON body
             json_body = {
@@ -146,7 +222,7 @@ class RunTestByIDTool(BaseTool):
             }
 
             # Execute the test
-            report_id = self.api_wrapper.run_test(test_id, json_body)
+            report_id = self.api_wrapper.run_test(test_data.get("id"), json_body)
             return f"Test started. Report id: {report_id}. Link to report:" \
                    f"{self.api_wrapper.url.rstrip('/')}/-/performance/backend/results?result_id={report_id}"
 
@@ -206,6 +282,24 @@ class RunTestByIDTool(BaseTool):
                 "default": param["default"]
             })
         return updated_parameters
+
+    def _merge_cloud_settings(self, available_cloud_settings, user_cloud_settings):
+        """
+        Merge user-provided cloud settings with available cloud settings.
+        Ensure that user-provided values override the defaults.
+        """
+        if not user_cloud_settings:
+            return available_cloud_settings
+
+        # Validate user-provided keys against available keys
+        invalid_keys = [key for key in user_cloud_settings if key not in available_cloud_settings]
+        if invalid_keys:
+            raise ValueError(
+                f"Invalid keys in cloud settings: {invalid_keys}. Allowed keys: {list(available_cloud_settings.keys())}")
+
+        # Merge the settings
+        merged_settings = {**available_cloud_settings, **user_cloud_settings}
+        return merged_settings
 
 
 class CreateBackendTestInput(BaseModel):

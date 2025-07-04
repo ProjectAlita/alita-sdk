@@ -70,6 +70,9 @@ class CarrierAPIWrapper(BaseModel):
     def get_integrations(self, name: str):
         return self._client.get_integrations(name)
 
+    def get_available_locations(self):
+        return self._client.get_available_locations()
+
     def run_test(self, test_id: str, json_body):
         return self._client.run_test(test_id, json_body)
 
