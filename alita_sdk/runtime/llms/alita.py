@@ -35,7 +35,7 @@ from langchain_core.messages import (AIMessageChunk, BaseMessage, HumanMessage, 
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import run_in_executor
 from langchain_community.chat_models.openai import generate_from_stream, _convert_delta_to_message_chunk
-from ..clients import AlitaClient
+from ..clients.client import AlitaClient
 from pydantic import Field, model_validator, field_validator, ValidationInfo
 
 logger = logging.getLogger(__name__)
