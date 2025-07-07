@@ -20,19 +20,16 @@ logger = logging.getLogger(__name__)
 # Input models for Test Plan operations
 TestPlanCreateModel = create_model(
     "TestPlanCreateModel",
-    test_plan_create_params=(str, Field(description="JSON of the test plan create parameters")),
-    project=(str, Field(description="Project ID or project name"))
+    test_plan_create_params=(str, Field(description="JSON of the test plan create parameters"))
 )
 
 TestPlanDeleteModel = create_model(
     "TestPlanDeleteModel",
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan to be deleted"))
 )
 
 TestPlanGetModel = create_model(
     "TestPlanGetModel",
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(Optional[int], Field(description="ID of the test plan to get", default=None))
 )
 
@@ -77,20 +74,17 @@ TestSuiteCreateModel = create_model(
         'name':'str'
     }
     """)),
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan that contains the suites"))
 )
 
 TestSuiteDeleteModel = create_model(
     "TestSuiteDeleteModel",
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan that contains the suite")),
     suite_id=(int, Field(description="ID of the test suite to delete"))
 )
 
 TestSuiteGetModel = create_model(
     "TestSuiteGetModel",
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan that contains the suites")),
     suite_id=(Optional[int], Field(description="ID of the suite to get", default=None))
 )
@@ -98,14 +92,12 @@ TestSuiteGetModel = create_model(
 TestCaseAddModel = create_model(
     "TestCaseAddModel",
     suite_test_case_create_update_parameters=(str, Field(description='JSON array of the suite test case create update parameters. Example: \"[{"work_item":{"id":"23"}}]\"')),
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan to which test cases are to be added")),
     suite_id=(int, Field(description="ID of the test suite to which test cases are to be added"))
 )
 
 TestCaseCreateModel = create_model(
     "TestCaseCreateModel",
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan to which test cases are to be added")),
     suite_id=(int, Field(description="ID of the test suite to which test cases are to be added")),
     title=(str, Field(description="Test case title")),
@@ -115,7 +107,6 @@ TestCaseCreateModel = create_model(
 
 TestCaseGetModel = create_model(
     "TestCaseGetModel",
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan for which test cases are requested")),
     suite_id=(int, Field(description="ID of the test suite for which test cases are requested")),
     test_case_id=(str, Field(description="Test Case Id to be fetched"))
@@ -123,7 +114,6 @@ TestCaseGetModel = create_model(
 
 TestCasesGetModel = create_model(
     "TestCasesGetModel",
-    project=(str, Field(description="Project ID or project name")),
     plan_id=(int, Field(description="ID of the test plan for which test cases are requested")),
     suite_id=(int, Field(description="ID of the test suite for which test cases are requested"))
 )
@@ -131,6 +121,7 @@ TestCasesGetModel = create_model(
 class TestPlanApiWrapper(BaseToolApiWrapper):
     __test__ = False
     organization_url: str
+    project: str
     token: SecretStr
     limit: Optional[int] = 5
     _client: Optional[TestPlanClient] = PrivateAttr()
@@ -148,90 +139,90 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
             raise ImportError(f"Failed to connect to Azure DevOps: {e}")
         return values
 
-    def create_test_plan(self, test_plan_create_params: str, project: str):
+    def create_test_plan(self, test_plan_create_params: str):
         """Create a test plan in Azure DevOps."""
         try:
             params = json.loads(test_plan_create_params)
             test_plan_create_params_obj = TestPlanCreateParams(**params)
-            test_plan = self._client.create_test_plan(test_plan_create_params_obj, project)
+            test_plan = self._client.create_test_plan(test_plan_create_params_obj, self.project)
             return f"Test plan {test_plan.id} created successfully."
         except Exception as e:
             logger.error(f"Error creating test plan: {e}")
             return ToolException(f"Error creating test plan: {e}")
 
-    def delete_test_plan(self, project: str, plan_id: int):
+    def delete_test_plan(self, plan_id: int):
         """Delete a test plan in Azure DevOps."""
         try:
-            self._client.delete_test_plan(project, plan_id)
+            self._client.delete_test_plan(self.project, plan_id)
             return f"Test plan {plan_id} deleted successfully."
         except Exception as e:
             logger.error(f"Error deleting test plan: {e}")
             return ToolException(f"Error deleting test plan: {e}")
 
-    def get_test_plan(self, project: str, plan_id: Optional[int] = None):
+    def get_test_plan(self, plan_id: Optional[int] = None):
         """Get a test plan or list of test plans in Azure DevOps."""
         try:
             if plan_id:
-                test_plan = self._client.get_test_plan_by_id(project, plan_id)
+                test_plan = self._client.get_test_plan_by_id(self.project, plan_id)
                 return test_plan.as_dict()
             else:
-                test_plans = self._client.get_test_plans(project)
+                test_plans = self._client.get_test_plans(self.project)
                 return [plan.as_dict() for plan in test_plans]
         except Exception as e:
             logger.error(f"Error getting test plan(s): {e}")
             return ToolException(f"Error getting test plan(s): {e}")
 
-    def create_test_suite(self, test_suite_create_params: str, project: str, plan_id: int):
+    def create_test_suite(self, test_suite_create_params: str, plan_id: int):
         """Create a test suite in Azure DevOps."""
         try:
             params = json.loads(test_suite_create_params)
             test_suite_create_params_obj = TestSuiteCreateParams(**params)
-            test_suite = self._client.create_test_suite(test_suite_create_params_obj, project, plan_id)
+            test_suite = self._client.create_test_suite(test_suite_create_params_obj, self.project, plan_id)
             return f"Test suite {test_suite.id} created successfully."
         except Exception as e:
             logger.error(f"Error creating test suite: {e}")
             return ToolException(f"Error creating test suite: {e}")
 
-    def delete_test_suite(self, project: str, plan_id: int, suite_id: int):
+    def delete_test_suite(self, plan_id: int, suite_id: int):
         """Delete a test suite in Azure DevOps."""
         try:
-            self._client.delete_test_suite(project, plan_id, suite_id)
+            self._client.delete_test_suite(self.project, plan_id, suite_id)
             return f"Test suite {suite_id} deleted successfully."
         except Exception as e:
             logger.error(f"Error deleting test suite: {e}")
             return ToolException(f"Error deleting test suite: {e}")
 
-    def get_test_suite(self, project: str, plan_id: int, suite_id: Optional[int] = None):
+    def get_test_suite(self, plan_id: int, suite_id: Optional[int] = None):
         """Get a test suite or list of test suites in Azure DevOps."""
         try:
             if suite_id:
-                test_suite = self._client.get_test_suite_by_id(project, plan_id, suite_id)
+                test_suite = self._client.get_test_suite_by_id(self.project, plan_id, suite_id)
                 return test_suite.as_dict()
             else:
-                test_suites = self._client.get_test_suites_for_plan(project, plan_id)
+                test_suites = self._client.get_test_suites_for_plan(self.project, plan_id)
                 return [suite.as_dict() for suite in test_suites]
         except Exception as e:
             logger.error(f"Error getting test suite(s): {e}")
             return ToolException(f"Error getting test suite(s): {e}")
 
-    def add_test_case(self, suite_test_case_create_update_parameters, project: str, plan_id: int, suite_id: int):
+    def add_test_case(self, suite_test_case_create_update_parameters, plan_id: int, suite_id: int):
         """Add a test case to a suite in Azure DevOps."""
         try:
             if isinstance(suite_test_case_create_update_parameters, str):
                 suite_test_case_create_update_parameters = json.loads(suite_test_case_create_update_parameters)
             suite_test_case_create_update_params_obj = [SuiteTestCaseCreateUpdateParameters(**param) for param in suite_test_case_create_update_parameters]
-            test_cases = self._client.add_test_cases_to_suite(suite_test_case_create_update_params_obj, project, plan_id, suite_id)
+            test_cases = self._client.add_test_cases_to_suite(suite_test_case_create_update_params_obj, self.project, plan_id, suite_id)
             return [test_case.as_dict() for test_case in test_cases]
         except Exception as e:
             logger.error(f"Error adding test case: {e}")
             return ToolException(f"Error adding test case: {e}")
 
-    def create_test_case(self, project: str, plan_id: int, suite_id: int, title: str, description: str, test_steps: str):
+    def create_test_case(self, plan_id: int, suite_id: int, title: str, description: str, test_steps: str):
         """Creates a new test case in specified suite in Azure DevOps."""
-        work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url, token=self.token.get_secret_value(), project=project)
+        work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url, token=self.token.get_secret_value(), project=self.project)
         work_item_json = self.build_ado_test_case(title, description, json.loads(test_steps))
         created_work_item_id = work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")['id']
-        return self.add_test_case([{"work_item":{"id":created_work_item_id}}], project, plan_id, suite_id)
+        return self.add_test_case([{"work_item":{"id":created_work_item_id}}], plan_id, suite_id)
 
     def build_ado_test_case(self, title, description, steps):
         """
@@ -259,23 +250,23 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
             }
         }
 
-    def get_test_case(self, project: str, plan_id: int, suite_id: int, test_case_id: str):
+    def get_test_case(self, plan_id: int, suite_id: int, test_case_id: str):
         """Get a test case from a suite in Azure DevOps."""
         try:
-            test_cases = self._client.get_test_case(project, plan_id, suite_id, test_case_id)
+            test_cases = self._client.get_test_case(self.project, plan_id, suite_id, test_case_id)
             if test_cases:  # This checks if the list is not empty
                 test_case = test_cases[0]
                 return test_case.as_dict()
             else:
-                return f"No test cases found per given criteria: project {project}, plan {plan_id}, suite {suite_id}, test case id {test_case_id}"
+                return f"No test cases found per given criteria: project {self.project}, plan {plan_id}, suite {suite_id}, test case id {test_case_id}"
         except Exception as e:
             logger.error(f"Error getting test case: {e}")
             return ToolException(f"Error getting test case: {e}")
 
-    def get_test_cases(self, project: str, plan_id: int, suite_id: int):
+    def get_test_cases(self, plan_id: int, suite_id: int):
         """Get test cases from a suite in Azure DevOps."""
         try:
-            test_cases = self._client.get_test_case_list(project, plan_id, suite_id)
+            test_cases = self._client.get_test_case_list(self.project, plan_id, suite_id)
             return [test_case.as_dict() for test_case in test_cases]
         except Exception as e:
             logger.error(f"Error getting test cases: {e}")

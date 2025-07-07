@@ -24,12 +24,13 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
         m = create_model(
             name_alias,
             name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AzureDevOpsPlansToolkit.toolkit_max_length})),
-            organization_url=(str, Field(default="", title="Organization URL",
+            organization_url=(str, Field(title="Organization URL",
                                                    description="ADO organization url",
                                                    json_schema_extra={
                                                        'configuration': True,
-                                                       "configuration_title": True
+                                                       'configuration_title': True
                                                    })),
+            project=(str, Field(title="Project", description="ADO project", json_schema_extra={'configuration': True})),
             limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
             token=(SecretStr, Field(description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
@@ -49,7 +50,8 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
                                 }
                             ]
                         }
-                    }
+                    },
+                    "configuration_group": "ado",
                 }
             }
             }
