@@ -149,6 +149,69 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return result if isinstance(result, ToolException) else f"File has been updated: {file_path}."
         except Exception as e:
             return ToolException(f"File was not updated due to error: {str(e)}")
+    
+    def get_pull_requests_commits(self, pr_id: str) -> List[Dict[str, Any]]:
+        """
+        Get commits from a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            List[Dict[str, Any]]: List of commits in the pull request
+        """
+        try:
+            result = self._bitbucket.get_pull_request_commits(pr_id=pr_id)
+            return result
+        except Exception as e:
+            return ToolException(f"Can't get commits from pull request `{pr_id}` due to error:\n{str(e)}")
+        
+    def get_pull_requests(self) -> List[Dict[str, Any]]:
+        """
+        Get pull requests from the repository
+        Returns:
+            List[Dict[str, Any]]: List of pull requests in the repository
+        """
+        return self._bitbucket.get_pull_requests()
+    
+    def get_pull_request(self, pr_id: str) -> Any:
+        """
+        Get details of a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            Any: Details of the pull request
+        """
+        try:
+            return self._bitbucket.get_pull_request(pr_id=pr_id)
+        except Exception as e:
+            return ToolException(f"Can't get pull request `{pr_id}` due to error:\n{str(e)}")
+        
+    def get_pull_requests_changes(self, pr_id: str) -> Any:
+        """
+        Get changes of a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            Any: Changes of the pull request
+        """
+        try:
+            return self._bitbucket.get_pull_requests_changes(pr_id=pr_id)
+        except Exception as e:
+            return ToolException(f"Can't get changes from pull request `{pr_id}` due to error:\n{str(e)}")
+        
+    def add_pull_request_comment(self, pr_id: str, content, inline=None) -> str:
+        """
+        Add a comment to a pull request. Supports multiple content types and inline comments.
+        Parameters:
+            pr_id (str): the pull request ID
+            content (str or dict): The comment content. Can be a string (raw text) or a dict with keys 'raw', 'markup', 'html'.
+            inline (dict, optional): Inline comment details. Example: {"from": 57, "to": 122, "path": "<string>"}
+        Returns:
+            str: A success or failure message
+        """
+        try:
+            return self._bitbucket.add_pull_request_comment(pr_id=pr_id, content=content, inline=inline)
+        except Exception as e:
+            return ToolException(f"Can't add comment to pull request `{pr_id}` due to error:\n{str(e)}")
 
     def _get_files(self, file_path: str, branch: str) -> str:
         """

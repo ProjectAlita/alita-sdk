@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from atlassian.bitbucket import Bitbucket, Cloud
 from langchain_core.tools import ToolException
@@ -41,6 +41,22 @@ class BitbucketApiAbstract(ABC):
 
     @abstractmethod
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
+        pass
+
+    @abstractmethod
+    def get_pull_request_commits(self, pr_id: str) -> List[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    def get_pull_request(self, pr_id: str) -> Any:
+        pass
+
+    @abstractmethod
+    def get_pull_requests_changes(self, pr_id: str) -> Any:
+        pass
+
+    @abstractmethod
+    def add_pull_request_comment(self, pr_id: str, text: str) -> str:
         pass
 
 
@@ -122,6 +138,71 @@ class BitbucketServerApi(BitbucketApiAbstract):
             filename=file_path,
             source_commit_id=source_commit['id']
         )
+    
+    def get_pull_request_commits(self, pr_id: str) -> List[Dict[str, Any]]:
+        """
+        Get commits from a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            List[Dict[str, Any]]: List of commits in the pull request
+        """
+        return self.api_client.get_pull_requests_commits(project_key=self.project, repository_slug=self.repository, pull_request_id=pr_id)
+    
+    def get_pull_request(self, pr_id):
+        """ Get details of a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            Any: Details of the pull request
+        """
+        return self.api_client.get_pull_request(project_key=self.project, repository_slug=self.repository, pull_request_id=pr_id)
+    
+    def get_pull_requests_changes(self, pr_id: str) -> Any:
+        """
+        Get changes of a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            Any: Changes of the pull request
+        """
+        return self.api_client.get_pull_requests_changes(project_key=self.project, repository_slug=self.repository, pull_request_id=pr_id)
+    
+    def add_pull_request_comment(self, pr_id, content, inline=None):
+        """
+        Add a comment to a pull request. Supports multiple content types and inline comments.
+        Parameters:
+            pr_id (str): the pull request ID
+            content (dict or str): The comment content. If str, will be used as raw text. If dict, can include 'raw', 'markup', 'html'.
+            inline (dict, optional): Inline comment details. Example: {"from": 57, "to": 122, "path": "<string>"}
+        Returns:
+            str: The API response or created comment URL
+        """
+        # Build the comment data
+        if isinstance(content, str):
+            comment_data = {"text": content}
+        elif isinstance(content, dict):
+            # Bitbucket Server API expects 'text' (raw), and optionally 'markup' and 'html' in a 'content' field
+            if 'raw' in content or 'markup' in content or 'html' in content:
+                comment_data = {"text": content.get("raw", "")}
+                if 'markup' in content:
+                    comment_data["markup"] = content["markup"]
+                if 'html' in content:
+                    comment_data["html"] = content["html"]
+            else:
+                comment_data = {"text": str(content)}
+        else:
+            comment_data = {"text": str(content)}
+
+        if inline:
+            comment_data["inline"] = inline
+
+        return self.api_client.add_pull_request_comment(
+            project_key=self.project,
+            repository_slug=self.repository,
+            pull_request_id=pr_id,
+            **comment_data
+        )
 
 class BitbucketCloudApi(BitbucketApiAbstract):
     api_client: Cloud
@@ -196,3 +277,63 @@ class BitbucketCloudApi(BitbucketApiAbstract):
                 "the current file contents."
             )
         return self.create_file(file_path, updated_file_content, branch)
+    
+    def get_pull_request_commits(self, pr_id: str) -> List[Dict[str, Any]]:
+        """
+        Get commits from a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            List[Dict[str, Any]]: List of commits in the pull request
+        """
+        commits = self.repository.pullrequests.get(pr_id).get('commits', [])
+        if not isinstance(commits, list):
+            commits = list(commits)
+        return commits
+    
+    def get_pull_request(self, pr_id: str) -> Any:
+        """ Get details of a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            Any: Details of the pull request
+        """
+        return self.repository.pullrequests.get(pr_id)
+    
+    def get_pull_requests_changes(self, pr_id: str) -> Any:
+        """
+        Get changes of a pull request
+        Parameters:
+            pr_id(str): the pull request ID
+        Returns:
+            Any: Changes of the pull request
+        """
+        return self.repository.pullrequests.get(pr_id).get('diff', {})
+    
+    def add_pull_request_comment(self, pr_id: str, content, inline=None) -> str:
+        """
+        Add a comment to a pull request. Supports multiple content types and inline comments.
+        Parameters:
+            pr_id (str): the pull request ID
+            content (dict or str): The comment content. If str, will be used as raw text. If dict, can include 'raw', 'markup', 'html'.
+            inline (dict, optional): Inline comment details. Example: {"from": 57, "to": 122, "path": "<string>"}
+        Returns:
+            str: The URL of the created comment
+        """
+        # Build the content dict for Bitbucket Cloud
+        if isinstance(content, str):
+            content_dict = {"raw": content}
+        elif isinstance(content, dict):
+            # Only include allowed keys
+            content_dict = {k: v for k, v in content.items() if k in ("raw", "markup", "html")}
+            if not content_dict:
+                content_dict = {"raw": str(content)}
+        else:
+            content_dict = {"raw": str(content)}
+
+        data = {"content": content_dict}
+        if inline:
+            data["inline"] = inline
+
+        response = self.repository.pullrequests.comments.post(pr_id, data=data)
+        return response['links']['self']['href']

@@ -138,7 +138,7 @@ class ListBranchesTool(BaseTool):
 
     def _run(self):
         try:
-            logger.debug(f"List branches in the repository.")
+            logger.debug("List branches in the repository.")
             return self.api_wrapper.list_branches_in_repo()
         except Exception as e:
             stacktrace = traceback.format_exc()
@@ -215,6 +215,78 @@ class LoaderTool(BaseTool):
         return self.api_wrapper.loader(branch, whitelist, blacklist)
 
 
+class GetPullRequestsCommitsTool(BaseTool):
+    api_wrapper: BitbucketAPIWrapper = Field(default_factory=BitbucketAPIWrapper)
+    name: str = "get_pull_requests_commits"
+    description: str = """This tool is a wrapper for the Bitbucket API to get commits from pull requests."""
+    args_schema: Type[BaseModel] = create_model(
+        "GetPullRequestsCommitsInput",
+        pr_id=(str, Field(description="The ID of the pull request to get commits from.")))
+
+    def _run(self, pr_id: str):
+        try:
+            logger.debug(f"Get pull request commits for {pr_id}.")
+            return self.api_wrapper.get_pull_requests_commits(pr_id)
+        except Exception as e:
+            stacktrace = traceback.format_exc()
+            logger.error(f"Can't get commits from pull request `{pr_id}` due to error:\n{stacktrace}")
+            return f"Can't get commits from pull request `{pr_id}` due to error:\n{stacktrace}"
+
+class GetPullRequestTool(BaseTool):
+    api_wrapper: BitbucketAPIWrapper = Field(default_factory=BitbucketAPIWrapper)
+    name: str = "get_pull_request"
+    description: str = """This tool is a wrapper for the Bitbucket API to get details of a pull request."""
+    args_schema: Type[BaseModel] = create_model(
+        "GetPullRequestInput",
+        pr_id=(str, Field(description="The ID of the pull request to get details from.")))
+
+    def _run(self, pr_id: str):
+        try:
+            logger.debug(f"Get pull request details for {pr_id}.")
+            return self.api_wrapper.get_pull_request(pr_id)
+        except Exception as e:
+            stacktrace = traceback.format_exc()
+            logger.error(f"Can't get pull request `{pr_id}` due to error:\n{stacktrace}")
+            return f"Can't get pull request `{pr_id}` due to error:\n{stacktrace}"
+
+class GetPullRequestsChangesTool(BaseTool):
+    api_wrapper: BitbucketAPIWrapper = Field(default_factory=BitbucketAPIWrapper)
+    name: str = "get_pull_requests_changes"
+    description: str = """This tool is a wrapper for the Bitbucket API to get changes of a pull request."""
+    args_schema: Type[BaseModel] = create_model(
+        "GetPullRequestsChangesInput",
+        pr_id=(str, Field(description="The ID of the pull request to get changes from.")))
+
+    def _run(self, pr_id: str):
+        try:
+            logger.debug(f"Get pull request changes for {pr_id}.")
+            return self.api_wrapper.get_pull_requests_changes(pr_id)
+        except Exception as e:
+            stacktrace = traceback.format_exc()
+            logger.error(f"Can't get changes from pull request `{pr_id}` due to error:\n{stacktrace}")
+            return f"Can't get changes from pull request `{pr_id}` due to error:\n{stacktrace}"
+
+class AddPullRequestCommentTool(BaseTool):
+    api_wrapper: BitbucketAPIWrapper = Field(default_factory=BitbucketAPIWrapper)
+    name: str = "add_pull_request_comment"
+    description: str = """This tool is a wrapper for the Bitbucket API to add a comment to a pull request.
+    Supports multiple content types and inline comments."""
+    args_schema: Type[BaseModel] = create_model(
+        "AddPullRequestCommentInput",
+        pr_id=(str, Field(description="The ID of the pull request to add a comment to.")),
+        content=(str, Field(description="The comment content. Can be a string (raw text) or a dict with keys 'raw', 'markup', 'html'.")),
+        inline=(Optional[dict], Field(default=None, description="Inline comment details. Example: {'from': 57, 'to': 122, 'path': '<string>'}"))
+    )
+
+    def _run(self, pr_id: str, content: str, inline: Optional[dict] = None):
+        try:
+            logger.debug(f"Add comment to pull request {pr_id}.")
+            return self.api_wrapper.add_pull_request_comment(pr_id, content, inline)
+        except Exception as e:
+            stacktrace = traceback.format_exc()
+            logger.error(f"Can't add comment to pull request `{pr_id}` due to error:\n{stacktrace}")
+            return f"Can't add comment to pull request `{pr_id}` due to error:\n{stacktrace}"
+
 __all__ = [
     {"name": "create_branch", "tool": CreateBitbucketBranchTool},
     {"name": "create_pull_request", "tool": CreatePRTool},
@@ -224,5 +296,9 @@ __all__ = [
     {"name": "read_file", "tool": ReadFileTool},
     {"name": "get_files", "tool": GetFilesListTool},
     {"name": "update_file", "tool": UpdateFileTool},
-    {"name": "loader", "tool": LoaderTool}
+    {"name": "loader", "tool": LoaderTool},
+    {"name": "get_pull_requests_commits", "tool": GetPullRequestsCommitsTool},
+    {"name": "get_pull_request", "tool": GetPullRequestTool},
+    {"name": "get_pull_requests_changes", "tool": GetPullRequestsChangesTool},
+    {"name": "add_pull_request_comment", "tool": AddPullRequestCommentTool}
 ]
