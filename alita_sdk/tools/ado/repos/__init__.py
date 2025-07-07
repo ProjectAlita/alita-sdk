@@ -46,19 +46,19 @@ class AzureDevOpsReposToolkit(BaseToolkit):
         AzureDevOpsReposToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            organization_url=(Optional[str], Field(default="", title="Organization URL",
+            organization_url=(str, Field(title="Organization URL",
                                                    description="ADO organization url",
                                                    json_schema_extra={
                                                        'configuration': True,
                                                        "configuration_title": True
                                                    })),
-            project=(Optional[str], Field(default="", title="Project", description="ADO project", json_schema_extra={'configuration': True})),
-            repository_id=(Optional[str], Field(default="", title="Repository ID", description="ADO repository ID",
+            project=(str, Field(title="Project", description="ADO project", json_schema_extra={'configuration': True})),
+            repository_id=(str, Field(title="Repository ID", description="ADO repository ID",
                                                 json_schema_extra={
                                                     'toolkit_name': True,
                                                     'max_toolkit_length': AzureDevOpsReposToolkit.toolkit_max_length,
                                                     'configuration': True})),
-            token=(Optional[SecretStr], Field(default="", title="Token", description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
+            token=(SecretStr, Field(title="Token", description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
             base_branch=(Optional[str], Field(default="", title="Base branch", description="ADO base branch (e.g., main)")),
             active_branch=(Optional[str], Field(default="", title="Active branch", description="ADO active branch (e.g., main)")),
 
@@ -84,7 +84,8 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                         }
                     },
                     "categories": ["code repositories"],
-                    "extra_categories": ["code", "repository", "version control"]
+                    "extra_categories": ["code", "repository", "version control"],
+                    "configuration_group": "ado-repos",
                 }}}
         )
 

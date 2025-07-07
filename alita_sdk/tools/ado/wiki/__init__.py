@@ -25,7 +25,7 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                                  'toolkit_name': True,
                                  'max_toolkit_length': AzureDevOpsWikiToolkit.toolkit_max_length})
                   ),
-            organization_url=(str, Field(default="", title="Organization URL",
+            organization_url=(str, Field(title="Organization URL",
                                                    description="ADO organization url",
                                                    json_schema_extra={
                                                        'configuration': True,
@@ -52,7 +52,8 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                                     }
                                 ]
                             }
-                        }
+                        },
+                        "configuration_group": "ado",
                     }
                 }
             }
