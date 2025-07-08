@@ -96,13 +96,55 @@ TestCaseAddModel = create_model(
     suite_id=(int, Field(description="ID of the test suite to which test cases are to be added"))
 )
 
+
+test_steps_description = """Json or XML array string with test steps. 
+    Json example: [{"stepNumber": 1, "action": "Some action", "expectedResult": "Some expectation"},...]
+    XML example: 
+    <Steps>
+    <Step>
+      <StepNumber>1</StepNumber>
+      <Action>Some action</Action>
+      <ExpectedResult>Some expectation</ExpectedResult>
+    </Step>
+    ...
+    </Steps>
+    """
+
+TestCasesCreateModel = create_model(
+    "TestCasesCreateModel",
+    create_test_cases_parameters=(str, Field(description=f"""Json array where each object is separate test case to be created.
+    Input format:
+    [
+        {'{'}
+            project: str
+            plan_id: str
+            suite_id: str
+            title: str
+            description: str
+            test_steps: str
+            test_steps_format: str
+        {'}'}
+        ...
+    ]
+    Where:
+    project - Project ID or project name;
+    plan_id - ID of the test plan to which test cases are to be added;
+    suite_id - ID of the test suite to which test cases are to be added
+    title - Test case title;
+    description - Test case description;
+    test_steps - {test_steps_description}
+    test_steps_format - Format of provided test steps. Possible values: json, xml
+    """))
+)
+
 TestCaseCreateModel = create_model(
     "TestCaseCreateModel",
     plan_id=(int, Field(description="ID of the test plan to which test cases are to be added")),
     suite_id=(int, Field(description="ID of the test suite to which test cases are to be added")),
     title=(str, Field(description="Test case title")),
     description=(str, Field(description="Test case description")),
-    test_steps=(str, Field(description="""Json array with test steps. Example: [{"action": "Some action", "expectedResult": "Some expectation"},...]""")),
+    test_steps=(str, Field(description=test_steps_description)),
+    test_steps_format=(Optional[str], Field(description="Format of provided test steps. Possible values: json, xml", default='json'))
 )
 
 TestCaseGetModel = create_model(
@@ -217,31 +259,39 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error adding test case: {e}")
             return ToolException(f"Error adding test case: {e}")
 
-    def create_test_case(self, plan_id: int, suite_id: int, title: str, description: str, test_steps: str):
+    def create_test_cases(self, create_test_cases_parameters):
+        """Creates new test cases in specified suite in Azure DevOps."""
+        test_cases = json.loads(create_test_cases_parameters)
+        return [self.create_test_case(
+            project=test_case['project'],
+            plan_id=test_case['plan_id'],
+            suite_id=test_case['suite_id'],
+            title=test_case['title'],
+            description=test_case['description'],
+            test_steps=test_case['test_steps'],
+            test_steps_format=test_case['test_steps_format']) for test_case in test_cases]
+
+
+    def create_test_case(self, plan_id: int, suite_id: int, title: str, description: str, test_steps: str, test_steps_format: str = 'json'):
         """Creates a new test case in specified suite in Azure DevOps."""
         work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url, token=self.token.get_secret_value(), project=self.project)
-        work_item_json = self.build_ado_test_case(title, description, json.loads(test_steps))
+        if test_steps_format == 'json':
+            steps_xml = self.get_test_steps_xml(json.loads(test_steps))
+        elif test_steps_format == 'xml':
+            steps_xml = self.convert_steps_tag_to_ado_steps(test_steps)
+        else:
+            return ToolException("Unknown test steps format: " + test_steps_format)
+        work_item_json = self.build_ado_test_case(title, description, steps_xml)
         created_work_item_id = work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")['id']
         return self.add_test_case([{"work_item":{"id":created_work_item_id}}], plan_id, suite_id)
 
-    def build_ado_test_case(self, title, description, steps):
+    def build_ado_test_case(self, title, description, steps_xml):
         """
         :param title: test title
         :param description: test description
-        :param steps: steps [(action, expected result), ...]
+        :param steps: steps xml
         :return: JSON with ADO fields
         """
-        steps_elem = ET.Element("steps")
-
-        for idx, step in enumerate(steps, start=1):
-            step_elem = ET.SubElement(steps_elem, "step", id=str(idx), type="Action")
-            action_elem = ET.SubElement(step_elem, "parameterizedString", isformatted="true")
-            action_elem.text = step["action"]
-            expected_elem = ET.SubElement(step_elem, "parameterizedString", isformatted="true")
-            expected_elem.text = step["expectedResult"]
-
-        steps_xml = ET.tostring(steps_elem, encoding="unicode")
-
         return {
             "fields": {
                 "System.Title": title,
@@ -249,6 +299,42 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
                 "Microsoft.VSTS.TCM.Steps": steps_xml
             }
         }
+
+    def get_test_steps_xml(self, steps: dict):
+        steps_elem = ET.Element("steps")
+        for step in steps:
+            step_number = step.get("stepNumber", 1)
+            action = step.get("action", "")
+            expected_result = step.get("expectedResult", "")
+            steps_elem.append(self.build_step_element(step_number, action, expected_result))
+        return ET.tostring(steps_elem, encoding="unicode")
+
+    def convert_steps_tag_to_ado_steps(self, input_xml: str) -> str:
+        """
+        Converts input XML from format:
+        <Steps><Step><Action>...</Action><ExpectedResult>...</ExpectedResult></Step></Steps>
+        to Azure DevOps test case format:
+        <steps><step id="1" type="Action">...</step>...</steps>
+        """
+        input_root = ET.fromstring(input_xml)
+        steps_elem = ET.Element("steps")
+        for step_node in input_root.findall("Step"):
+            step_number = step_node.findtext("StepNumber", default="1")
+            action = step_node.findtext("Action", default="")
+            expected_result = step_node.findtext("ExpectedResult", default="")
+            steps_elem.append(self.build_step_element(step_number, action, expected_result))
+        return ET.tostring(steps_elem, encoding="unicode")
+
+    def build_step_element(self, step_number: str, action: str, expected_result: str) -> ET.Element:
+        """
+            Creates an individual <step> element for Azure DevOps.
+            """
+        step_elem = ET.Element("step", id=str(step_number), type="Action")
+        action_elem = ET.SubElement(step_elem, "parameterizedString", isformatted="true")
+        action_elem.text = action or ""
+        expected_elem = ET.SubElement(step_elem, "parameterizedString", isformatted="true")
+        expected_elem.text = expected_result or ""
+        return step_elem
 
     def get_test_case(self, plan_id: int, suite_id: int, test_case_id: str):
         """Get a test case from a suite in Azure DevOps."""
@@ -322,6 +408,12 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
                 "description": self.create_test_case.__doc__,
                 "args_schema": TestCaseCreateModel,
                 "ref": self.create_test_case,
+            },
+            {
+                "name": "create_test_cases",
+                "description": self.create_test_cases.__doc__,
+                "args_schema": TestCasesCreateModel,
+                "ref": self.create_test_cases,
             },
             {
                 "name": "get_test_case",
