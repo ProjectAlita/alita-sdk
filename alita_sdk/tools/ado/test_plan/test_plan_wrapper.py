@@ -116,7 +116,6 @@ TestCasesCreateModel = create_model(
     Input format:
     [
         {'{'}
-            project: str
             plan_id: str
             suite_id: str
             title: str
@@ -127,7 +126,6 @@ TestCasesCreateModel = create_model(
         ...
     ]
     Where:
-    project - Project ID or project name;
     plan_id - ID of the test plan to which test cases are to be added;
     suite_id - ID of the test suite to which test cases are to be added
     title - Test case title;
@@ -263,7 +261,6 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
         """Creates new test cases in specified suite in Azure DevOps."""
         test_cases = json.loads(create_test_cases_parameters)
         return [self.create_test_case(
-            project=test_case['project'],
             plan_id=test_case['plan_id'],
             suite_id=test_case['suite_id'],
             title=test_case['title'],
@@ -289,7 +286,7 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
         """
         :param title: test title
         :param description: test description
-        :param steps: steps xml
+        :param steps_xml: steps xml
         :return: JSON with ADO fields
         """
         return {
