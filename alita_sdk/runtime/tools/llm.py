@@ -35,9 +35,10 @@ def create_llm_input_with_messages(
     input_messages = []
     
     # Add system message from prompt if available
-    if prompt and prompt.get('template'):
+    if prompt:
         try:
-            system_content = prompt['template'].format(**params) if params else prompt['template']
+            # Format the system message using the prompt template or value and params
+            system_content = (prompt['template'] if 'template' in prompt else prompt['value']).format(**params) if params else prompt['template']
             input_messages.append(SystemMessage(content=system_content))
         except KeyError as e:
             error_msg = f"KeyError in prompt formatting: {e}. Available params: {list(params.keys())}"
