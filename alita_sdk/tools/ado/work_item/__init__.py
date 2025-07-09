@@ -48,7 +48,9 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                                 ]
                             }
                         },
-                        "configuration_group": "ado",
+                        "configuration_group": {
+                            "name": "ado",
+                        }
                     }
                 }
             }

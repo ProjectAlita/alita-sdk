@@ -51,7 +51,11 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
                             ]
                         }
                     },
-                    "configuration_group": "ado",
+                    "configuration_group": {
+                        "name": "ado",
+                        "label": "Azure DevOps",
+                        "icon_url": "azure-icon.svg",
+                    }
                 }
             }
             }

@@ -49,7 +49,9 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                                 ]
                             }
                         },
-                        "configuration_group": "ado",
+                        "configuration_group": {
+                            "name": "ado",
+                        }
                     }
                 }
             }
