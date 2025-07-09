@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import create_model, BaseModel, Field, SecretStr
@@ -26,11 +26,13 @@ class SlackToolkit(BaseToolkit):
          SlackToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
          return create_model(
             name,
-            slack_token=(SecretStr, Field( description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")),
-            channel_id=(str, Field(title="Channel ID", description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")),
-            selected_tools=(list[str], Field(title="Selected Tools", description="List of tools to enable", default=[])),
+             slack_token=(SecretStr, Field(description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")),
+             channel_id=(str, Field(title="Channel ID",
+                                    description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")),
+             selected_tools=(List[Literal[tuple(selected_tools)]],
+                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
              __config__={'json_schema_extra': {'metadata': {"label": "slack", "icon_url": None, "hidden": True}}}
-        )
+         )
 
     @classmethod
     def get_toolkit(cls, selected_tools: Optional[List[str]] = None, toolkit_name: Optional[str] = None, **kwargs):
