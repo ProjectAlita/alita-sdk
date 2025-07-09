@@ -310,18 +310,21 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         return [
             {
                 "name": "search_index",
+                "mode": "search_index",
                 "ref": self.search_index,
                 "description": self.search_index.__doc__,
                 "args_schema": BaseSearchParams
             },
             {
                 "name": "stepback_search_index",
+                "mode": "stepback_search_index",
                 "ref": self.stepback_search_index,
                 "description": self.stepback_search_index.__doc__,
                 "args_schema": BaseStepbackSearchParams
             },
             {
                 "name": "stepback_summary_index",
+                "mode": "stepback_summary_index",
                 "ref": self.stepback_summary_index,
                 "description": self.stepback_summary_index.__doc__,
                 "args_schema": BaseStepbackSearchParams
@@ -437,6 +440,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         # Add the index_data tool specific to code toolkits
         index_tool = {
             "name": "index_data",
+            "mode": "index_data",
             "ref": self.index_data,
             "description": self.index_data.__doc__,
             "args_schema": BaseCodeIndexParams
