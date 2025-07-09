@@ -38,27 +38,19 @@ class SlackApiWrapper(BaseToolApiWrapper):
     slack_token: Optional[SecretStr] = Field(default=None,description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")
     channel_id: Optional[str] = Field(default=None, description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")
 
-    @model_validator(mode="after")
+    @model_validator(mode="before")
     @classmethod
     def validate_toolkit(cls, values):
-        token = values.slack_token.get_secret_value() if values.slack_token else None
+        token = values.get("slack_token")
         if not token:
-            logging.error("Slack token is required.")
-            raise ValueError("Slack token is required.")
-        try:
-            cls._client = WebClient(token=token)
-            logging.info("Authenticated with Slack token.")
-        except Exception as e:
-            logging.error(f"Failed to authenticate with Slack: {str(e)}")
-            raise ValueError(f"Failed to authenticate with Slack: {str(e)}")
+            logger.error("Slack token is required for authentication.")
+            raise ValueError("Slack token is required for authentication.")
         return values
-
     def _get_client(self):
-        if not self._client:
+        if not hasattr(self, "_client") or self._client is None:
             self._client = WebClient(token=self.slack_token.get_secret_value())
         return self._client
-
-
+    
     def send_message(self, message: str):
         """
         Sends a message to a specified Slack channel, user, or conversation.
@@ -85,6 +77,7 @@ class SlackApiWrapper(BaseToolApiWrapper):
         try:
 
             client = self._get_client()
+            logger.info(f"auth test: {client.auth_test()}")
             # Fetch conversation history
             response = client.conversations_history(
                 channel=self.channel_id,
