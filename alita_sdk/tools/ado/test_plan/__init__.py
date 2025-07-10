@@ -51,6 +51,8 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
                             ]
                         }
                     },
+                    # connect different toolkits under the same configuration group with the same name,
+                    # label and icon
                     "configuration_group": {
                         "name": "ado",
                         "label": "Azure DevOps",

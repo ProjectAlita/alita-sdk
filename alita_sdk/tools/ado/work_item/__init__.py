@@ -25,9 +25,16 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                                  'max_toolkit_length': AzureDevOpsWorkItemsToolkit.toolkit_max_length})
                   ),
             organization_url=(str, Field(title="Organization URL",
-                                                   description="ADO organization url")),
-            project=(str, Field(description="ADO project")),
-            token=(SecretStr, Field(description="ADO token", json_schema_extra={'secret': True})),
+                                         description="ADO organization url",
+                                         json_schema_extra={
+                                             'configuration': True
+                                         })),
+            project=(str, Field(description="ADO project",
+                                json_schema_extra={
+                                    'configuration': True
+                                }
+                                )),
+            token=(SecretStr, Field(description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
             limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={
