@@ -1,11 +1,17 @@
 from typing import List, Optional, Literal
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import create_model, BaseModel, Field, SecretStr
 from ..base.tool import BaseAction
 
 from .api_wrapper import SlackApiWrapper
-from ..utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length
+from ..utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length, check_connection_response
+from slack_sdk.errors import SlackApiError
+from slack_sdk import WebClient
 
 name = "slack"
 
@@ -24,15 +30,30 @@ class SlackToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
          selected_tools = {x['name']: x['args_schema'].schema() for x in SlackApiWrapper.model_construct().get_available_tools()}
          SlackToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
-         return create_model(
+
+         @check_connection_response
+         def check_connection(self):
+            """
+            Checks the connection to Slack using the provided token.
+            Returns the response from Slack's auth.test endpoint.
+            """
+            try:
+                response = WebClient(token=self.slack_token.get_secret_value()).auth_test()
+                logger.info("Slack connection successful: %s", response)
+                return {"success": True, "response": response}
+            except SlackApiError as e:
+                logger.error(f"Slack connection failed: {e.response['error']}")
+                return {"success": False, "error": e.response['error']}
+            
+         model = create_model(
             name,
-             slack_token=(SecretStr, Field(description="Slack Bot/User OAuth Token like XOXB-*****-*****-*****-*****")),
-             channel_id=(str, Field(title="Channel ID",
-                                    description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")),
-             selected_tools=(List[Literal[tuple(selected_tools)]],
-                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-             __config__={'json_schema_extra': {'metadata': {"label": "slack", "icon_url": None, "hidden": True}}}
-         )
+            slack_token=(SecretStr, Field(description="Slack Token like XOXB-*****-*****-*****-*****", json_schema_extra={'secret': True, 'configuration': True})),
+            channel_id=(str, Field( description="Channel ID", json_schema_extra={'configuration': True})),
+            selected_tools=(list[str], Field( description="List of tools to enable", default=[],json_schema_extra={'args_schemas': selected_tools})),
+            __config__={'json_schema_extra': {'metadata': {"label": "Slack", "icon_url": None}}}
+        )
+         model.check_connection = check_connection
+         return model
 
     @classmethod
     def get_toolkit(cls, selected_tools: Optional[List[str]] = None, toolkit_name: Optional[str] = None, **kwargs):
@@ -50,7 +71,6 @@ class SlackToolkit(BaseToolkit):
                 name=prefix + tool["name"],
                 description=tool["description"],
                 args_schema=tool["args_schema"],
-                func=tool["ref"]
             ))
         return cls(tools=tools)
 
