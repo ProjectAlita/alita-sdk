@@ -40,6 +40,7 @@ class MemoryToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Memory",
                     "icon_url": "memory.svg",
+                    "hidden": True,
                     "categories": ["other"],
                     "extra_categories": ["long-term memory", "langmem"],
                 }
