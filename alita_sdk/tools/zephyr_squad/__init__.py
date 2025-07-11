@@ -1,14 +1,13 @@
 from typing import List, Literal, Optional
 
-from langchain_community.agent_toolkits.base import BaseToolkit
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import create_model, BaseModel, Field, SecretStr
 
 from .api_wrapper import ZephyrSquadApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 
-name = "zephyr"
+name = "zephyr_squad"
 
 def get_tools(tool):
     return ZephyrSquadToolkit().get_toolkit(
@@ -28,10 +27,10 @@ class ZephyrSquadToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in ZephyrSquadApiWrapper.model_construct().get_available_tools()}
         ZephyrSquadToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
-            "zephyr_squad",
+            name,
             account_id=(str, Field(description="AccountID for the user that is going to be authenticating")),
-            access_key=(str, Field(description="Generated access key")),
-            secret_key=(SecretStr, Field(description="Generated secret key")),
+            access_key=(SecretStr, Field(description="Generated access key", json_schema_extra={'secret': True})),
+            secret_key=(SecretStr, Field(description="Generated secret key", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Squad", "icon_url": "zephyr.svg",
                             "categories": ["test management"],
