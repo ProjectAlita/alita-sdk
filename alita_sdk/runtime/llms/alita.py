@@ -139,7 +139,7 @@ class AlitaChatModel(BaseChatModel):
             else:
                 message = _convert_delta_to_message_chunk(chunk, default_chunk_class)
                 finish_reason = None
-                generation_info = ()
+                generation_info = dict()
                 if stop:
                     for stop_word in stop:
                         if stop_word in message.content:
