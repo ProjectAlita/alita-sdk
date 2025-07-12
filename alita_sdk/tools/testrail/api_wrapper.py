@@ -1,14 +1,18 @@
 import json
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 
 import pandas as pd
 from langchain_core.tools import ToolException
 from pydantic import SecretStr, create_model, model_validator
 from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
-
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
+from langchain_core.documents import Document
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +285,15 @@ updateCase = create_model(
     ),
 )
 
+# Schema for indexing TestRail data into vector store
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    project_id=(str, Field(description="TestRail project ID to index data from")),
+    suite_id=(Optional[str], Field(default=None, description="Optional TestRail suite ID to filter test cases")),
+    section_id=(Optional[int], Field(default=None, description="Optional section ID to filter test cases")),
+    title_keyword=(Optional[str], Field(default=None, description="Optional keyword to filter test cases by title")),
+)
 
 SUPPORTED_KEYS = {
     "id", "title", "section_id", "template_id", "type_id", "priority_id", "milestone_id",
@@ -291,11 +304,19 @@ SUPPORTED_KEYS = {
 }
 
 
-class TestrailAPIWrapper(BaseToolApiWrapper):
+class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
     url: str
     password: Optional[SecretStr] = None,
     email: Optional[str] = None,
     _client: Optional[TestRailAPI] = PrivateAttr() # Private attribute for the TestRail client
+    llm: Any = None
+
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
+
 
     @model_validator(mode="before")
     @classmethod
@@ -492,7 +513,7 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
         you can submit and update specific fields only).
 
         :param case_id: T
-            he ID of the test case
+            He ID of the test case
         :param kwargs:
             :key title: str
                 The title of the test case
@@ -522,6 +543,42 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
             f"Test case #{case_id} has been updated at '{updated_case['updated_on']}')"
         )
 
+    def index_data(
+            self,
+            project_id: str,
+            suite_id: Optional[str] = None,
+            collection_suffix: str = "",
+            section_id: Optional[int] = None,
+            title_keyword: Optional[str] = None,
+    ):
+        """Load TestRail test cases into the vector store."""
+        try:
+            if suite_id:
+                resp = self._client.cases.get_cases(project_id=project_id, suite_id=int(suite_id))
+                cases = resp.get('cases', [])
+            else:
+                resp = self._client.cases.get_cases(project_id=project_id)
+                cases = resp.get('cases', [])
+        except StatusCodeError as e:
+            raise ToolException(f"Unable to extract test cases: {e}")
+            # Apply filters
+        if section_id is not None:
+            cases = [case for case in cases if case.get('section_id') == section_id]
+        if title_keyword is not None:
+            cases = [case for case in cases if title_keyword.lower() in case.get('title', '').lower()]
+
+        docs: List[Document] = []
+        for case in cases:
+            docs.append(Document(page_content=json.dumps(case), metadata={
+                'project_id': project_id,
+                'title': case.get('title', ''),
+                'suite_id': suite_id or case.get('suite_id', ''),
+                'case_id': str(case.get('id', ''))
+            }))
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs)
+
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """
         Converts the given data into the specified format: 'json', 'csv', or 'markdown'.
@@ -550,7 +607,7 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
             return df.to_markdown(index=False)
 
     def get_available_tools(self):
-        return [
+        tools = [
             {
                 "name": "get_case",
                 "ref": self.get_case,
@@ -587,4 +644,13 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
                 "description": self.update_case.__doc__,
                 "args_schema": updateCase,
             },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
+            }
         ]
+        # Add vector search from base
+        tools.extend(self._get_vector_search_tools())
+        return tools

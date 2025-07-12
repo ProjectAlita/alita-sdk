@@ -383,9 +383,11 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             combined_items = [item for item in combined_items if abs(item[1]) >= cut_off]
         
         # Sort by score and limit results
-        combined_items.sort(key=lambda x: x[1], reverse=True)
+
+        # for chroma we want ascending order (lower score is better), for others descending
+        combined_items.sort(key=lambda x: x[1], reverse= self.vectorstore_type.lower() != 'chroma')
         combined_items = combined_items[:search_top]
-        
+
         # Format output based on doctype
         if doctype == 'code':
             return code_format(combined_items)
