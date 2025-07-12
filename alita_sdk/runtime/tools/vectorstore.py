@@ -383,9 +383,13 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             combined_items = [item for item in combined_items if abs(item[1]) >= cut_off]
         
         # Sort by score and limit results
-        combined_items.sort(key=lambda x: x[1], reverse=True)
+
+        # disabled since `lower score represents more similarity.`
+        # re-test on prod with PGVector
+        # combined_items.sort(key=lambda x: x[1], reverse=True)
+        combined_items.sort(key=lambda x: x[1])
         combined_items = combined_items[:search_top]
-        
+
         # Format output based on doctype
         if doctype == 'code':
             return code_format(combined_items)
