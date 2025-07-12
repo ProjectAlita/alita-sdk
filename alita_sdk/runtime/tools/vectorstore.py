@@ -384,10 +384,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         
         # Sort by score and limit results
 
-        # disabled since `lower score represents more similarity.`
-        # re-test on prod with PGVector
-        # combined_items.sort(key=lambda x: x[1], reverse=True)
-        combined_items.sort(key=lambda x: x[1])
+        # for chroma we want ascending order (lower score is better), for others descending
+        combined_items.sort(key=lambda x: x[1], reverse= self.vectorstore_type.lower() != 'chroma')
         combined_items = combined_items[:search_top]
 
         # Format output based on doctype
