@@ -201,6 +201,8 @@ GetPageAttachmentsInput = create_model(
     page_id=(str, Field(description="Confluence page ID from which attachments will be retrieved")),
     max_content_length=(int, Field(default=10000, description="Maximum number of characters to return for attachment content. Content will be truncated if longer. Default is 10000.")),
     custom_prompt=(Optional[str], Field(default=None, description="Custom prompt to use for LLM-based analysis of attachments (images, pdfs, etc). If not provided, a default prompt will be used.")),
+    allowed_extensions=(Optional[List[str]], Field(default=None, description="List of file extensions to include (e.g. ['pdf', 'docx']). If None, all extensions are included.", examples=[["pdf", "docx"]])),
+    name_pattern=(Optional[str], Field(default=None, description="Regex pattern to filter attachment names (e.g. '^report_.*\\.pdf$'). If None, all names are included.", examples=["^report_.*\\.pdf$"])),
 )
 
 
@@ -1427,8 +1429,8 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             stacktrace = traceback.format_exc()
             logger.error(f"Error processing page with images: {stacktrace}")
             return f"Error processing page with images: {str(e)}"
-
-    def get_page_attachments(self, page_id: str, max_content_length: int = 10000, custom_prompt: str = None):
+    
+    def get_page_attachments(self, page_id: str, max_content_length: int = 10000, custom_prompt: str = None, allowed_extensions: Optional[List[str]] = None, name_pattern: Optional[str] = None):
         """
         Retrieve all attachments for a Confluence page, including core metadata (with creator, created, updated), comments,
         file content, and LLM-based analysis for supported types.
@@ -1449,8 +1451,19 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                     logger.warning(f"Failed to fetch history for attachment {attachment.get('title', '')}: {str(e)}")
                     history_map[attachment['id']] = None
 
+            import re
             results = []
             for attachment in attachments['results']:
+                title = attachment.get('title', '')
+                file_ext = title.lower().split('.')[-1] if '.' in title else ''
+
+                # Filter by allowed_extensions
+                if allowed_extensions and file_ext not in allowed_extensions:
+                    continue
+                # Filter by name_pattern
+                if name_pattern and not re.match(name_pattern, title):
+                    continue
+
                 media_type = attachment.get('metadata', {}).get('mediaType', '')
                 # Core metadata extraction with history
                 hist = history_map.get(attachment['id']) or {}
@@ -1458,7 +1471,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                 created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
                 last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
                 metadata = {
-                    'name': attachment.get('title', ''),
+                    'name': title,
                     'size': attachment.get('extensions', {}).get('fileSize', None),
                     'creator': created_by,
                     'created': created_date,
@@ -1467,6 +1480,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                     'labels': [label['name'] for label in attachment.get('metadata', {}).get('labels', {}).get('results', [])],
                     'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get('_links', {}).get('download') else None
                 }
+
                 # Fetch comments for the attachment
                 comments = []
                 try:
@@ -1480,16 +1494,13 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                                 'body': comment.get('body', {}).get('storage', {}).get('value', '')
                             })
                 except Exception as e:
-                    logger.warning(f"Failed to fetch comments for attachment {attachment.get('title', '')}: {str(e)}")
+                    logger.warning(f"Failed to fetch comments for attachment {title}: {str(e)}")
 
                 content = None
                 llm_analysis = None
-                title = attachment.get('title', '')
                 download_url = self.base_url.rstrip('/') + attachment['_links']['download']
 
                 # --- Begin: Raw content for xml, json, markdown, txt ---
-                # Check by media type or file extension
-                file_ext = title.lower().split('.')[-1] if '.' in title else ''
                 is_text_type = (
                     media_type in [
                         'application/xml', 'text/xml',
@@ -1661,7 +1672,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                             llm_analysis = self._process_image_with_llm(image_data, title, context_text, custom_prompt)
 
                 if llm_analysis and isinstance(llm_analysis, str) and len(llm_analysis) > max_content_length:
-                        llm_analysis = llm_analysis[:max_content_length] + f"\n...[truncated, showing first {max_content_length} characters]"
+                    llm_analysis = llm_analysis[:max_content_length] + f"\n...[truncated, showing first {max_content_length} characters]"
 
                 results.append({
                     'metadata': metadata,
