@@ -1326,6 +1326,70 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
         }
         return additional_content
 
+    def _parse_jql(self, jql: str) -> dict:
+        import re
+        result = {}
+
+        # Match string equality: field = "value"
+        for match in re.findall(r'(\w+)\s*=\s*"([^"]*)"', jql):
+            result[match[0]] = match[1]
+
+        # Match text search: field ~ "value"
+        for match in re.findall(r'(\w+)\s*~\s*"([^"]*)"', jql):
+            result[match[0]] = match[1]
+
+        # Match list: field in ("a", "b", ...)
+        for match in re.findall(r'(\w+)\s*in\s*\(\s*([^)]+?)\s*\)', jql):
+            values = [v.strip().strip('"') for v in match[1].split(",")]
+            result[match[0]] = values
+
+        # Match number/bool: field = 123 or field = true/false
+        for match in re.findall(r'(\w+)\s*=\s*([^\s"()]+)', jql):
+            key, raw_val = match
+            if key in result:
+                continue
+            if raw_val.lower() == "true":
+                result[key] = True
+            elif raw_val.lower() == "false":
+                result[key] = False
+            elif raw_val.isdigit():
+                result[key] = int(raw_val)
+            else:
+                try:
+                    result[key] = float(raw_val)
+                except ValueError:
+                    result[key] = raw_val
+
+        return result
+
+    def index_data(self, project_key: str, jql: str, collection_suffix: str = '',
+                   fields: Optional[List[str]] = ["key", "name"]) -> str:
+        """
+        Search test cases using a JQL-like query with explicit project_key.
+
+        Example:
+            jql = 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login"'
+        """
+        if 'key' not in fields:
+            fields.append('key')
+        try:
+            test_cases = self._search_test_cases_by_jql(project_key, jql, fields)
+        except Exception as e:
+            raise ToolException(f"Unable to extract test cases: {e}")
+
+        docs: List[Document] = []
+        for case in test_cases:
+            steps = self.get_test_steps(case['key'])
+            if isinstance(steps, ToolException):
+                steps = self.get_test_script(case['key'])
+                if isinstance(steps, ToolException):
+                    steps = 'unknown'
+            docs.append(Document(page_content=steps, metadata={
+                k: v for k, v in case.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))
+            }))
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs)
     def get_tests_recursive(self, project_key: str = None, folder_id: str = None, maxResults: Optional[int] = 100, startAt: Optional[int] = 0):
         """Retrieves all test cases recursively from a folder and all its subfolders.
         
