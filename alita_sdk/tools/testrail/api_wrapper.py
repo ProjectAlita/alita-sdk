@@ -293,6 +293,8 @@ indexData = create_model(
     suite_id=(Optional[str], Field(default=None, description="Optional TestRail suite ID to filter test cases")),
     section_id=(Optional[int], Field(default=None, description="Optional section ID to filter test cases")),
     title_keyword=(Optional[str], Field(default=None, description="Optional keyword to filter test cases by title")),
+    progress_step=(Optional[int],
+                   Field(default=None, ge=0, le=100, description="Optional step size for progress reporting during indexing")),
 )
 
 SUPPORTED_KEYS = {
@@ -550,6 +552,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             collection_suffix: str = "",
             section_id: Optional[int] = None,
             title_keyword: Optional[str] = None,
+            progress_step: Optional[int] = None
     ):
         """Load TestRail test cases into the vector store."""
         try:
@@ -577,7 +580,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             }))
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs)
+        return vs.index_documents(docs, progress_step)
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """

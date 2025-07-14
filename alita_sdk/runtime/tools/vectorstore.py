@@ -1,12 +1,13 @@
 import json
-from json import dumps
+import math
 from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, model_validator, Field
-from langchain_core.tools import ToolException
 from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from logging import getLogger
+
+from ..utils.logging import dispatch_custom_event
 
 logger = getLogger(__name__)
 
@@ -182,7 +183,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
-    def index_documents(self, documents):
+    def index_documents(self, documents, progress_step: int = 20):
         from ..langchain.interfaces.llm_processor import add_documents
         logger.debug(f"Indexing documents: {documents}")
         logger.debug(self.vectoradapter)
@@ -192,8 +193,12 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         #
         self.vectoradapter.vacuum()
         #
+        documents = list(documents)
+        total_docs = len(documents)
         documents_count = 0
         _documents = []
+        # set default progress step to 20 if out of 0...100 or None
+        next_progress_point = 20 if progress_step not in range(0, 100)  else progress_step
         for document in documents:
             documents_count += 1
             # logger.debug(f"Indexing document: {document}")
@@ -203,6 +208,19 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                     add_documents(vectorstore=self.vectoradapter.vectorstore, documents=_documents)
                     self.vectoradapter.persist()
                     _documents = []
+
+                percent = math.floor((documents_count / total_docs) * 100)
+                if percent >= next_progress_point:
+                    logger.debug(f"Indexing progress: {percent}%. Processed {documents_count} of {total_docs} documents.")
+                    dispatch_custom_event(
+                        name="thinking_step",
+                        data={
+                            "message": f"Indexing progress: {percent}%. Processed {documents_count} of {total_docs} documents.",
+                            "tool_name": "index_data",
+                            "toolkit": "vectorstore",
+                        },
+                    )
+                    next_progress_point += progress_step
             except Exception as e:
                 from traceback import format_exc
                 logger.error(f"Error: {format_exc()}")
