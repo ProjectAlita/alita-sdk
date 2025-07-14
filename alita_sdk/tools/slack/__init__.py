@@ -44,14 +44,20 @@ class SlackToolkit(BaseToolkit):
             except SlackApiError as e:
                 logger.error(f"Slack connection failed: {e.response['error']}")
                 return {"success": False, "error": e.response['error']}
-            
+
          model = create_model(
-            name,
-            slack_token=(SecretStr, Field(description="Slack Token like XOXB-*****-*****-*****-*****", json_schema_extra={'secret': True, 'configuration': True})),
-            channel_id=(str, Field( description="Channel ID", json_schema_extra={'configuration': True})),
-            selected_tools=(list[str], Field( description="List of tools to enable", default=[],json_schema_extra={'args_schemas': selected_tools})),
-            __config__={'json_schema_extra': {'metadata': {"label": "Slack", "icon_url": None}}}
-        )
+             name,
+             name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True,
+                                                                             'max_toolkit_length': SlackToolkit.toolkit_max_length,
+                                                                             'configuration': True,
+                                                                             'configuration_title': True})),
+             slack_token=(SecretStr, Field(description="Slack Token like XOXB-*****-*****-*****-*****",
+                                           json_schema_extra={'secret': True, 'configuration': True})),
+             channel_id=(str, Field(description="Channel ID", json_schema_extra={'configuration': True})),
+             selected_tools=(List[Literal[tuple(selected_tools)]],
+                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+             __config__={'json_schema_extra': {'metadata': {"label": "Slack", "icon_url": "slack-icon.svg"}}}
+         )
          model.check_connection = check_connection
          return model
 
