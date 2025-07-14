@@ -7,7 +7,12 @@ from langchain_core.tools import ToolException
 from pydantic import create_model, PrivateAttr
 from pydantic.fields import Field
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams, extend_with_vector_tools
+from langchain_core.documents import Document
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +169,7 @@ ZephyrCreateTestScript = create_model(
 
 ZephyrSearchTestCases = create_model(
     "ZephyrSearchTestCases",
-    project_id=(str, Field(description="Jira project key filter")),
+    project_key=(str, Field(description="Jira project key filter")),
     search_term=(Optional[str], Field(description="Optional search term to filter test cases", default=None)),
     max_results=(Optional[int], Field(description="Maximum number of results to query from the API", default=1000)),
     start_at=(Optional[int], Field(description="Zero-indexed starting position", default=0)),
@@ -242,8 +247,37 @@ ZephyrUpdateTestSteps = create_model(
     steps_updates=(str, Field(description="JSON string representing the test steps to update. Format: [{\"index\": 0, \"description\": \"Updated step description\", \"testData\": \"Updated test data\", \"expectedResult\": \"Updated expected result\"}]"))
 )
 
+# Schema for indexing Zephyr scale data into vector store
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    project_key=(str, Field(description="Jira project key filter")),
+    jql=(str, Field(description="""JQL-like query for searching test cases.
 
-class ZephyrScaleApiWrapper(BaseToolApiWrapper):
+    Supported fields:
+    - folder: exact folder name (e.g., folder = "Login Tests")
+    - folderPath: full folder path (e.g., folderPath = "Root/Subfolder")
+    - label: one or more labels (e.g., label in ("Smoke", "Critical"))
+    - text: full-text search in name/description (e.g., text ~ "login")
+    - customFields: JSON string with key-value pairs to filter by custom fields
+    - steps: search within test steps (e.g., steps ~ "click submit")
+    - orderBy: sort field (e.g., orderBy = "name")
+    - orderDirection: ASC or DESC (e.g., orderDirection = "DESC")
+    - limit: maximum number of results (e.g., limit = 100)
+    - includeSubfolders: whether to include subfolders (e.g., includeSubfolders = false)
+    - exactFolderMatch: match folder name exactly (e.g., exactFolderMatch = true)
+
+    Example:
+        'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login" AND orderBy = "name" AND orderDirection = "ASC"'
+    """)),
+    fields=(Optional[List[str]], Field(
+        description="Fields to include to metadata (default: key, name). Regular fields include key, name, id, labels, folder, etc. Custom fields can be included in the following ways:Individual custom fields via customFields.field_name format, All custom fields via customFields in the fields list",
+        default=["key", "name"])),
+
+)
+
+
+class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
     # url for a Zephyr server
     base_url: Optional[str] = ""
     # auth with Jira token (cloud & server)
@@ -259,6 +293,14 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
 
     _is_cloud: bool = False
     _api: Any = PrivateAttr()
+
+    llm: Any = None
+
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     class Config:
         arbitrary_types_allowed = True
@@ -949,7 +991,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         
         return result_cases, message
 
-    def search_test_cases(self, project_id: str, search_term: Optional[str] = None, 
+    def search_test_cases(self, project_key: str, search_term: Optional[str] = None,
                          max_results: Optional[int] = 1000, start_at: Optional[int] = 0,
                          order_by: Optional[str] = "name", order_direction: Optional[str] = "ASC", 
                          archived: Optional[bool] = False, fields: Optional[List[str]] = ["key", "name"],
@@ -957,7 +999,8 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
                          folder_name: Optional[str] = None, exact_folder_match: Optional[bool] = False,
                          folder_path: Optional[str] = None, include_subfolders: Optional[bool] = True,
                          labels: Optional[List[str]] = None, custom_fields: Optional[str] = None,
-                         steps_search: Optional[str] = None, include_steps: Optional[bool] = False) -> str:
+                         steps_search: Optional[str] = None, include_steps: Optional[bool] = False,
+                         return_raw: bool = False) -> Union[str, List[dict]]:
         """Searches for test cases using custom search API.
         
         Args:
@@ -987,7 +1030,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             # If we have folder_name or folder_path, we need to get folders and build the folder hierarchy
             if folder_name or folder_path:
                 # Get all folders in the project
-                all_folders = self._get_folders(project_id, "TEST_CASE", 1000)
+                all_folders = self._get_folders(project_key, "TEST_CASE", 1000)
                 
                 # Build folder hierarchy
                 folder_hierarchy = self._build_folder_hierarchy(all_folders)
@@ -1014,7 +1057,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             
             # Prepare parameters for the API call
             params = {
-                "projectKey": project_id,
+                "projectKey": project_key,
                 "maxResults": max_results,
                 "startAt": start_at
             }
@@ -1040,7 +1083,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             # If we have multiple target folder IDs, get test cases from each folder
             if target_folder_ids and include_subfolders:
                 all_test_cases = self._get_test_cases_from_folders(
-                    project_id, target_folder_ids, max_results, start_at, params
+                    project_key, target_folder_ids, max_results, start_at, params
                 )
             else:
                 # Just use the standard params (which might include a single folder_id)
@@ -1077,14 +1120,106 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
                 "custom fields": custom_fields,
                 "steps containing": steps_search
             }
-            
-            result_cases, message = self._format_test_case_results(filtered_cases, fields, search_criteria)
-            
-            return f"{message}: {json.dumps(result_cases, indent=2)}"
-                
+
+            if return_raw:
+                return self._format_test_case_results(filtered_cases, fields, search_criteria)[0]
+            return self._finalize_test_case_results(filtered_cases, fields, search_criteria)
+
         except Exception as e:
             return ToolException(f"Error searching test cases: {str(e)}")
 
+    def _finalize_test_case_results(self, filtered_cases: List[dict], fields: List[str], search_criteria: dict) -> str:
+        result_cases, message = self._format_test_case_results(filtered_cases, fields, search_criteria)
+        return f"{message}: {json.dumps(result_cases, indent=2)}"
+
+    def _search_test_cases_by_jql(self, project_key: str, jql: str, fields: Optional[List[str]] = ["key", "name"]):
+        try:
+            parsed = self._parse_jql(jql)
+
+            return self.search_test_cases(
+                project_key=project_key,
+                search_term=parsed.get("text"),
+                order_by=parsed.get("orderBy", "name"),
+                order_direction=parsed.get("orderDirection", "ASC"),
+                limit_results=parsed.get("limit"),
+                folder_name=parsed.get("folder"),
+                folder_path=parsed.get("folderPath"),
+                exact_folder_match=parsed.get("exactFolderMatch", False),
+                include_subfolders=parsed.get("includeSubfolders", True),
+                labels=parsed.get("label"),
+                custom_fields=parsed.get("customFields"),
+                steps_search=parsed.get("steps"),
+                include_steps=True,
+                fields=fields,
+                return_raw=True
+            )
+        except Exception as e:
+            return ToolException(f"Error searching test cases by JQL: {str(e)}")
+
+    def _parse_jql(self, jql: str) -> dict:
+        import re
+        result = {}
+
+        # Match string equality: field = "value"
+        for match in re.findall(r'(\w+)\s*=\s*"([^"]*)"', jql):
+            result[match[0]] = match[1]
+
+        # Match text search: field ~ "value"
+        for match in re.findall(r'(\w+)\s*~\s*"([^"]*)"', jql):
+            result[match[0]] = match[1]
+
+        # Match list: field in ("a", "b", ...)
+        for match in re.findall(r'(\w+)\s*in\s*\(\s*([^)]+?)\s*\)', jql):
+            values = [v.strip().strip('"') for v in match[1].split(",")]
+            result[match[0]] = values
+
+        # Match number/bool: field = 123 or field = true/false
+        for match in re.findall(r'(\w+)\s*=\s*([^\s"()]+)', jql):
+            key, raw_val = match
+            if key in result:
+                continue
+            if raw_val.lower() == "true":
+                result[key] = True
+            elif raw_val.lower() == "false":
+                result[key] = False
+            elif raw_val.isdigit():
+                result[key] = int(raw_val)
+            else:
+                try:
+                    result[key] = float(raw_val)
+                except ValueError:
+                    result[key] = raw_val
+
+        return result
+
+    def index_data(self, project_key: str, jql: str, collection_suffix: str = '',
+                   fields: Optional[List[str]] = ["key", "name"]) -> str:
+        """
+        Search test cases using a JQL-like query with explicit project_key.
+
+        Example:
+            jql = 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login"'
+        """
+        if 'key' not in fields:
+            fields.append('key')
+        try:
+            test_cases = self._search_test_cases_by_jql(project_key, jql, fields)
+        except Exception as e:
+            raise ToolException(f"Unable to extract test cases: {e}")
+
+        docs: List[Document] = []
+        for case in test_cases:
+            steps = self.get_test_steps(case['key'])
+            if isinstance(steps, ToolException):
+                steps = self.get_test_script(case['key'])
+                if isinstance(steps, ToolException):
+                    steps = 'unknown'
+            docs.append(Document(page_content=steps, metadata={
+                k: v for k, v in case.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))
+            }))
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs)
     def get_tests_recursive(self, project_key: str = None, folder_id: str = None, maxResults: Optional[int] = 100, startAt: Optional[int] = 0):
         """Retrieves all test cases recursively from a folder and all its subfolders.
         
@@ -1341,7 +1476,8 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             return f"Test steps updated for test case `{test_case_key}`: {len(updates)} step(s) modified"
         except Exception as e:
             return ToolException(f"Error updating test steps for test case {test_case_key}: {str(e)}")
-    
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {
@@ -1463,5 +1599,11 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
                 "description": self.get_tests_by_folder_path.__doc__,
                 "args_schema": ZephyrGetTestsByFolderPath,
                 "ref": self.get_tests_by_folder_path,
+            },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
             }
         ]
