@@ -31,6 +31,7 @@ class BigQueryToolkitConfig(BaseModel):
         title = name
         json_schema_extra = {
             "metadata": {
+                "hidden": True,
                 "label": "Cloud GCP",
                 "icon_url": "google.svg",
                 "sections": {
