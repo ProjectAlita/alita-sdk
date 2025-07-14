@@ -319,11 +319,18 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         """
         # Build the content dict for Bitbucket Cloud
         if isinstance(content, str):
-            content_raw = content
-        elif isinstance(content, dict) and "raw" in content:
-            content_raw = content.get("raw")
+            content_dict = {"raw": content}
+        elif isinstance(content, dict):
+            # Only include allowed keys
+            content_dict = {k: v for k, v in content.items() if k in ("raw", "markup", "html")}
+            if not content_dict:
+                content_dict = {"raw": str(content)}
         else:
-            content_raw = str(content)
+            content_dict = {"raw": str(content)}
+
+        data = {"content": content_dict}
+        if inline:
+            data["inline"] = inline
 
         response = self.repository.pullrequests.get(pr_id).post("comments", data)
         return response['links']['html']['href']
