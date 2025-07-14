@@ -188,7 +188,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     """Base class for tool API wrappers that support vector store functionality."""
 
     doctype: str = "document"
-    
+
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
         """ Initializes the vector store wrapper with the provided parameters."""
         try:
@@ -450,3 +450,11 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         
         # Return index_data tool first, then the search tools
         return [index_tool] + base_tools
+
+def extend_with_vector_tools(method):
+    def wrapper(self, *args, **kwargs):
+        tools = method(self, *args, **kwargs)
+        tools.extend(self._get_vector_search_tools())
+        return tools
+
+    return wrapper
