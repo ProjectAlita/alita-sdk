@@ -29,6 +29,7 @@ class DeltaLakeToolkitConfig(BaseModel):
         title = name
         json_schema_extra = {
             "metadata": {
+                "hidden": True,
                 "label": "AWS Delta Lake",
                 "icon_url": "delta-lake.svg",
                 "sections": {
