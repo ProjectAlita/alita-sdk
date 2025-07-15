@@ -339,7 +339,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         """Direct method to get test data without string formatting - similar to TestRail approach"""
         start_at = 0
         all_tests = []
-        logger.info(f"jql to get tests: {jql}")
+        logger.info(f"[indexing] jql to get tests: {jql}")
         
         while True:
             try:
@@ -364,7 +364,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
     def _execute_graphql_direct(self, graphql: str) -> Any:
         """Direct method to execute GraphQL and return parsed data"""
-        logger.info(f"Executing GraphQL query: {graphql}")
+        logger.info(f"[indexing] executing GraphQL query: {graphql}")
         try:
             return self._client.execute(query=graphql)
         except Exception as e:
