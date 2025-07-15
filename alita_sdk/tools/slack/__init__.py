@@ -25,6 +25,7 @@ def get_tools(tool):
 
 class SlackToolkit(BaseToolkit):
     tools: List[BaseTool] = []
+    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
@@ -53,7 +54,7 @@ class SlackToolkit(BaseToolkit):
                                                                              'configuration_title': True})),
              slack_token=(SecretStr, Field(description="Slack Token like XOXB-*****-*****-*****-*****",
                                            json_schema_extra={'secret': True, 'configuration': True})),
-             channel_id=(str, Field(description="Channel ID", json_schema_extra={'configuration': True})),
+             channel_id=(Optional[str], Field(default=None, description="Channel ID", json_schema_extra={'configuration': True})),
              selected_tools=(List[Literal[tuple(selected_tools)]],
                              Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
              __config__={'json_schema_extra': {'metadata': {"label": "Slack", "icon_url": "slack-icon.svg"}}}
@@ -75,7 +76,7 @@ class SlackToolkit(BaseToolkit):
             tools.append(BaseAction(                
                 api_wrapper=slack_api_wrapper,
                 name=prefix + tool["name"],
-                description=tool["description"],
+                description=f"Slack Tool: {tool['description']}",
                 args_schema=tool["args_schema"],
             ))
         return cls(tools=tools)
