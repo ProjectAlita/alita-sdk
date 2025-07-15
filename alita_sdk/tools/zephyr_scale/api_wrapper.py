@@ -1372,6 +1372,10 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
         """
         if 'key' not in fields:
             fields.append('key')
+        if 'id' not in fields:
+            fields.append('id')
+        if 'createdOn' not in fields:
+            fields.append('createdOn')
         try:
             test_cases = self._search_test_cases_by_jql(project_key, jql, fields)
         except Exception as e:
@@ -1385,7 +1389,9 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
                 if isinstance(steps, ToolException):
                     steps = 'unknown'
             docs.append(Document(page_content=steps, metadata={
-                k: v for k, v in case.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))
+                ("updated_on" if k == "createdOn" else k): v
+                for k, v in case.items()
+                if isinstance(v, (str, int, float, bool, list, dict, type(None)))
             }))
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
