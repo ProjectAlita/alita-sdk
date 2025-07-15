@@ -295,6 +295,8 @@ indexData = create_model(
     title_keyword=(Optional[str], Field(default=None, description="Optional keyword to filter test cases by title")),
     progress_step=(Optional[int],
                    Field(default=None, ge=0, le=100, description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool],
+                       Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
 )
 
 SUPPORTED_KEYS = {
@@ -552,7 +554,8 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             collection_suffix: str = "",
             section_id: Optional[int] = None,
             title_keyword: Optional[str] = None,
-            progress_step: Optional[int] = None
+            progress_step: Optional[int] = None,
+            clean_index: Optional[bool] = False
     ):
         """Load TestRail test cases into the vector store."""
         try:
@@ -576,11 +579,12 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'project_id': project_id,
                 'title': case.get('title', ''),
                 'suite_id': suite_id or case.get('suite_id', ''),
-                'case_id': str(case.get('id', ''))
+                'id': str(case.get('id', '')),
+                'updated_on': case.get('updated_on', ''),
             }))
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs, progress_step)
+        return vs.index_documents(docs, progress_step, clean_index)
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """
