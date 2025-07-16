@@ -48,7 +48,6 @@ class AzureSearchToolkit(BaseToolkit):
             index_name=(str, Field(description="Azure Search index name")),
             api_base=(Optional[str], Field(description="Azure OpenAI base URL", default=None,
                                            json_schema_extra={
-                                               'toolkit_name': True,
                                                'max_toolkit_length': AzureSearchToolkit.toolkit_max_length,
                                                'configuration': True})),
             api_version=(Optional[str], Field(description="API version", default=None)),

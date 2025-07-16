@@ -43,7 +43,6 @@ class TestrailToolkit(BaseToolkit):
                 Field(
                     description="Testrail URL",
                     json_schema_extra={
-                        'toolkit_name': True,
                         "max_length": TestrailToolkit.toolkit_max_length,
                         "configuration": True,
                         "configuration_title": True

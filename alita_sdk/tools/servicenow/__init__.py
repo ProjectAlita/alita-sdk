@@ -33,7 +33,6 @@ class ServiceNowToolkit(BaseToolkit):
         return create_model(
             name,
             base_url=(str, Field(description="ServiceNow URL", json_schema_extra={
-                        'toolkit_name': True,
                         'max_toolkit_length': ServiceNowToolkit.toolkit_max_length,
                         'configuration': True,
                         'configuration_title': True
