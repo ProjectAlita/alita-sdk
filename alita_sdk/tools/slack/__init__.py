@@ -47,8 +47,7 @@ class SlackToolkit(BaseToolkit):
 
          model = create_model(
              name,
-             name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True,
-                                                                             'max_toolkit_length': SlackToolkit.toolkit_max_length,
+             name=(str, Field(description="Toolkit name", json_schema_extra={'max_toolkit_length': SlackToolkit.toolkit_max_length,
                                                                              'configuration': True,
                                                                              'configuration_title': True})),
              slack_token=(SecretStr, Field(description="Slack Token like XOXB-*****-*****-*****-*****",
