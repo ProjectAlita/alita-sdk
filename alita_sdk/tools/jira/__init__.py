@@ -56,7 +56,6 @@ class JiraToolkit(BaseToolkit):
                 Field(
                     description="Jira URL",
                     json_schema_extra={
-                        'toolkit_name': True,
                         'max_toolkit_length': JiraToolkit.toolkit_max_length,
                         'configuration': True,
                         'configuration_title': True

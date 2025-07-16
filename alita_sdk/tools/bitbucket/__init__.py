@@ -43,7 +43,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
             name,
             url=(str, Field(description="Bitbucket URL", json_schema_extra={'configuration': True, 'configuration_title': True})),
             project=(str, Field(description="Project/Workspace", json_schema_extra={'configuration': True})),
-            repository=(str, Field(description="Repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length, 'configuration': True})),
+            repository=(str, Field(description="Repository", json_schema_extra={'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length, 'configuration': True})),
             branch=(str, Field(description="Main branch", default="main")),
             username=(str, Field(description="Username", json_schema_extra={'configuration': True})),
             password=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True, 'configuration': True})),
