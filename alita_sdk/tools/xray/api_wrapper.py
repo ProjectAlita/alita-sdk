@@ -136,7 +136,8 @@ XrayIndexData = create_model(
     Example:
         'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) testType { name } steps { action result } } } }'
     """, default=None)),
-    progress_step=(Optional[int], Field(description="Progress step for tracking indexing progress", default=None))
+    progress_step=(Optional[int], Field(description="Progress step for tracking indexing progress", default=None)),
+    clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
 )
 
 
@@ -250,7 +251,8 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             return ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
 
     def index_data(self, jql: Optional[str] = None, graphql: Optional[str] = None, 
-                   collection_suffix: str = '', progress_step: Optional[int] = None) -> str:
+                   collection_suffix: str = '', progress_step: Optional[int] = None, 
+                   clean_index: Optional[bool] = False) -> str:
         """
         Index Xray test cases into vector store using JQL query or custom GraphQL.
 
@@ -259,6 +261,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             graphql: Custom GraphQL query for advanced data extraction
             collection_suffix: Optional suffix for collection name
             progress_step: Progress step for tracking indexing progress
+            clean_index: Flag to indicate whether to clean the index before indexing
 
         Examples:
             # Using JQL
@@ -352,6 +355,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 
                 if 'issueId' in test:
                     metadata['issueId'] = str(test['issueId'])
+                    metadata['id'] = str(test['issueId'])
                 if 'projectId' in test:
                     metadata['projectId'] = str(test['projectId'])
                 if 'testType' in test and test['testType']:
@@ -362,7 +366,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
             embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
             vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-            return vs.index_documents(documents=docs, progress_step=progress_step)
+            return vs.index_documents(documents=docs, progress_step=progress_step, clean_index=clean_index)
             
         except Exception as e:
             raise ToolException(f"Unable to index test cases: {e}")
