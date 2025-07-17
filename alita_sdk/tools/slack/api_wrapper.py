@@ -10,12 +10,14 @@ from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 logger = logging.getLogger(__name__)
 
 SendMessageModel = create_model(
-                    "SendMessageModel",                    
+                    "SendMessageModel",
+                    channel_id=(Optional[str], Field(default=None,description="Channel ID, user ID, or conversation ID to send the message to. (like C12345678 for public channels, D12345678 for DMs)")),                   
                     message=(str, Field(description="The message text to send."))
                     )
 
 ReadMessagesModel = create_model(
-                    "ReadMessagesModel",                    
+                    "ReadMessagesModel",
+                    channel_id=(Optional[str], Field(default=None,description="Channel ID, user ID, or conversation ID to read messages from. (like C12345678 for public channels, D12345678 for DMs)")),                    
                     limit=(int, Field(default=10, description="The number of messages to fetch (default is 10)."))
                     )
 
@@ -25,9 +27,25 @@ CreateChannelModel = create_model(
                     is_private=(bool, Field(default=False, description="Whether to make the channel private (default: False)."))
                     )
 
-ListUsersModel = create_model(
-                    "ListUsersModel"                 
+ListChannelUsersModel = create_model(
+                    "ListChannelUsersModel",
+                    channel_id=(Optional[str], Field(default=None,description="Channel ID, user ID, or conversation ID to read messages from. (like C12345678 for public channels, D12345678 for DMs)"))                 
                     )
+
+ListWorkspaceUsersModel = create_model(
+                    "ListWorkspaceUsersModel"                 
+                    )
+
+ListWorkspaceConversationsModel = create_model(
+                    "ListWorkspaceConversationsModel"                 
+                    )
+
+InviteToConversationModel = create_model(
+                    "InviteToConversationModel" ,
+                    channel_id=(Optional[str], Field(default=None,description="Conversation ID of the channel.")),
+                    user_ids=(list[str], Field(description="List of user IDs to invite."))                  
+                    )
+
 
 
 class SlackApiWrapper(BaseToolApiWrapper):
@@ -46,28 +64,34 @@ class SlackApiWrapper(BaseToolApiWrapper):
             logger.error("Slack token is required for authentication.")
             raise ValueError("Slack token is required for authentication.")
         return values
+
+    
     def _get_client(self):
         if not hasattr(self, "_client") or self._client is None:
             self._client = WebClient(token=self.slack_token.get_secret_value())
         return self._client
     
-    def send_message(self, message: str):
+    def send_message(self, message: str, channel_id: Optional[str] = None):
         """
         Sends a message to a specified Slack channel, user, or conversation.
+        Uses the provided channel_id if given, otherwise falls back to the instance's channel_id.
         """
         
         try:
 
             client = self._get_client()
-            response = client.chat_postMessage(channel=self.channel_id, text=message)
-            logger.info(f"Message sent to {self.channel_id}: {message}")
-            return f"Message sent successfully to {self.channel_id}."
+            
+            # Use the passed channel_id if provided, else use self.channel_id
+            channel = channel_id if channel_id else self.channel_id
+            response = client.chat_postMessage(channel=channel, text=message)
+            logger.info(f"Message sent to {channel}: {message}")
+            return f"Message sent successfully to {channel}."
         
         except SlackApiError as e:
-            logger.error(f"Failed to send message to {self.channel_id}: {e.response['error']}")
+            logger.error(f"Failed to send message to {channel}: {e.response['error']}")
             return f"Received the error :  {e.response['error']}"
 
-    def read_messages(self, limit=10):
+    def read_messages(self, limit=10, channel_id: Optional[str] = None):
         """
         Reads the latest messages from a Slack channel or conversation.
        
@@ -78,9 +102,11 @@ class SlackApiWrapper(BaseToolApiWrapper):
 
             client = self._get_client()
             logger.info(f"auth test: {client.auth_test()}")
+            # Use the passed channel_id if provided, else use self.channel_id
+            channel = channel_id if channel_id else self.channel_id
             # Fetch conversation history
             response = client.conversations_history(
-                channel=self.channel_id,
+                channel=channel,
                 limit=limit )
             
             # Extract messages from the response
@@ -90,7 +116,7 @@ class SlackApiWrapper(BaseToolApiWrapper):
             
         except SlackApiError as e:
             # Handle errors from the Slack API
-            logger.error(f"Failed to read message from {self.channel_id}: {e.response['error']}")
+            logger.error(f"Failed to read message from {channel}: {e.response['error']}")
             return f"Received the error :  {e.response['error']}"
         
     def create_slack_channel(self,  channel_name: str, is_private=False):
@@ -116,25 +142,91 @@ class SlackApiWrapper(BaseToolApiWrapper):
             print(f"Failed to create channel '{channel_name}': {error_message}")
             return {"success": False, "error": error_message}
     
-    def list_users(self):
-        """
-        Lists all users in the Slack workspace.
 
-        :return: list: List of users with their IDs and names.
+
+    def list_channel_users(self, channel_id: Optional[str] = None):
         """
-        
-        
+        Lists all users in the specified Slack channel.
+
+        :param channel_id: Optional[str]: The channel ID to list users from. If not provided, uses self.channel_id.
+        :return: list: List of user dictionaries with their IDs and names.
+        """
         try:
             client = self._get_client()
-            print(client.auth_test())
-            response = client.users_list()
-            users = response["members"]
-            return [{"id": user["id"], "name": user["name"]} for user in users if not user["is_bot"]]
-        
+            # Use the passed channel_id if provided, else use self.channel_id
+            channel = channel_id if channel_id else self.channel_id
+            logger.info
+            if not channel:
+                logger.error("No channel_id provided to list_channel_users.")
+                return "Error: channel_id must be provided either as an argument or set on the instance."
+
+            # Get user IDs in the channel
+            members_response = client.conversations_members(channel=channel)
+            user_ids = members_response.get("members", [])
+
+            # Fetch user info for each user ID
+            users = []
+            for user_id in user_ids:
+                user_info = client.users_info(user=user_id)
+                user = user_info.get("user", {})
+                users.append({"id": user.get("id"), "name": user.get("name")})
+
+            return users
+
         except SlackApiError as e:
-            logger.error(f"Failed to list users: {e.response['error']}")
+            logger.error(f"Failed to list users in channel {channel}: {e.response['error']}")
             return f"Received the error :  {e.response['error']}"
+
+    def list_workspace_users(self):
+        """
+        Fetches and returns a list of all users in the Slack workspace with selected user details.
+
+        :return: list: List of user dictionaries containing id, name, is_bot, email, and team.
+        """
+        try:
+            client = self._get_client()
+            response = client.users_list()  # Fetch users
+            members = self.extract_required_user_fields(response.get('members', []))
+            print(f"Found {len(members)} users.")
+            return members  # Return the list of users
+        except SlackApiError as e:
+            print(f"Error fetching users: {e.response['error']}")
+            return []
     
+    def list_workspace_conversations(self):
+        """
+        Retrieves and returns a list of all conversations (channels, groups, and direct messages) in the Slack workspace.
+
+        :return: list: List of conversation/channel dictionaries as returned by the Slack API.
+        """
+        try:
+            client = self._get_client()
+            response = client.conversations_list()  # Fetch conversations
+            channels = response.get("channels", [])
+            print(f"Found {len(channels)} channels.")
+            return channels  # Return the list of channels
+        except SlackApiError as e:
+            print(f"Error fetching conversations: {e.response['error']}")
+            return [] 
+
+    def invite_to_conversation(self, user_ids: list, channel_id: Optional[str] = None ):
+        """
+        Invite one or more users to a Slack channel.
+        :param client: Slack WebClient instance.
+        :param channel_id: Conversation ID of the channel.
+        :param user_ids: List of user IDs to invite.
+        """
+        try:
+            client = self._get_client()
+            # Use the passed channel_id if provided, else use self.channel_id
+            channel = channel_id if channel_id else self.channel_id
+            response = client.conversations_invite(channel=channel, users=",".join(user_ids))
+            print(f"Successfully invited users to {channel}.")
+            return response
+        except SlackApiError as e:
+            print(f"Error inviting users: {e.response['error']}")
+            return None
+                
     def extract_slack_messages(self, data):
         extracted_info = []
 
@@ -150,7 +242,20 @@ class SlackApiWrapper(BaseToolApiWrapper):
             extracted_info.append({"user": user, "message": message, "app_name": app_name})
         
         return extracted_info
-    
+
+    # Function to extract required user details
+    def extract_required_user_fields(self, user_details):
+        extracted_user_data = []
+        for entry in user_details:
+            extracted_entry = {
+                "id": entry.get("id", None),
+                "name": entry.get("name", None),
+                "is_bot": entry.get("is_bot", None),
+                "email": entry.get("profile", {}).get("email", None),
+                "team": entry.get("profile", {}).get("team", None)
+            }
+            extracted_user_data.append(extracted_entry)
+        return extracted_user_data   
     
     def get_available_tools(self):
         return [
@@ -163,21 +268,34 @@ class SlackApiWrapper(BaseToolApiWrapper):
             },
             {
                 "name": "read_messages",
-                "description": self.read_messages.__doc__ or "Send a message to a Slack channel, user, or conversation.",
+                "description": self.read_messages.__doc__ or "Read a message from a Slack channel, user, or conversation.",
                 "args_schema": ReadMessagesModel,
                 "ref": self.read_messages
             },
             {
-                "name": "create_channel",
-                "description": self.create_slack_channel.__doc__ or "Send a message to a Slack channel, user, or conversation.",
+                "name": "create_slack_channel",
+                "description": self.create_slack_channel.__doc__ or "Create a  Slack channel",
                 "args_schema": CreateChannelModel,
                 "ref": self.create_slack_channel             
             },
             {
-                "name": "list_users",
-                "description": self.list_users.__doc__ or "List all users in the Slack workspace.",
-                "args_schema": ListUsersModel,
-                "ref": self.list_users
+                "name": "list_channel_users",
+                "description": self.list_channel_users.__doc__ or "List all users in the Slack channel.",
+                "args_schema": ListChannelUsersModel,
+                "ref": self.list_channel_users
+            },
+            {
+                "name": "list_workspace_users",
+                "description": self.list_workspace_users.__doc__ or "List all users in the Slack workspace.",
+                "args_schema": ListWorkspaceUsersModel,
+                "ref": self.list_workspace_users
+            }
+            ,
+            {
+                "name": "invite_to_conversation",
+                "description": self.invite_to_conversation.__doc__ or "Invite to a conversation in the Slack workspace.",
+                "args_schema": InviteToConversationModel,
+                "ref": self.invite_to_conversation
             }
             
         ]
