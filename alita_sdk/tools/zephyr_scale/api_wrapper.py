@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any, Optional, List, Dict, Tuple, Union
 
 from pydantic import model_validator, BaseModel, SecretStr
@@ -7,7 +8,12 @@ from langchain_core.tools import ToolException
 from pydantic import create_model, PrivateAttr
 from pydantic.fields import Field
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams, extend_with_vector_tools
+from langchain_core.documents import Document
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +170,7 @@ ZephyrCreateTestScript = create_model(
 
 ZephyrSearchTestCases = create_model(
     "ZephyrSearchTestCases",
-    project_id=(str, Field(description="Jira project key filter")),
+    project_key=(str, Field(description="Jira project key filter")),
     search_term=(Optional[str], Field(description="Optional search term to filter test cases", default=None)),
     max_results=(Optional[int], Field(description="Maximum number of results to query from the API", default=1000)),
     start_at=(Optional[int], Field(description="Zero-indexed starting position", default=0)),
@@ -242,8 +248,37 @@ ZephyrUpdateTestSteps = create_model(
     steps_updates=(str, Field(description="JSON string representing the test steps to update. Format: [{\"index\": 0, \"description\": \"Updated step description\", \"testData\": \"Updated test data\", \"expectedResult\": \"Updated expected result\"}]"))
 )
 
+# Schema for indexing Zephyr scale data into vector store
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    project_key=(str, Field(description="Jira project key filter")),
+    jql=(str, Field(description="""JQL-like query for searching test cases.
 
-class ZephyrScaleApiWrapper(BaseToolApiWrapper):
+    Supported fields:
+    - folder: exact folder name (e.g., folder = "Login Tests")
+    - folderPath: full folder path (e.g., folderPath = "Root/Subfolder")
+    - label: one or more labels (e.g., label in ("Smoke", "Critical"))
+    - text: full-text search in name/description (e.g., text ~ "login")
+    - customFields: JSON string with key-value pairs to filter by custom fields
+    - steps: search within test steps (e.g., steps ~ "click submit")
+    - orderBy: sort field (e.g., orderBy = "name")
+    - orderDirection: ASC or DESC (e.g., orderDirection = "DESC")
+    - limit: maximum number of results (e.g., limit = 100)
+    - includeSubfolders: whether to include subfolders (e.g., includeSubfolders = false)
+    - exactFolderMatch: match folder name exactly (e.g., exactFolderMatch = true)
+
+    Example:
+        'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login" AND orderBy = "name" AND orderDirection = "ASC"'
+    """)),
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False,
+                       description="Optional flag to enforce clean existing index before indexing new data")),
+)
+
+
+class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
     # url for a Zephyr server
     base_url: Optional[str] = ""
     # auth with Jira token (cloud & server)
@@ -259,6 +294,14 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
 
     _is_cloud: bool = False
     _api: Any = PrivateAttr()
+
+    llm: Any = None
+
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     class Config:
         arbitrary_types_allowed = True
@@ -342,6 +385,8 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         try:
             test_case_steps = self._api.test_cases.get_test_steps(test_case_key, **kwargs)
             steps_list = [str(step) for step in test_case_steps]
+            if kwargs['return_list']:
+                return steps_list
             all_steps_concatenated = '\n'.join(steps_list)
         except Exception as e:
             return ToolException(f"Unable to extract test case steps from test case with key: {test_case_key}:\n{str(e)}")
@@ -403,7 +448,8 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             maxResults: Optional[int] = 10,
             startAt: Optional[int] = 0,
             projectKey: Optional[str] = None,
-            folderType: Optional[str] = None
+            folderType: Optional[str] = None,
+            return_as_list: bool = False
     ):
         """Retrieves all folders. Query parameters can be used to filter the results: maxResults, startAt, projectKey, folderType"""
 
@@ -411,7 +457,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         for folder in self._api.folders.get_folders(maxResults=maxResults, startAt=startAt,
                                                     projectKey=projectKey, folderType=folderType):
             folders_str.append(folder)
-        return f"Extracted folders: {folders_str}"
+        return folders_str if return_as_list else f"Extracted folders: {folders_str}"
 
     def update_test_case(self, test_case_key: str, test_case_id: int, name: str, project_id: int, priority_id: int, status_id: int, **kwargs) -> str:
         """Updates an existing test case.
@@ -452,7 +498,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to update test case with key: {test_case_key}:\n{str(e)}")
             
-    def get_links(self, test_case_key: str) -> str:
+    def get_links(self, test_case_key: str, **kwargs) -> str:
         """Returns links for a test case with specified key
         
         Args:
@@ -461,6 +507,8 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         
         try:
             links = self._api.test_cases.get_links(test_case_key)
+            if kwargs['return_only_links']:
+                return links
             return f"Links for test case `{test_case_key}`: {str(links)}"
         except Exception as e:
             return ToolException(f"Unable to get links for test case with key: {test_case_key}:\n{str(e)}")
@@ -495,8 +543,32 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             return f"Web link created for test case `{test_case_key}` with URL `{url}`: {str(web_link_response)}"
         except Exception as e:
             return ToolException(f"Unable to create web link for test case with key: {test_case_key}:\n{str(e)}")
-    
-    def get_versions(self, test_case_key: str, maxResults: Optional[int] = 10, startAt: Optional[int] = 0) -> str:
+
+    def _get_last_version(self, test_case_key: str, step:int = 10):
+        max_iterations = 50
+        count = 0
+        start_at = 0
+        last_version = None
+
+        while count < max_iterations:
+            count+=1
+            last_versions = self.get_versions(test_case_key=test_case_key, maxResults=step, startAt=start_at, return_as_list=True)
+            last_versions_count = len(last_versions)
+
+            if last_versions_count == 0:
+                break
+
+            last_version = last_versions[-1]
+            start_at+=last_versions_count
+
+        if last_version:
+            match = re.search(r'/versions/(\d+)', last_version["self"])
+            version_number = match.group(1)
+            return self.get_version(test_case_key=test_case_key, version=version_number, return_as_object=True)
+        return None
+
+
+    def get_versions(self, test_case_key: str, maxResults: Optional[int] = 10, startAt: Optional[int] = 0, return_as_list: bool = False) -> str|list:
         """Returns all test case versions for a test case with specified key. Response is ordered by most recent first.
         
         Args:
@@ -507,26 +579,30 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         
         try:
             versions = self._api.test_cases.get_versions(test_case_key, maxResults=maxResults, startAt=startAt)
+            if return_as_list:
+                return [version for version in versions]
             versions_list = [str(version) for version in versions]
             all_versions = '\n'.join(versions_list)
             return f"Versions for test case `{test_case_key}`: {all_versions}"
         except Exception as e:
             return ToolException(f"Unable to get versions for test case with key: {test_case_key}:\n{str(e)}")
     
-    def get_version(self, test_case_key: str, version: str) -> str:
+    def get_version(self, test_case_key: str, version: str, return_as_object: bool = False) -> str|dict:
         """Retrieves a specific version of a test case"""
         
         try:
             version_data = self._api.test_cases.get_version(test_case_key, version)
-            return f"Version {version} of test case `{test_case_key}`: {str(version_data)}"
+            return version_data if return_as_object else f"Version {version} of test case `{test_case_key}`: {str(version_data)}"
         except Exception as e:
             return ToolException(f"Unable to get version {version} for test case with key: {test_case_key}:\n{str(e)}")
     
-    def get_test_script(self, test_case_key: str) -> str:
+    def get_test_script(self, test_case_key: str, return_only_script:bool = False) -> str:
         """Returns the test script for the given test case"""
         
         try:
             test_script = self._api.test_cases.get_test_script(test_case_key)
+            if return_only_script:
+                return test_script
             return f"Test script for test case `{test_case_key}`: {str(test_script)}"
         except Exception as e:
             return ToolException(f"Unable to get test script for test case with key: {test_case_key}:\n{str(e)}")
@@ -949,7 +1025,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
         
         return result_cases, message
 
-    def search_test_cases(self, project_id: str, search_term: Optional[str] = None, 
+    def search_test_cases(self, project_key: str, search_term: Optional[str] = None,
                          max_results: Optional[int] = 1000, start_at: Optional[int] = 0,
                          order_by: Optional[str] = "name", order_direction: Optional[str] = "ASC", 
                          archived: Optional[bool] = False, fields: Optional[List[str]] = ["key", "name"],
@@ -957,7 +1033,8 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
                          folder_name: Optional[str] = None, exact_folder_match: Optional[bool] = False,
                          folder_path: Optional[str] = None, include_subfolders: Optional[bool] = True,
                          labels: Optional[List[str]] = None, custom_fields: Optional[str] = None,
-                         steps_search: Optional[str] = None, include_steps: Optional[bool] = False) -> str:
+                         steps_search: Optional[str] = None, include_steps: Optional[bool] = False,
+                         return_raw: bool = False) -> Union[str, List[dict]]:
         """Searches for test cases using custom search API.
         
         Args:
@@ -987,7 +1064,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             # If we have folder_name or folder_path, we need to get folders and build the folder hierarchy
             if folder_name or folder_path:
                 # Get all folders in the project
-                all_folders = self._get_folders(project_id, "TEST_CASE", 1000)
+                all_folders = self._get_folders(project_key, "TEST_CASE", 1000)
                 
                 # Build folder hierarchy
                 folder_hierarchy = self._build_folder_hierarchy(all_folders)
@@ -1014,7 +1091,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             
             # Prepare parameters for the API call
             params = {
-                "projectKey": project_id,
+                "projectKey": project_key,
                 "maxResults": max_results,
                 "startAt": start_at
             }
@@ -1040,7 +1117,7 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             # If we have multiple target folder IDs, get test cases from each folder
             if target_folder_ids and include_subfolders:
                 all_test_cases = self._get_test_cases_from_folders(
-                    project_id, target_folder_ids, max_results, start_at, params
+                    project_key, target_folder_ids, max_results, start_at, params
                 )
             else:
                 # Just use the standard params (which might include a single folder_id)
@@ -1077,13 +1154,177 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
                 "custom fields": custom_fields,
                 "steps containing": steps_search
             }
-            
-            result_cases, message = self._format_test_case_results(filtered_cases, fields, search_criteria)
-            
-            return f"{message}: {json.dumps(result_cases, indent=2)}"
-                
+
+            if return_raw:
+                return filtered_cases
+            return self._finalize_test_case_results(filtered_cases, fields, search_criteria)
+
         except Exception as e:
             return ToolException(f"Error searching test cases: {str(e)}")
+
+    def _finalize_test_case_results(self, filtered_cases: List[dict], fields: List[str], search_criteria: dict) -> str:
+        result_cases, message = self._format_test_case_results(filtered_cases, fields, search_criteria)
+        return f"{message}: {json.dumps(result_cases, indent=2)}"
+
+    def _search_test_cases_by_jql(self, project_key: str, jql: str):
+        try:
+            parsed = self._parse_jql(jql)
+
+            return self.search_test_cases(
+                project_key=project_key,
+                search_term=parsed.get("text"),
+                order_by=parsed.get("orderBy", "name"),
+                order_direction=parsed.get("orderDirection", "ASC"),
+                limit_results=parsed.get("limit"),
+                folder_name=parsed.get("folder"),
+                folder_path=parsed.get("folderPath"),
+                exact_folder_match=parsed.get("exactFolderMatch", False),
+                include_subfolders=parsed.get("includeSubfolders", True),
+                labels=parsed.get("label"),
+                custom_fields=parsed.get("customFields"),
+                steps_search=parsed.get("steps"),
+                include_steps=True,
+                return_raw=True
+            )
+        except Exception as e:
+            return ToolException(f"Error searching test cases by JQL: {str(e)}")
+
+    def _parse_jql(self, jql: str) -> dict:
+        import re
+        result = {}
+
+        # Match string equality: field = "value"
+        for match in re.findall(r'(\w+)\s*=\s*"([^"]*)"', jql):
+            result[match[0]] = match[1]
+
+        # Match text search: field ~ "value"
+        for match in re.findall(r'(\w+)\s*~\s*"([^"]*)"', jql):
+            result[match[0]] = match[1]
+
+        # Match list: field in ("a", "b", ...)
+        for match in re.findall(r'(\w+)\s*in\s*\(\s*([^)]+?)\s*\)', jql):
+            values = [v.strip().strip('"') for v in match[1].split(",")]
+            result[match[0]] = values
+
+        # Match number/bool: field = 123 or field = true/false
+        for match in re.findall(r'(\w+)\s*=\s*([^\s"()]+)', jql):
+            key, raw_val = match
+            if key in result:
+                continue
+            if raw_val.lower() == "true":
+                result[key] = True
+            elif raw_val.lower() == "false":
+                result[key] = False
+            elif raw_val.isdigit():
+                result[key] = int(raw_val)
+            else:
+                try:
+                    result[key] = float(raw_val)
+                except ValueError:
+                    result[key] = raw_val
+
+        return result
+
+    def index_data(self, project_key: str,
+                   jql: str,
+                   collection_suffix: str = '',
+                   progress_step: int = None,
+                   clean_index: bool = False) -> str:
+        """
+        Search test cases using a JQL-like query with explicit project_key.
+
+        Example:
+            jql = 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login"'
+        """
+        test_cases_docs = self.get_test_cases_docs(project_key, jql)
+        folders_docs = self.get_folders_docs(project_key)
+
+        docs = test_cases_docs + folders_docs
+
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, document_processing_func=self.process_documents, progress_step=progress_step, clean_index=clean_index)
+
+    def _get_all_folders(self, project_key: str, folder_type:str, step: int = 10):
+        max_iterations = 50
+        count = 0
+        all_folders = []
+        start_at = 0
+        while count < max_iterations:
+            count+=1
+            new_folders = self.get_folders(projectKey=project_key, folderType=folder_type, maxResults=step, startAt=start_at, return_as_list=True)
+
+            if new_folders and len(new_folders) > 0:
+                all_folders.extend(new_folders)
+                start_at+=step
+            else:
+                break
+        return all_folders
+
+    def get_folders_docs(self, project_key: str):
+        folder_types = ['TEST_CASE', 'TEST_PLAN', 'TEST_CYCLE']
+        folders = []
+        for folder_type in folder_types:
+            try:
+                folders.extend(self._get_all_folders(project_key, folder_type=folder_type, step=100))
+            except Exception as e:
+                raise ToolException(f"Unable to extract folders for folder type '{folder_type}': {e}")
+
+        docs: List[Document] = []
+        for folder in folders:
+            page_content = folder['name']
+            metadata = folder
+            metadata['type'] = "FOLDER"
+            docs.append(Document(page_content=json.dumps(page_content), metadata=metadata))
+        return docs
+
+    def get_test_cases_docs(self, project_key: str, jql: str):
+        try:
+            test_cases = self._search_test_cases_by_jql(project_key, jql)
+        except Exception as e:
+            raise ToolException(f"Unable to extract test cases: {e}")
+
+        docs: List[Document] = []
+        for case in test_cases:
+            last_version = self._get_last_version(case['key'], step=100)
+            metadata = {
+                k: v for k, v in case.items()
+                if isinstance(v, (str, int, float, bool, list, dict, type(None)))
+            }
+            if last_version and isinstance(last_version, dict) and 'createdOn' in last_version:
+                metadata['updated_at'] = last_version['createdOn']
+            else:
+                metadata['updated_at'] = case['createdOn']
+
+            case['type'] = "TEST_CASE"
+
+            docs.append(Document(page_content=json.dumps(case), metadata=metadata))
+        return docs
+
+    def process_documents(self, documents: List[Document]) -> List[Document]:
+        return [self.process_document(doc) for doc in documents]
+
+    def process_document(self, document: Document) -> Document:
+        try:
+            base_data = json.loads(document.page_content)
+
+            if base_data['type'] and base_data['type'] == "TEST_CASE":
+                additional_content = self._process_test_case(base_data)
+                base_data['test_case_content'] = additional_content
+
+            document.page_content = json.dumps(base_data)
+            return document
+        except json.JSONDecodeError as e:
+            raise ToolException(f"Failed to decode JSON from document: {e}")
+
+    def _process_test_case(self, case):
+        steps = self.get_test_steps(case['key'], return_list=True)
+        script = self.get_test_script(case['key'], return_only_script=True)
+        additional_content = {
+            "steps": "" if isinstance(steps, ToolException) else steps,
+            "script": "" if isinstance(script, ToolException) else script,
+        }
+        return additional_content
 
     def get_tests_recursive(self, project_key: str = None, folder_id: str = None, maxResults: Optional[int] = 100, startAt: Optional[int] = 0):
         """Retrieves all test cases recursively from a folder and all its subfolders.
@@ -1341,7 +1582,8 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
             return f"Test steps updated for test case `{test_case_key}`: {len(updates)} step(s) modified"
         except Exception as e:
             return ToolException(f"Error updating test steps for test case {test_case_key}: {str(e)}")
-    
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {
@@ -1463,5 +1705,11 @@ class ZephyrScaleApiWrapper(BaseToolApiWrapper):
                 "description": self.get_tests_by_folder_path.__doc__,
                 "args_schema": ZephyrGetTestsByFolderPath,
                 "ref": self.get_tests_by_folder_path,
+            },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
             }
         ]
