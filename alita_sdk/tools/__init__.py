@@ -80,6 +80,8 @@ _safe_import_tool('postman', 'postman', 'get_tools', 'PostmanToolkit')
 _safe_import_tool('memory', 'memory', 'get_tools', 'MemoryToolkit')
 _safe_import_tool('zephyr_squad', 'zephyr_squad', 'get_tools', 'ZephyrSquadToolkit')
 _safe_import_tool('slack', 'slack', 'get_tools', 'SlackToolkit')
+_safe_import_tool('bigquery', 'google.bigquery', 'get_tools', 'BigQueryToolkit')
+_safe_import_tool('delta_lake', 'aws.delta_lake', 'get_tools', 'DeltaLakeToolkit')
 
 # Log import summary
 available_count = len(AVAILABLE_TOOLS)
