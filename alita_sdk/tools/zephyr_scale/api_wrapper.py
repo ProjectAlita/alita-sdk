@@ -1362,40 +1362,107 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
 
         return result
 
-    def index_data(self, project_key: str, jql: str, collection_suffix: str = '',
-                   fields: Optional[List[str]] = ["key", "name"]) -> str:
+    def index_data(self, project_key: str,
+                   jql: str,
+                   collection_suffix: str = '',
+                   progress_step: int = None,
+                   clean_index: bool = False) -> str:
         """
         Search test cases using a JQL-like query with explicit project_key.
 
         Example:
             jql = 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login"'
         """
-        if 'key' not in fields:
-            fields.append('key')
-        if 'id' not in fields:
-            fields.append('id')
-        if 'createdOn' not in fields:
-            fields.append('createdOn')
+        test_cases_docs = self.get_test_cases_docs(project_key, jql)
+        folders_docs = self.get_folders_docs(project_key)
+
+        docs = test_cases_docs + folders_docs
+
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, document_processing_func=self.process_documents, progress_step=progress_step, clean_index=clean_index)
+
+    def _get_all_folders(self, project_key: str, folder_type:str, step: int = 10):
+        max_iterations = 50
+        count = 0
+        all_folders = []
+        start_at = 0
+        while count < max_iterations:
+            count+=1
+            new_folders = self.get_folders(projectKey=project_key, folderType=folder_type, maxResults=step, startAt=start_at, return_as_list=True)
+
+            if new_folders and len(new_folders) > 0:
+                all_folders.extend(new_folders)
+                start_at+=step
+            else:
+                break
+        return all_folders
+
+    def get_folders_docs(self, project_key: str):
+        folder_types = ['TEST_CASE', 'TEST_PLAN', 'TEST_CYCLE']
+        folders = []
+        for folder_type in folder_types:
+            try:
+                folders.extend(self._get_all_folders(project_key, folder_type=folder_type, step=100))
+            except Exception as e:
+                raise ToolException(f"Unable to extract folders for folder type '{folder_type}': {e}")
+
+        docs: List[Document] = []
+        for folder in folders:
+            page_content = folder['name']
+            metadata = folder
+            metadata['type'] = "FOLDER"
+            docs.append(Document(page_content=json.dumps(page_content), metadata=metadata))
+        return docs
+
+    def get_test_cases_docs(self, project_key: str, jql: str):
         try:
-            test_cases = self._search_test_cases_by_jql(project_key, jql, fields)
+            test_cases = self._search_test_cases_by_jql(project_key, jql)
         except Exception as e:
             raise ToolException(f"Unable to extract test cases: {e}")
 
         docs: List[Document] = []
         for case in test_cases:
-            steps = self.get_test_steps(case['key'])
-            if isinstance(steps, ToolException):
-                steps = self.get_test_script(case['key'])
-                if isinstance(steps, ToolException):
-                    steps = 'unknown'
-            docs.append(Document(page_content=steps, metadata={
-                ("updated_on" if k == "createdOn" else k): v
-                for k, v in case.items()
+            last_version = self._get_last_version(case['key'], step=100)
+            metadata = {
+                k: v for k, v in case.items()
                 if isinstance(v, (str, int, float, bool, list, dict, type(None)))
-            }))
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs)
+            }
+            if last_version and isinstance(last_version, dict) and 'createdOn' in last_version:
+                metadata['updated_at'] = last_version['createdOn']
+            else:
+                metadata['updated_at'] = case['createdOn']
+
+            case['type'] = "TEST_CASE"
+
+            docs.append(Document(page_content=json.dumps(case), metadata=metadata))
+        return docs
+
+    def process_documents(self, documents: List[Document]) -> List[Document]:
+        return [self.process_document(doc) for doc in documents]
+
+    def process_document(self, document: Document) -> Document:
+        try:
+            base_data = json.loads(document.page_content)
+
+            if base_data['type'] and base_data['type'] == "TEST_CASE":
+                additional_content = self._process_test_case(base_data)
+                base_data['test_case_content'] = additional_content
+
+            document.page_content = json.dumps(base_data)
+            return document
+        except json.JSONDecodeError as e:
+            raise ToolException(f"Failed to decode JSON from document: {e}")
+
+    def _process_test_case(self, case):
+        steps = self.get_test_steps(case['key'], return_list=True)
+        script = self.get_test_script(case['key'], return_only_script=True)
+        additional_content = {
+            "steps": "" if isinstance(steps, ToolException) else steps,
+            "script": "" if isinstance(script, ToolException) else script,
+        }
+        return additional_content
+
     def get_tests_recursive(self, project_key: str = None, folder_id: str = None, maxResults: Optional[int] = 100, startAt: Optional[int] = 0):
         """Retrieves all test cases recursively from a folder and all its subfolders.
         
