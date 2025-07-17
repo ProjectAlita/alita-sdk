@@ -12,9 +12,9 @@ from python_graphql_client import GraphqlClient
 from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams, extend_with_vector_tools
 
 try:
-    from alita_sdk.runtime.utils.embeddings import get_embeddings
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 except ImportError:
-    get_embeddings = None
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ _get_tests_query = """query GetTests($jql: String!, $limit:Int!, $start: Int)
         limit
         results {
             issueId
-            jira(fields: ["key"])
+            jira(fields: ["key", "summary", "created", "updated", "assignee.displayName", "reporter.displayName"])
             projectId
             testType {
                 name
@@ -52,6 +52,8 @@ _get_tests_query = """query GetTests($jql: String!, $limit:Int!, $start: Int)
                     projectId
                 }
             }
+            unstructured
+            gherkin
         }
     }
 }
@@ -275,10 +277,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             raise ToolException("Please provide either 'jql' or 'graphql', not both.")
         
         try:
-            import json
-            
             if jql:
-                # Use direct method to get test data
                 tests_data = self._get_tests_direct(jql)
                 
             elif graphql:
@@ -307,17 +306,50 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             
             docs: List[Document] = []
             for test in tests_data:
-                # Use JSON dump approach similar to TestRail for consistency
-                page_content = json.dumps(test, default=str)
+                page_content = ""
+                test_type_name = test.get('testType', {}).get('name', '').lower()
                 
-                # Prepare essential metadata
+                if test_type_name == 'manual' and 'steps' in test and test['steps']:
+                    import json
+                    steps_content = []
+                    for step in test['steps']:
+                        step_obj = {}
+                        if step.get('action'):
+                            step_obj['action'] = step['action']
+                        if step.get('data'):
+                            step_obj['data'] = step['data']
+                        if step.get('result'):
+                            step_obj['result'] = step['result']
+                        if step_obj:
+                            steps_content.append(step_obj)
+                    page_content = json.dumps(steps_content, indent=2)
+                
+                elif test_type_name == 'cucumber' and test.get('gherkin'):
+                    page_content = test['gherkin']
+                
+                elif test.get('unstructured'):
+                    page_content = test['unstructured']
+
                 metadata = {
-                    'doctype': self.doctype  # Add doctype for proper filtering
+                    'doctype': self.doctype
                 }
                 
-                # Extract key fields for metadata
                 if 'jira' in test and test['jira']:
-                    metadata['key'] = test['jira'].get('key', '')
+                    jira_data = test['jira']
+                    metadata['key'] = jira_data.get('key', '')
+                    metadata['summary'] = jira_data.get('summary', '')
+                    
+                    if 'created' in jira_data:
+                        metadata['created_on'] = jira_data['created']
+                    if 'updated' in jira_data:
+                        metadata['updated_on'] = jira_data['updated']
+                    
+                    if 'assignee' in jira_data and jira_data['assignee']:
+                        metadata['assignee'] = str(jira_data['assignee'])
+                    
+                    if 'reporter' in jira_data and jira_data['reporter']:
+                        metadata['reporter'] = str(jira_data['reporter'])
+                
                 if 'issueId' in test:
                     metadata['issueId'] = str(test['issueId'])
                 if 'projectId' in test:
@@ -330,13 +362,13 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
             embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
             vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-            return vs.index_documents(docs, progress_step)
+            return vs.index_documents(docs)
             
         except Exception as e:
             raise ToolException(f"Unable to index test cases: {e}")
 
     def _get_tests_direct(self, jql: str) -> List[Dict]:
-        """Direct method to get test data without string formatting - similar to TestRail approach"""
+        """Direct method to get test data without string formatting"""
         start_at = 0
         all_tests = []
         logger.info(f"[indexing] jql to get tests: {jql}")
@@ -372,7 +404,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
     @extend_with_vector_tools
     def get_available_tools(self):
-        return [
+        tools = [
             {
                 "name": "get_tests",
                 "description": self.get_tests.__doc__,
@@ -404,3 +436,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 "ref": self.index_data,
             }
         ]
+
+        tools.extend(self._get_vector_search_tools())
+        return tools
