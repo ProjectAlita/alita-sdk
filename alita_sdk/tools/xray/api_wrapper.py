@@ -1,14 +1,20 @@
 import logging
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 
 import requests
 from langchain_core.tools import ToolException
+from langchain_core.documents import Document
 from pydantic import create_model, PrivateAttr, SecretStr
 from pydantic import model_validator
 from pydantic.fields import Field
 from python_graphql_client import GraphqlClient
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
+
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +26,7 @@ _get_tests_query = """query GetTests($jql: String!, $limit:Int!, $start: Int)
         limit
         results {
             issueId
-            jira(fields: ["key"])
+            jira(fields: ["key", "summary", "created", "updated", "assignee.displayName", "reporter.displayName"])
             projectId
             testType {
                 name
@@ -46,6 +52,8 @@ _get_tests_query = """query GetTests($jql: String!, $limit:Int!, $start: Int)
                     projectId
                 }
             }
+            unstructured
+            gherkin
         }
     }
 }
@@ -96,6 +104,41 @@ XrayCreateTests = create_model(
     graphql_mutations=(list[str], Field(description="list of GraphQL mutations:\n" + _graphql_mutation_description))
 )
 
+# Schema for indexing Xray data into vector store
+XrayIndexData = create_model(
+    "XrayIndexData",
+    __base__=BaseIndexParams,
+    jql=(Optional[str], Field(description="""JQL query for searching test cases in Xray.
+
+    Standard JQL query syntax for filtering Xray test cases. Examples:
+    - project = "CALC" AND testType = "Manual"
+    - project = "CALC" AND labels in ("Smoke", "Regression")
+    - project = "CALC" AND summary ~ "login"
+    - project = "CALC" AND testType = "Manual" AND labels = "Critical"
+
+    Supported fields:
+    - project: project key filter (e.g., project = "CALC")
+    - testType: filter by test type (e.g., testType = "Manual")
+    - labels: filter by labels (e.g., labels = "Smoke" or labels in ("Smoke", "Regression"))
+    - summary: search in test summary (e.g., summary ~ "login")
+    - description: search in test description
+    - status: filter by test status
+    - priority: filter by test priority
+
+    Example:
+        'project = "CALC" AND testType = "Manual" AND labels in ("Smoke", "Critical")'
+    """, default=None)),
+    graphql=(Optional[str], Field(description="""Custom GraphQL query for advanced data extraction.
+    
+    Use this for custom GraphQL queries that return test data. The query should return test objects
+    with relevant fields like issueId, jira, testType, steps, etc.
+    
+    Example:
+        'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) testType { name } steps { action result } } } }'
+    """, default=None)),
+    progress_step=(Optional[int], Field(description="Progress step for tracking indexing progress", default=None))
+)
+
 
 def _parse_tests(test_results) -> List[Any]:
     """Handles tests in order to minimize tests' output"""
@@ -107,13 +150,22 @@ def _parse_tests(test_results) -> List[Any]:
     return test_results
 
 
-class XrayApiWrapper(BaseToolApiWrapper):
+class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
     _default_base_url: str = 'https://xray.cloud.getxray.app'
     base_url: str = ""
     client_id: str = None,
     client_secret: SecretStr = None,
     limit: Optional[int] = 100,
     _client: Optional[GraphqlClient] = PrivateAttr()
+
+    # Vector store fields
+    llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
+    doctype: str = "xray_test"
 
     class Config:
         arbitrary_types_allowed = True
@@ -197,8 +249,161 @@ class XrayApiWrapper(BaseToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
 
+    def index_data(self, jql: Optional[str] = None, graphql: Optional[str] = None, 
+                   collection_suffix: str = '', progress_step: Optional[int] = None) -> str:
+        """
+        Index Xray test cases into vector store using JQL query or custom GraphQL.
+
+        Args:
+            jql: JQL query for searching test cases
+            graphql: Custom GraphQL query for advanced data extraction
+            collection_suffix: Optional suffix for collection name
+            progress_step: Progress step for tracking indexing progress
+
+        Examples:
+            # Using JQL
+            jql = 'project = "CALC" AND testType = "Manual" AND labels in ("Smoke", "Critical")'
+            
+            # Using GraphQL
+            graphql = 'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) steps { action result } } } }'
+        """
+        if not get_embeddings:
+            raise ToolException("get_embeddings function not available. Please check the import.")
+        
+        if not jql and not graphql:
+            raise ToolException("Either 'jql' or 'graphql' parameter must be provided.")
+        
+        if jql and graphql:
+            raise ToolException("Please provide either 'jql' or 'graphql', not both.")
+        
+        try:
+            if jql:
+                tests_data = self._get_tests_direct(jql)
+                
+            elif graphql:
+                # Use direct GraphQL execution
+                graphql_data = self._execute_graphql_direct(graphql)
+                
+                # Extract tests from GraphQL response (handle different possible structures)
+                if 'data' in graphql_data:
+                    if 'getTests' in graphql_data['data']:
+                        tests_data = graphql_data['data']['getTests'].get('results', [])
+                    else:
+                        # Try to find any list of test objects in the data
+                        tests_data = []
+                        for key, value in graphql_data['data'].items():
+                            if isinstance(value, list):
+                                tests_data = value
+                                break
+                            elif isinstance(value, dict) and 'results' in value:
+                                tests_data = value['results']
+                                break
+                else:
+                    tests_data = graphql_data if isinstance(graphql_data, list) else []
+                
+                if not tests_data:
+                    raise ToolException("No test data found in GraphQL response")
+            
+            docs: List[Document] = []
+            for test in tests_data:
+                page_content = ""
+                test_type_name = test.get('testType', {}).get('name', '').lower()
+                
+                if test_type_name == 'manual' and 'steps' in test and test['steps']:
+                    import json
+                    steps_content = []
+                    for step in test['steps']:
+                        step_obj = {}
+                        if step.get('action'):
+                            step_obj['action'] = step['action']
+                        if step.get('data'):
+                            step_obj['data'] = step['data']
+                        if step.get('result'):
+                            step_obj['result'] = step['result']
+                        if step_obj:
+                            steps_content.append(step_obj)
+                    page_content = json.dumps(steps_content, indent=2)
+                
+                elif test_type_name == 'cucumber' and test.get('gherkin'):
+                    page_content = test['gherkin']
+                
+                elif test.get('unstructured'):
+                    page_content = test['unstructured']
+
+                metadata = {
+                    'doctype': self.doctype
+                }
+                
+                if 'jira' in test and test['jira']:
+                    jira_data = test['jira']
+                    metadata['key'] = jira_data.get('key', '')
+                    metadata['summary'] = jira_data.get('summary', '')
+                    
+                    if 'created' in jira_data:
+                        metadata['created_on'] = jira_data['created']
+                    if 'updated' in jira_data:
+                        metadata['updated_on'] = jira_data['updated']
+                    
+                    if 'assignee' in jira_data and jira_data['assignee']:
+                        metadata['assignee'] = str(jira_data['assignee'])
+                    
+                    if 'reporter' in jira_data and jira_data['reporter']:
+                        metadata['reporter'] = str(jira_data['reporter'])
+                
+                if 'issueId' in test:
+                    metadata['issueId'] = str(test['issueId'])
+                if 'projectId' in test:
+                    metadata['projectId'] = str(test['projectId'])
+                if 'testType' in test and test['testType']:
+                    metadata['testType'] = test['testType'].get('name', '')
+                    metadata['testKind'] = test['testType'].get('kind', '')
+                
+                docs.append(Document(page_content=page_content, metadata=metadata))
+
+            embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+            vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+            return vs.index_documents(documents=docs, progress_step=progress_step)
+            
+        except Exception as e:
+            raise ToolException(f"Unable to index test cases: {e}")
+
+    def _get_tests_direct(self, jql: str) -> List[Dict]:
+        """Direct method to get test data without string formatting"""
+        start_at = 0
+        all_tests = []
+        logger.info(f"[indexing] jql to get tests: {jql}")
+        
+        while True:
+            try:
+                get_tests_response = self._client.execute(query=_get_tests_query,
+                                                          variables={"jql": jql, "start": start_at,
+                                                                     "limit": self.limit})['data']["getTests"]
+            except Exception as e:
+                raise ToolException(f"Unable to get tests due to error: {str(e)}")
+            
+            # Get raw test data without parsing
+            tests = _parse_tests(get_tests_response["results"])
+            total = get_tests_response['total']
+            all_tests.extend(tests)
+
+            # Check if more results are available
+            if len(all_tests) == total:
+                break
+
+            start_at += self.limit
+        
+        return all_tests
+
+    def _execute_graphql_direct(self, graphql: str) -> Any:
+        """Direct method to execute GraphQL and return parsed data"""
+        logger.info(f"[indexing] executing GraphQL query: {graphql}")
+        try:
+            return self._client.execute(query=graphql)
+        except Exception as e:
+            raise ToolException(f"Unable to execute GraphQL due to error: {str(e)}")
+
     def get_available_tools(self):
-        return [
+        tools = [
             {
                 "name": "get_tests",
                 "description": self.get_tests.__doc__,
@@ -222,5 +427,14 @@ class XrayApiWrapper(BaseToolApiWrapper):
                 "description": self.execute_graphql.__doc__,
                 "args_schema": XrayGrapql,
                 "ref": self.execute_graphql,
+            },
+            {
+                "name": "index_data",
+                "description": self.index_data.__doc__,
+                "args_schema": XrayIndexData,
+                "ref": self.index_data,
             }
         ]
+
+        tools.extend(self._get_vector_search_tools())
+        return tools
