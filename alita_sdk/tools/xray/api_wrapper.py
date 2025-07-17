@@ -9,7 +9,7 @@ from pydantic import model_validator
 from pydantic.fields import Field
 from python_graphql_client import GraphqlClient
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams, extend_with_vector_tools
+from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -402,7 +402,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             raise ToolException(f"Unable to execute GraphQL due to error: {str(e)}")
 
-    @extend_with_vector_tools
     def get_available_tools(self):
         tools = [
             {
