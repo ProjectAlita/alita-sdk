@@ -582,9 +582,70 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'id': str(case.get('id', '')),
                 'updated_on': case.get('updated_on', ''),
             }))
+
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs, progress_step, clean_index)
+        return vs.index_documents(docs, document_processing_func=self.process_documents, progress_step=progress_step, clean_index=clean_index)
+
+    def process_documents(self, documents: List[Document]) -> List[Document]:
+        """
+        Process a list of base documents to extract relevant metadata for full document preparation.
+        Used for late processing of documents after we ensure that the documents have to be indexed to avoid
+        time-consuming operations for documents which might be useless.
+        This function passed to index_documents method of vector store and called after _reduce_duplicates method.
+
+        Args:
+            documents (List[Document]): The base documents to process.
+
+        Returns:
+            List[Document]: The processed documents with metadata.
+        """
+        return [self.process_document(doc) for doc in documents]
+
+    def process_document(self, document: Document) -> Document:
+        """
+        Process an existing base document to extract relevant metadata for full document preparation.
+        Used for late processing of documents after we ensure that the document has to be indexed to avoid
+        time-consuming operations for documents which might be useless.
+
+        Args:
+            document (Document): The base document to process.
+
+        Returns:
+            Document: The processed document with metadata.
+        """
+        try:
+            # get base data from the document required to extract attachments and other metadata
+            base_data = json.loads(document.page_content)
+            case_id = base_data.get("id")
+
+            # get a list of attachments for the case
+            attachments = self._client.attachments.get_attachments_for_case_bulk(case_id=case_id)
+            attachments_data = {}
+
+            # process each attachment to extract its content
+            for attachment in attachments:
+                attachments_data[attachment['filename']] = self._process_attachment(attachment)
+            base_data['attachments'] = attachments_data
+            document.page_content = json.dumps(base_data)
+            return document
+        except json.JSONDecodeError as e:
+            raise ToolException(f"Failed to decode JSON from document: {e}")
+
+    def _process_attachment(self, attachment: Dict[str, Any]) -> str:
+        """
+        Processes an attachment to extract its content.
+
+        Args:
+            attachment (Dict[str, Any]): The attachment data.
+
+        Returns:
+            str: string description of the attachment.
+        """
+        if attachment['filetype'] == 'txt' :
+            return self._client.get(endpoint=f"get_attachment/{attachment['id']}")
+        # TODO: add support for other file types
+        return "This filetype is not supported."
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """

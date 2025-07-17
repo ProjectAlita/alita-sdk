@@ -244,7 +244,16 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         return final_docs
 
-    def index_documents(self, documents, progress_step: int = 20, clean_index: bool = True):
+    def index_documents(self, documents, document_processing_func = None, progress_step: int = 20, clean_index: bool = True):
+        """ Index documents in the vectorstore.
+
+        Args:
+            documents (Any): Generator or list of documents to index.
+            document_processing_func (Optional[Callable]): Function to process documents after duplicates removal and before indexing.
+            progress_step (int): Step for progress reporting, default is 20.
+            clean_index (bool): If True, clean the index before re-indexing all documents.
+        """
+
         from ..langchain.interfaces.llm_processor import add_documents
 
         # pre-process documents if needed (find duplicates, etc.)
@@ -267,6 +276,11 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         if not documents or len(documents) == 0:
             logger.info("No new documents to index after duplicate check.")
             return {"status": "ok", "message": "No new documents to index."}
+
+        # if func is provided, apply it to documents
+        # used for processing of documents before indexing,
+        # e.g. to avoid time-consuming operations for documents that are already indexed
+        document_processing_func(documents) if document_processing_func else None
 
         # notify user about missed required metadata fields: id, updated_on
         # it is not required to have them, but it is recommended to have them for proper re-indexing and duplicate detection
