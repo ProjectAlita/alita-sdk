@@ -1283,7 +1283,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             self.analyzer.remove_item_ids(collection_data.get("item", []))
 
             response = self._make_request(
-                'POST', '/collections', json={"collection": collection_data})
+                'POST', f'/collections?workspace={self.workspace_id}', json={"collection": collection_data})
             return json.dumps(response, indent=2)
         except Exception as e:
             stacktrace = format_exc()
