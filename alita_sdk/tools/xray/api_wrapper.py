@@ -362,7 +362,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
             embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
             vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-            return vs.index_documents(docs)
+            return vs.index_documents(documents=docs, progress_step=progress_step)
             
         except Exception as e:
             raise ToolException(f"Unable to index test cases: {e}")
