@@ -186,6 +186,8 @@ class BaseToolApiWrapper(BaseModel):
 
 class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     """Base class for tool API wrappers that support vector store functionality."""
+
+    doctype: str = "document"
     
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
         """ Initializes the vector store wrapper with the provided parameters."""

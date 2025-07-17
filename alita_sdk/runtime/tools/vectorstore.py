@@ -1,12 +1,13 @@
 import json
-from json import dumps
+import math
 from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, model_validator, Field
-from langchain_core.tools import ToolException
 from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from logging import getLogger
+
+from ..utils.logging import dispatch_custom_event
 
 logger = getLogger(__name__)
 
@@ -182,18 +183,108 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
-    def index_documents(self, documents):
+    def _get_indexed_data(self, store):
+        """ Get all indexed data from vectorstore """
+
+        # get already indexed data
+        result = {}
+        try:
+            self._log_data("Retrieving already indexed data from vectorstore",
+                           tool_name="index_documents")
+            data = store.get(include=['documents', 'metadatas'])
+            # re-structure data to be more usable
+            for doc_str, meta, db_id in zip(data['documents'], data['metadatas'], data['ids']):
+                doc = json.loads(doc_str)
+                doc_id = str(meta['id'])
+                result[doc_id] = {
+                    'metadata': meta,
+                    'document': doc,
+                    'id': db_id
+                }
+        except Exception as e:
+            logger.error(f"Failed to get indexed data from vectorstore: {str(e)}. Continuing with empty index.")
+        return result
+
+    def _reduce_duplicates(self, documents, store) -> List[Any]:
+        """Remove documents already indexed in the vectorstore based on metadata 'id' and 'updated_on' fields."""
+
+        self._log_data("Verification of documents to index started", tool_name="index_documents")
+
+        data = self._get_indexed_data(store)
+        indexed_ids = set(data.keys())
+        if not indexed_ids:
+            self._log_data("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
+            return documents
+
+        final_docs = []
+        docs_to_remove = []
+
+        for document in documents:
+            doc_id = document.metadata.get('id')
+            # get document's metadata and id and check if already indexed
+            if doc_id in indexed_ids:
+                # document has been indexed already, then verify `updated_on`
+                to_index_updated_on = document.metadata.get('updated_on')
+                indexed_meta = data[doc_id]['metadata']
+                indexed_updated_on = indexed_meta.get('updated_on')
+                if to_index_updated_on and indexed_updated_on and to_index_updated_on == indexed_updated_on:
+                    # same updated_on, skip indexing
+                    continue
+                # if updated_on is missing or different, we will re-index the document and remove old one
+                docs_to_remove.append(data[doc_id]['id'])
+            else:
+                final_docs.append(document)
+
+        if docs_to_remove:
+            self._log_data(
+                f"Removing {len(docs_to_remove)} documents from vectorstore that are already indexed with different updated_on.",
+                tool_name="index_documents"
+            )
+            store.delete(ids=docs_to_remove)
+
+        return final_docs
+
+    def index_documents(self, documents, progress_step: int = 20, clean_index: bool = True):
         from ..langchain.interfaces.llm_processor import add_documents
+
+        # pre-process documents if needed (find duplicates, etc.)
+        if clean_index:
+            logger.info("Cleaning index before re-indexing all documents.")
+            self._log_data("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
+            try:
+                self.vectoradapter.delete_dataset(self.dataset)
+                self.vectoradapter.persist()
+                self.vectoradapter.vacuum()
+                self._log_data("Previous index has been removed",
+                               tool_name="index_documents")
+            except Exception as e:
+                logger.warning(f"Failed to clean index: {str(e)}. Continuing with re-indexing.")
+        else:
+            # remove duplicates based on metadata 'id' and 'updated_on' fields
+            documents = self._reduce_duplicates(documents, self.vectoradapter.vectorstore)
+
+
+        if not documents or len(documents) == 0:
+            logger.info("No new documents to index after duplicate check.")
+            return {"status": "ok", "message": "No new documents to index."}
+
+        # notify user about missed required metadata fields: id, updated_on
+        # it is not required to have them, but it is recommended to have them for proper re-indexing and duplicate detection
+        for doc in documents:
+            if 'id' not in doc.metadata or 'updated_on' not in doc.metadata:
+                logger.warning(f"Document is missing required metadata field 'id' or 'updated_on': {doc.metadata}")
+
         logger.debug(f"Indexing documents: {documents}")
         logger.debug(self.vectoradapter)
-        self.vectoradapter.delete_dataset(self.dataset)
-        self.vectoradapter.persist()
-        logger.debug(f"Deleted Dataset")
-        #
-        self.vectoradapter.vacuum()
-        #
+
+        documents = list(documents)
+        total_docs = len(documents)
         documents_count = 0
         _documents = []
+
+        # set default progress step to 20 if out of 0...100 or None
+        progress_step = 20 if progress_step not in range(0, 100) else progress_step
+        next_progress_point = progress_step
         for document in documents:
             documents_count += 1
             # logger.debug(f"Indexing document: {document}")
@@ -203,7 +294,14 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                     add_documents(vectorstore=self.vectoradapter.vectorstore, documents=_documents)
                     self.vectoradapter.persist()
                     _documents = []
-            except Exception as e:
+
+                percent = math.floor((documents_count / total_docs) * 100)
+                if percent >= next_progress_point:
+                    msg = f"Indexing progress: {percent}%. Processed {documents_count} of {total_docs} documents."
+                    logger.debug(msg)
+                    self._log_data(msg)
+                    next_progress_point += progress_step
+            except Exception:
                 from traceback import format_exc
                 logger.error(f"Error: {format_exc()}")
                 return {"status": "error", "message": f"Error: {format_exc()}"}
@@ -383,9 +481,11 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             combined_items = [item for item in combined_items if abs(item[1]) >= cut_off]
         
         # Sort by score and limit results
-        combined_items.sort(key=lambda x: x[1], reverse=True)
+
+        # for chroma we want ascending order (lower score is better), for others descending
+        combined_items.sort(key=lambda x: x[1], reverse= self.vectorstore_type.lower() != 'chroma')
         combined_items = combined_items[:search_top]
-        
+
         # Format output based on doctype
         if doctype == 'code':
             return code_format(combined_items)
@@ -497,6 +597,21 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             )
         ])
         return result.content
+
+    def _log_data(self, message: str, tool_name: str = "index_data"):
+        """Log data and dispatch custom event for indexing progress"""
+
+        try:
+            dispatch_custom_event(
+                name="thinking_step",
+                data={
+                    "message": message,
+                    "tool_name": tool_name,
+                    "toolkit": "vectorstore",
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to dispatch progress event: {str(e)}")
 
     def get_available_tools(self):
         return [
