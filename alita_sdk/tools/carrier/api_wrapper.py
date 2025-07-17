@@ -61,6 +61,9 @@ class CarrierAPIWrapper(BaseModel):
     def get_reports_list(self) -> List[Dict[str, Any]]:
         return self._client.get_reports_list()
 
+    def add_tag_to_report(self, report_id, tag_name):
+        return self._client.add_tag_to_report(report_id, tag_name)
+
     def get_tests_list(self) -> List[Dict[str, Any]]:
         return self._client.get_tests_list()
 
