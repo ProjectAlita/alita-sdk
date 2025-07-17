@@ -23,10 +23,11 @@ class GetReportsTool(BaseTool):
     description: str = "Get list of reports from the Carrier platform."
     args_schema: Type[BaseModel] = create_model(
         "GetReportsInput",
+        name=(str, Field(default="", description="Optional parameter. Report name to filter reports")),
         tag_name=(str, Field(default="", description="Optional parameter. Tag name to filter reports")),
     )
 
-    def _run(self, tag_name=""):
+    def _run(self, name="", tag_name=""):
         try:
             reports = self.api_wrapper.get_reports_list()
 
@@ -38,6 +39,10 @@ class GetReportsTool(BaseTool):
 
             trimmed_reports = []
             for report in reports:
+                # Filter reports by name
+                if name and not name == report["name"]:
+                    continue
+
                 # Filter by tag title
                 tags = report.get("tags", [])
                 if tag_name and not any(tag.get("title") == tag_name for tag in tags):
@@ -105,6 +110,29 @@ class GetReportByIDTool(BaseTool):
                 report["link_to_errors_file"] = "link is not available"
 
             return json.dumps(report)
+        except Exception:
+            stacktrace = traceback.format_exc()
+            logger.error(f"Error downloading reports: {stacktrace}")
+            raise ToolException(stacktrace)
+
+
+class AddTagToReportTool(BaseTool):
+    api_wrapper: CarrierAPIWrapper = Field(..., description="Carrier API Wrapper instance")
+    name: str = "add_tag_to_report"
+    description: str = "Add tag to backend report"
+    args_schema: Type[BaseModel] = create_model(
+        "AddTagToReportInput",
+        report_id=(str, Field(description="Report id to update")),
+        tag_name=(str, Field(description="Tag name to add to report")),
+    )
+
+    def _run(self, report_id: str, tag_name: str):
+        try:
+            res = self.api_wrapper.add_tag_to_report(report_id, tag_name)
+            if "Tags was updated" in res.text:
+                return f"Added tag {tag_name} to report id {report_id}"
+            else:
+                return f"Failed to add new tag to report id {report_id}"
         except Exception:
             stacktrace = traceback.format_exc()
             logger.error(f"Error downloading reports: {stacktrace}")
