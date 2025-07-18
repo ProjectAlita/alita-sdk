@@ -1,42 +1,124 @@
-"""Util that calls gitlab."""
-from __future__ import annotations
+# api_wrapper.py
+from typing import Any, Dict, List, Optional
 
-import json
-from datetime import datetime
-from langchain_core.tools import ToolException
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from alita_sdk.tools.elitea_base import BaseCodeToolApiWrapper
+from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
-from pydantic import BaseModel, model_validator, SecretStr
-from pydantic.fields import PrivateAttr
+AppendFileModel = create_model(
+    "AppendFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    content=(str, Field(description="The content to append to the file")),
+    branch=(str, Field(description="The branch to append the file in")),
+)
+DeleteFileModel = create_model(
+    "DeleteFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    branch=(str, Field(description="The branch to delete the file from")),
+    commit_message=(str, Field(default=None, description="Commit message for deleting the file. Optional.")),
+)
+CreateFileModel = create_model(
+    "CreateFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    file_contents=(str, Field(description="The contents of the file")),
+    branch=(str, Field(description="The branch to create the file in")),
+)
+ReadFileModel = create_model(
+    "ReadFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    branch=(str, Field(description="The branch to read the file from")),
+)
+UpdateFileModel = create_model(
+    "UpdateFileModel",
+    file_query=(str, Field(description="The file query string")),
+    branch=(str, Field(description="The branch to update the file in")),
+)
+CommentOnIssueModel = create_model(
+    "CommentOnIssueModel",
+    comment_query=(str, Field(description="The comment query string")),
+)
+GetIssueModel = create_model(
+    "GetIssueModel",
+    issue_number=(int, Field(description="The number of the issue")),
+)
+CreatePullRequestModel = create_model(
+    "CreatePullRequestModel",
+    pr_title=(str, Field(description="The title of the pull request")),
+    pr_body=(str, Field(description="The body of the pull request")),
+    branch=(str, Field(description="The branch to create the pull request from")),
+)
 
-if TYPE_CHECKING:
-    from gitlab.v4.objects import Issue
+CreateBranchModel = create_model(
+    "CreateBranchModel",
+    branch_name=(str, Field(description="The name of the branch, e.g. `my_branch`.")),
+)
+ListBranchesInRepoModel = create_model(
+    "ListBranchesInRepoModel",
+)
+ListFilesModel = create_model(
+    "ListFilesModel",
+    path=(Optional[str], Field(description="The path to list files from")),
+    recursive=(bool, Field(description="Whether to list files recursively", default=True)),
+    branch=(Optional[str], Field(description="The branch to list files from")),
+)
+ListFoldersModel = create_model(
+    "ListFoldersModel",
+    path=(Optional[str], Field(description="The path to list folders from")),
+    recursive=(bool, Field(description="Whether to list folders recursively", default=True)),
+    branch=(Optional[str], Field(description="The branch to list folders from")),
+)
+GetIssuesModel = create_model(
+    "GetIssuesModel",
+)
+SetActiveBranchModel = create_model(
+    "SetActiveBranchModel",
+    branch_name=(str, Field(description="The name of the branch, e.g. `my_branch`.")),
+)
+GetPRChangesModel = create_model(
+    "GetPRChangesModel",
+    pr_number=(int, Field(description="GitLab Merge Request (Pull Request) number")),
+)
+CreatePRChangeCommentModel = create_model(
+    "CreatePRChangeCommentModel",
+    pr_number=(int, Field(description="GitLab Merge Request (Pull Request) number")),
+    file_path=(str, Field(description="File path of the changed file")),
+    line_number=(int, Field(description="Line number from the diff for a changed file")),
+    comment=(str, Field(description="Comment content")),
+)
+GetCommitsModel = create_model(
+    "GetCommitsModel",
+    sha=(Optional[str], Field(description="Commit SHA", default=None)),
+    path=(Optional[str], Field(description="File path", default=None)),
+    since=(Optional[str], Field(description="Start date", default=None)),
+    until=(Optional[str], Field(description="End date", default=None)),
+    author=(Optional[str], Field(description="Author name", default=None)),
+)
 
-
-class GitLabAPIWrapper(BaseModel):
-    """Wrapper for GitLab API."""
-
+class GitLabAPIWrapper(BaseCodeToolApiWrapper):
+    url: str
+    repository: str
+    private_token: SecretStr
+    branch: Optional[str] = 'main'
     _git: Any = PrivateAttr()
     _repo_instance: Any = PrivateAttr()
     _active_branch: Any = PrivateAttr()
-    url: str = ''
-    repository: str = ''
-    """The name of the GitLab repository, in the form {username}/{repo-name}."""
-    private_token: SecretStr = None
-    """Personal access token for the GitLab service, used for authentication."""
-    branch: Optional[str] = 'main'
-    """The specific branch in the GitLab repository where the bot will make 
-        its commits. Defaults to 'main'.
-    """
 
+    llm: Optional[Any] = None
+    # Alita instance
+    alita: Optional[Any] = None
+
+    # Vector store configuration
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    doctype: Optional[str] = 'code'
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     @model_validator(mode='before')
     @classmethod
-    def validate_env(cls, values: Dict) -> Dict:
-        """Validate that api key and python package exists in environment."""
+    def validate_toolkit(cls, values: Dict) -> Dict:
         try:
             import gitlab
-
         except ImportError:
             raise ImportError(
                 "python-gitlab is not installed. "
@@ -55,40 +137,40 @@ class GitLabAPIWrapper(BaseModel):
         cls._active_branch = values.get('branch')
         return values
 
-
-    def set_active_branch(self, branch: str) -> None:
-        """Set the active branch for the bot."""
-        self._active_branch = branch
-        self._repo_instance.default_branch = branch
-        return f"Active branch set to {branch}"
-
+    def set_active_branch(self, branch_name: str) -> str:
+        self._active_branch = branch_name
+        self._repo_instance.default_branch = branch_name
+        return f"Active branch set to {branch_name}"
 
     def list_branches_in_repo(self) -> List[str]:
-        """List all branches in the repository."""
         branches = self._repo_instance.branches.list()
-        return json.dumps([branch.name for branch in branches])
+        return [branch.name for branch in branches]
 
     def list_files(self, path: str = None, recursive: bool = True, branch: str = None) -> List[str]:
-        """List files by defined path."""
         branch = branch if branch else self._active_branch
         files = self._get_all_files(path, recursive, branch)
         paths = [file['path'] for file in files if file['type'] == 'blob']
-        return f"Files: {paths}"
+        return paths
 
     def list_folders(self, path: str = None, recursive: bool = True, branch: str = None) -> List[str]:
-        """List folders by defined path."""
         branch = branch if branch else self._active_branch
         files = self._get_all_files(path, recursive, branch)
         paths = [file['path'] for file in files if file['type'] == 'tree']
-        return f"Folders: {paths}"
+        return paths
 
     def _get_all_files(self, path: str = None, recursive: bool = True, branch: str = None):
         branch = branch if branch else self._active_branch
-        return self._repo_instance.repository_tree(path=path, ref=branch,
-                                                    recursive=recursive, all=True)
+        return self._repo_instance.repository_tree(path=path, ref=branch, recursive=recursive, all=True)
 
-    def create_branch(self, branch_name: str) -> None:
-        """Create a new branch in the repository."""
+    # overrided for indexer
+    def _get_files(self, path: str = None, recursive: bool = True, branch: str = None):
+        gitlab_files = self._get_all_files(path, recursive, branch)
+        return [file['path'] for file in gitlab_files if file['type'] == 'blob']
+
+    def _read_file(self, file_path: str, branch: str):
+        return self.read_file(file_path, branch)
+
+    def create_branch(self, branch_name: str) -> str:
         try:
             self._repo_instance.branches.create(
                 {
@@ -104,14 +186,7 @@ class GitLabAPIWrapper(BaseModel):
         self._active_branch = branch_name
         return f"Branch {branch_name} created successfully and set as active"
 
-    def parse_issues(self, issues: List[Issue]) -> List[dict]:
-        """
-        Extracts title and number from each Issue and puts them in a dictionary
-        Parameters:
-            issues(List[Issue]): A list of gitlab Issue objects
-        Returns:
-            List[dict]: A dictionary of issue titles and numbers
-        """
+    def parse_issues(self, issues: List[Any]) -> List[dict]:
         parsed = []
         for issue in issues:
             title = issue.title
@@ -120,13 +195,6 @@ class GitLabAPIWrapper(BaseModel):
         return parsed
 
     def get_issues(self) -> str:
-        """
-        Fetches all open issues from the repo
-
-        Returns:
-            str: A plaintext report containing the number of issues
-            and each issue's title and number.
-        """
         issues = self._repo_instance.issues.list(state="opened")
         if len(issues) > 0:
             parsed_issues = self.parse_issues(issues)
@@ -138,14 +206,6 @@ class GitLabAPIWrapper(BaseModel):
             return "No open issues available"
 
     def get_issue(self, issue_number: int) -> Dict[str, Any]:
-        """
-        Fetches a specific issue and its first 10 comments
-        Parameters:
-            issue_number(int): The number for the gitlab issue
-        Returns:
-            dict: A dictionary containing the issue's title,
-            body, and comments as a string
-        """
         issue = self._repo_instance.issues.get(issue_number)
         page = 0
         comments: List[dict] = []
@@ -167,16 +227,6 @@ class GitLabAPIWrapper(BaseModel):
         }
 
     def create_pull_request(self, pr_title: str, pr_body: str, branch: str) -> str:
-        """
-        Makes a pull request from the bot's branch to the base branch
-        Parameters:
-            pr_query(str): a string which contains the PR title
-            and the PR body. The title is the first line
-            in the string, and the body are the rest of the string.
-            For example, "Updated README\nmade changes to add info"
-        Returns:
-            str: A success or failure message
-        """
         if self.branch == branch:
             return f"""Cannot make a pull request because 
             commits are already in the {self.branch} branch"""
@@ -196,16 +246,6 @@ class GitLabAPIWrapper(BaseModel):
                 return "Unable to make pull request due to error:\n" + str(e)
 
     def comment_on_issue(self, comment_query: str) -> str:
-        """
-        Adds a comment to a gitlab issue
-        Parameters:
-            comment_query(str): a string which contains the issue number,
-            two newlines, and the comment.
-            for example: "1\n\nWorking on it now"
-            adds the comment "working on it now" to issue 1
-        Returns:
-            str: A success or failure message
-        """
         issue_number = int(comment_query.split("\n\n")[0])
         comment = comment_query[len(str(issue_number)) + 2 :]
         try:
@@ -215,18 +255,7 @@ class GitLabAPIWrapper(BaseModel):
         except Exception as e:
             return "Unable to make comment due to error:\n" + str(e)
 
-
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
-        """
-        Creates a new file on the gitlab repo
-        Parameters:
-            file_query(str): a string which contains the file path
-            and the file contents. The file path is the first line
-            in the string, and the contents are the rest of the string.
-            For example, "hello_world.md\n# Hello World!"
-        Returns:
-            str: A success or failure message
-        """
         try:
             self.set_active_branch(branch)
             self._repo_instance.files.get(file_path, branch)
@@ -243,35 +272,11 @@ class GitLabAPIWrapper(BaseModel):
             return "Created file " + file_path
 
     def read_file(self, file_path: str, branch: str) -> str:
-        """
-        Reads a file from the gitlab repo
-        Parameters:
-            file_path(str): the file path
-        Returns:
-            str: The file decoded as a string
-        """
         self.set_active_branch(branch)
         file = self._repo_instance.files.get(file_path, branch)
         return file.decode().decode("utf-8")
 
     def update_file(self, file_query: str, branch: str) -> str:
-        """
-        Updates a file with new content.
-        Parameters:
-            file_query(str): Contains the file path and the file contents.
-                The old file contents is wrapped in OLD <<<< and >>>> OLD
-                The new file contents is wrapped in NEW <<<< and >>>> NEW
-                For example:
-                /test/hello.txt
-                OLD <<<<
-                Hello Earth!
-                >>>> OLD
-                NEW <<<<
-                Hello Mars!
-                >>>> NEW
-        Returns:
-            A success or failure message
-        """
         if branch == self.branch:
             return (
                 "You're attempting to commit to the directly"
@@ -313,16 +318,6 @@ class GitLabAPIWrapper(BaseModel):
             return "Unable to update file due to error:\n" + str(e)
 
     def append_file(self, file_path: str, content: str, branch: str) -> str:
-        """
-        Appends new content to the end of file.
-        Parameters:
-            file_path(str): Contains the file path.
-                For example:
-                /test/hello.txt
-            content(str): new content.
-        Returns:
-            A success or failure message
-        """
         if branch == self.branch:
             return (
                 "You're attempting to commit to the directly"
@@ -352,125 +347,155 @@ class GitLabAPIWrapper(BaseModel):
         except Exception as e:
             return "Unable to update file due to error:\n" + str(e)
 
-
-    def delete_file(self, file_path: str, branch: str) -> str:
-        """
-        Deletes a file from the repo
-        Parameters:
-            file_path(str): Where the file is
-        Returns:
-            str: Success or failure message
-        """
+    def delete_file(self, file_path: str, branch: str, commit_message: str = None) -> str:
         try:
             self.set_active_branch(branch)
-            self._repo_instance.files.delete(
-                file_path, branch, "Delete " + file_path
-            )
-            return "Deleted file " + file_path
+            if not commit_message:
+                commit_message = f"Delete {file_path}"
+            self._repo_instance.files.delete(file_path, branch, commit_message)
+            return f"Deleted file {file_path}"
         except Exception as e:
-            return "Unable to delete file due to error:\n" + str(e)
+            return f"Unable to delete file due to error:\n{e}"
 
-    def extract_old_new_pairs(self, file_query):
-        # Split the file content by lines
-        code_lines = file_query.split("\n")
+    def get_pr_changes(self, pr_number: int) -> str:
+        mr = self._repo_instance.mergerequests.get(pr_number)
+        res = f"title: {mr.title}\ndescription: {mr.description}\n\n"
+        for change in mr.changes()["changes"]:
+            res += f"diff --git a/{change['old_path']} b/{change['new_path']}\n{change['diff']}\n"
+        return res
 
-        # Initialize lists to hold the contents of OLD and NEW sections
-        old_contents = []
-        new_contents = []
+    def create_pr_change_comment(self, pr_number: int, file_path: str, line_number: int, comment: str) -> str:
+        mr = self._repo_instance.mergerequests.get(pr_number)
+        position = {"position_type": "text", "new_path": file_path, "new_line": line_number}
+        mr.discussions.create({"body": comment, "position": position})
+        return "Comment added"
 
-        # Initialize variables to track whether the current line is within an OLD or NEW section
-        in_old_section = False
-        in_new_section = False
-
-        # Temporary storage for the current section's content
-        current_section_content = []
-
-        # Iterate through each line in the file content
-        for line in code_lines:
-            # Check for OLD section start
-            if "OLD <<<" in line:
-                in_old_section = True
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for OLD section end
-            if ">>>> OLD" in line:
-                in_old_section = False
-                old_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for NEW section start
-            if "NEW <<<" in line:
-                in_new_section = True
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for NEW section end
-            if ">>>> NEW" in line:
-                in_new_section = False
-                new_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # If currently in an OLD or NEW section, add the line to the current section content
-            if in_old_section or in_new_section:
-                current_section_content.append(line)
-
-        # Pair the OLD and NEW contents
-        paired_contents = list(zip(old_contents, new_contents))
-
-        return paired_contents
-
-    def get_commits(
-            self,
-            sha: Optional[str] = None,
-            path: Optional[str] = None,
-            since: Optional[str] = None,
-            until: Optional[str] = None,
-            author: Optional[str] = None,
-    ) -> str:
-        """
-        Retrieves a list of commits from the repository.
-
-        Parameters:
-            sha (Optional[str]): The commit SHA to start listing commits from.
-            path (Optional[str]): The file path to filter commits by.
-            since (Optional[datetime]): Only commits after this date will be returned.
-            until (Optional[datetime]): Only commits before this date will be returned.
-            author (Optional[str]): The author of the commits.
-
-        Returns:
-            str: A list of commit data or an error message.
-        """
-        try:
-            # Prepare the parameters for the API call
-            params = {
-                "ref_name": sha,
-                "path": path,
-                "since": datetime.fromisoformat(since) if since else None,
-                "until": datetime.fromisoformat(until) if until else None,
-                "author": author if isinstance(author, str) else None,
-                "all" : True
+    def get_commits(self, sha: Optional[str] = None, path: Optional[str] = None, since: Optional[str] = None, until: Optional[str] = None, author: Optional[str] = None):
+        params = {}
+        if sha:
+            params["ref_name"] = sha
+        if path:
+            params["path"] = path
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+        if author:
+            params["author"] = author
+        commits = self._repo_instance.commits.list(**params)
+        return [
+            {
+                "sha": commit.id,
+                "author": commit.author_name,
+                "createdAt": commit.created_at,
+                "message": commit.message,
+                "url": commit.web_url,
             }
-            # Remove None values from the parameters
-            params = {key: value for key, value in params.items() if value is not None}
+            for commit in commits
+        ]
 
-            # Call the GitHub API to get commits
-            commits = self._repo_instance.commits.list(**params)
-
-            # Convert the commits to a list of dictionaries for easier processing
-            commit_list = [
-                {
-                    "sha": commit.id,
-                    "author": commit.author_name,
-                    "createdAt": commit.created_at,
-                    "message": commit.message,
-                    "url": commit.web_url,
-                }
-                for commit in commits
-            ]
-
-            return commit_list
-        except Exception as e:
-            return ToolException(f"Unable to retrieve commits due to error:\n{str(e)}")
+    def get_available_tools(self):
+        return [
+            {
+                "name": "create_branch",
+                "ref": self.create_branch,
+                "description": self.create_branch.__doc__,
+                "args_schema": CreateBranchModel,
+            },
+            {
+                "name": "list_branches_in_repo",
+                "ref": self.list_branches_in_repo,
+                "description": self.list_branches_in_repo.__doc__,
+                "args_schema": ListBranchesInRepoModel,
+            },
+            {
+                "name": "list_files",
+                "ref": self.list_files,
+                "description": self.list_files.__doc__,
+                "args_schema": ListFilesModel,
+            },
+            {
+                "name": "list_folders",
+                "ref": self.list_folders,
+                "description": self.list_folders.__doc__,
+                "args_schema": ListFoldersModel,
+            },
+            {
+                "name": "get_issues",
+                "ref": self.get_issues,
+                "description": self.get_issues.__doc__,
+                "args_schema": GetIssuesModel,
+            },
+            {
+                "name": "get_issue",
+                "ref": self.get_issue,
+                "description": self.get_issue.__doc__,
+                "args_schema": GetIssueModel,
+            },
+            {
+                "name": "create_pull_request",
+                "ref": self.create_pull_request,
+                "description": self.create_pull_request.__doc__,
+                "args_schema": CreatePullRequestModel,
+            },
+            {
+                "name": "comment_on_issue",
+                "ref": self.comment_on_issue,
+                "description": self.comment_on_issue.__doc__,
+                "args_schema": CommentOnIssueModel,
+            },
+            {
+                "name": "create_file",
+                "ref": self.create_file,
+                "description": self.create_file.__doc__,
+                "args_schema": CreateFileModel,
+            },
+            {
+                "name": "read_file",
+                "ref": self.read_file,
+                "description": self.read_file.__doc__,
+                "args_schema": ReadFileModel,
+            },
+            {
+                "name": "update_file",
+                "ref": self.update_file,
+                "description": self.update_file.__doc__,
+                "args_schema": UpdateFileModel,
+            },
+            {
+                "name": "append_file",
+                "ref": self.append_file,
+                "description": self.append_file.__doc__,
+                "args_schema": AppendFileModel,
+            },
+            {
+                "name": "delete_file",
+                "ref": self.delete_file,
+                "description": self.delete_file.__doc__,
+                "args_schema": DeleteFileModel,
+            },
+            {
+                "name": "set_active_branch",
+                "ref": self.set_active_branch,
+                "description": "Set the active branch in the repository.",
+                "args_schema": SetActiveBranchModel,
+            },
+            {
+                "name": "get_pr_changes",
+                "ref": self.get_pr_changes,
+                "description": "Get all changes from a pull request in git diff format.",
+                "args_schema": GetPRChangesModel,
+            },
+            {
+                "name": "create_pr_change_comment",
+                "ref": self.create_pr_change_comment,
+                "description": "Create a comment on a pull request change.",
+                "args_schema": CreatePRChangeCommentModel,
+            },
+            {
+                "name": "get_commits",
+                "ref": self.get_commits,
+                "description": "Retrieve a list of commits from the repository.",
+                "args_schema": GetCommitsModel,
+            },
+        ] + self._get_vector_search_tools()

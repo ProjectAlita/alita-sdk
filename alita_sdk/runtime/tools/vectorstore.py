@@ -1,5 +1,6 @@
 import json
 import math
+import types
 from typing import Any, Optional, List, Dict, Callable
 from pydantic import BaseModel, model_validator, Field
 from ..langchain.tools.vector import VectorAdapter
@@ -256,6 +257,10 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         """
 
         from ..langchain.interfaces.llm_processor import add_documents
+
+        # handler for generator
+        if isinstance(documents, types.GeneratorType):
+            documents = list(documents)
 
         # pre-process documents if needed (find duplicates, etc.)
         if clean_index:
