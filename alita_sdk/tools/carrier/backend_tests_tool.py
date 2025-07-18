@@ -7,7 +7,6 @@ from pydantic.fields import Field
 from pydantic import create_model, BaseModel
 from .api_wrapper import CarrierAPIWrapper
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -79,8 +78,10 @@ class RunTestByIDTool(BaseTool):
     description: str = "Execute test plan from the Carrier platform."
     args_schema: Type[BaseModel] = create_model(
         "RunTestByIdInput",
-        test_id=(int, Field(default=None, description="Test id to execute. Use test_id if user provide id in int format")),
-        name=(str, Field(default=None, description="Test name to execute. Use name if user provide name in str format")),
+        test_id=(
+        int, Field(default=None, description="Test id to execute. Use test_id if user provide id in int format")),
+        name=(
+        str, Field(default=None, description="Test name to execute. Use name if user provide name in str format")),
         test_parameters=(list, Field(
             default=None,
             description=(
@@ -200,7 +201,6 @@ class RunTestByIDTool(BaseTool):
                 # Validate and merge user-provided cloud_settings with available parameters
                 cloud_settings = self._merge_cloud_settings(available_cloud_settings, cloud_settings)
 
-
             # Build common_params dictionary
             common_params = {
                 param["name"]: param
@@ -307,7 +307,8 @@ class CreateBackendTestInput(BaseModel):
     test_type: str = Field(..., description="Test type")
     env_type: str = Field(..., description="Env type")
     entrypoint: str = Field(..., description="Entrypoint for the test (JMeter script path or Gatling simulation path)")
-    custom_cmd: str = Field(..., description="Custom command line to execute the test (e.g., -l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report)")
+    custom_cmd: str = Field(...,
+                            description="Custom command line to execute the test (e.g., -l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report)")
     runner: str = Field(..., description="Test runner (Gatling or JMeter)")
     source: Optional[Dict[str, Optional[str]]] = Field(
         None,
@@ -474,8 +475,11 @@ class CreateBackendTestTool(BaseTool):
                 return {
                     "message": "Do you want to configure email integration?",
                     "instructions": (
+                        "If the user indicates no integrations are needed make sure to pass email_integration"
+                        " as empty dict to _run method and invoke it ones again with email_integration={}."
                         "If yes, select an integration from the available options below and provide email recipients.\n"
-                        "If no, respond with 'no'."
+                        "If no, respond with 'no'. "
+
                     ),
                     "available_integrations": [
                         {
@@ -490,6 +494,28 @@ class CreateBackendTestTool(BaseTool):
                         "recipients": ["example@example.com", "user@example.com"],
                     },
                 }
+
+            # Ensure email_integrations is an empty dict if the user indicates no integrations are needed
+            if isinstance(email_integration, str) and email_integration.lower() == "no":
+                email_integration = {}
+            elif (
+                    len(integrations_list) > 0
+                    and isinstance(email_integration, dict)
+                    and "integration_id" in email_integration
+                    and "recipients" in email_integration
+            ):
+                email_integration = {
+                    "reporters": {
+                        "reporter_email": {
+                            "id": email_integration["integration_id"],
+                            "is_local": True,
+                            "project_id": integrations_list[0]["project_id"],
+                            "recipients": email_integration["recipients"],
+                        }
+                    }
+                }
+            else:
+                email_integration = {}
 
             # Prepare the final data dictionary
             data = {
@@ -512,16 +538,7 @@ class CreateBackendTestTool(BaseTool):
                     "location": "default",  # TODO update location
                 },
                 "test_parameters": test_parameters,
-                "integrations": {
-                    "reporters": {
-                        "reporter_email": {
-                            "id": email_integration["integration_id"],
-                            "is_local": True,
-                            "project_id": integrations_list[0]["project_id"],  # Example project_id
-                            "recipients": email_integration["recipients"],
-                        }
-                    }
-                },
+                "integrations": email_integration,
                 "scheduling": [],
                 "run_test": False,
             }
@@ -539,17 +556,3 @@ class CreateBackendTestTool(BaseTool):
             stacktrace = traceback.format_exc()
             logger.error(f"Error while creating test: {stacktrace}")
             raise ToolException(stacktrace)
-
-# data = {"common_params":{"name":"toolkit_demo","test_type":"toolkit_demo","env_type":"toolkit_demo",
-#                                      "entrypoint":"tests/BasicEcommerceWithTransaction.jmx","runner":"v5.6.3",
-#                                      "source":{"name":"git_https","repo":"https://git.epam.com/epm-perf/boilerplate.git",
-#                                                "branch":"jmeter","username":"mykhailo_hunko@epam.com",
-#                                                "password":"{{secret.mykhailo_gitlab}}"},
-#                                      "env_vars":{"cpu_quota":2,"memory_quota":6,"cloud_settings":{},
-#                                                  "custom_cmd":"-l /tmp/reports/jmeter.jtl -e -o /tmp/reports/html_report"},
-#                                      "parallel_runners":1,"cc_env_vars":{},"customization":{},"location":"default"},
-#                     "test_parameters":[{"name":"VUSERS","default":"5","type":"string","description":"","action":""},
-#                                        {"name":"DURATION","default":"60","type":"string","description":"","action":""}],
-#                     "integrations":{"reporters":{"reporter_email":{"id":1,"is_local":True,"project_id":36,
-#                                                                    "recipients":["mykhailo_hunko@epam.com"]}}},
-#                     "scheduling":[],"run_test":True}
