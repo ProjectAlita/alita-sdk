@@ -1106,7 +1106,8 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
         """
         try:
             search_criteria = GitQueryCommitsCriteria(
-                item_version=GitVersionDescriptor(version=sha, version_type='commit'),
+                # get from the active branch if not specified
+                item_version=GitVersionDescriptor(version=sha, version_type='commit') if sha else None,
                 item_path=path,
                 from_date=str(datetime.fromisoformat(since)) if since else None,
                 to_date=str(datetime.fromisoformat(until)) if until else None,

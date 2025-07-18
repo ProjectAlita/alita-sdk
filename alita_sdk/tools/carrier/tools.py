@@ -1,6 +1,6 @@
 # import all available tools
 from .tickets_tool import FetchTicketsTool, CreateTicketTool
-from .backend_reports_tool import GetReportsTool, GetReportByIDTool, CreateExcelReportTool
+from .backend_reports_tool import GetReportsTool, GetReportByIDTool, CreateExcelReportTool, AddTagToReportTool
 from .backend_tests_tool import GetTestsTool, GetTestByIDTool, RunTestByIDTool, CreateBackendTestTool
 from .ui_reports_tool import GetUIReportsTool, GetUIReportByIDTool, GetUITestsTool
 from .run_ui_test_tool import RunUITestTool
@@ -14,6 +14,7 @@ __all__ = [
     {"name": "create_ticket", "tool": CreateTicketTool},
     {"name": "get_reports", "tool": GetReportsTool},
     {"name": "get_report_by_id", "tool": GetReportByIDTool},
+    {"name": "add_tag_to_report", "tool": AddTagToReportTool},
     {"name": "create_excel_report", "tool": CreateExcelReportTool},
     {"name": "get_tests", "tool": GetTestsTool},
     {"name": "get_test_by_id", "tool": GetTestByIDTool},

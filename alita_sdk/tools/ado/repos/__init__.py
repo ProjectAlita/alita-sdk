@@ -55,7 +55,6 @@ class AzureDevOpsReposToolkit(BaseToolkit):
             project=(str, Field(title="Project", description="ADO project", json_schema_extra={'configuration': True})),
             repository_id=(str, Field(title="Repository ID", description="ADO repository ID",
                                                 json_schema_extra={
-                                                    'toolkit_name': True,
                                                     'max_toolkit_length': AzureDevOpsReposToolkit.toolkit_max_length,
                                                     'configuration': True})),
             token=(SecretStr, Field(title="Token", description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),

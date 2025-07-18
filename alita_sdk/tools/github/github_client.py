@@ -1585,7 +1585,7 @@ class GitHubClient(BaseModel):
             run = repo.get_workflow_run(int(run_id))
 
             # Get additional details about the run jobs
-            jobs = list(run.get_jobs())
+            jobs = list(run.jobs())
             job_details = []
 
             for job in jobs:
@@ -1664,7 +1664,7 @@ class GitHubClient(BaseModel):
                 }
             except Exception as e:
                 # Fallback approach: Get logs from individual jobs
-                jobs = list(run.get_jobs())
+                jobs = list(run.jobs())
                 job_logs = []
 
                 for job in jobs:
