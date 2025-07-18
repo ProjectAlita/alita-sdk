@@ -261,7 +261,8 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             embedding_model=self.embedding_model,
             embedding_model_params=self.embedding_model_params,
             vectorstore_params=vectorstore_params,
-            embeddings=embeddings
+            embeddings=embeddings,
+            process_document_func=self._process_documents,
         )
 
     def search_index(self,
