@@ -91,12 +91,16 @@ PostmanUpdateCollectionDescription = create_model(
 
 PostmanUpdateCollectionVariables = create_model(
     "PostmanUpdateCollectionVariables",
-    variables=(List[Dict], Field(description="Updated collection variables"))
+    variables=(Optional[List[Dict[str, Any]]], Field(default=None,
+        description="List of collection variables objects. "
+                    "Example: [{'key': 'project_id', 'type': 'string', 'value': '15', 'enabled': true}]"))
 )
 
 PostmanUpdateCollectionAuth = create_model(
     "PostmanUpdateCollectionAuth",
-    auth=(Dict, Field(description="Updated authentication settings"))
+    auth=(Optional[Dict[str, Any]], Field(default=None,
+         description="Updated authentication settings. Example: {'type': 'bearer',token '': 'your_token'}"
+     ))
 )
 
 PostmanDeleteCollection = create_model(
@@ -190,19 +194,21 @@ PostmanUpdateRequestDescription = create_model(
 PostmanUpdateRequestHeaders = create_model(
     "PostmanUpdateRequestHeaders",
     request_path=(str, Field(description="Path to the request (folder/requestName)")),
-    headers=(List[Dict], Field(description="Request headers"))
+    headers=(Optional[List[Dict[str, Any]]], Field(default=None, description="Request headers."))
 )
 
 PostmanUpdateRequestBody = create_model(
     "PostmanUpdateRequestBody",
     request_path=(str, Field(description="Path to the request (folder/requestName)")),
-    body=(Dict, Field(description="Request body"))
+    body=(Optional[Dict[str, Any]], Field(default=None, description="Request body."))
 )
 
 PostmanUpdateRequestAuth = create_model(
     "PostmanUpdateRequestAuth",
     request_path=(str, Field(description="Path to the request (folder/requestName)")),
-    auth=(Dict, Field(description="Request authentication"))
+    auth=(Optional[Dict[str, Any]], Field(default=None,
+         description="Updated authentication settings. Example: {'type': 'bearer',token '': 'your_token'}"
+     ))
 )
 
 PostmanUpdateRequestTests = create_model(
@@ -692,7 +698,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
     def get_collections(self, **kwargs) -> str:
         """Get all Postman collections accessible to the user."""
         try:
-            response = self._make_request('GET', '/collections')
+            response = self._make_request('GET', f'/collections?workspace={self.workspace_id}')
             return json.dumps(response, indent=2)
         except Exception as e:
             stacktrace = format_exc()
@@ -1214,7 +1220,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update collection {self.collection_id} description: {str(e)}")
 
-    def update_collection_variables(self, variables: List[Dict], **kwargs) -> str:
+    def update_collection_variables(self, variables: List[Dict[str, Any]], **kwargs) -> str:
         """Update collection variables."""
         try:
             # Get current collection
@@ -1234,7 +1240,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update collection {self.collection_id} variables: {str(e)}")
 
-    def update_collection_auth(self, auth: Dict, **kwargs) -> str:
+    def update_collection_auth(self, auth: Dict[str, Any], **kwargs) -> str:
         """Update collection authentication settings."""
         try:
             # Get current collection
@@ -1638,7 +1644,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update request '{request_path}' description: {str(e)}")
 
-    def update_request_headers(self, request_path: str, headers: List[Dict], **kwargs) -> str:
+    def update_request_headers(self, request_path: str, headers: Dict[str, Any], **kwargs) -> str:
         """Update request headers."""
         try:
             # Get request item and ID
@@ -1659,7 +1665,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update request '{request_path}' headers: {str(e)}")
 
-    def update_request_body(self, request_path: str, body: Dict, **kwargs) -> str:
+    def update_request_body(self, request_path: str, body: Dict[str, Any], **kwargs) -> str:
         """Update request body."""
         try:
             # Get request item and ID
@@ -1680,7 +1686,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update request '{request_path}' body: {str(e)}")
 
-    def update_request_auth(self, request_path: str, auth: Dict, **kwargs) -> str:
+    def update_request_auth(self, request_path: str, auth: Dict[str, Any], **kwargs) -> str:
         """Update request authentication."""
         try:
             # Get request item and ID
