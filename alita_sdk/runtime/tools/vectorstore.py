@@ -1,6 +1,6 @@
 import json
 import math
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, Callable
 from pydantic import BaseModel, model_validator, Field
 from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
@@ -140,6 +140,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     vectoradapter: Any = None
     pg_helper: Any = None
     embeddings: Any = None
+    process_document_func: Optional[Callable] = None
     
     @model_validator(mode='before')
     @classmethod
@@ -244,7 +245,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         return final_docs
 
-    def index_documents(self, documents, document_processing_func = None, progress_step: int = 20, clean_index: bool = True):
+    def index_documents(self, documents, progress_step: int = 20, clean_index: bool = True):
         """ Index documents in the vectorstore.
 
         Args:
@@ -280,7 +281,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         # if func is provided, apply it to documents
         # used for processing of documents before indexing,
         # e.g. to avoid time-consuming operations for documents that are already indexed
-        document_processing_func(documents) if document_processing_func else None
+        self.process_document_func(documents) if self.process_document_func else None
 
         # notify user about missed required metadata fields: id, updated_on
         # it is not required to have them, but it is recommended to have them for proper re-indexing and duplicate detection

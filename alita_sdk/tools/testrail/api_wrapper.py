@@ -547,17 +547,11 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             f"Test case #{case_id} has been updated at '{updated_case['updated_on']}')"
         )
 
-    def index_data(
-            self,
-            project_id: str,
-            suite_id: Optional[str] = None,
-            collection_suffix: str = "",
-            section_id: Optional[int] = None,
-            title_keyword: Optional[str] = None,
-            progress_step: Optional[int] = None,
-            clean_index: Optional[bool] = False
-    ):
-        """Load TestRail test cases into the vector store."""
+    def _base_loader(self, project_id: str,
+                     suite_id: Optional[str] = None,
+                     section_id: Optional[int] = None,
+                     title_keyword: Optional[str] = None
+                     ) -> List[Document]:
         try:
             if suite_id:
                 resp = self._client.cases.get_cases(project_id=project_id, suite_id=int(suite_id))
@@ -582,27 +576,25 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'id': str(case.get('id', '')),
                 'updated_on': case.get('updated_on', ''),
             }))
+        return docs
 
+    def index_data(
+            self,
+            project_id: str,
+            suite_id: Optional[str] = None,
+            collection_suffix: str = "",
+            section_id: Optional[int] = None,
+            title_keyword: Optional[str] = None,
+            progress_step: Optional[int] = None,
+            clean_index: Optional[bool] = False
+    ):
+        """Load TestRail test cases into the vector store."""
+        docs = self._base_loader(project_id, suite_id, section_id, title_keyword)
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs, document_processing_func=self.process_documents, progress_step=progress_step, clean_index=clean_index)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
 
-    def process_documents(self, documents: List[Document]) -> List[Document]:
-        """
-        Process a list of base documents to extract relevant metadata for full document preparation.
-        Used for late processing of documents after we ensure that the documents have to be indexed to avoid
-        time-consuming operations for documents which might be useless.
-        This function passed to index_documents method of vector store and called after _reduce_duplicates method.
-
-        Args:
-            documents (List[Document]): The base documents to process.
-
-        Returns:
-            List[Document]: The processed documents with metadata.
-        """
-        return [self.process_document(doc) for doc in documents]
-
-    def process_document(self, document: Document) -> Document:
+    def _process_document(self, document: Document) -> Document:
         """
         Process an existing base document to extract relevant metadata for full document preparation.
         Used for late processing of documents after we ensure that the document has to be indexed to avoid
