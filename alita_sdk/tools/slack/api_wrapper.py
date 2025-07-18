@@ -215,8 +215,6 @@ class SlackApiWrapper(BaseToolApiWrapper):
             ]
             logger.info(f"Found {len(filtered_channels)} channels.")
             return filtered_channels  # Return the list of channels
-            # print(f"Found {len(channels)} channels.")
-            # return channels  # Return the list of channels
         except SlackApiError as e:
             print(f"Error fetching conversations: {e.response['error']}")
             return [] 
