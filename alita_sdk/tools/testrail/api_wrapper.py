@@ -1,14 +1,18 @@
 import json
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 
 import pandas as pd
 from langchain_core.tools import ToolException
 from pydantic import SecretStr, create_model, model_validator
 from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
-
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
+from langchain_core.documents import Document
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +285,19 @@ updateCase = create_model(
     ),
 )
 
+# Schema for indexing TestRail data into vector store
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    project_id=(str, Field(description="TestRail project ID to index data from")),
+    suite_id=(Optional[str], Field(default=None, description="Optional TestRail suite ID to filter test cases")),
+    section_id=(Optional[int], Field(default=None, description="Optional section ID to filter test cases")),
+    title_keyword=(Optional[str], Field(default=None, description="Optional keyword to filter test cases by title")),
+    progress_step=(Optional[int],
+                   Field(default=None, ge=0, le=100, description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool],
+                       Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
+)
 
 SUPPORTED_KEYS = {
     "id", "title", "section_id", "template_id", "type_id", "priority_id", "milestone_id",
@@ -291,11 +308,19 @@ SUPPORTED_KEYS = {
 }
 
 
-class TestrailAPIWrapper(BaseToolApiWrapper):
+class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
     url: str
     password: Optional[SecretStr] = None,
     email: Optional[str] = None,
     _client: Optional[TestRailAPI] = PrivateAttr() # Private attribute for the TestRail client
+    llm: Any = None
+
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
+
 
     @model_validator(mode="before")
     @classmethod
@@ -492,7 +517,7 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
         you can submit and update specific fields only).
 
         :param case_id: T
-            he ID of the test case
+            He ID of the test case
         :param kwargs:
             :key title: str
                 The title of the test case
@@ -522,6 +547,98 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
             f"Test case #{case_id} has been updated at '{updated_case['updated_on']}')"
         )
 
+    def _base_loader(self, project_id: str,
+                     suite_id: Optional[str] = None,
+                     section_id: Optional[int] = None,
+                     title_keyword: Optional[str] = None
+                     ) -> List[Document]:
+        try:
+            if suite_id:
+                resp = self._client.cases.get_cases(project_id=project_id, suite_id=int(suite_id))
+                cases = resp.get('cases', [])
+            else:
+                resp = self._client.cases.get_cases(project_id=project_id)
+                cases = resp.get('cases', [])
+        except StatusCodeError as e:
+            raise ToolException(f"Unable to extract test cases: {e}")
+            # Apply filters
+        if section_id is not None:
+            cases = [case for case in cases if case.get('section_id') == section_id]
+        if title_keyword is not None:
+            cases = [case for case in cases if title_keyword.lower() in case.get('title', '').lower()]
+
+        docs: List[Document] = []
+        for case in cases:
+            docs.append(Document(page_content=json.dumps(case), metadata={
+                'project_id': project_id,
+                'title': case.get('title', ''),
+                'suite_id': suite_id or case.get('suite_id', ''),
+                'id': str(case.get('id', '')),
+                'updated_on': case.get('updated_on', ''),
+            }))
+        return docs
+
+    def index_data(
+            self,
+            project_id: str,
+            suite_id: Optional[str] = None,
+            collection_suffix: str = "",
+            section_id: Optional[int] = None,
+            title_keyword: Optional[str] = None,
+            progress_step: Optional[int] = None,
+            clean_index: Optional[bool] = False
+    ):
+        """Load TestRail test cases into the vector store."""
+        docs = self._base_loader(project_id, suite_id, section_id, title_keyword)
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+    def _process_document(self, document: Document) -> Document:
+        """
+        Process an existing base document to extract relevant metadata for full document preparation.
+        Used for late processing of documents after we ensure that the document has to be indexed to avoid
+        time-consuming operations for documents which might be useless.
+
+        Args:
+            document (Document): The base document to process.
+
+        Returns:
+            Document: The processed document with metadata.
+        """
+        try:
+            # get base data from the document required to extract attachments and other metadata
+            base_data = json.loads(document.page_content)
+            case_id = base_data.get("id")
+
+            # get a list of attachments for the case
+            attachments = self._client.attachments.get_attachments_for_case_bulk(case_id=case_id)
+            attachments_data = {}
+
+            # process each attachment to extract its content
+            for attachment in attachments:
+                attachments_data[attachment['filename']] = self._process_attachment(attachment)
+            base_data['attachments'] = attachments_data
+            document.page_content = json.dumps(base_data)
+            return document
+        except json.JSONDecodeError as e:
+            raise ToolException(f"Failed to decode JSON from document: {e}")
+
+    def _process_attachment(self, attachment: Dict[str, Any]) -> str:
+        """
+        Processes an attachment to extract its content.
+
+        Args:
+            attachment (Dict[str, Any]): The attachment data.
+
+        Returns:
+            str: string description of the attachment.
+        """
+        if attachment['filetype'] == 'txt' :
+            return self._client.get(endpoint=f"get_attachment/{attachment['id']}")
+        # TODO: add support for other file types
+        return "This filetype is not supported."
+
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """
         Converts the given data into the specified format: 'json', 'csv', or 'markdown'.
@@ -550,7 +667,7 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
             return df.to_markdown(index=False)
 
     def get_available_tools(self):
-        return [
+        tools = [
             {
                 "name": "get_case",
                 "ref": self.get_case,
@@ -587,4 +704,13 @@ class TestrailAPIWrapper(BaseToolApiWrapper):
                 "description": self.update_case.__doc__,
                 "args_schema": updateCase,
             },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
+            }
         ]
+        # Add vector search from base
+        tools.extend(self._get_vector_search_tools())
+        return tools

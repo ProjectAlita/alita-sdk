@@ -3,6 +3,8 @@ import fnmatch
 import logging
 import traceback
 from typing import Any, Optional, List, Dict
+
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, create_model, Field
 from .utils import TOOLKIT_SPLITTER
@@ -186,7 +188,41 @@ class BaseToolApiWrapper(BaseModel):
 
 class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     """Base class for tool API wrappers that support vector store functionality."""
-    
+
+    doctype: str = "document"
+
+    def _base_loader(self, **kwargs) -> List[Document]:
+        """ Loads documents from a source, processes them,
+        and returns a list of Document objects with base metadata: id and created_on."""
+        pass
+
+    def _process_document(self, base_document: Document) -> Document:
+        """ Process an existing base document to extract relevant metadata for full document preparation.
+        Used for late processing of documents after we ensure that the document has to be indexed to avoid
+        time-consuming operations for documents which might be useless.
+
+        Args:
+            document (Document): The base document to process.
+
+        Returns:
+            Document: The processed document with metadata."""
+        pass
+
+    def _process_documents(self, documents: List[Document]) -> List[Document]:
+        """
+        Process a list of base documents to extract relevant metadata for full document preparation.
+        Used for late processing of documents after we ensure that the documents have to be indexed to avoid
+        time-consuming operations for documents which might be useless.
+        This function passed to index_documents method of vector store and called after _reduce_duplicates method.
+
+        Args:
+            documents (List[Document]): The base documents to process.
+
+        Returns:
+            List[Document]: The processed documents with metadata.
+        """
+        return [self._process_document(doc) for doc in documents]
+
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
         """ Initializes the vector store wrapper with the provided parameters."""
         try:
@@ -225,7 +261,8 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             embedding_model=self.embedding_model,
             embedding_model_params=self.embedding_model_params,
             vectorstore_params=vectorstore_params,
-            embeddings=embeddings
+            embeddings=embeddings,
+            process_document_func=self._process_documents,
         )
 
     def search_index(self,
@@ -345,7 +382,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         Handles the retrieval of files from a specific path and branch.
         This method should be implemented in subclasses to provide the actual file retrieval logic.
         """
-        _files = self._get_files(path, branch)
+        _files = self._get_files(path=path, branch=branch)
         if isinstance(_files, str):
             try:
                 # Attempt to convert the string to a list using ast.literal_eval
@@ -448,3 +485,11 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         
         # Return index_data tool first, then the search tools
         return [index_tool] + base_tools
+
+def extend_with_vector_tools(method):
+    def wrapper(self, *args, **kwargs):
+        tools = method(self, *args, **kwargs)
+        tools.extend(self._get_vector_search_tools())
+        return tools
+
+    return wrapper
