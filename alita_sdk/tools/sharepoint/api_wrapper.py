@@ -152,10 +152,7 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
             return ToolException("File not found. Please, check file name and path.")
         return parse_file_content(file.name, file_content, is_capture_image, page_number)
 
-    def index_data(self,
-                   collection_suffix: str = '',
-                   progress_step: int = None,
-                   clean_index: bool = False):
+    def _base_loader(self) -> List[Document]:
         try:
             all_files = self.get_files_list()
         except Exception as e:
@@ -168,17 +165,18 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                 for k, v in file.items()
             }
             docs.append(Document(page_content="", metadata=metadata))
+        return docs
+
+    def index_data(self,
+                   collection_suffix: str = '',
+                   progress_step: int = None,
+                   clean_index: bool = False):
+        docs = self._base_loader()
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs,
-                                  document_processing_func=self.process_documents,
-                                  progress_step=progress_step,
-                                  clean_index=clean_index)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
 
-    def process_documents(self, documents: List[Document]) -> List[Document]:
-        return [self.process_document(doc) for doc in documents]
-
-    def process_document(self, document: Document) -> Document:
+    def _process_document(self, document: Document) -> Document:
         page_content = self.read_file(document.metadata['Path'], is_capture_image=True)
 
         document.page_content = json.dumps(str(page_content))
