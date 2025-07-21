@@ -10,12 +10,6 @@ def get_model(model_type: str, model_params: dict):
         return None
     if model_type in llms:
         return get_llm(model_type)(**model_params)
-    elif model_type == "Alita":
-        try:
-            from alita_sdk.llms.alita import AlitaChatModel
-        except ImportError:
-            raise RuntimeError("Alita model not found")
-        return AlitaChatModel(**model_params)
     elif model_type in chat_models:
         model = getattr(__import__("langchain_community.chat_models", fromlist=[model_type]), model_type)
         return model(**model_params)

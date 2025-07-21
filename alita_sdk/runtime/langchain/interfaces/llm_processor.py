@@ -50,9 +50,6 @@ def get_model(model_type: str, model_params: dict):
         return get_llm(model_type)(**model_params)
     if model_type == "PreloadedChatModel":
         return PreloadedChatModel(**model_params)
-    if model_type == "Alita":
-        from ...llms.alita import AlitaClient
-        return AlitaClient(**model_params)
     if model_type in chat_models:
         model = getattr(
             __import__("langchain_community.chat_models", fromlist=[model_type]),

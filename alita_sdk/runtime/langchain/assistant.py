@@ -36,29 +36,30 @@ class Assistant:
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
-
+        
+        self.client = client
         # For predict agents, use the client as-is since it's already configured
-        if app_type == "predict":
-            self.client = client
-        else:
-            # For other agent types, configure client from llm_settings
-            self.client = copy(client)
-            self.client.max_tokens = data['llm_settings']['max_tokens']
-            self.client.temperature = data['llm_settings']['temperature']
-            self.client.top_p = data['llm_settings']['top_p']
-            self.client.top_k = data['llm_settings']['top_k']
-            self.client.model_name = data['llm_settings']['model_name']
-            self.client.integration_uid = data['llm_settings']['integration_uid']
+        # if app_type == "predict":
+        #     self.client = client
+        # else:
+        #     # For other agent types, configure client from llm_settings
+        #     self.client = copy(client)
+        #     self.client.max_tokens = data['llm_settings']['max_tokens']
+        #     self.client.temperature = data['llm_settings']['temperature']
+        #     self.client.top_p = data['llm_settings']['top_p']
+        #     self.client.top_k = data['llm_settings']['top_k']
+        #     self.client.model_name = data['llm_settings']['model_name']
+        #     self.client.integration_uid = data['llm_settings']['integration_uid']
 
-            model_type = data["llm_settings"]["indexer_config"]["ai_model"]
-            model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
-            #
-            target_pkg, target_name = model_type.rsplit(".", 1)
-            target_cls = getattr(
-                importlib.import_module(target_pkg),
-                target_name
-            )
-            self.client = target_cls(**model_params)
+        #     model_type = data["llm_settings"]["indexer_config"]["ai_model"]
+        #     model_params = data["llm_settings"]["indexer_config"]["ai_model_params"]
+        #     #
+        #     target_pkg, target_name = model_type.rsplit(".", 1)
+        #     target_cls = getattr(
+        #         importlib.import_module(target_pkg),
+        #         target_name
+        #     )
+        #     self.client = target_cls(**model_params)
         # validate agents compatibility: non-pipeline agents cannot have pipelines as toolkits
         if app_type not in ["pipeline", "predict"]:
             tools_to_check = data.get('tools', [])
