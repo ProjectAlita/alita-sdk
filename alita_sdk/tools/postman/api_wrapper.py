@@ -194,7 +194,9 @@ PostmanUpdateRequestDescription = create_model(
 PostmanUpdateRequestHeaders = create_model(
     "PostmanUpdateRequestHeaders",
     request_path=(str, Field(description="Path to the request (folder/requestName)")),
-    headers=(Optional[List[Dict[str, Any]]], Field(default=None, description="Request headers."))
+    headers=(str, Field(description="String containing HTTP headers, separated by newline characters. "
+                                    "Each header should be in the format: \"Header-Name: value\". "
+                                    "Example: \"Content-Type: application/json\\nAuthorization: Bearer token123\". "))
 )
 
 PostmanUpdateRequestBody = create_model(
@@ -207,8 +209,15 @@ PostmanUpdateRequestAuth = create_model(
     "PostmanUpdateRequestAuth",
     request_path=(str, Field(description="Path to the request (folder/requestName)")),
     auth=(Optional[Dict[str, Any]], Field(default=None,
-         description="Updated authentication settings. Example: {'type': 'bearer',token '': 'your_token'}"
-     ))
+        description=(
+            "An object. "
+            "For API key authentication, use: {\"type\": \"apikey\", \"apikey\": [{\"key\": \"key\", \"value\": \"api-key\"}, {\"key\": \"value\", \"value\": \"XXX\"}]}. "
+            "For bearer authentication, use: {\"type\": \"bearer\", \"bearer\": [{\"key\": \"token\", \"value\": \"XXX\", \"type\": \"string\"}]}. "
+            "For basic authentication, use: {\"type\": \"basic\", \"basic\": [{\"key\": \"username\", \"value\": \"user\"}, {\"key\": \"password\", \"value\": \"pass\"}]}. "
+            "`type`: Authentication type (e.g., \"apikey\", \"bearer\", \"basic\"). "
+            "`apikey`, `bearer`, `basic`: List of key-value pairs for configuration."
+            "Other types can be added as needed, following the same structure."
+        )))
 )
 
 PostmanUpdateRequestTests = create_model(
@@ -1644,7 +1653,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update request '{request_path}' description: {str(e)}")
 
-    def update_request_headers(self, request_path: str, headers: Dict[str, Any], **kwargs) -> str:
+    def update_request_headers(self, request_path: str, headers: str, **kwargs) -> str:
         """Update request headers."""
         try:
             # Get request item and ID
@@ -1652,7 +1661,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             
             # Create update payload
             request_update = {
-                "header": headers
+                "headers": headers
             }
 
             # Update the headers field
@@ -1672,9 +1681,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             request_item, request_id, _ = self._get_request_item_and_id(request_path)
             
             # Create update payload
-            request_update = {
-                "body": body
-            }
+            request_update = body
 
             # Update the body field
             response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
