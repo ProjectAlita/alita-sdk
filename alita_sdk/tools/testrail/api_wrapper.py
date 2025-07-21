@@ -574,7 +574,14 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'title': case.get('title', ''),
                 'suite_id': suite_id or case.get('suite_id', ''),
                 'id': str(case.get('id', '')),
-                'updated_on': case.get('updated_on', ''),
+                'updated_on': case.get('updated_on') or -1,
+                'labels': [lbl['title'] for lbl in case.get('labels', [])],
+                'type': case.get('type_id') or -1,
+                'priority': case.get('priority_id') or -1,
+                'milestone': case.get('milestone_id') or -1,
+                'estimate': case.get('estimate') or '',
+                'automation_type': case.get('custom_automation_type') or -1,
+                'section_id': case.get('section_id') or -1,
             }))
         return docs
 
@@ -617,6 +624,9 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
 
             # process each attachment to extract its content
             for attachment in attachments:
+                # add attachment id to metadata of parent
+                document.metadata.get('attachments', []).append(attachment['id'])
+
                 attachments_data[attachment['filename']] = self._process_attachment(attachment)
             base_data['attachments'] = attachments_data
             document.page_content = json.dumps(base_data)

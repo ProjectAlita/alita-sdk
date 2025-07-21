@@ -2,6 +2,7 @@ import logging
 from importlib import import_module
 from typing import Optional
 
+from langchain_core.tools import ToolException
 from langgraph.store.base import BaseStore
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
 
             except Exception as e:
                 logger.error(f"Error getting tools for {tool_type}: {e}")
+                raise ToolException(f"Error getting tools for {tool_type}: {e}")
 
         # Handle ADO repos special case (it might be requested as azure_devops_repos)
         elif tool_type in ['ado_repos', 'azure_devops_repos'] and 'ado_repos' in AVAILABLE_TOOLS:
