@@ -1,5 +1,6 @@
+import json
 import logging
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from ..utils.content_parser import parse_file_content
 from langchain_core.tools import ToolException
@@ -7,7 +8,9 @@ from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseToolApiWrapper, BaseIndexParams, BaseVectorStoreToolApiWrapper
+from ...runtime.langchain.interfaces.llm_processor import get_embeddings
+from langchain_core.documents import Document
 
 NoInput = create_model(
     "NoInput"
@@ -32,13 +35,29 @@ ReadDocument = create_model(
     page_number=(Optional[int], Field(description="Specifies which page to read. If it is None, then full document will be read.", default=None))
 )
 
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False,
+                       description="Optional flag to enforce clean existing index before indexing new data")),
+)
 
-class SharepointApiWrapper(BaseToolApiWrapper):
+
+class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
     site_url: str
     client_id: str = None
     client_secret: SecretStr = None
     token: SecretStr = None
     _client: Optional[ClientContext] = PrivateAttr()  # Private attribute for the office365 client
+
+    llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     @model_validator(mode='before')
     @classmethod
@@ -111,7 +130,8 @@ class SharepointApiWrapper(BaseToolApiWrapper):
                     'Path': file.properties['ServerRelativeUrl'],
                     'Created': file.properties['TimeCreated'],
                     'Modified': file.properties['TimeLastModified'],
-                    'Link': file.properties['LinkingUrl']
+                    'Link': file.properties['LinkingUrl'],
+                    'id': file.properties['UniqueId']
                 }
                 result.append(temp_props)
             return result if result else ToolException("Can not get files or folder is empty. Please, double check folder name and read permissions.")
@@ -132,6 +152,36 @@ class SharepointApiWrapper(BaseToolApiWrapper):
             return ToolException("File not found. Please, check file name and path.")
         return parse_file_content(file.name, file_content, is_capture_image, page_number)
 
+    def _base_loader(self) -> List[Document]:
+        try:
+            all_files = self.get_files_list()
+        except Exception as e:
+            raise ToolException(f"Unable to extract files: {e}")
+
+        docs: List[Document] = []
+        for file in all_files:
+            metadata = {
+                ("updated_at" if k == "Modified" else k): str(v)
+                for k, v in file.items()
+            }
+            docs.append(Document(page_content="", metadata=metadata))
+        return docs
+
+    def index_data(self,
+                   collection_suffix: str = '',
+                   progress_step: int = None,
+                   clean_index: bool = False):
+        docs = self._base_loader()
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+    def _process_document(self, document: Document) -> Document:
+        page_content = self.read_file(document.metadata['Path'], is_capture_image=True)
+
+        document.page_content = json.dumps(str(page_content))
+        return document
+
     def get_available_tools(self):
         return [
             {
@@ -151,5 +201,11 @@ class SharepointApiWrapper(BaseToolApiWrapper):
                 "description": self.read_file.__doc__,
                 "args_schema": ReadDocument,
                 "ref": self.read_file
+            },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
             }
         ]
