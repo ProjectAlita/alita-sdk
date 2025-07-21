@@ -58,8 +58,8 @@ class AlitaClient:
         self.list_apps_url = f"{self.base_url}{self.api_path}/applications/applications/prompt_lib/{self.project_id}"
         self.integration_details = f"{self.base_url}{self.api_path}/integrations/integration/{self.project_id}"
         self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/{self.project_id}"
-        self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/{self.project_id}"
-        self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/{self.project_id}"
+        self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/default/{self.project_id}"
+        self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/default/{self.project_id}"
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
@@ -291,7 +291,7 @@ class AlitaClient:
         return self._process_requst(data)
 
     def download_artifact(self, bucket_name, artifact_name):
-        url = f'{self.artifact_url}/{bucket_name}/{artifact_name}'
+        url = f'{self.artifact_url}/{bucket_name.lower()}/{artifact_name}'
         data = requests.get(url, headers=self.headers, verify=False)
         if data.status_code == 403:
             return {"error": "You are not authorized to access this resource"}
