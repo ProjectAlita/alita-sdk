@@ -54,7 +54,6 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 alita_client,
                 application_id=int(tool['settings']['application_id']),
                 application_version_id=int(tool['settings']['application_version_id']),
-                app_api_key=alita_client.auth_token,
                 selected_tools=[]
             ).get_tools())
         elif tool['type'] == 'application' and tool.get('agent_type', '') == 'pipeline':

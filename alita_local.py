@@ -15,6 +15,7 @@ if 'messages' not in st.session_state:
     st.session_state.messages = []
     st.session_state.thread_id = None
     st.session_state.agent_executor = None
+    st.session_state.client = None
     st.session_state.llm = None
     st.session_state.agent_chat = False
     st.session_state.model = None

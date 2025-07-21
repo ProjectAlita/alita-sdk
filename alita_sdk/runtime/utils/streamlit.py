@@ -65,7 +65,8 @@ def pil_to_base64_string(pil_image):
         return None
 
 
-from alita_sdk.runtime.llms.alita import AlitaChatModel
+# from alita_sdk.runtime.llms.alita import AlitaChatModel
+from alita_sdk.runtime.clients.client import AlitaClient
 from alita_sdk.runtime.utils.AlitaCallback import AlitaStreamlitCallback
 from alita_sdk.runtime.toolkits.tools import get_toolkits, get_tools
 from alita_sdk.community.utils import check_schema
@@ -369,7 +370,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.rerun()
         
         # Determine login form title and expansion state
-        if st.session_state.llm:
+        if st.session_state.client:
             login_title = "✅ Elitea Login (Connected)"
             # Collapse after successful login, but allow expansion
             if st.session_state.login_form_expanded is True:
@@ -385,13 +386,13 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
             deployment_secret = environ.get('XSECRET', 'secret')
             api_key_value = environ.get('API_KEY', None)
             project_id_value = int(environ.get('PROJECT_ID', 0))
-            if st.session_state.llm:
-                deployment_value = st.session_state.llm.deployment
-                api_key_value = st.session_state.llm.api_token
-                project_id_value = st.session_state.llm.project_id
-                
+            if st.session_state.client:
+                deployment_value = st.session_state.client.base_url
+                api_key_value = st.session_state.client.auth_token
+                project_id_value = st.session_state.client.project_id
+
             # Show current connection status
-            if st.session_state.llm:
+            if st.session_state.client:
                 st.success(f"Connected to: {deployment_value}")
                 st.info(f"Project ID: {project_id_value}")
                 
@@ -403,22 +404,24 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 deployment_secret = st.text_input("Deployment Secret", placeholder="Enter Deployment Secret", value=deployment_secret)
                 
                 # Change button text based on login status
-                button_text = "Re-Login" if st.session_state.llm else "Login"
+                button_text = "Re-Login" if st.session_state.client else "Login"
                 submitted = st.form_submit_button(button_text)
                 
                 if submitted:
                     with st.spinner("Logging to Alita..."):
                         try:
-                            st.session_state.llm = AlitaChatModel(**{
-                                    "deployment": deployment,
-                                    "api_token": api_key,
-                                    "project_id": project_id,
-                                })
-                            client = st.session_state.llm.client
+
+                            st.session_state.client = AlitaClient(
+                                base_url=deployment,
+                                project_id=project_id,
+                                auth_token=api_key,
+                                api_extra_headers={"X-SECRET": deployment_secret}
+                            )
+                            
                             
                             # Fetch specific project secret for pgvector connection
                             try:
-                                pgvector_connstr = client.unsecret('pgvector_project_connstr')
+                                pgvector_connstr = st.session_state.client.unsecret('pgvector_project_connstr')
                                 if pgvector_connstr:
                                     st.session_state.project_secrets = {'pgvector_project_connstr': pgvector_connstr}
                                     logger.info("Successfully retrieved pgvector connection string from project secrets")
@@ -429,7 +432,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                 logger.warning(f"Could not retrieve pgvector connection string: {str(e)}")
                                 st.session_state.project_secrets = {}
                             
-                            integrations = client.all_models_and_integrations()
+                            integrations = st.session_state.client.all_models_and_integrations()
                             unique_models = set()
                             models_list = []
                             for entry in integrations:
@@ -438,7 +441,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                     if model.get('capabilities', {}).get('chat_completion') and model['name'] not in unique_models:
                                         unique_models.add(model['name'])
                                         models_list.append({'name': model['name'], 'integration_id': entry['uid']})
-                            st.session_state.agents = client.get_list_of_apps()
+                            st.session_state.agents = st.session_state.client.get_list_of_apps()
                             st.session_state.models = models_list
                             clear_chat_history()
                             
@@ -454,6 +457,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                         except Exception as e:
                             logger.error(f"Error loggin to ELITEA: {format_exc()}")
                             st.session_state.agents = None
+                            st.session_state.client = None
                             st.session_state.models = None
                             st.session_state.llm = None
                             st.session_state.project_secrets = None
@@ -463,7 +467,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
         llmconfig, toolkit_config = st.tabs(["Alita Agents", "Toolkit Testing"])
         
         with llmconfig:
-            if st.session_state.llm:
+            if st.session_state.client:
                 st.title("Available Agents")
                 st.write("This one will load latest version of agent")
                 with st.form("agents_form", clear_on_submit=False):
@@ -477,7 +481,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                             agent = next((a for a in st.session_state.agents if a['name'] == options), None)
                             if agent:
                                 agent_id = agent['id']
-                                agent_details = st.session_state.llm.client.get_app_details(agent_id)
+                                agent_details = st.session_state.client.get_app_details(agent_id)
                                 latest_version = next((v for v in agent_details['versions'] if v['name'] == agent_version_name), None)
                                 if latest_version:
                                     agent_version_id = latest_version['id']
@@ -504,11 +508,11 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                         
                                         # Try to get the complete agent configuration
                                         try:
-                                            agent_version_details = st.session_state.llm.client.get_app_version_details(agent_id, agent_version_id)
+                                            agent_version_details = st.session_state.client.get_app_version_details(agent_id, agent_version_id)
                                             agent_full_config = agent_version_details
                                         except AttributeError:
                                             try:
-                                                agent_version_details = st.session_state.llm.client.get_application_version_details(agent_id, agent_version_id)
+                                                agent_version_details = st.session_state.client.get_application_version_details(agent_id, agent_version_id)
                                                 agent_full_config = agent_version_details
                                             except AttributeError:
                                                 # Use the version details we already have
@@ -630,8 +634,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                         st.session_state.agent_toolkit_configs = {}
                                         st.session_state.agent_raw_config = None
                                     
-                                    st.session_state.agent_executor = st.session_state.llm.client.application(
-                                        client=st.session_state.llm,
+                                    st.session_state.agent_executor = st.session_state.client.application(
                                         application_id=agent_id,
                                         application_version_id=agent_version_id,
                                         app_type=agent_type if agent_type else None,
@@ -658,7 +661,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
             """)
             
             # Check if user is logged in
-            if not st.session_state.llm:
+            if not st.session_state.client:
                 st.warning("⚠️ **Please log in first!**")
                 st.info("""
                 📋 **To use Toolkit Testing:**
@@ -671,7 +674,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.stop()
             
             # User is logged in, proceed with toolkit testing
-            if st.session_state.llm:
+            if st.session_state.client:
                 # Show project secrets status with detailed debugging
                 secrets_status = st.session_state.project_secrets
                 
@@ -685,7 +688,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 # Debug info (can be removed later)
                 with st.expander("🔍 Debug Info", expanded=False):
                     st.write(f"**Project Secrets Status:** {type(secrets_status)} - {secrets_status}")
-                    st.write(f"**LLM Status:** {'Connected' if st.session_state.llm else 'Not Connected'}")
+                    # st.write(f"**LLM Status:** {'Connected' if st.session_state.llm else 'Not Connected'}")
                 
                 # Toolkit selection and configuration
                 st.markdown("---")
@@ -1021,7 +1024,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.markdown("👈 Please use the **Alita Login Form** in the sidebar to authenticate.")
                         
     # Main content area
-    if st.session_state.llm and st.session_state.agent_executor and st.session_state.agent_chat:
+    if st.session_state.client and st.session_state.agent_executor and st.session_state.agent_chat:
         try:
             st.title(st.session_state.agent_name)
         except:
@@ -1043,7 +1046,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.session_state.thread_id = response.get("thread_id", None)
                 st.session_state.messages.append({"role": "assistant", "content": response["output"]})
     
-    elif st.session_state.llm and st.session_state.show_toolkit_testing and st.session_state.configured_toolkit:
+    elif st.session_state.client and st.session_state.show_toolkit_testing and st.session_state.configured_toolkit:
         # Toolkit Testing Main View
         st.title("🚀 Toolkit Testing Interface")
         
@@ -1281,7 +1284,7 @@ Please explain how you would use these tools to help the user, even though I can
                 st.rerun()
     
     else:
-        if st.session_state.llm:
+        if st.session_state.client:
             st.title("🎯 Alita SDK Toolkit Interface")
             st.markdown("""
             ### Welcome to the Alita SDK!

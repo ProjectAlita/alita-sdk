@@ -10,6 +10,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import ToolException
 from langgraph.store.base import BaseStore
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 from ..langchain.assistant import Assistant as LangChainAssistant
 # from ..llamaindex.assistant import Assistant as LLamaAssistant
@@ -37,6 +38,7 @@ class AlitaClient:
 
         self.base_url = base_url.rstrip('/')
         self.api_path = '/api/v1'
+        self.llm_path = '/llm/v1'
         self.project_id = project_id
         self.auth_token = auth_token
         self.headers = {
@@ -152,6 +154,37 @@ class AlitaClient:
             return resp.json()
         return []
 
+    def get_llm(self, model_name: str, model_config: dict) -> ChatOpenAI:
+        """
+        Get a ChatOpenAI model instance based on the model name and configuration.
+        
+        Args:
+            model_name: Name of the model to retrieve
+            model_config: Configuration parameters for the model
+            
+        Returns:
+            An instance of ChatOpenAI configured with the provided parameters.
+        """
+        if not model_name:
+            raise ValueError("Model name must be provided")
+        # TODO: Remove After we done with LLM Proxy
+        model_api_key = self.unsecret('project_llm_key')
+
+        logger.info(f"Creating ChatOpenAI model: {model_name} with config: {model_config}")
+        
+        return ChatOpenAI(
+            base_url=f"{self.base_url}{self.llm_path}",
+            model=model_name,
+            api_key=model_api_key,
+            stream_usage=model_config.get("stream_usage", True),
+            max_tokens=model_config.get("max_tokens", None),
+            top_p=model_config.get("top_p"),
+            temperature=model_config.get("temperature"),
+            max_retries=model_config.get("max_retries", 3),
+            seed=model_config.get("seed", None),
+        )
+         
+    
     def get_app_version_details(self, application_id: int, application_version_id: int) -> dict:
         url = f"{self.application_versions}/{application_id}/{application_version_id}"
         if self.configurations:
@@ -177,11 +210,12 @@ class AlitaClient:
         logger.info(f"Unsecret response: {data}")
         return data.get('value', None)
 
-    def application(self, client: Any, application_id: int, application_version_id: int,
+    def application(self, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                     app_type=None, memory=None, runtime='langchain',
                     application_variables: Optional[dict] = None,
-                    version_details: Optional[dict] = None, store: Optional[BaseStore] = None):
+                    version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
+                    llm: Optional[ChatOpenAI] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -200,7 +234,15 @@ class AlitaClient:
             for var in data.get('variables', {}):
                 if var['name'] in application_variables:
                     var.update(application_variables[var['name']])
-
+        if llm is None:
+            llm = self.get_llm(
+                model_name=data['llm_settings']['model_name'],
+                model_config = {
+                    "max_tokens": data['llm_settings']['max_tokens'],
+                    "top_p": data['llm_settings']['top_p'],
+                    "temperature": data['llm_settings']['temperature']
+                }
+            )
         if not app_type:
             app_type = data.get("agent_type", "react")
         if app_type == "alita":
@@ -212,10 +254,10 @@ class AlitaClient:
         elif app_type == 'autogen':
             app_type = "openai"
         if runtime == 'nonrunnable':
-            return LangChainAssistant(self, data, client, chat_history, app_type,
+            return LangChainAssistant(self, data, llm, chat_history, app_type,
                                       tools=tools, memory=memory, store=store)
         if runtime == 'langchain':
-            return LangChainAssistant(self, data, client,
+            return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
                                       tools=tools, memory=memory, store=store).runnable()
         elif runtime == 'llama':
