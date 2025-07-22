@@ -2,6 +2,8 @@ import re
 
 TOOLKIT_SPLITTER = "___"
 
+DEPENDENT_DOCS_KEY = 'dependent_docs'
+
 # This pattern matches characters that are NOT alphanumeric, underscores, or hyphens
 clean_string_pattern = re.compile(r'[^a-zA-Z0-9_.-]')
 

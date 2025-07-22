@@ -2,7 +2,7 @@ import ast
 import fnmatch
 import logging
 import traceback
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, Generator
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
@@ -208,7 +208,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             Document: The processed document with metadata."""
         pass
 
-    def _process_documents(self, documents: List[Document]) -> List[Document]:
+    def _process_documents(self, documents: List[Document]) -> Generator[Document, None, None]:
         """
         Process a list of base documents to extract relevant metadata for full document preparation.
         Used for late processing of documents after we ensure that the documents have to be indexed to avoid
@@ -219,9 +219,14 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             documents (List[Document]): The base documents to process.
 
         Returns:
-            List[Document]: The processed documents with metadata.
+            Generator[Document, None, None]: A generator yielding processed documents with metadata.
         """
-        return [self._process_document(doc) for doc in documents]
+        for doc in documents:
+            processed_docs = self._process_document(doc)
+            if processed_docs:  # Only proceed if the list is not empty
+                for processed_doc in processed_docs:
+                    yield processed_doc
+
 
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
         """ Initializes the vector store wrapper with the provided parameters."""
