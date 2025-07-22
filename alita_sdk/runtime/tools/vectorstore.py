@@ -251,7 +251,6 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         Args:
             documents (Any): Generator or list of documents to index.
-            document_processing_func (Optional[Callable]): Function to process documents after duplicates removal and before indexing.
             progress_step (int): Step for progress reporting, default is 20.
             clean_index (bool): If True, clean the index before re-indexing all documents.
         """

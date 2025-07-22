@@ -250,19 +250,13 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
 
-    def index_data(self, jql: Optional[str] = None, graphql: Optional[str] = None, 
-                   collection_suffix: str = '', progress_step: Optional[int] = None, 
-                   clean_index: Optional[bool] = False) -> str:
+    def _base_loader(self, jql: Optional[str] = None, graphql: Optional[str] = None) -> str:
         """
         Index Xray test cases into vector store using JQL query or custom GraphQL.
 
         Args:
             jql: JQL query for searching test cases
             graphql: Custom GraphQL query for advanced data extraction
-            collection_suffix: Optional suffix for collection name
-            progress_step: Progress step for tracking indexing progress
-            clean_index: Flag to indicate whether to clean the index before indexing
-
         Examples:
             # Using JQL
             jql = 'project = "CALC" AND testType = "Manual" AND labels in ("Smoke", "Critical")'
@@ -270,8 +264,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             # Using GraphQL
             graphql = 'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) steps { action result } } } }'
         """
-        if not get_embeddings:
-            raise ToolException("get_embeddings function not available. Please check the import.")
         
         if not jql and not graphql:
             raise ToolException("Either 'jql' or 'graphql' parameter must be provided.")
@@ -363,13 +355,24 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                     metadata['testKind'] = test['testType'].get('kind', '')
                 
                 docs.append(Document(page_content=page_content, metadata=metadata))
-
-            embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-            vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-            return vs.index_documents(documents=docs, progress_step=progress_step, clean_index=clean_index)
-            
         except Exception as e:
-            raise ToolException(f"Unable to index test cases: {e}")
+            logger.error(f"Error processing test data: {e}")
+            raise ToolException(f"Error processing test data: {e}")
+
+        return docs
+
+
+    def index_data(self, jql: Optional[str] = None, graphql: Optional[str] = None,
+                   collection_suffix: str = '', progress_step: Optional[int] = None,
+                   clean_index: Optional[bool] = False) -> str:
+        """Index Xray test cases into vector store using JQL query or custom GraphQL."""
+        if not get_embeddings:
+            raise ToolException("get_embeddings function not available. Please check the import.")
+        docs = self._base_loader(jql=jql, graphql=graphql)
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
 
     def _get_tests_direct(self, jql: str) -> List[Dict]:
         """Direct method to get test data without string formatting"""
