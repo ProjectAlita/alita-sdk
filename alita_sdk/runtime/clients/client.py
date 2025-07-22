@@ -167,15 +167,13 @@ class AlitaClient:
         """
         if not model_name:
             raise ValueError("Model name must be provided")
-        # TODO: Remove After we done with LLM Proxy
-        model_api_key = self.unsecret('project_llm_key')
-
+        
         logger.info(f"Creating ChatOpenAI model: {model_name} with config: {model_config}")
         
         return ChatOpenAI(
             base_url=f"{self.base_url}{self.llm_path}",
             model=model_name,
-            api_key=model_api_key,
+            api_key=self.auth_token,
             stream_usage=model_config.get("stream_usage", True),
             max_tokens=model_config.get("max_tokens", None),
             top_p=model_config.get("top_p"),
