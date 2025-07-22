@@ -32,7 +32,10 @@ ReadDocument = create_model(
     "ReadDocument",
     path=(str, Field(description="Contains the server-relative path of a document for reading.")),
     is_capture_image=(Optional[bool], Field(description="Determines is pictures in the document should be recognized.", default=False)),
-    page_number=(Optional[int], Field(description="Specifies which page to read. If it is None, then full document will be read.", default=None))
+    page_number=(Optional[int], Field(description="Specifies which page to read. If it is None, then full document will be read.", default=None)),
+    sheet_name=(Optional[str], Field(
+                        description="Specifies which sheet to read. If it is None, then full document will be read.",
+                        default=None))
 )
 
 indexData = create_model(
@@ -139,7 +142,7 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
             logging.error(f"Failed to load files from sharepoint: {e}")
             return ToolException("Can not get files. Please, double check folder name and read permissions.")
 
-    def read_file(self, path, is_capture_image: bool = False, page_number: int = None):
+    def read_file(self, path, is_capture_image: bool = False, page_number: int = None, sheet_name: str=None):
         """ Reads file located at the specified server-relative path. """
         try:
             file = self._client.web.get_file_by_server_relative_path(path)
@@ -150,7 +153,12 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             logging.error(f"Failed to load file from SharePoint: {e}. Path: {path}. Please, double check file name and path.")
             return ToolException("File not found. Please, check file name and path.")
-        return parse_file_content(file.name, file_content, is_capture_image, page_number)
+        return parse_file_content(file_name=file.name,
+                                  file_content=file_content,
+                                  is_capture_image=is_capture_image,
+                                  page_number=page_number,
+                                  sheet_name=sheet_name,
+                                  llm=self.llm)
 
     def _base_loader(self) -> List[Document]:
         try:
