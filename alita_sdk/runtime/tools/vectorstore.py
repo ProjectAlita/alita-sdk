@@ -11,7 +11,7 @@ from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from logging import getLogger
 
 from ..utils.logging import dispatch_custom_event
-from ..utils.utils import DEPENDENT_DOCS_KEY
+from ..utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
 
@@ -201,12 +201,14 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             for doc_str, meta, db_id in zip(data['documents'], data['metadatas'], data['ids']):
                 doc = json.loads(doc_str)
                 doc_id = str(meta['id'])
-                dependent_docs = meta.get(DEPENDENT_DOCS_KEY, [])
+                dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
+                parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
                 result[doc_id] = {
                     'metadata': meta,
                     'document': doc,
                     'id': db_id,
-                    DEPENDENT_DOCS_KEY: dependent_docs
+                    IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
+                    IndexerKeywords.PARENT.value: parent_id
                 }
         except Exception as e:
             logger.error(f"Failed to get indexed data from vectorstore: {str(e)}. Continuing with empty index.")
@@ -241,7 +243,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 # parent doc removal
                 docs_to_remove.append(indexed_data[doc_id]['id'])
                 # mark dependent docs for removal
-                for dependent_doc_id in indexed_data[doc_id][DEPENDENT_DOCS_KEY]:
+                for dependent_doc_id in indexed_data[doc_id][IndexerKeywords.DEPENDENT_DOCS.value]:
                     docs_to_remove.append(indexed_data[dependent_doc_id]['id'])
             else:
                 final_docs.append(document)

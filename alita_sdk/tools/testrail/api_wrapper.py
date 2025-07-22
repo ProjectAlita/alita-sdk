@@ -10,7 +10,7 @@ from testrail_api import StatusCodeError, TestRailAPI
 from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
 from langchain_core.documents import Document
 
-from ...runtime.utils.utils import DEPENDENT_DOCS_KEY
+from ...runtime.utils.utils import IndexerKeywords
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -627,13 +627,13 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             for attachment in attachments:
                 attachment_id = attachment['id']
                 # add attachment id to metadata of parent
-                document.metadata.setdefault(DEPENDENT_DOCS_KEY, []).append(attachment_id)
+                document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
 
                 # TODO: pass it to chunkers
                 yield Document(page_content=self._process_attachment(attachment),
                                                      metadata={
                                                          'project_id': base_data.get('project_id', ''),
-                                                         'parent': case_id,
+                                                         IndexerKeywords.PARENT.value: case_id,
                                                          'id': attachment_id,
                                                          'filename': attachment['filename'],
                                                          'filetype': attachment['filetype'],
