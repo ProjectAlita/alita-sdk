@@ -14,7 +14,8 @@ def get_tools(tool):
         site_url=tool['settings'].get('site_url', None),
         client_id=tool['settings'].get('client_id', None),
         client_secret=tool['settings'].get('client_secret', None),
-        toolkit_name=tool.get('toolkit_name'))
+        toolkit_name=tool.get('toolkit_name'),
+        llm=tool['settings'].get('llm'))
             .get_tools())
 
 
