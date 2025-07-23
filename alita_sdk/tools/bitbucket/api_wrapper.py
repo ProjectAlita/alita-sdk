@@ -5,7 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, model_validator, SecretStr
+from pydantic import model_validator, SecretStr
 from .bitbucket_constants import create_pr_data
 from .cloud_api_wrapper import BitbucketCloudApi, BitbucketServerApi
 from pydantic.fields import PrivateAttr
@@ -172,26 +172,26 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
         """
         return self._bitbucket.get_pull_requests()
     
-    def get_pull_request(self, pr_id: str) -> Any:
+    def get_pull_request(self, pr_id: str) -> Dict[str, Any]:
         """
         Get details of a pull request
         Parameters:
             pr_id(str): the pull request ID
         Returns:
-            Any: Details of the pull request
+            dict: Details of the pull request as a dictionary
         """
         try:
             return self._bitbucket.get_pull_request(pr_id=pr_id)
         except Exception as e:
             return ToolException(f"Can't get pull request `{pr_id}` due to error:\n{str(e)}")
         
-    def get_pull_requests_changes(self, pr_id: str) -> Any:
+    def get_pull_requests_changes(self, pr_id: str) -> Dict[str, Any]:
         """
         Get changes of a pull request
         Parameters:
             pr_id(str): the pull request ID
         Returns:
-            Any: Changes of the pull request
+            dict: Changes of the pull request as a dictionary
         """
         try:
             return self._bitbucket.get_pull_requests_changes(pr_id=pr_id)
