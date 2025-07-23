@@ -250,6 +250,7 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
     token: Optional[SecretStr]
     _client: Optional[GitClient] = PrivateAttr()
 
+    llm: Optional[Any] = None
     # Vector store configuration
     connection_string: Optional[SecretStr] = None
     collection_name: Optional[str] = None
@@ -303,24 +304,30 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
 
     def _get_files(
             self,
-            directory_path: str = "",
-            branch_name: str = None,
+            path: str = "",
+            branch: str = None,
             recursion_level: str = "Full",
     ) -> str:
+        """Get list of files from a repository path and branch.
+
+        Args:
+            path (str): Path within the repository to list files from
+            branch (str): Branch to get files from. Defaults to base_branch if None.
+            recursion_level (str): OneLevel - includes immediate children, Full - includes all items, None - no recursion
+
+        Returns:
+            List[str]: List of file paths
         """
-        Params:
-            recursion_level: OneLevel - includes immediate children, Full - includes all items, None - no recursion
-        """
-        branch_name = branch_name if branch_name else self.base_branch
+        branch = branch if branch else self.base_branch
         files: List[str] = []
         try:
             version_descriptor = GitVersionDescriptor(
-                version=branch_name, version_type="branch"
+                version=branch, version_type="branch"
             )
             items = self._client.get_items(
                 repository_id=self.repository_id,
                 project=self.project,
-                scope_path=directory_path,
+                scope_path=path,
                 recursion_level=recursion_level,
                 version_descriptor=version_descriptor,
                 include_content_metadata=True,
@@ -334,7 +341,7 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
             item = items.pop(0)
             if item.git_object_type == "blob":
                 files.append(item.path)
-        return str(files)
+        return files # Changed to return list directly instead of str
 
     def set_active_branch(self, branch_name: str) -> str:
         """
@@ -389,7 +396,7 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
             logger.error(msg)
             return ToolException(msg)
 
-    def list_files(self, directory_path: str = "", branch_name: str = None) -> str:
+    def list_files(self, directory_path: str = "", branch_name: str = None) -> List[str]:
         """
         Recursively fetches files from a directory in the repo.
 
@@ -398,12 +405,12 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
             branch_name (str): The name of the branch where the files to be received.
 
         Returns:
-            str: List of file paths, or an error message.
+            List[str]: List of file paths, or an error message.
         """
         self.active_branch = branch_name if branch_name else self.active_branch
         return self._get_files(
-            directory_path=directory_path,
-            branch_name=self.active_branch if self.active_branch else self.base_branch,
+            path=directory_path,
+            branch=self.active_branch if self.active_branch else self.base_branch,
         )
 
     def parse_pull_request_comments(
