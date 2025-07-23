@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Generator
 
 import pandas as pd
 from langchain_core.tools import ToolException
@@ -9,6 +9,9 @@ from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
 from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
 from langchain_core.documents import Document
+
+from ...runtime.utils.utils import IndexerKeywords
+
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 except ImportError:
@@ -551,7 +554,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                      suite_id: Optional[str] = None,
                      section_id: Optional[int] = None,
                      title_keyword: Optional[str] = None
-                     ) -> List[Document]:
+                     ) -> Generator[Document, None, None]:
         try:
             if suite_id:
                 resp = self._client.cases.get_cases(project_id=project_id, suite_id=int(suite_id))
@@ -567,9 +570,8 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         if title_keyword is not None:
             cases = [case for case in cases if title_keyword.lower() in case.get('title', '').lower()]
 
-        docs: List[Document] = []
         for case in cases:
-            docs.append(Document(page_content=json.dumps(case), metadata={
+            yield Document(page_content=json.dumps(case), metadata={
                 'project_id': project_id,
                 'title': case.get('title', ''),
                 'suite_id': suite_id or case.get('suite_id', ''),
@@ -582,8 +584,8 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'estimate': case.get('estimate') or '',
                 'automation_type': case.get('custom_automation_type') or -1,
                 'section_id': case.get('section_id') or -1,
-            }))
-        return docs
+                'entity_type': 'test_case',
+            })
 
     def index_data(
             self,
@@ -601,7 +603,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
         return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
 
-    def _process_document(self, document: Document) -> Document:
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
         """
         Process an existing base document to extract relevant metadata for full document preparation.
         Used for late processing of documents after we ensure that the document has to be indexed to avoid
@@ -611,7 +613,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             document (Document): The base document to process.
 
         Returns:
-            Document: The processed document with metadata.
+            Generator[Document, None, None]: A generator yielding processed Document objects with metadata.
         """
         try:
             # get base data from the document required to extract attachments and other metadata
@@ -620,17 +622,25 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
 
             # get a list of attachments for the case
             attachments = self._client.attachments.get_attachments_for_case_bulk(case_id=case_id)
-            attachments_data = {}
 
             # process each attachment to extract its content
             for attachment in attachments:
+                attachment_id = attachment['id']
                 # add attachment id to metadata of parent
-                document.metadata.get('attachments', []).append(attachment['id'])
+                document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
 
-                attachments_data[attachment['filename']] = self._process_attachment(attachment)
-            base_data['attachments'] = attachments_data
-            document.page_content = json.dumps(base_data)
-            return document
+                # TODO: pass it to chunkers
+                yield Document(page_content=self._process_attachment(attachment),
+                                                     metadata={
+                                                         'project_id': base_data.get('project_id', ''),
+                                                         IndexerKeywords.PARENT.value: case_id,
+                                                         'id': attachment_id,
+                                                         'filename': attachment['filename'],
+                                                         'filetype': attachment['filetype'],
+                                                         'created_on': attachment['created_on'],
+                                                         'entity_type': 'test_case_attachment',
+                                                         'is_image': attachment['is_image'],
+                                                     })
         except json.JSONDecodeError as e:
             raise ToolException(f"Failed to decode JSON from document: {e}")
 
@@ -644,10 +654,13 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         Returns:
             str: string description of the attachment.
         """
+
+        page_content = "This filetype is not supported."
         if attachment['filetype'] == 'txt' :
-            return self._client.get(endpoint=f"get_attachment/{attachment['id']}")
+            page_content =  self._client.get(endpoint=f"get_attachment/{attachment['id']}")
         # TODO: add support for other file types
-        return "This filetype is not supported."
+        # use utility to handle different types (tools/utils)
+        return page_content
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """

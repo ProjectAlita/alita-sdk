@@ -182,7 +182,7 @@ def add_documents(vectorstore, documents):
         texts.append(document.page_content)
         for key in document.metadata:
             if isinstance(document.metadata[key], list):
-                document.metadata[key] = "; ".join(document.metadata[key])
+                document.metadata[key] = "; ".join([str(val) for val in document.metadata[key]])
             if isinstance(document.metadata[key], dict):
                 document.metadata[key] = dumps(document.metadata[key])
         metadata.append(document.metadata)
