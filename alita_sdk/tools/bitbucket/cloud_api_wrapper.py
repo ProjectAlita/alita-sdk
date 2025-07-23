@@ -17,6 +17,21 @@ if TYPE_CHECKING:
     pass
 
 
+def normalize_response(response) -> Dict[str, Any]:
+    """
+    Normalize API response to dictionary format.
+    Handles different response types from Bitbucket APIs.
+    """
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, 'to_dict'):
+        return response.to_dict()
+    if hasattr(response, '__dict__'):
+        return {k: v for k, v in response.__dict__.items()
+                if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
+    return {"raw_response": str(response)}
+
+
 class BitbucketApiAbstract(ABC):
 
     @abstractmethod
@@ -48,11 +63,11 @@ class BitbucketApiAbstract(ABC):
         pass
 
     @abstractmethod
-    def get_pull_request(self, pr_id: str) -> Any:
+    def get_pull_request(self, pr_id: str) -> Dict[str, Any]:
         pass
 
     @abstractmethod
-    def get_pull_requests_changes(self, pr_id: str) -> Any:
+    def get_pull_requests_changes(self, pr_id: str) -> Dict[str, Any]:
         pass
 
     @abstractmethod
@@ -95,7 +110,7 @@ class BitbucketServerApi(BitbucketApiAbstract):
 
     def get_files_list(self, file_path: str, branch: str) -> list:
         files = self.api_client.get_file_list(project_key=self.project, repository_slug=self.repository, query=branch,
-                                      sub_folder=file_path)
+                                              sub_folder=file_path)
         files_list = []
         for file in files:
             files_list.append(file['path'])
@@ -112,7 +127,7 @@ class BitbucketServerApi(BitbucketApiAbstract):
         )
 
     def update_file(self, file_path: str, update_query: str, branch: str) -> str:
-        file_content = self.get_file(file_path = file_path, branch=branch)
+        file_content = self.get_file(file_path=file_path, branch=branch)
         updated_file_content = file_content
         for old, new in extract_old_new_pairs(update_query):
             if not old.strip():
@@ -126,8 +141,8 @@ class BitbucketServerApi(BitbucketApiAbstract):
                 "the current file contents."
             )
 
-
-        source_commit_generator = self.api_client.get_commits(project_key=self.project, repository_slug=self.repository, hash_newest=branch, limit=1)
+        source_commit_generator = self.api_client.get_commits(project_key=self.project, repository_slug=self.repository,
+                                                              hash_newest=branch, limit=1)
         source_commit = next(source_commit_generator)
         return self.api_client.update_file(
             project_key=self.project,
@@ -138,7 +153,7 @@ class BitbucketServerApi(BitbucketApiAbstract):
             filename=file_path,
             source_commit_id=source_commit['id']
         )
-    
+
     def get_pull_request_commits(self, pr_id: str) -> List[Dict[str, Any]]:
         """
         Get commits from a pull request
@@ -147,27 +162,32 @@ class BitbucketServerApi(BitbucketApiAbstract):
         Returns:
             List[Dict[str, Any]]: List of commits in the pull request
         """
-        return self.api_client.get_pull_requests_commits(project_key=self.project, repository_slug=self.repository, pull_request_id=pr_id)
-    
+        return self.api_client.get_pull_requests_commits(project_key=self.project, repository_slug=self.repository,
+                                                         pull_request_id=pr_id)
+
     def get_pull_request(self, pr_id):
         """ Get details of a pull request
         Parameters:
             pr_id(str): the pull request ID
         Returns:
-            Any: Details of the pull request
+            Dict[str, Any]: Details of the pull request
         """
-        return self.api_client.get_pull_request(project_key=self.project, repository_slug=self.repository, pull_request_id=pr_id)
-    
-    def get_pull_requests_changes(self, pr_id: str) -> Any:
+        response = self.api_client.get_pull_request(project_key=self.project, repository_slug=self.repository,
+                                                    pull_request_id=pr_id)
+        return normalize_response(response)
+
+    def get_pull_requests_changes(self, pr_id: str) -> Dict[str, Any]:
         """
         Get changes of a pull request
         Parameters:
             pr_id(str): the pull request ID
         Returns:
-            Any: Changes of the pull request
+            Dict[str, Any]: Changes of the pull request
         """
-        return self.api_client.get_pull_requests_changes(project_key=self.project, repository_slug=self.repository, pull_request_id=pr_id)
-    
+        response = self.api_client.get_pull_requests_changes(project_key=self.project, repository_slug=self.repository,
+                                                             pull_request_id=pr_id)
+        return normalize_response(response)
+
     def add_pull_request_comment(self, pr_id, content, inline=None):
         """
         Add a comment to a pull request. Supports multiple content types and inline comments.
@@ -203,6 +223,7 @@ class BitbucketServerApi(BitbucketApiAbstract):
             pull_request_id=pr_id,
             **comment_data
         )
+
 
 class BitbucketCloudApi(BitbucketApiAbstract):
     api_client: Cloud
@@ -249,8 +270,9 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         index = 0
         # TODO: add pagination
         for item in \
-        self.repository.get(path=f'src/{branch}/{file_path}?max_depth=100&pagelen=100&fields=values.path&q=type="commit_file"')[
-            'values']:
+                self.repository.get(
+                    path=f'src/{branch}/{file_path}?max_depth=100&pagelen=100&fields=values.path&q=type="commit_file"')[
+                    'values']:
             files_list.append(item['path'])
         return files_list
 
@@ -259,7 +281,8 @@ class BitbucketCloudApi(BitbucketApiAbstract):
             'branch': f'{branch}',
             f'{file_path}': f'{file_contents}',
         }
-        return self.repository.post(path='src', data=form_data, files={}, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        return self.repository.post(path='src', data=form_data, files={},
+                                    headers={'Content-Type': 'application/x-www-form-urlencoded'})
 
     def update_file(self, file_path: str, update_query: str, branch: str) -> ToolException | str:
 
@@ -277,7 +300,7 @@ class BitbucketCloudApi(BitbucketApiAbstract):
                 "the current file contents."
             )
         return self.create_file(file_path, updated_file_content, branch)
-    
+
     def get_pull_request_commits(self, pr_id: str) -> List[Dict[str, Any]]:
         """
         Get commits from a pull request
@@ -287,26 +310,28 @@ class BitbucketCloudApi(BitbucketApiAbstract):
             List[Dict[str, Any]]: List of commits in the pull request
         """
         return self.repository.pullrequests.get(pr_id).get('commits', {}).get('values', [])
-    
-    def get_pull_request(self, pr_id: str) -> Any:
+
+    def get_pull_request(self, pr_id: str) -> Dict[str, Any]:
         """ Get details of a pull request
         Parameters:
             pr_id(str): the pull request ID
         Returns:
-            Any: Details of the pull request
+            Dict[str, Any]: Details of the pull request
         """
-        return self.repository.pullrequests.get(pr_id)
-    
-    def get_pull_requests_changes(self, pr_id: str) -> Any:
+        response = self.repository.pullrequests.get(pr_id)
+        return normalize_response(response)
+
+    def get_pull_requests_changes(self, pr_id: str) -> Dict[str, Any]:
         """
         Get changes of a pull request
         Parameters:
             pr_id(str): the pull request ID
         Returns:
-            Any: Changes of the pull request
+            Dict[str, Any]: Changes of the pull request
         """
-        return self.repository.pullrequests.get(pr_id).get('diff', {})
-    
+        response = self.repository.pullrequests.get(pr_id).get('diff', {})
+        return normalize_response(response)
+
     def add_pull_request_comment(self, pr_id: str, content, inline=None) -> str:
         """
         Add a comment to a pull request. Supports multiple content types and inline comments.
