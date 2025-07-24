@@ -634,27 +634,112 @@ class AlitaClient:
                     "execution_time_seconds": 0.0
                 }
             
-            # Find the specific tool
+            # Find the specific tool with smart name matching
             target_tool = None
+            toolkit_name = toolkit_config.get('toolkit_name', '').lower()
+            
+            # Helper function to extract base tool name from full name
+            def extract_base_tool_name(full_name: str) -> str:
+                """Extract base tool name from toolkit___toolname format."""
+                if '___' in full_name:
+                    return full_name.split('___', 1)[1]
+                return full_name
+            
+            # Helper function to create full tool name
+            def create_full_tool_name(base_name: str, toolkit_name: str) -> str:
+                """Create full tool name in toolkit___toolname format."""
+                return f"{toolkit_name}___{base_name}"
+            
+            # Normalize tool_name to handle both formats
+            # If user provides toolkit___toolname, extract just the tool name
+            # If user provides just toolname, keep as is
+            if '___' in tool_name:
+                normalized_tool_name = extract_base_tool_name(tool_name)
+                logger.info(f"Extracted base tool name '{normalized_tool_name}' from full name '{tool_name}'")
+            else:
+                normalized_tool_name = tool_name
+            
+            # Try multiple matching strategies
             for tool in tools:
-                if hasattr(tool, 'name') and tool.name == tool_name:
-                    target_tool = tool
-                    break
-                elif hasattr(tool, 'func') and hasattr(tool.func, '__name__') and tool.func.__name__ == tool_name:
-                    target_tool = tool
-                    break
+                tool_name_attr = None
+                if hasattr(tool, 'name'):
+                    tool_name_attr = tool.name
+                elif hasattr(tool, 'func') and hasattr(tool.func, '__name__'):
+                    tool_name_attr = tool.func.__name__
+                
+                if tool_name_attr:
+                    # Strategy 1: Exact match with provided name (handles both formats)
+                    if tool_name_attr == tool_name:
+                        target_tool = tool
+                        logger.info(f"Found tool using exact match: '{tool_name_attr}'")
+                        break
+                    
+                    # Strategy 2: Match normalized name with toolkit prefix
+                    expected_full_name = create_full_tool_name(normalized_tool_name, toolkit_name)
+                    if tool_name_attr == expected_full_name:
+                        target_tool = tool
+                        logger.info(f"Found tool using toolkit prefix mapping: '{tool_name_attr}' for normalized name '{normalized_tool_name}'")
+                        break
+                    
+                    # Strategy 3: Match base names (extract from both sides)
+                    base_tool_name = extract_base_tool_name(tool_name_attr)
+                    if base_tool_name == normalized_tool_name:
+                        target_tool = tool
+                        logger.info(f"Found tool using base name mapping: '{tool_name_attr}' -> '{base_tool_name}' matches '{normalized_tool_name}'")
+                        break
+                    
+                    # Strategy 4: Match provided name with base tool name (reverse lookup)
+                    if tool_name_attr == normalized_tool_name:
+                        target_tool = tool
+                        logger.info(f"Found tool using direct name match: '{tool_name_attr}' matches normalized '{normalized_tool_name}'")
+                        break
             
             if target_tool is None:
                 available_tools = []
+                base_available_tools = []
+                full_available_tools = []
+                
                 for tool in tools:
+                    tool_name_attr = None
                     if hasattr(tool, 'name'):
-                        available_tools.append(tool.name)
+                        tool_name_attr = tool.name
                     elif hasattr(tool, 'func') and hasattr(tool.func, '__name__'):
-                        available_tools.append(tool.func.__name__)
+                        tool_name_attr = tool.func.__name__
+                    
+                    if tool_name_attr:
+                        available_tools.append(tool_name_attr)
+                        
+                        # Extract base name for user-friendly error
+                        base_name = extract_base_tool_name(tool_name_attr)
+                        if base_name not in base_available_tools:
+                            base_available_tools.append(base_name)
+                        
+                        # Track full names separately
+                        if '___' in tool_name_attr:
+                            full_available_tools.append(tool_name_attr)
+                
+                # Create comprehensive error message
+                error_msg = f"Tool '{tool_name}' not found in toolkit '{toolkit_config.get('toolkit_name')}'."
+                
+                if base_available_tools and full_available_tools:
+                    error_msg += f" Available tools: {base_available_tools} (base names) or {full_available_tools} (full names)"
+                elif base_available_tools:
+                    error_msg += f" Available tools: {base_available_tools}"
+                elif available_tools:
+                    error_msg += f" Available tools: {available_tools}"
+                else:
+                    error_msg += " No tools found in the toolkit."
+                
+                # Add helpful hint about naming conventions
+                if '___' in tool_name:
+                    error_msg += f" Note: You provided a full name '{tool_name}'. Try using just the base name '{extract_base_tool_name(tool_name)}'."
+                elif full_available_tools:
+                    possible_full_name = create_full_tool_name(tool_name, toolkit_name)
+                    error_msg += f" Note: You provided a base name '{tool_name}'. The full name might be '{possible_full_name}'."
                 
                 return {
                     "success": False,
-                    "error": f"Tool '{tool_name}' not found. Available tools: {available_tools}",
+                    "error": error_msg,
                     "tool_name": tool_name,
                     "toolkit_config": toolkit_config,
                     "llm_model": llm_model,
@@ -664,7 +749,22 @@ class AlitaClient:
             
             # Execute the tool with callback support
             try:
-                logger.info(f"Executing tool '{tool_name}' with parameters: {tool_params}")
+                # Log which tool was found and how
+                actual_tool_name = getattr(target_tool, 'name', None) or getattr(target_tool.func, '__name__', 'unknown')
+                
+                # Determine which matching strategy was used
+                if actual_tool_name == tool_name:
+                    logger.info(f"Found tool '{tool_name}' using exact match")
+                elif actual_tool_name == create_full_tool_name(normalized_tool_name, toolkit_name):
+                    logger.info(f"Found tool '{tool_name}' using toolkit prefix mapping ('{actual_tool_name}' for normalized '{normalized_tool_name}')")
+                elif extract_base_tool_name(actual_tool_name) == normalized_tool_name:
+                    logger.info(f"Found tool '{tool_name}' using base name mapping ('{actual_tool_name}' -> '{extract_base_tool_name(actual_tool_name)}')")
+                elif actual_tool_name == normalized_tool_name:
+                    logger.info(f"Found tool '{tool_name}' using direct normalized name match ('{actual_tool_name}')")
+                else:
+                    logger.info(f"Found tool '{tool_name}' using fallback matching ('{actual_tool_name}')")
+                
+                logger.info(f"Executing tool '{tool_name}' (internal name: '{actual_tool_name}') with parameters: {tool_params}")
                 
                 # Start timing the tool execution
                 start_time = time.time()
