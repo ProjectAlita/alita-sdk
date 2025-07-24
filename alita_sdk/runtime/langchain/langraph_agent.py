@@ -500,7 +500,12 @@ def create_graph(
                 }
                 
                 # Check if tools should be bound to this LLM node
-                tool_names = node.get('tool_names', []) if isinstance(node.get('tool_names'), list) else []
+                connected_tools = node.get('tool_names', {})
+                tool_names = []
+                if isinstance(connected_tools, dict):
+                    for toolkit, selected_tools in connected_tools.items():
+                        for tool in selected_tools:
+                            tool_names.append(f"{toolkit}___{tool}")
                 
                 # Filter tools if specific tool names are provided
                 available_tools = []
