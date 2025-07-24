@@ -1,7 +1,8 @@
 import json
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Generator
 
+from ..chunkers import markdown_chunker
 from ..utils.content_parser import parse_file_content
 from langchain_core.tools import ToolException
 from office365.runtime.auth.client_credential import ClientCredential
@@ -184,11 +185,19 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
         return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
 
-    def _process_document(self, document: Document) -> Document:
-        page_content = self.read_file(document.metadata['Path'], is_capture_image=True)
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        config = {
+            "max_tokens": self.llm.model_config.get('max_tokens', 512),
+            "token_overlap": self.llm.model_config.get('token_overlap',
+                                                       int(self.llm.model_config.get('max_tokens', 512) * 0.05))
+        }
+        chunks = markdown_chunker(file_content_generator=self._generate_file_content(document), config=config)
+        yield from chunks
 
+    def _generate_file_content(self, document: Document) -> Generator[Document, None, None]:
+        page_content = self.read_file(document.metadata['Path'], is_capture_image=True)
         document.page_content = json.dumps(str(page_content))
-        return document
+        yield document
 
     def get_available_tools(self):
         return [
