@@ -473,15 +473,15 @@ class AlitaClient:
             logger.warning(f"Error: Could not determine user ID for MCP tool: {e}")
             return None
 
-    def predict_agent(self, client: Any, instructions: str = "You are a helpful assistant.",
+    def predict_agent(self, llm: ChatOpenAI, instructions: str = "You are a helpful assistant.",
                       tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                       memory=None, runtime='langchain', variables: Optional[list] = None,
                       store: Optional[BaseStore] = None):
         """
         Create a predict-type agent with minimal configuration.
-        
+
         Args:
-            client: The LLM client to use
+            llm: The LLM to use
             instructions: System instructions for the agent
             tools: Optional list of tools to provide to the agent
             chat_history: Optional chat history
@@ -489,7 +489,7 @@ class AlitaClient:
             runtime: Runtime type (default: 'langchain')
             variables: Optional list of variables for the agent
             store: Optional store for memory
-            
+
         Returns:
             Runnable agent ready for execution
         """
@@ -499,7 +499,7 @@ class AlitaClient:
             chat_history = []
         if variables is None:
             variables = []
-            
+
         # Create a minimal data structure for predict agent
         # All LLM settings are taken from the passed client instance
         agent_data = {
@@ -507,7 +507,7 @@ class AlitaClient:
             'tools': tools,  # Tools are handled separately in predict agents
             'variables': variables
         }
-        return LangChainAssistant(self, agent_data, client,
+        return LangChainAssistant(self, agent_data, llm,
                                   chat_history, "predict", memory=memory, store=store).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None, 
