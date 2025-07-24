@@ -1,7 +1,7 @@
 from typing import Optional, List
 
 from langchain_core.tools import BaseToolkit, BaseTool
-from langgraph.store.postgres import PostgresStore
+
 try:
     from langmem import create_manage_memory_tool, create_search_memory_tool
 except ImportError:
@@ -15,13 +15,37 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 
 name = "memory"
 
-def get_tools(tool):
-    return MemoryToolkit().get_toolkit(
-        namespace=tool['settings'].get('namespace', str(tool['id'])),
-        username=tool['settings'].get('username', ''),
-        store=tool['settings'].get('store', None),
-        toolkit_name=tool.get('toolkit_name', '')
-).get_tools()
+def get_tools(tools_list: list, alita_client, llm, memory_store=None):
+    """
+    Get memory tools for the provided tool configurations.
+    
+    Args:
+        tools_list: List of tool configurations
+        alita_client: Alita client instance
+        llm: LLM client instance
+        memory_store: Optional memory store instance
+    
+    Returns:
+        List of memory tools
+    """
+    all_tools = []
+    
+    for tool in tools_list:
+        if tool.get('type') == 'memory' or tool.get('toolkit_name') == 'memory':
+            try:
+                toolkit_instance = MemoryToolkit().get_toolkit(
+                    namespace=tool['settings'].get('namespace', str(tool['id'])),
+                    username=tool['settings'].get('username', ''),
+                    store=tool['settings'].get('store', memory_store),
+                    toolkit_name=tool.get('toolkit_name', '')
+                )
+                all_tools.extend(toolkit_instance.get_tools())
+            except Exception as e:
+                print(f"DEBUG: Error in memory toolkit get_tools: {e}")
+                print(f"DEBUG: Tool config: {tool}")
+                raise
+    
+    return all_tools
 
 class MemoryToolkit(BaseToolkit):
     tools: List[BaseTool] = []
@@ -30,7 +54,7 @@ class MemoryToolkit(BaseToolkit):
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         return create_model(
-            name,
+            'MemoryConfig',
             namespace=(str, Field(description="Memory namespace", json_schema_extra={'toolkit_name': True})),
             username=(Optional[str], Field(description="Username", default='Tester', json_schema_extra={'hidden': True})),
             connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
@@ -48,7 +72,27 @@ class MemoryToolkit(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, namespace: str, store: PostgresStore, **kwargs):
+    def get_toolkit(cls, namespace: str, store=None, **kwargs):
+        """
+        Get toolkit with memory tools.
+        
+        Args:
+            namespace: Memory namespace
+            store: PostgresStore instance (imported dynamically)
+            **kwargs: Additional arguments
+        """
+        try:
+            from langgraph.store.postgres import PostgresStore
+        except ImportError:
+            raise ImportError(
+                "PostgreSQL dependencies (psycopg) are required for MemoryToolkit. "
+                "Install with: pip install psycopg[binary]"
+            )
+        
+        # Validate store type
+        if store is not None and not isinstance(store, PostgresStore):
+            raise TypeError(f"Expected PostgresStore, got {type(store)}")
+        
         return cls(tools=[
             create_manage_memory_tool(namespace=namespace, store=store),
             create_search_memory_tool(namespace=namespace, store=store)

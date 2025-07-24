@@ -509,4 +509,267 @@ class AlitaClient:
         }
         return LangChainAssistant(self, agent_data, client,
                                   chat_history, "predict", memory=memory, store=store).runnable()
+
+    def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None, 
+                          runtime_config: dict = None, llm_model: str = None, 
+                          llm_config: dict = None) -> dict:
+        """
+        Test a single tool from a toolkit with given parameters and runtime callbacks.
+        
+        This method initializes a toolkit, calls a specific tool, and supports runtime
+        callbacks for event dispatching, enabling tools to send custom events back to
+        the platform during execution.
+        
+        Args:
+            toolkit_config: Configuration dictionary for the toolkit containing:
+                - toolkit_name: Name of the toolkit (e.g., 'github', 'jira')
+                - settings: Dictionary containing toolkit-specific settings
+            tool_name: Name of the specific tool to call
+            tool_params: Parameters to pass to the tool (default: empty dict)
+            runtime_config: Runtime configuration with callbacks for events, containing:
+                - callbacks: List of callback handlers for event processing
+                - configurable: Additional configuration parameters
+                - tags: Tags for the execution
+            llm_model: Name of the LLM model to use (default: 'gpt-4o-mini')
+            llm_config: Configuration for the LLM containing:
+                - max_tokens: Maximum tokens for response (default: 1000)
+                - temperature: Temperature for response generation (default: 0.1)
+                - top_p: Top-p value for response generation (default: 1.0)
+            
+        Returns:
+            Dictionary containing:
+                - success: Boolean indicating if the operation was successful
+                - result: The actual result from the tool (if successful)
+                - error: Error message (if unsuccessful)
+                - tool_name: Name of the executed tool
+                - toolkit_config: Original toolkit configuration
+                - events_dispatched: List of custom events dispatched during execution
+                - llm_model: LLM model used for the test
+                - execution_time_seconds: Time taken to execute the tool in seconds
+            
+        Example:
+            >>> from langchain_core.callbacks import BaseCallbackHandler
+            >>> 
+            >>> class TestCallback(BaseCallbackHandler):
+            ...     def __init__(self):
+            ...         self.events = []
+            ...     def on_custom_event(self, name, data, **kwargs):
+            ...         self.events.append({'name': name, 'data': data})
+            >>> 
+            >>> callback = TestCallback()
+            >>> runtime_config = {'callbacks': [callback]}
+            >>> 
+            >>> config = {
+            ...     'toolkit_name': 'github',
+            ...     'settings': {'github_token': 'your_token'}
+            ... }
+            >>> result = client.test_toolkit_tool(
+            ...     config, 'get_repository_info', 
+            ...     {'repo_name': 'alita'}, runtime_config,
+            ...     llm_model='gpt-4o-mini',
+            ...     llm_config={'temperature': 0.1}
+            ... )
+        """
+        if tool_params is None:
+            tool_params = {}
+        if llm_model is None:
+            llm_model = 'gpt-4o-mini'
+        if llm_config is None:
+            llm_config = {
+                'max_tokens': 1024,
+                'temperature': 0.1,
+                'top_p': 1.0
+            }
+            
+        try:
+            from ..utils.toolkit_utils import instantiate_toolkit_with_client
+            from langchain_core.runnables import RunnableConfig
+            import logging
+            import time
+            
+            logger = logging.getLogger(__name__)
+            logger.info(f"Testing tool '{tool_name}' from toolkit '{toolkit_config.get('toolkit_name')}' with LLM '{llm_model}'")
+            
+            # Create RunnableConfig for callback support
+            config = None
+            callbacks = []
+            events_dispatched = []
+            
+            if runtime_config:
+                callbacks = runtime_config.get('callbacks', [])
+                if callbacks:
+                    config = RunnableConfig(
+                        callbacks=callbacks,
+                        configurable=runtime_config.get('configurable', {}),
+                        tags=runtime_config.get('tags', [])
+                    )
+            
+            # Create LLM instance using the client's get_llm method
+            try:
+                llm = self.get_llm(llm_model, llm_config)
+                logger.info(f"Created LLM instance: {llm_model} with config: {llm_config}")
+            except Exception as llm_error:
+                logger.error(f"Failed to create LLM instance: {str(llm_error)}")
+                return {
+                    "success": False,
+                    "error": f"Failed to create LLM instance '{llm_model}': {str(llm_error)}",
+                    "tool_name": tool_name,
+                    "toolkit_config": toolkit_config,
+                    "llm_model": llm_model,
+                    "events_dispatched": events_dispatched,
+                    "execution_time_seconds": 0.0
+                }
+            
+            # Instantiate the toolkit with client and LLM support
+            tools = instantiate_toolkit_with_client(toolkit_config, llm, self)
+            
+            if not tools:
+                return {
+                    "success": False,
+                    "error": f"Failed to instantiate toolkit '{toolkit_config.get('toolkit_name')}' or no tools found",
+                    "tool_name": tool_name,
+                    "toolkit_config": toolkit_config,
+                    "llm_model": llm_model,
+                    "events_dispatched": events_dispatched,
+                    "execution_time_seconds": 0.0
+                }
+            
+            # Find the specific tool
+            target_tool = None
+            for tool in tools:
+                if hasattr(tool, 'name') and tool.name == tool_name:
+                    target_tool = tool
+                    break
+                elif hasattr(tool, 'func') and hasattr(tool.func, '__name__') and tool.func.__name__ == tool_name:
+                    target_tool = tool
+                    break
+            
+            if target_tool is None:
+                available_tools = []
+                for tool in tools:
+                    if hasattr(tool, 'name'):
+                        available_tools.append(tool.name)
+                    elif hasattr(tool, 'func') and hasattr(tool.func, '__name__'):
+                        available_tools.append(tool.func.__name__)
+                
+                return {
+                    "success": False,
+                    "error": f"Tool '{tool_name}' not found. Available tools: {available_tools}",
+                    "tool_name": tool_name,
+                    "toolkit_config": toolkit_config,
+                    "llm_model": llm_model,
+                    "events_dispatched": events_dispatched,
+                    "execution_time_seconds": 0.0
+                }
+            
+            # Execute the tool with callback support
+            try:
+                logger.info(f"Executing tool '{tool_name}' with parameters: {tool_params}")
+                
+                # Start timing the tool execution
+                start_time = time.time()
+                
+                # Different tools might have different invocation patterns
+                if hasattr(target_tool, 'invoke'):
+                    # Use config for tools that support RunnableConfig
+                    if config is not None:
+                        result = target_tool.invoke(tool_params, config=config)
+                    else:
+                        result = target_tool.invoke(tool_params)
+                elif hasattr(target_tool, 'run'):
+                    result = target_tool.run(tool_params)
+                elif callable(target_tool):
+                    result = target_tool(**tool_params)
+                else:
+                    execution_time = time.time() - start_time
+                    return {
+                        "success": False,
+                        "error": f"Tool '{tool_name}' is not callable",
+                        "tool_name": tool_name,
+                        "toolkit_config": toolkit_config,
+                        "llm_model": llm_model,
+                        "events_dispatched": events_dispatched,
+                        "execution_time_seconds": execution_time
+                    }
+                
+                # Calculate execution time
+                execution_time = time.time() - start_time
+                
+                # Extract events from callbacks if they support it
+                for callback in callbacks:
+                    if hasattr(callback, 'events'):
+                        events_dispatched.extend(callback.events)
+                    elif hasattr(callback, 'get_events'):
+                        events_dispatched.extend(callback.get_events())
+                    elif hasattr(callback, 'dispatched_events'):
+                        events_dispatched.extend(callback.dispatched_events)
+                
+                logger.info(f"Tool '{tool_name}' executed successfully in {execution_time:.3f} seconds")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "tool_name": tool_name,
+                    "toolkit_config": toolkit_config,
+                    "llm_model": llm_model,
+                    "events_dispatched": events_dispatched,
+                    "execution_time_seconds": execution_time
+                }
+                
+            except Exception as tool_error:
+                # Calculate execution time even for failed executions
+                execution_time = time.time() - start_time
+                logger.error(f"Error executing tool '{tool_name}' after {execution_time:.3f} seconds: {str(tool_error)}")
+                
+                # Still collect events even if tool execution failed
+                for callback in callbacks:
+                    if hasattr(callback, 'events'):
+                        events_dispatched.extend(callback.events)
+                    elif hasattr(callback, 'get_events'):
+                        events_dispatched.extend(callback.get_events())
+                    elif hasattr(callback, 'dispatched_events'):
+                        events_dispatched.extend(callback.dispatched_events)
+                
+                return {
+                    "success": False,
+                    "error": f"Tool execution failed: {str(tool_error)}",
+                    "tool_name": tool_name,
+                    "toolkit_config": toolkit_config,
+                    "llm_model": llm_model,
+                    "events_dispatched": events_dispatched,
+                    "execution_time_seconds": execution_time
+                }
+                
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in test_toolkit_tool: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Method execution failed: {str(e)}",
+                "tool_name": tool_name,
+                "toolkit_config": toolkit_config,
+                "llm_model": llm_model if 'llm_model' in locals() else None,
+                "events_dispatched": [],
+                "execution_time_seconds": 0.0
+            }
+    
+    def _get_real_user_id(self) -> str:
+        """Extract the real user ID from the auth token for MCP tool calls."""
+        try:
+            import base64
+            import json
+            # Assuming JWT token, extract user ID from payload
+            # This is a basic implementation - adjust based on your token format
+            token_parts = self.auth_token.split('.')
+            if len(token_parts) >= 2:
+                payload_part = token_parts[1]
+                # Add padding if needed
+                padding = len(payload_part) % 4
+                if padding:
+                    payload_part += '=' * (4 - padding)
+                payload = json.loads(base64.b64decode(payload_part))
+                return payload.get('user_id') or payload.get('sub') or payload.get('uid')
+        except Exception as e:
+            logger.error(f"Error extracting user ID from token: {e}")
+        return None
         
