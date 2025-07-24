@@ -1,6 +1,10 @@
 import logging
-from typing import Optional
+from typing import Any, Dict, Generator, List, Optional
 
+from alita_sdk.tools.elitea_base import BaseIndexParams
+from langchain_core.documents import Document
+
+from ...elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from azure.devops.connection import Connection
 from azure.devops.exceptions import AzureDevOpsServiceError
 from azure.devops.v7_0.core import CoreClient
@@ -12,6 +16,10 @@ from msrest.authentication import BasicAuthentication
 from pydantic import create_model, PrivateAttr, SecretStr
 from pydantic import model_validator
 from pydantic.fields import Field
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 from ...elitea_base import BaseToolApiWrapper
 
@@ -52,13 +60,31 @@ RenamePageInput = create_model(
     version_type=(Optional[str], Field(description="Version type (branch, tag, or commit). Determines how Id is interpreted", default="branch"))
 )
 
+# Schema for indexing ADO Wiki pages into vector store
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    wiki_identifier=(str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False,
+                       description="Optional flag to enforce clean existing index before indexing new data")),
+)
 
-class AzureDevOpsApiWrapper(BaseToolApiWrapper):
+
+class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
     organization_url: str
     project: str
     token: SecretStr
     _client: Optional[WikiClient] = PrivateAttr()  # Private attribute for the wiki client
     _core_client: Optional[CoreClient] = PrivateAttr()  # Private attribute for the CoreClient client
+
+    llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     class Config:
         arbitrary_types_allowed = True  # Allow arbitrary types (e.g., WorkItemTrackingClient)
@@ -216,6 +242,34 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
             logger.error(f"Unable to modify wiki page: {str(e)}")
             return ToolException(f"Unable to modify wiki page: {str(e)}")
 
+    def index_data(
+            self,
+            wiki_identifier: str,
+            collection_suffix: str = '',
+            progress_step: int = None,
+            clean_index: bool = False
+    ):
+        """Load ADO Wiki pages into the vector store."""
+        docs = self._base_loader(wiki_identifier)
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+    def _base_loader(self, wiki_identifier: str) -> Generator[Document, None, None]:
+        pages = self._client.get_pages_batch(pages_batch_request={}, project=self.project, wiki_identifier=wiki_identifier)
+        #
+        for page in pages:
+            content = self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_identifier, id=page.id, include_content=True).page.content
+            yield Document(page_content=content, metadata={
+                'id': page.id, 
+                'path': page.path,
+                'updated_on': ''
+            })
+
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        yield document
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         """Return a list of available tools."""
         return [
@@ -260,5 +314,11 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
                 "description": self.rename_wiki_page.__doc__,
                 "args_schema": RenamePageInput,
                 "ref": self.rename_wiki_page,
+            },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
             }
         ]

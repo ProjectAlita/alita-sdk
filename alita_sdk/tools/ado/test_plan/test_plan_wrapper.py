@@ -1,7 +1,10 @@
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, Generator, List, Optional
 
+from langchain_core.documents import Document
+
+from alita_sdk.tools.elitea_base import BaseIndexParams
 from azure.devops.connection import Connection
 from azure.devops.v7_0.test_plan.models import TestPlanCreateParams, TestSuiteCreateParams, \
     SuiteTestCaseCreateUpdateParameters
@@ -13,7 +16,11 @@ from pydantic.fields import FieldInfo as Field
 import xml.etree.ElementTree as ET
 
 from ..work_item import AzureDevOpsApiWrapper
-from ...elitea_base import BaseToolApiWrapper
+from ...elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +103,6 @@ TestCaseAddModel = create_model(
     suite_id=(int, Field(description="ID of the test suite to which test cases are to be added"))
 )
 
-
 test_steps_description = """Json or XML array string with test steps. 
     Json example: [{"stepNumber": 1, "action": "Some action", "expectedResult": "Some expectation"},...]
     XML example: 
@@ -158,13 +164,32 @@ TestCasesGetModel = create_model(
     suite_id=(int, Field(description="ID of the test suite for which test cases are requested"))
 )
 
-class TestPlanApiWrapper(BaseToolApiWrapper):
+# Schema for indexing ADO Wiki pages into vector store
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    plan_id=(int, Field(description="ID of the test plan for which test cases are requested")),
+    suite_ids=(list[int], Field(description="List of test suite IDs for which test cases are requested (can be empty)")),
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False,
+                       description="Optional flag to enforce clean existing index before indexing new data")),
+)
+
+class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
     __test__ = False
     organization_url: str
     project: str
     token: SecretStr
     limit: Optional[int] = 5
     _client: Optional[TestPlanClient] = PrivateAttr()
+
+    llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     class Config:
         arbitrary_types_allowed = True
@@ -250,8 +275,10 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
         try:
             if isinstance(suite_test_case_create_update_parameters, str):
                 suite_test_case_create_update_parameters = json.loads(suite_test_case_create_update_parameters)
-            suite_test_case_create_update_params_obj = [SuiteTestCaseCreateUpdateParameters(**param) for param in suite_test_case_create_update_parameters]
-            test_cases = self._client.add_test_cases_to_suite(suite_test_case_create_update_params_obj, self.project, plan_id, suite_id)
+            suite_test_case_create_update_params_obj = [SuiteTestCaseCreateUpdateParameters(**param) for param in
+                                                        suite_test_case_create_update_parameters]
+            test_cases = self._client.add_test_cases_to_suite(suite_test_case_create_update_params_obj, self.project,
+                                                              plan_id, suite_id)
             return [test_case.as_dict() for test_case in test_cases]
         except Exception as e:
             logger.error(f"Error adding test case: {e}")
@@ -268,10 +295,11 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
             test_steps=test_case['test_steps'],
             test_steps_format=test_case['test_steps_format']) for test_case in test_cases]
 
-
-    def create_test_case(self, plan_id: int, suite_id: int, title: str, description: str, test_steps: str, test_steps_format: str = 'json'):
+    def create_test_case(self, plan_id: int, suite_id: int, title: str, description: str, test_steps: str,
+                         test_steps_format: str = 'json'):
         """Creates a new test case in specified suite in Azure DevOps."""
-        work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url, token=self.token.get_secret_value(), project=self.project)
+        work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url,
+                                                  token=self.token.get_secret_value(), project=self.project)
         if test_steps_format == 'json':
             steps_xml = self.get_test_steps_xml(json.loads(test_steps))
         elif test_steps_format == 'xml':
@@ -279,8 +307,9 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
         else:
             return ToolException("Unknown test steps format: " + test_steps_format)
         work_item_json = self.build_ado_test_case(title, description, steps_xml)
-        created_work_item_id = work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")['id']
-        return self.add_test_case([{"work_item":{"id":created_work_item_id}}], plan_id, suite_id)
+        created_work_item_id = \
+        work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")['id']
+        return self.add_test_case([{"work_item": {"id": created_work_item_id}}], plan_id, suite_id)
 
     def build_ado_test_case(self, title, description, steps_xml):
         """
@@ -355,6 +384,42 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error getting test cases: {e}")
             return ToolException(f"Error getting test cases: {e}")
 
+    def index_data(self,
+            plan_id: str,
+            suite_ids: list[str] = [],
+            collection_suffix: str = '',
+            progress_step: int = None,
+            clean_index: bool = False
+    ):
+        """Load ADO TestCases into the vector store."""
+        docs = self._base_loader(plan_id, suite_ids)
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+    def _base_loader(self, plan_id: str, suite_ids: Optional[list[str]] = []) -> Generator[Document, None, None]:
+        cases = []
+        for sid in suite_ids:
+            cases.extend(self.get_test_cases(plan_id, sid))
+        #
+        for case in cases:
+            field_dicts = case.get('work_item', {}).get('work_item_fields', [])
+            data = {k: v for d in field_dicts for k, v in d.items()}
+            yield Document(
+                page_content=data.get('Microsoft.VSTS.TCM.Steps', ''),
+                metadata={
+                    'id': case.get('work_item', {}).get('id', ''),
+                    'title': case.get('work_item', {}).get('name', ''),
+                    'plan_id': case.get('test_plan', {}).get('id', ''),
+                    'suite_id': case.get('test_suite', {}).get('id', ''),
+                    'description': data.get('System.Description', ''),
+                    'updated_on': data.get('System.Rev', ''),
+                })
+
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        yield document
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         """Return a list of available tools."""
         return [
@@ -423,5 +488,11 @@ class TestPlanApiWrapper(BaseToolApiWrapper):
                 "description": self.get_test_cases.__doc__,
                 "args_schema": TestCasesGetModel,
                 "ref": self.get_test_cases,
+            },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
             }
         ]
