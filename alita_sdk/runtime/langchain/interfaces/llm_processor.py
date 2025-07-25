@@ -50,9 +50,6 @@ def get_model(model_type: str, model_params: dict):
         return get_llm(model_type)(**model_params)
     if model_type == "PreloadedChatModel":
         return PreloadedChatModel(**model_params)
-    if model_type == "Alita":
-        from ...llms.alita import AlitaClient
-        return AlitaClient(**model_params)
     if model_type in chat_models:
         model = getattr(
             __import__("langchain_community.chat_models", fromlist=[model_type]),
@@ -185,7 +182,7 @@ def add_documents(vectorstore, documents):
         texts.append(document.page_content)
         for key in document.metadata:
             if isinstance(document.metadata[key], list):
-                document.metadata[key] = "; ".join(document.metadata[key])
+                document.metadata[key] = "; ".join([str(val) for val in document.metadata[key]])
             if isinstance(document.metadata[key], dict):
                 document.metadata[key] = dumps(document.metadata[key])
         metadata.append(document.metadata)

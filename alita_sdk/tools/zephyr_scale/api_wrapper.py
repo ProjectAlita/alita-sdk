@@ -1236,14 +1236,15 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
         Example:
             jql = 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login"'
         """
-        test_cases_docs = self.get_test_cases_docs(project_key, jql)
-        folders_docs = self.get_folders_docs(project_key)
-
-        docs = test_cases_docs + folders_docs
-
+        docs = self._base_loader(project_key, jql)
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs, document_processing_func=self.process_documents, progress_step=progress_step, clean_index=clean_index)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+    def _base_loader(self, project_key: str, jql: str):
+        test_cases_docs = self._get_test_cases_docs(project_key, jql)
+        folders_docs = self._get_folders_docs(project_key)
+        return test_cases_docs + folders_docs
 
     def _get_all_folders(self, project_key: str, folder_type:str, step: int = 10):
         max_iterations = 50
@@ -1261,7 +1262,7 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
                 break
         return all_folders
 
-    def get_folders_docs(self, project_key: str):
+    def _get_folders_docs(self, project_key: str):
         folder_types = ['TEST_CASE', 'TEST_PLAN', 'TEST_CYCLE']
         folders = []
         for folder_type in folder_types:
@@ -1269,16 +1270,19 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
                 folders.extend(self._get_all_folders(project_key, folder_type=folder_type, step=100))
             except Exception as e:
                 raise ToolException(f"Unable to extract folders for folder type '{folder_type}': {e}")
-
+        page_content = {}
         docs: List[Document] = []
         for folder in folders:
-            page_content = folder['name']
-            metadata = folder
-            metadata['type'] = "FOLDER"
+            page_content['name'] = folder['name']
+            metadata = {}
+            for key, value in folder.items():
+                if value is not None:
+                    metadata[key] = value
+            page_content['type'] = "FOLDER"
             docs.append(Document(page_content=json.dumps(page_content), metadata=metadata))
         return docs
 
-    def get_test_cases_docs(self, project_key: str, jql: str):
+    def _get_test_cases_docs(self, project_key: str, jql: str):
         try:
             test_cases = self._search_test_cases_by_jql(project_key, jql)
         except Exception as e:
@@ -1289,7 +1293,7 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
             last_version = self._get_last_version(case['key'], step=100)
             metadata = {
                 k: v for k, v in case.items()
-                if isinstance(v, (str, int, float, bool, list, dict, type(None)))
+                if isinstance(v, (str, int, float, bool, list, dict))
             }
             if last_version and isinstance(last_version, dict) and 'createdOn' in last_version:
                 metadata['updated_at'] = last_version['createdOn']
@@ -1301,10 +1305,7 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
             docs.append(Document(page_content=json.dumps(case), metadata=metadata))
         return docs
 
-    def process_documents(self, documents: List[Document]) -> List[Document]:
-        return [self.process_document(doc) for doc in documents]
-
-    def process_document(self, document: Document) -> Document:
+    def _process_document(self, document: Document) -> Document:
         try:
             base_data = json.loads(document.page_content)
 

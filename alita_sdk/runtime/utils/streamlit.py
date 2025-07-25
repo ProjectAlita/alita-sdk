@@ -65,7 +65,8 @@ def pil_to_base64_string(pil_image):
         return None
 
 
-from alita_sdk.runtime.llms.alita import AlitaChatModel
+# from alita_sdk.runtime.llms.alita import AlitaChatModel
+from alita_sdk.runtime.clients.client import AlitaClient
 from alita_sdk.runtime.utils.AlitaCallback import AlitaStreamlitCallback
 from alita_sdk.runtime.toolkits.tools import get_toolkits, get_tools
 from alita_sdk.community.utils import check_schema
@@ -255,45 +256,55 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
         
         return config
     
-    def instantiate_toolkit(toolkit_name, toolkit_config, llm_client):
-        """Helper function to instantiate a toolkit based on its configuration"""
+    def instantiate_toolkit(toolkit_config):
+        """
+        Helper function to instantiate a toolkit based on its configuration.
+        This function now delegates to the toolkit_utils module for the actual implementation.
+        """
         try:
-            # Log the configuration being used
-            logger.info(f"Instantiating toolkit {toolkit_name} with config: {json.dumps(toolkit_config, indent=2)}")
+            from .toolkit_utils import instantiate_toolkit_with_client
             
-            # Validate LLM client
-            if not llm_client:
-                raise ValueError("LLM client is required but not provided")
+            # Extract toolkit name and settings from the old format
+            toolkit_name = toolkit_config.get('toolkit_name')
+            settings = toolkit_config.get('settings', {})
             
-            # Find the toolkit schema
-            toolkit_schema = None
-            for config in st.session_state.tooklit_configs:
-                if config['title'] == toolkit_name:
-                    toolkit_schema = config
-                    break
+            # Inject project secrets into configuration  
+            enhanced_settings = inject_project_secrets(settings)
             
-            if not toolkit_schema:
-                raise ValueError(f"Toolkit {toolkit_name} not found")
-            
-            # Inject project secrets into configuration
-            enhanced_config = inject_project_secrets(toolkit_config)
-            logger.info(f"Enhanced configuration for {toolkit_name}: {json.dumps(enhanced_config, indent=2)}")
-            # Use the get_tools function from toolkits to instantiate the toolkit
-            # Create a tool configuration dict with required ID field
-            tool_config = {
-                'id': random.randint(1, 1000000),  # Required random integer ID
-                'type': toolkit_name.lower(),
-                'settings': enhanced_config,
-                'toolkit_name': toolkit_name
+            # Create the new format configuration
+            new_config = {
+                'toolkit_name': toolkit_name,
+                'settings': enhanced_settings
             }
             
-            # Import get_tools dynamically
-            tools = get_tools([tool_config], llm_client.client, llm_client)
+            # Create a basic LLM client for toolkit instantiation
+            try:
+                if not st.session_state.client:
+                    raise ValueError("Alita client not available")
+                    
+                llm_client = st.session_state.client.get_llm(
+                    model_name="gpt-4o-mini",
+                    model_config={
+                        "temperature": 0.1,
+                        "max_tokens": 1000,
+                        "top_p": 1.0
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create LLM client: {str(e)}. Falling back to basic toolkit instantiation.")
+                # Fallback to basic instantiation
+                from .toolkit_utils import instantiate_toolkit as fallback_instantiate
+                return fallback_instantiate(new_config)
             
-            return tools
+            # Use the enhanced implementation with client support
+            return instantiate_toolkit_with_client(
+                new_config, 
+                llm_client, 
+                st.session_state.client
+            )
                 
         except Exception as e:
-            logger.error(f"Error instantiating toolkit {toolkit_name}: {str(e)}")
+            logger.error(f"Error instantiating toolkit {toolkit_config.get('toolkit_name')}: {str(e)}")
             raise
 
     st.set_page_config(
@@ -369,7 +380,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.rerun()
         
         # Determine login form title and expansion state
-        if st.session_state.llm:
+        if st.session_state.client:
             login_title = "✅ Elitea Login (Connected)"
             # Collapse after successful login, but allow expansion
             if st.session_state.login_form_expanded is True:
@@ -385,13 +396,13 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
             deployment_secret = environ.get('XSECRET', 'secret')
             api_key_value = environ.get('API_KEY', None)
             project_id_value = int(environ.get('PROJECT_ID', 0))
-            if st.session_state.llm:
-                deployment_value = st.session_state.llm.deployment
-                api_key_value = st.session_state.llm.api_token
-                project_id_value = st.session_state.llm.project_id
-                
+            if st.session_state.client:
+                deployment_value = st.session_state.client.base_url
+                api_key_value = st.session_state.client.auth_token
+                project_id_value = st.session_state.client.project_id
+
             # Show current connection status
-            if st.session_state.llm:
+            if st.session_state.client:
                 st.success(f"Connected to: {deployment_value}")
                 st.info(f"Project ID: {project_id_value}")
                 
@@ -403,22 +414,24 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 deployment_secret = st.text_input("Deployment Secret", placeholder="Enter Deployment Secret", value=deployment_secret)
                 
                 # Change button text based on login status
-                button_text = "Re-Login" if st.session_state.llm else "Login"
+                button_text = "Re-Login" if st.session_state.client else "Login"
                 submitted = st.form_submit_button(button_text)
                 
                 if submitted:
                     with st.spinner("Logging to Alita..."):
                         try:
-                            st.session_state.llm = AlitaChatModel(**{
-                                    "deployment": deployment,
-                                    "api_token": api_key,
-                                    "project_id": project_id,
-                                })
-                            client = st.session_state.llm.client
+
+                            st.session_state.client = AlitaClient(
+                                base_url=deployment,
+                                project_id=project_id,
+                                auth_token=api_key,
+                                api_extra_headers={"X-SECRET": deployment_secret}
+                            )
+                            
                             
                             # Fetch specific project secret for pgvector connection
                             try:
-                                pgvector_connstr = client.unsecret('pgvector_project_connstr')
+                                pgvector_connstr = st.session_state.client.unsecret('pgvector_project_connstr')
                                 if pgvector_connstr:
                                     st.session_state.project_secrets = {'pgvector_project_connstr': pgvector_connstr}
                                     logger.info("Successfully retrieved pgvector connection string from project secrets")
@@ -429,7 +442,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                 logger.warning(f"Could not retrieve pgvector connection string: {str(e)}")
                                 st.session_state.project_secrets = {}
                             
-                            integrations = client.all_models_and_integrations()
+                            integrations = st.session_state.client.all_models_and_integrations()
                             unique_models = set()
                             models_list = []
                             for entry in integrations:
@@ -438,7 +451,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                     if model.get('capabilities', {}).get('chat_completion') and model['name'] not in unique_models:
                                         unique_models.add(model['name'])
                                         models_list.append({'name': model['name'], 'integration_id': entry['uid']})
-                            st.session_state.agents = client.get_list_of_apps()
+                            st.session_state.agents = st.session_state.client.get_list_of_apps()
                             st.session_state.models = models_list
                             clear_chat_history()
                             
@@ -454,6 +467,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                         except Exception as e:
                             logger.error(f"Error loggin to ELITEA: {format_exc()}")
                             st.session_state.agents = None
+                            st.session_state.client = None
                             st.session_state.models = None
                             st.session_state.llm = None
                             st.session_state.project_secrets = None
@@ -463,7 +477,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
         llmconfig, toolkit_config = st.tabs(["Alita Agents", "Toolkit Testing"])
         
         with llmconfig:
-            if st.session_state.llm:
+            if st.session_state.client:
                 st.title("Available Agents")
                 st.write("This one will load latest version of agent")
                 with st.form("agents_form", clear_on_submit=False):
@@ -477,7 +491,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                             agent = next((a for a in st.session_state.agents if a['name'] == options), None)
                             if agent:
                                 agent_id = agent['id']
-                                agent_details = st.session_state.llm.client.get_app_details(agent_id)
+                                agent_details = st.session_state.client.get_app_details(agent_id)
                                 latest_version = next((v for v in agent_details['versions'] if v['name'] == agent_version_name), None)
                                 if latest_version:
                                     agent_version_id = latest_version['id']
@@ -504,11 +518,11 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                         
                                         # Try to get the complete agent configuration
                                         try:
-                                            agent_version_details = st.session_state.llm.client.get_app_version_details(agent_id, agent_version_id)
+                                            agent_version_details = st.session_state.client.get_app_version_details(agent_id, agent_version_id)
                                             agent_full_config = agent_version_details
                                         except AttributeError:
                                             try:
-                                                agent_version_details = st.session_state.llm.client.get_application_version_details(agent_id, agent_version_id)
+                                                agent_version_details = st.session_state.client.get_application_version_details(agent_id, agent_version_id)
                                                 agent_full_config = agent_version_details
                                             except AttributeError:
                                                 # Use the version details we already have
@@ -630,8 +644,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                         st.session_state.agent_toolkit_configs = {}
                                         st.session_state.agent_raw_config = None
                                     
-                                    st.session_state.agent_executor = st.session_state.llm.client.application(
-                                        client=st.session_state.llm,
+                                    st.session_state.agent_executor = st.session_state.client.application(
                                         application_id=agent_id,
                                         application_version_id=agent_version_id,
                                         app_type=agent_type if agent_type else None,
@@ -658,7 +671,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
             """)
             
             # Check if user is logged in
-            if not st.session_state.llm:
+            if not st.session_state.client:
                 st.warning("⚠️ **Please log in first!**")
                 st.info("""
                 📋 **To use Toolkit Testing:**
@@ -671,7 +684,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.stop()
             
             # User is logged in, proceed with toolkit testing
-            if st.session_state.llm:
+            if st.session_state.client:
                 # Show project secrets status with detailed debugging
                 secrets_status = st.session_state.project_secrets
                 
@@ -685,7 +698,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 # Debug info (can be removed later)
                 with st.expander("🔍 Debug Info", expanded=False):
                     st.write(f"**Project Secrets Status:** {type(secrets_status)} - {secrets_status}")
-                    st.write(f"**LLM Status:** {'Connected' if st.session_state.llm else 'Not Connected'}")
+                    # st.write(f"**LLM Status:** {'Connected' if st.session_state.llm else 'Not Connected'}")
                 
                 # Toolkit selection and configuration
                 st.markdown("---")
@@ -902,12 +915,61 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                         elif default_value:
                                             array_value = str(default_value)
                                         
-                                        array_input = st.text_area(
-                                            f"{label} (one per line)",
-                                            value=array_value,
-                                            help=f"{field_description} - Enter one item per line",
-                                            key=f"config_{field_name}_{selected_toolkit_idx}"
-                                        )
+                                        # Auto-populate selected_tools with all available tools
+                                        if field_name == 'selected_tools':
+                                            # Get available tools from the schema's json_schema_extra
+                                            args_schemas = field_schema.get('json_schema_extra', {}).get('args_schemas', {})
+                                            if args_schemas:
+                                                available_tools = list(args_schemas.keys())
+                                                
+                                                # Create a session state key for this toolkit's auto-population
+                                                auto_populate_key = f"auto_populate_tools_{toolkit_schema['title']}_{selected_toolkit_idx}"
+                                                
+                                                # Auto-populate if field is empty and not already auto-populated
+                                                if not array_value and auto_populate_key not in st.session_state:
+                                                    array_value = '\n'.join(available_tools)
+                                                    st.session_state[auto_populate_key] = True
+                                                    st.success(f"🔧 **Auto-populated {len(available_tools)} tools:** {', '.join(available_tools)}")
+                                                elif array_value and auto_populate_key in st.session_state:
+                                                    # Show info about existing auto-population
+                                                    current_tools = [line.strip() for line in array_value.split('\n') if line.strip()]
+                                                    st.info(f"📋 **{len(current_tools)} tools configured** (auto-populated: {len(available_tools)} available)")
+                                                
+                                                # Add a button to reset to all tools
+                                                col1, col2 = st.columns([3, 1])
+                                                with col2:
+                                                    if st.button("📋 Load All Tools", help="Auto-populate with all available tools", key=f"load_all_tools_{selected_toolkit_idx}"):
+                                                        # Update the session state to trigger rerun with populated tools
+                                                        st.session_state[f"tools_loaded_{selected_toolkit_idx}"] = '\n'.join(available_tools)
+                                                        st.success(f"✅ Loaded {len(available_tools)} tools")
+                                                        st.rerun()
+                                                
+                                                # Check if tools were just loaded via button
+                                                if f"tools_loaded_{selected_toolkit_idx}" in st.session_state:
+                                                    array_value = st.session_state[f"tools_loaded_{selected_toolkit_idx}"]
+                                                    del st.session_state[f"tools_loaded_{selected_toolkit_idx}"]  # Clean up
+                                                
+                                                with col1:
+                                                    array_input = st.text_area(
+                                                        f"{label} (one per line)",
+                                                        value=array_value,
+                                                        help=f"{field_description} - Enter one item per line. Available tools: {', '.join(available_tools)}",
+                                                        key=f"config_{field_name}_{selected_toolkit_idx}"
+                                                    )
+                                            else:
+                                                array_input = st.text_area(
+                                                    f"{label} (one per line)",
+                                                    value=array_value,
+                                                    help=f"{field_description} - Enter one item per line",
+                                                    key=f"config_{field_name}_{selected_toolkit_idx}"
+                                                )
+                                        else:
+                                            array_input = st.text_area(
+                                                f"{label} (one per line)",
+                                                value=array_value,
+                                                help=f"{field_description} - Enter one item per line",
+                                                key=f"config_{field_name}_{selected_toolkit_idx}"
+                                            )
                                         toolkit_config_values[field_name] = [line.strip() for line in array_input.split('\n') if line.strip()]
                         else:
                             st.info("This toolkit doesn't require additional configuration.")
@@ -985,7 +1047,11 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                     toolkit_name = toolkit_schema['title']
                                     
                                     # Test with current config
-                                    tools = instantiate_toolkit(toolkit_name, toolkit_config_values, st.session_state.llm)
+                                    toolkit_test_config = {
+                                        'toolkit_name': toolkit_name,
+                                        'settings': toolkit_config_values
+                                    }
+                                    tools = instantiate_toolkit(toolkit_test_config)
                                     st.success("✅ Connection test successful!")
                                     
                                 except Exception as e:
@@ -1021,7 +1087,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.markdown("👈 Please use the **Alita Login Form** in the sidebar to authenticate.")
                         
     # Main content area
-    if st.session_state.llm and st.session_state.agent_executor and st.session_state.agent_chat:
+    if st.session_state.client and st.session_state.agent_executor and st.session_state.agent_chat:
         try:
             st.title(st.session_state.agent_name)
         except:
@@ -1043,9 +1109,44 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.session_state.thread_id = response.get("thread_id", None)
                 st.session_state.messages.append({"role": "assistant", "content": response["output"]})
     
-    elif st.session_state.llm and st.session_state.show_toolkit_testing and st.session_state.configured_toolkit:
+    elif st.session_state.client and st.session_state.show_toolkit_testing and st.session_state.configured_toolkit:
         # Toolkit Testing Main View
         st.title("🚀 Toolkit Testing Interface")
+        
+        # Add info about the new testing capabilities
+        st.info("""
+        🔥 **Enhanced Testing Features:**
+        - **Event Tracking**: Monitor custom events dispatched during tool execution
+        - **Callback Support**: Full runtime callback support for real-time monitoring
+        - **Error Handling**: Detailed error reporting with execution context
+        - **Client Integration**: Uses the same method available in the API client
+        """)
+        
+        # Sidebar with testing information
+        with st.sidebar:
+            st.markdown("### 🔧 Testing Information")
+            st.markdown("""
+            **Current Method**: `client.test_toolkit_tool()`
+            
+            **Features**:
+            - ✅ Runtime callbacks
+            - ✅ Event dispatching  
+            - ✅ Error handling
+            - ✅ Configuration validation
+            
+            **API Usage**:
+            ```python
+            result = client.test_toolkit_tool(
+                toolkit_config={
+                    'toolkit_name': 'github',
+                    'settings': {'token': '...'}
+                },
+                tool_name='get_repo',
+                tool_params={'repo': 'alita'},
+                runtime_config={'callbacks': [cb]}
+            )
+            ```
+            """)
         
         toolkit_config = st.session_state.configured_toolkit
         
@@ -1088,185 +1189,367 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st.write("**Original Agent Configuration:**")
                 st.json(agent_context['original_agent_config'])
         
-        # Test mode selection in main view
+        # Test mode selection in main view - simplified to function mode only
         st.markdown("---")
-        st.subheader("📋 Step 2: Choose Testing Mode")
+        st.subheader("📋 Step 2: Function Testing Mode")
         
-        test_mode = st.radio(
-            "**Select your testing approach:**",
-            ["🤖 With LLM (Tool Mode)", "⚡ Without LLM (Function Mode)"],
-            help="Tool Mode: Let AI decide which functions to call. Function Mode: Call specific functions directly.",
-            horizontal=True
-        )
+        # Force to function mode only to avoid client dependency issues
+        test_mode = "⚡ Without LLM (Function Mode)"
+        st.info("🔧 **Function Mode:** Call specific toolkit functions directly with custom parameters.")
         
         st.markdown("---")
         
-        if test_mode == "🤖 With LLM (Tool Mode)":
-            st.markdown("### 🤖 AI-Assisted Toolkit Testing")
-            st.info("💡 **Tip:** Describe what you want to accomplish, and the AI will use the appropriate toolkit functions to help you.")
-            
-            test_prompt = st.text_area(
-                "Enter your test prompt:", 
-                placeholder="Example: 'Get a list of all projects' or 'Create a new test case with title \"Login Test\"'",
-                height=120,
-                key="llm_test_prompt"
-            )
-            
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                run_llm = st.button("🚀 Run with LLM", type="primary", key="run_llm_main")
-            with col2:
-                clear_prompt = st.button("🗑️ Clear", key="clear_llm_main")
-                if clear_prompt:
-                    st.rerun()
-            
-            if run_llm:
-                if not test_prompt.strip():
-                    st.warning("⚠️ Please enter a test prompt.")
-                else:
-                    with st.spinner("🔄 AI is working with your toolkit..."):
-                        try:
-                            tools = instantiate_toolkit(
-                                toolkit_config['name'], 
-                                toolkit_config['config'], 
-                                st.session_state.llm
-                            )
-                            
-                            # Create a simple agent with the tools
-                            try:
-                                # Try to use OpenAI functions agent if available
-                                from langchain.agents import create_openai_functions_agent, AgentExecutor
-                                from langchain.prompts import ChatPromptTemplate
-                                
-                                # Create a prompt for the toolkit testing
-                                prompt = ChatPromptTemplate.from_messages([
-                                    ("system", f"You are a helpful assistant with access to {toolkit_config['name']} toolkit functions. Use the available tools to help the user accomplish their task. Always explain what you're doing and provide clear results."),
-                                    ("human", "{input}"),
-                                    ("placeholder", "{agent_scratchpad}"),
-                                ])
-                                
-                                agent = create_openai_functions_agent(st.session_state.llm, tools, prompt)
-                                agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-                                
-                                result = agent_executor.invoke({"input": test_prompt})
-                                
-                            except ImportError:
-                                # Fallback to direct LLM invocation with tool descriptions
-                                tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in tools])
-                                enhanced_prompt = f"""You have access to the following {toolkit_config['name']} toolkit functions:
-{tool_descriptions}
-
-User request: {test_prompt}
-
-Please explain how you would use these tools to help the user, even though I cannot directly execute them in this fallback mode."""
-                                
-                                result = {"output": st.session_state.llm.invoke(enhanced_prompt).content}
-                            
-                            st.markdown("### 🎯 AI Response:")
-                            st.success(result["output"])
-                            
-                            # Show tool usage details if available
-                            if "intermediate_steps" in result:
-                                with st.expander("📋 Execution Details"):
-                                    st.json(result)
-                            
-                        except Exception as e:
-                            st.error(f"❌ Error running toolkit with LLM: {str(e)}")
-                            with st.expander("🔍 Error Details"):
-                                st.code(str(e))
+        # Directly proceed to Function Mode (no LLM option)
+        st.markdown("### ⚡ Direct Function Testing")
         
-        else:  # Without LLM (Function Mode)
-            st.markdown("### ⚡ Direct Function Testing")
-            st.info("💡 **Tip:** This mode lets you call specific toolkit functions directly with custom parameters.")
+        # Information about the new testing method
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.info("💡 **Enhanced Testing:** Using `AlitaClient.test_toolkit_tool()` method with event capture and runtime callbacks.")
+        with col2:
+            st.markdown("**🔧 Method:** `test_toolkit_tool`")
+        
+        # Show available functions
+        try:
+            # Use the client to get toolkit tools for display
+            # We'll call the toolkit utilities directly to get tools
+            from .toolkit_utils import instantiate_toolkit_with_client
             
-            # Show available functions
+            # Create a simple LLM client for tool instantiation
             try:
-                tools = instantiate_toolkit(
-                    toolkit_config['name'], 
-                    toolkit_config['config'], 
-                    st.session_state.llm
+                if not st.session_state.client:
+                    raise ValueError("Alita client not available")
+                    
+                llm_client = st.session_state.client.get_llm(
+                    model_name="gpt-4o-mini",
+                    model_config={
+                        "temperature": 0.1,
+                        "max_tokens": 1000,
+                        "top_p": 1.0
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create LLM client for toolkit instantiation: {str(e)}. Falling back to basic mode.")
+                # Fallback to basic instantiation
+                from .toolkit_utils import instantiate_toolkit as fallback_instantiate
+                toolkit_test_config = {
+                    'toolkit_name': toolkit_config['name'],
+                    'settings': toolkit_config['config']
+                }
+                tools = fallback_instantiate(toolkit_test_config)
+            else:
+                toolkit_test_config = {
+                    'toolkit_name': toolkit_config['name'],
+                    'settings': toolkit_config['config']
+                }
+                tools = instantiate_toolkit_with_client(
+                    toolkit_test_config, 
+                    llm_client, 
+                    st.session_state.client
+                )
+            
+            if tools:
+                st.markdown("### 📚 Available Functions:")
+                st.info("🔧 **Auto-Population Enabled:** All available tools are automatically selected when you configure a toolkit. You can modify the selection below.")
+                function_names = [tool.name for tool in tools]
+                
+                # Auto-populate selected tools with all available tools
+                if f"selected_tools_{toolkit_config['name']}" not in st.session_state:
+                    st.session_state[f"selected_tools_{toolkit_config['name']}"] = function_names
+                
+                # Add controls for tool selection
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.markdown("**Tool Selection:**")
+                with col2:
+                    if st.button("✅ Select All", help="Select all available tools", key=f"select_all_{toolkit_config['name']}"):
+                        st.session_state[f"selected_tools_{toolkit_config['name']}"] = function_names
+                        st.rerun()
+                with col3:
+                    if st.button("❌ Clear All", help="Clear all selected tools", key=f"clear_all_{toolkit_config['name']}"):
+                        st.session_state[f"selected_tools_{toolkit_config['name']}"] = []
+                        st.rerun()
+                
+                # Create multi-select for tools with auto-population
+                selected_tools = st.multiselect(
+                    "Select tools to test:", 
+                    function_names,
+                    default=st.session_state[f"selected_tools_{toolkit_config['name']}"],
+                    help="Choose the tools you want to test. All tools are selected by default.",
+                    key=f"tools_multiselect_{toolkit_config['name']}"
                 )
                 
-                if tools:
-                    st.markdown("### 📚 Available Functions:")
-                    function_names = [tool.name for tool in tools]
-                    
-                    # Create function selection with details
+                # Update session state when selection changes
+                st.session_state[f"selected_tools_{toolkit_config['name']}"] = selected_tools
+                
+                # Show selection summary
+                if selected_tools:
+                    st.success(f"✅ **{len(selected_tools)} of {len(function_names)} tools selected**")
+                else:
+                    st.warning("⚠️ **No tools selected** - Please select at least one tool to proceed.")
+                
+                # Create function selection dropdown from selected tools
+                if selected_tools:
                     selected_function = st.selectbox(
-                        "Select a function:", 
-                        function_names,
-                        help="Choose the function you want to test",
+                        "Select a function to configure and run:", 
+                        selected_tools,
+                        help="Choose the specific function you want to configure and execute",
                         key="function_selector_main"
                     )
-                    
-                    if selected_function:
-                        selected_tool = next(tool for tool in tools if tool.name == selected_function)
-                        
-                        # Function details
-                        col1, col2 = st.columns([2, 1])
-                        with col1:
-                            st.markdown(f"**📖 Description:** {selected_tool.description}")
-                        with col2:
-                            st.markdown(f"**🏷️ Function:** `{selected_function}`")
-                        
-                        # Show function schema if available
-                        if hasattr(selected_tool, 'args_schema') and selected_tool.args_schema:
-                            with st.expander("📋 Function Schema", expanded=False):
-                                try:
-                                    schema = selected_tool.args_schema.schema()
-                                    st.json(schema)
-                                except:
-                                    st.write("Schema not available")
-                        
-                        # Function parameter form (instead of JSON input)
-                        st.markdown("---")
-                        with st.form("function_params_form", clear_on_submit=False):
-                            parameters = render_function_parameters_form(selected_tool, f"func_{selected_function}")
-                            
-                            col1, col2 = st.columns([3, 1])
-                            with col1:
-                                run_function = st.form_submit_button("⚡ Run Function", type="primary")
-                            with col2:
-                                clear_params = st.form_submit_button("🗑️ Clear Form")
-                                if clear_params:
-                                    st.rerun()
-                            
-                            if run_function and parameters is not None:
-                                with st.spinner("⚡ Executing function..."):
-                                    try:
-                                        result = selected_tool.invoke(parameters)
-                                        
-                                        st.markdown("### 🎯 Function Result:")
-                                        
-                                        # Try to format result nicely
-                                        if isinstance(result, (dict, list)):
-                                            st.json(result)
-                                        elif isinstance(result, str):
-                                            if result.startswith('{') or result.startswith('['):
-                                                try:
-                                                    parsed_result = json.loads(result)
-                                                    st.json(parsed_result)
-                                                except:
-                                                    st.code(result)
-                                            else:
-                                                st.code(result)
-                                        else:
-                                            st.code(str(result))
-                                        
-                                        # Success message
-                                        st.success("✅ Function executed successfully!")
-                                        
-                                    except Exception as e:
-                                        st.error(f"❌ Error running function: {str(e)}")
-                                        with st.expander("🔍 Error Details"):
-                                            st.code(str(e))
                 else:
-                    st.warning("⚠️ No functions available in this toolkit.")
+                    st.warning("Please select at least one tool to proceed.")
+                    selected_function = None
+                
+                if selected_function:
+                    selected_tool = next(tool for tool in tools if tool.name == selected_function)
+                    
+                    # Function details
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.markdown(f"**📖 Description:** {selected_tool.description}")
+                    with col2:
+                        st.markdown(f"**🏷️ Function:** `{selected_function}`")
+                    
+                    # Show function schema if available
+                    if hasattr(selected_tool, 'args_schema') and selected_tool.args_schema:
+                        with st.expander("📋 Function Schema", expanded=False):
+                            try:
+                                schema = selected_tool.args_schema.schema()
+                                st.json(schema)
+                            except:
+                                st.write("Schema not available")
+                    
+                    # Function parameter form (instead of JSON input)
+                    st.markdown("---")
+                    with st.form("function_params_form", clear_on_submit=False):
+                        parameters = render_function_parameters_form(selected_tool, f"func_{selected_function}")
+                        
+                        # LLM Configuration Section
+                        st.markdown("### 🤖 LLM Configuration")
+                        st.markdown("Configure the LLM settings for tools that require AI capabilities:")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            llm_model = st.selectbox(
+                                "LLM Model:",
+                                options=['gpt-4o-mini', 'gpt-4o', 'gpt-4', 'gpt-3.5-turbo', 'claude-3-haiku', 'claude-3-sonnet'],
+                                index=0,
+                                help="Select the LLM model to use for tools that require AI capabilities"
+                            )
+                            
+                            temperature = st.slider(
+                                "Temperature:",
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=0.1,
+                                step=0.1,
+                                help="Controls randomness in AI responses. Lower values are more deterministic."
+                            )
+                        
+                        with col2:
+                            max_tokens = st.number_input(
+                                "Max Tokens:",
+                                min_value=100,
+                                max_value=4000,
+                                value=1000,
+                                step=100,
+                                help="Maximum number of tokens in the AI response"
+                            )
+                            
+                            top_p = st.slider(
+                                "Top-p:",
+                                min_value=0.1,
+                                max_value=1.0,
+                                value=1.0,
+                                step=0.1,
+                                help="Controls diversity via nucleus sampling"
+                            )
+                        
+                        # Create LLM config
+                        llm_config = {
+                            'max_tokens': max_tokens,
+                            'temperature': temperature,
+                            'top_p': top_p
+                        }
+                        
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            run_function = st.form_submit_button("⚡ Run Function", type="primary")
+                        with col2:
+                            clear_params = st.form_submit_button("🗑️ Clear Form")
+                            if clear_params:
+                                st.rerun()
+                        
+                        if run_function and parameters is not None:
+                            with st.spinner("⚡ Executing function..."):
+                                try:
+                                    # Use the client's test_toolkit_tool method
+                                    # Create callback to capture events
+                                    from langchain_core.callbacks import BaseCallbackHandler
                                     
-            except Exception as e:
-                st.error(f"❌ Error loading toolkit functions: {str(e)}")
-                with st.expander("🔍 Error Details"):
-                    st.code(str(e))
+                                    class StreamlitEventCallback(BaseCallbackHandler):
+                                        """Callback handler for capturing custom events in Streamlit."""
+                                        def __init__(self):
+                                            self.events = []
+                                            self.steps = []
+                                            
+                                        def on_custom_event(self, name, data, **kwargs):
+                                            """Handle custom events dispatched by tools."""
+                                            import datetime
+                                            event = {
+                                                'name': name, 
+                                                'data': data, 
+                                                'timestamp': datetime.datetime.now().isoformat(),
+                                                **kwargs
+                                            }
+                                            self.events.append(event)
+                                            
+                                            # Update progress in real-time for certain events
+                                            if name == "progress" and isinstance(data, dict):
+                                                message = data.get('message', 'Processing...')
+                                                step = data.get('step', None)
+                                                total_steps = data.get('total_steps', None)
+                                                
+                                                if step and total_steps:
+                                                    progress = step / total_steps
+                                                    st.progress(progress, text=f"{message} ({step}/{total_steps})")
+                                                else:
+                                                    st.info(f"📊 {message}")
+                                    
+                                    callback = StreamlitEventCallback()
+                                    runtime_config = {
+                                        'callbacks': [callback],
+                                        'configurable': {'streamlit_session': True},
+                                        'tags': ['streamlit_testing', toolkit_config['name']]
+                                    }
+                                    
+                                    # Call the client's test method with LLM configuration
+                                    result = st.session_state.client.test_toolkit_tool(
+                                        toolkit_config={
+                                            'toolkit_name': toolkit_config['name'],
+                                            'settings': toolkit_config['config']
+                                        },
+                                        tool_name=selected_function,
+                                        tool_params=parameters,
+                                        runtime_config=runtime_config,
+                                        llm_model=llm_model,
+                                        llm_config=llm_config
+                                    )
+                                    
+                                    st.markdown("### 🎯 Function Result:")
+                                    
+                                    if result['success']:
+                                        execution_time = result.get('execution_time_seconds', 0.0)
+                                        # Display success status with timing and LLM info
+                                        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                                        with col1:
+                                            st.success("✅ Function executed successfully!")
+                                        with col2:
+                                            st.metric("⏱️ Time", f"{execution_time:.3f}s")
+                                        with col3:
+                                            st.metric("📡 Events", len(result.get('events_dispatched', [])))
+                                        with col4:
+                                            st.metric("🔧 Tool", result['tool_name'])
+                                            llm_used = result.get('llm_model', 'N/A')
+                                            st.metric("LLM", llm_used)
+                                        
+                                        # Display the actual result
+                                        with st.container():
+                                            st.markdown("**📊 Function Output:**")
+                                            tool_result = result['result']
+                                            if isinstance(tool_result, (dict, list)):
+                                                st.json(tool_result)
+                                            elif isinstance(tool_result, str):
+                                                if tool_result.startswith('{') or tool_result.startswith('['):
+                                                    try:
+                                                        parsed_result = json.loads(tool_result)
+                                                        st.json(parsed_result)
+                                                    except:
+                                                        st.code(tool_result, language="text")
+                                                else:
+                                                    if len(tool_result) > 1000:
+                                                        with st.expander("📄 View Full Output", expanded=False):
+                                                            st.code(tool_result, language="text")
+                                                        st.info(f"Output truncated. Full length: {len(tool_result)} characters.")
+                                                    else:
+                                                        st.code(tool_result, language="text")
+                                            else:
+                                                st.code(str(tool_result), language="text")
+                                        
+                                        # Show events if any were dispatched with better formatting
+                                        events = result.get('events_dispatched', [])
+                                        if events:
+                                            with st.expander(f"📡 Events Dispatched ({len(events)})", expanded=True):
+                                                for i, event in enumerate(events):
+                                                    with st.container():
+                                                        col1, col2 = st.columns([1, 4])
+                                                        with col1:
+                                                            event_type = event.get('name', 'unknown')
+                                                            if event_type == 'progress':
+                                                                st.markdown("🔄 **Progress**")
+                                                            elif event_type == 'info':
+                                                                st.markdown("ℹ️ **Info**")
+                                                            elif event_type == 'warning':
+                                                                st.markdown("⚠️ **Warning**")
+                                                            elif event_type == 'error':
+                                                                st.markdown("❌ **Error**")
+                                                            else:
+                                                                st.markdown(f"📋 **{event_type.title()}**")
+                                                        with col2:
+                                                            event_data = event.get('data', {})
+                                                            if isinstance(event_data, dict) and 'message' in event_data:
+                                                                st.write(event_data['message'])
+                                                                if len(event_data) > 1:
+                                                                    with st.expander("Event Details"):
+                                                                        st.json({k: v for k, v in event_data.items() if k != 'message'})
+                                                            else:
+                                                                st.json(event_data)
+                                                    if i < len(events) - 1:
+                                                        st.divider()
+                                        
+                                        # Show execution metadata
+                                        with st.expander("🔍 Execution Details", expanded=False):
+                                            execution_time = result.get('execution_time_seconds', 0.0)
+                                            metadata = {
+                                                'tool_name': result['tool_name'],
+                                                'toolkit_name': result['toolkit_config'].get('toolkit_name'),
+                                                'llm_model': result.get('llm_model'),
+                                                'llm_config': llm_config,
+                                                'success': result['success'],
+                                                'execution_time_seconds': execution_time,
+                                                'execution_time_formatted': f"{execution_time:.3f}s",
+                                                'events_count': len(result.get('events_dispatched', [])),
+                                                'parameters_used': parameters
+                                            }
+                                            st.json(metadata)
+                                    else:
+                                        # Display error from the client method
+                                        execution_time = result.get('execution_time_seconds', 0.0)
+                                        st.error(f"❌ {result['error']} (after {execution_time:.3f}s)")
+                                        with st.expander("🔍 Error Details"):
+                                            error_details = {
+                                                'error': result['error'],
+                                                'tool_name': result['tool_name'],
+                                                'toolkit_config': result['toolkit_config'],
+                                                'llm_model': result.get('llm_model'),
+                                                'llm_config': llm_config,
+                                                'execution_time_seconds': execution_time,
+                                                'execution_time_formatted': f"{execution_time:.3f}s",
+                                                'events_dispatched': result.get('events_dispatched', [])
+                                            }
+                                            st.json(error_details)
+                                            
+                                except Exception as e:
+                                    st.error(f"❌ Error executing function: {str(e)}")
+                                    with st.expander("🔍 Error Details"):
+                                        st.code(str(e))
+            else:
+                st.warning("⚠️ No functions available in this toolkit.")
+                                
+        except Exception as e:
+            st.error(f"❌ Error loading toolkit functions: {str(e)}")
+            with st.expander("🔍 Error Details"):
+                st.code(str(e))
         
         # Display current configuration
         st.markdown("---")
@@ -1281,7 +1564,7 @@ Please explain how you would use these tools to help the user, even though I can
                 st.rerun()
     
     else:
-        if st.session_state.llm:
+        if st.session_state.client:
             st.title("🎯 Alita SDK Toolkit Interface")
             st.markdown("""
             ### Welcome to the Alita SDK!

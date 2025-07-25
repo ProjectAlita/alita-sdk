@@ -203,8 +203,18 @@ class SlackApiWrapper(BaseToolApiWrapper):
             client = self._get_client()
             response = client.conversations_list()  # Fetch conversations
             channels = response.get("channels", [])
-            print(f"Found {len(channels)} channels.")
-            return channels  # Return the list of channels
+             # Extract only the required fields
+            filtered_channels = [
+                {
+                    "id": ch.get("id"),
+                    "name": ch.get("name"),
+                    "is_channel": ch.get("is_channel"),
+                    "shared_team_ids": ch.get("shared_team_ids"),
+                }
+                for ch in channels
+            ]
+            logger.info(f"Found {len(filtered_channels)} channels.")
+            return filtered_channels  # Return the list of channels
         except SlackApiError as e:
             print(f"Error fetching conversations: {e.response['error']}")
             return [] 
@@ -289,13 +299,18 @@ class SlackApiWrapper(BaseToolApiWrapper):
                 "description": self.list_workspace_users.__doc__ or "List all users in the Slack workspace.",
                 "args_schema": ListWorkspaceUsersModel,
                 "ref": self.list_workspace_users
-            }
-            ,
+            },
             {
                 "name": "invite_to_conversation",
                 "description": self.invite_to_conversation.__doc__ or "Invite to a conversation in the Slack workspace.",
                 "args_schema": InviteToConversationModel,
                 "ref": self.invite_to_conversation
+            },
+            {
+                "name": "list_workspace_conversations",
+                "description": self.list_workspace_conversations.__doc__ or "Invite to a conversation in the Slack workspace.",
+                "args_schema": ListWorkspaceConversationsModel,
+                "ref": self.list_workspace_conversations
             }
             
         ]

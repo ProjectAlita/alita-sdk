@@ -9,7 +9,7 @@ from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain_core.runnables import Runnable
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from langgraph.channels.ephemeral_value import EphemeralValue
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import END, START
@@ -500,11 +500,16 @@ def create_graph(
                 }
                 
                 # Check if tools should be bound to this LLM node
-                tool_names = node.get('tool_names', []) if isinstance(node.get('tool_names'), list) else []
+                connected_tools = node.get('tool_names', {})
+                tool_names = []
+                if isinstance(connected_tools, dict):
+                    for toolkit, selected_tools in connected_tools.items():
+                        for tool in selected_tools:
+                            tool_names.append(f"{toolkit}___{tool}")
+                elif isinstance(connected_tools, list):
+                    # for cases when tools are provided as a list of names with already bound toolkit_name
+                    tool_names = connected_tools
                 
-                # Filter tools if specific tool names are provided
-                available_tools = []
-            
                 if tool_names:
                     # Filter tools by name
                     tool_dict = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
@@ -575,7 +580,10 @@ def create_graph(
                     default_output=node['condition'].get('default_output', 'END')))
 
         # set default value for state variable at START
-        entry_point = clean_string(schema['entry_point'])
+        try:
+            entry_point = clean_string(schema['entry_point'])
+        except KeyError:
+            raise ToolException("Entry point is not defined in the schema. Please define 'entry_point' in the schema.")
         for key, value in state.items():
             if 'type' in value and 'value' in value:
                 # set default value for state variable if it is defined in the schema

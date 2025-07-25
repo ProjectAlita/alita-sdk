@@ -14,18 +14,15 @@ from .vectorstore import VectorStoreToolkit
 from ..tools.mcp_server_tool import McpServerTool
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
-# from ...tools.memory import MemoryToolkit
+from ...tools.memory import MemoryToolkit
 
 logger = logging.getLogger(__name__)
 
 
 def get_toolkits():
     core_toolkits = [
-        # PromptToolkit.toolkit_config_schema(),
-        # DatasourcesToolkit.toolkit_config_schema(),
-        # ApplicationToolkit.toolkit_config_schema(),
         ArtifactToolkit.toolkit_config_schema(),
-        # MemoryToolkit.toolkit_config_schema(),
+        MemoryToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema()
     ]
 
@@ -37,12 +34,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
     tools = []
 
     for tool in tools_list:
-        if tool['type'] == 'prompt':
-            prompts.append([
-                int(tool['settings']['prompt_id']),
-                int(tool['settings']['prompt_version_id'])
-            ])
-        elif tool['type'] == 'datasource':
+        if tool['type'] == 'datasource':
             tools.extend(DatasourcesToolkit.get_toolkit(
                 alita_client,
                 datasource_ids=[int(tool['settings']['datasource_id'])],
@@ -54,7 +46,6 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 alita_client,
                 application_id=int(tool['settings']['application_id']),
                 application_version_id=int(tool['settings']['application_version_id']),
-                app_api_key=alita_client.auth_token,
                 selected_tools=[]
             ).get_tools())
         elif tool['type'] == 'application' and tool.get('agent_type', '') == 'pipeline':
@@ -67,15 +58,14 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 selected_tools=[],
                 llm=llm
             ))
-            # move on tools level
-        # elif tool['type'] == 'memory':
-        #     if memory_store is None:
-        #         raise ToolException(f"Memory store is not provided for memory tool: {tool['name']}")
-        #     tools += MemoryToolkit.get_toolkit(
-        #         namespace=tool['settings'].get('namespace', str(tool['id'])),
-        #         store=memory_store,
-        #         toolkit_name=tool.get('toolkit_name', '')
-        #     ).get_tools()
+        elif tool['type'] == 'memory':
+            if memory_store is None:
+                raise ToolException(f"Memory store is not provided for memory tool: {tool.get('name', tool.get('toolkit_name', 'unknown'))}")
+            tools += MemoryToolkit.get_toolkit(
+                namespace=tool['settings'].get('namespace', str(tool['id'])),
+                store=memory_store,
+                toolkit_name=tool.get('toolkit_name', '')
+            ).get_tools()
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
                 client=alita_client,

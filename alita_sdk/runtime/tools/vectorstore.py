@@ -1,6 +1,9 @@
 import json
 import math
-from typing import Any, Optional, List, Dict
+import types
+from typing import Any, Optional, List, Dict, Callable, Generator
+
+from langchain_core.documents import Document
 from pydantic import BaseModel, model_validator, Field
 from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
@@ -8,6 +11,7 @@ from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from logging import getLogger
 
 from ..utils.logging import dispatch_custom_event
+from ..utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
 
@@ -140,6 +144,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     vectoradapter: Any = None
     pg_helper: Any = None
     embeddings: Any = None
+    process_document_func: Optional[Callable] = None
     
     @model_validator(mode='before')
     @classmethod
@@ -194,27 +199,30 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             data = store.get(include=['documents', 'metadatas'])
             # re-structure data to be more usable
             for doc_str, meta, db_id in zip(data['documents'], data['metadatas'], data['ids']):
-                doc = json.loads(doc_str)
                 doc_id = str(meta['id'])
+                dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
+                parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
                 result[doc_id] = {
                     'metadata': meta,
-                    'document': doc,
-                    'id': db_id
+                    'document': doc_str,
+                    'id': db_id,
+                    IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
+                    IndexerKeywords.PARENT.value: parent_id
                 }
         except Exception as e:
             logger.error(f"Failed to get indexed data from vectorstore: {str(e)}. Continuing with empty index.")
         return result
 
-    def _reduce_duplicates(self, documents, store) -> List[Any]:
+    def _reduce_duplicates(self, documents: Generator[Document, None, None], store) -> List[Any]:
         """Remove documents already indexed in the vectorstore based on metadata 'id' and 'updated_on' fields."""
 
         self._log_data("Verification of documents to index started", tool_name="index_documents")
 
-        data = self._get_indexed_data(store)
-        indexed_ids = set(data.keys())
+        indexed_data = self._get_indexed_data(store)
+        indexed_ids = set(indexed_data.keys())
         if not indexed_ids:
             self._log_data("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
-            return documents
+            return list(documents)
 
         final_docs = []
         docs_to_remove = []
@@ -225,13 +233,17 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             if doc_id in indexed_ids:
                 # document has been indexed already, then verify `updated_on`
                 to_index_updated_on = document.metadata.get('updated_on')
-                indexed_meta = data[doc_id]['metadata']
+                indexed_meta = indexed_data[doc_id]['metadata']
                 indexed_updated_on = indexed_meta.get('updated_on')
                 if to_index_updated_on and indexed_updated_on and to_index_updated_on == indexed_updated_on:
                     # same updated_on, skip indexing
                     continue
                 # if updated_on is missing or different, we will re-index the document and remove old one
-                docs_to_remove.append(data[doc_id]['id'])
+                # parent doc removal
+                docs_to_remove.append(indexed_data[doc_id]['id'])
+                # mark dependent docs for removal
+                for dependent_doc_id in indexed_data[doc_id][IndexerKeywords.DEPENDENT_DOCS.value]:
+                    docs_to_remove.append(indexed_data[dependent_doc_id]['id'])
             else:
                 final_docs.append(document)
 
@@ -244,7 +256,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         return final_docs
 
-    def index_documents(self, documents, document_processing_func = None, progress_step: int = 20, clean_index: bool = True):
+    def index_documents(self, documents: Generator[Document, None, None], progress_step: int = 20, clean_index: bool = True):
         """ Index documents in the vectorstore.
 
         Args:
@@ -267,6 +279,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                                tool_name="index_documents")
             except Exception as e:
                 logger.warning(f"Failed to clean index: {str(e)}. Continuing with re-indexing.")
+            if isinstance(documents, types.GeneratorType):
+                documents = list(documents)
         else:
             # remove duplicates based on metadata 'id' and 'updated_on' fields
             documents = self._reduce_duplicates(documents, self.vectoradapter.vectorstore)
@@ -279,7 +293,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         # if func is provided, apply it to documents
         # used for processing of documents before indexing,
         # e.g. to avoid time-consuming operations for documents that are already indexed
-        document_processing_func(documents) if document_processing_func else None
+        dependent_docs_generator = self.process_document_func(documents) if self.process_document_func else []
 
         # notify user about missed required metadata fields: id, updated_on
         # it is not required to have them, but it is recommended to have them for proper re-indexing and duplicate detection
@@ -290,7 +304,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         logger.debug(f"Indexing documents: {documents}")
         logger.debug(self.vectoradapter)
 
-        documents = list(documents)
+        documents = documents + list(dependent_docs_generator)
         total_docs = len(documents)
         documents_count = 0
         _documents = []

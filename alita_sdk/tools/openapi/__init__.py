@@ -1,11 +1,14 @@
 import json
 import re
+import logging
 from typing import List, Any, Optional, Dict
-from langchain_core.tools import BaseTool, BaseToolkit
+from langchain_core.tools import BaseTool, BaseToolkit, ToolException
 from requests_openapi import Operation, Client, Server
 
 from pydantic import create_model, Field
 from functools import partial
+
+logger = logging.getLogger(__name__)
 
 name = "openapi"
 
@@ -105,11 +108,19 @@ class AlitaOpenAPIToolkit(BaseToolkit):
             c.requestor.headers.update(headers)
         tools = []
         for i in tools_set:
+
             try:
+                if not i:
+                    raise ToolException("Operation id is missing for some of declared operations.")
                 tool = c.operations[i]
+                if not isinstance(tool, Operation):
+                    raise ToolException(f"Operation {i} is not an instance of Operation class.")
                 tools.append(create_api_tool(i, tool))
-            except KeyError:
-                ...
+            except ToolException:
+                raise
+            except Exception as e:
+                logger.warning(f"Tool {i} not found in OpenAPI spec.")
+                raise ToolException(f"Cannot create API tool ({i}): \n{e}.")
         return cls(request_session=c, tools=tools)
 
     def get_tools(self):

@@ -77,6 +77,17 @@ class CarrierClient(BaseModel):
         endpoint = f"api/v1/backend_performance/reports/{self.credentials.project_id}"
         return self.request('get', endpoint).get("rows", [])
 
+    def add_tag_to_report(self, report_id, tag_name):
+        endpoint = f"api/v1/backend_performance/tags/{self.credentials.project_id}/{report_id}"
+        full_url = f"{self.credentials.url.rstrip('/')}/{endpoint.lstrip('/')}"
+        headers = {
+            'Authorization': f'bearer {self.credentials.token}',
+            'content-type': 'application/json'
+        }
+        data = {"tags": [{"title": tag_name, "hex": "#5933c6"}]}
+        res = requests.post(full_url, headers=headers, json=data)
+        return res
+
     def get_tests_list(self) -> List[Dict[str, Any]]:
         endpoint = f"api/v1/backend_performance/tests/{self.credentials.project_id}"
         return self.request('get', endpoint).get("rows", [])
@@ -90,9 +101,6 @@ class CarrierClient(BaseModel):
         form_data = {"data": dumps(data)}
         # Send the POST request
         res = requests.post(full_url, headers=headers, data=form_data)
-        print("************************* response")
-        print(res.text)
-        print("**********************************")
         return res
 
     def run_test(self, test_id: str, json_body):
@@ -150,7 +158,8 @@ class CarrierClient(BaseModel):
         for file_name in file_list:
             if file_name.startswith(report_archive_prefix) and "excel_report" not in file_name:
                 report_files_list.append(file_name)
-        test_log_file_path, errors_log_file_path = self.download_and_merge_reports(report_files_list, lg_type, bucket_name, extract_to)
+        test_log_file_path, errors_log_file_path = self.download_and_merge_reports(report_files_list, lg_type,
+                                                                                   bucket_name, extract_to)
 
         return report_info, test_log_file_path, errors_log_file_path
 

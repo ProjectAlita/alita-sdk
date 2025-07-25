@@ -1,12 +1,13 @@
 from typing import Generator
 from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain.text_splitter import TokenTextSplitter
 from ..utils import tiktoken_length
 from copy import deepcopy as copy
 
 
-def markdown_chunker(file_content_generator: Generator[Document, None, None], config: dict, *args, **kwargs) -> Generator[str, None, None]:
+def markdown_chunker(file_content_generator: Generator[Document, None, None], config: dict, *args, **kwargs) -> Generator[Document, None, None]:
     strip_header = config.get("strip_header", False)
     return_each_line = config.get("return_each_line", False)
     headers_to_split_on = config.get("headers_to_split_on", [])

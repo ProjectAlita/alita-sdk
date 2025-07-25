@@ -1,6 +1,11 @@
 import re
+from enum import Enum
 
 TOOLKIT_SPLITTER = "___"
+
+class IndexerKeywords(Enum):
+    DEPENDENT_DOCS = 'dependent_docs'
+    PARENT = 'parent_id'
 
 # This pattern matches characters that are NOT alphanumeric, underscores, or hyphens
 clean_string_pattern = re.compile(r'[^a-zA-Z0-9_.-]')

@@ -1,13 +1,17 @@
+import json
 import logging
-from typing import Optional
+from typing import Optional, List, Dict, Any, Generator
 
+from ..chunkers import markdown_chunker
 from ..utils.content_parser import parse_file_content
 from langchain_core.tools import ToolException
 from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseToolApiWrapper, BaseIndexParams, BaseVectorStoreToolApiWrapper
+from ...runtime.langchain.interfaces.llm_processor import get_embeddings
+from langchain_core.documents import Document
 
 NoInput = create_model(
     "NoInput"
@@ -29,16 +33,35 @@ ReadDocument = create_model(
     "ReadDocument",
     path=(str, Field(description="Contains the server-relative path of a document for reading.")),
     is_capture_image=(Optional[bool], Field(description="Determines is pictures in the document should be recognized.", default=False)),
-    page_number=(Optional[int], Field(description="Specifies which page to read. If it is None, then full document will be read.", default=None))
+    page_number=(Optional[int], Field(description="Specifies which page to read. If it is None, then full document will be read.", default=None)),
+    sheet_name=(Optional[str], Field(
+                        description="Specifies which sheet to read. If it is None, then full document will be read.",
+                        default=None))
+)
+
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False,
+                       description="Optional flag to enforce clean existing index before indexing new data")),
 )
 
 
-class SharepointApiWrapper(BaseToolApiWrapper):
+class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
     site_url: str
     client_id: str = None
     client_secret: SecretStr = None
     token: SecretStr = None
     _client: Optional[ClientContext] = PrivateAttr()  # Private attribute for the office365 client
+
+    llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     @model_validator(mode='before')
     @classmethod
@@ -111,7 +134,8 @@ class SharepointApiWrapper(BaseToolApiWrapper):
                     'Path': file.properties['ServerRelativeUrl'],
                     'Created': file.properties['TimeCreated'],
                     'Modified': file.properties['TimeLastModified'],
-                    'Link': file.properties['LinkingUrl']
+                    'Link': file.properties['LinkingUrl'],
+                    'id': file.properties['UniqueId']
                 }
                 result.append(temp_props)
             return result if result else ToolException("Can not get files or folder is empty. Please, double check folder name and read permissions.")
@@ -119,7 +143,7 @@ class SharepointApiWrapper(BaseToolApiWrapper):
             logging.error(f"Failed to load files from sharepoint: {e}")
             return ToolException("Can not get files. Please, double check folder name and read permissions.")
 
-    def read_file(self, path, is_capture_image: bool = False, page_number: int = None):
+    def read_file(self, path, is_capture_image: bool = False, page_number: int = None, sheet_name: str=None):
         """ Reads file located at the specified server-relative path. """
         try:
             file = self._client.web.get_file_by_server_relative_path(path)
@@ -130,7 +154,50 @@ class SharepointApiWrapper(BaseToolApiWrapper):
         except Exception as e:
             logging.error(f"Failed to load file from SharePoint: {e}. Path: {path}. Please, double check file name and path.")
             return ToolException("File not found. Please, check file name and path.")
-        return parse_file_content(file.name, file_content, is_capture_image, page_number)
+        return parse_file_content(file_name=file.name,
+                                  file_content=file_content,
+                                  is_capture_image=is_capture_image,
+                                  page_number=page_number,
+                                  sheet_name=sheet_name,
+                                  llm=self.llm)
+
+    def _base_loader(self) -> List[Document]:
+        try:
+            all_files = self.get_files_list()
+        except Exception as e:
+            raise ToolException(f"Unable to extract files: {e}")
+
+        docs: List[Document] = []
+        for file in all_files:
+            metadata = {
+                ("updated_at" if k == "Modified" else k): str(v)
+                for k, v in file.items()
+            }
+            docs.append(Document(page_content="", metadata=metadata))
+        return docs
+
+    def index_data(self,
+                   collection_suffix: str = '',
+                   progress_step: int = None,
+                   clean_index: bool = False):
+        docs = self._base_loader()
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        config = {
+            "max_tokens": self.llm.model_config.get('max_tokens', 512),
+            "token_overlap": self.llm.model_config.get('token_overlap',
+                                                       int(self.llm.model_config.get('max_tokens', 512) * 0.05))
+        }
+        chunks = markdown_chunker(file_content_generator=self._generate_file_content(document), config=config)
+        yield from chunks
+
+    def _generate_file_content(self, document: Document) -> Generator[Document, None, None]:
+        page_content = self.read_file(document.metadata['Path'], is_capture_image=True)
+        document.page_content = json.dumps(str(page_content))
+        yield document
 
     def get_available_tools(self):
         return [
@@ -151,5 +218,11 @@ class SharepointApiWrapper(BaseToolApiWrapper):
                 "description": self.read_file.__doc__,
                 "args_schema": ReadDocument,
                 "ref": self.read_file
+            },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
             }
         ]

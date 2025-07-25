@@ -3,9 +3,6 @@ import atexit
 import logging
 from urllib.parse import urlparse, unquote
 
-from psycopg import Connection
-from langgraph.store.postgres import PostgresStore
-
 logger = logging.getLogger(__name__)
 
 class StoreManager:
@@ -37,7 +34,10 @@ class StoreManager:
             "dbname": parsed.path.lstrip("/") if parsed.path else None
         }
 
-    def get_store(self, conn_str: str) -> PostgresStore:
+    def get_store(self, conn_str: str):
+        from psycopg import Connection
+        from langgraph.store.postgres import PostgresStore
+        
         store = self._stores.get(conn_str)
         if store is None:
             logger.info(f"Creating new PostgresStore for connection: {conn_str}")
