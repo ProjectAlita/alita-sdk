@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Union, Any, Generator
 
 import pandas as pd
 from langchain_core.tools import ToolException
+from openai import BadRequestError
 from pydantic import SecretStr, create_model, model_validator
 from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
@@ -577,7 +578,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'title': case.get('title', ''),
                 'suite_id': suite_id or case.get('suite_id', ''),
                 'id': str(case.get('id', '')),
-                'updated_on': case.get('updated_on') or -1,
+                IndexerKeywords.UPDATED_ON.value: case.get('updated_on') or -1,
                 'labels': [lbl['title'] for lbl in case.get('labels', [])],
                 'type': case.get('type_id') or -1,
                 'priority': case.get('priority_id') or -1,
@@ -626,16 +627,13 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
 
             # process each attachment to extract its content
             for attachment in attachments:
-                attachment_id = attachment['id']
-                # add attachment id to metadata of parent
-                document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
-
+                attachment_id = f"attach_{attachment['id']}"
                 # TODO: pass it to chunkers
                 yield Document(page_content=self._process_attachment(attachment),
                                                      metadata={
                                                          'project_id': base_data.get('project_id', ''),
-                                                         IndexerKeywords.PARENT.value: case_id,
-                                                         'id': attachment_id,
+                                                         'id': str(case_id),
+                                                         IndexerKeywords.DEPENDENCY_ID.value: attachment_id,
                                                          'filename': attachment['filename'],
                                                          'filetype': attachment['filetype'],
                                                          'created_on': attachment['created_on'],
@@ -663,6 +661,8 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             try:
                 attachment_path = self._client.attachments.get_attachment(attachment_id=attachment['id'], path=f"./{attachment['filename']}")
                 page_content = parse_file_content(file_name=attachment['filename'], file_content=attachment_path.read_bytes(), llm=self.llm, is_capture_image=True)
+            except BadRequestError as ai_e:
+                logger.error(f"Unable to parse page's content with type: {attachment['filetype']} due to AI service issues: {ai_e}")
             except Exception as e:
                 logger.error(f"Unable to parse page's content with type: {attachment['filetype']}: {e}")
         return page_content

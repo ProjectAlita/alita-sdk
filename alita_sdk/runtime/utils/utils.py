@@ -4,8 +4,11 @@ from enum import Enum
 TOOLKIT_SPLITTER = "___"
 
 class IndexerKeywords(Enum):
-    DEPENDENT_DOCS = 'dependent_docs'
-    PARENT = 'parent_id'
+    # TODO: remove these fields when the indexer is updated
+    # DEPENDENT_DOCS = 'dependent_docs'
+    # PARENT = 'parent_id'
+    DEPENDENCY_ID = 'dependency_id'
+    UPDATED_ON = 'updated_on'
 
 # This pattern matches characters that are NOT alphanumeric, underscores, or hyphens
 clean_string_pattern = re.compile(r'[^a-zA-Z0-9_.-]')
