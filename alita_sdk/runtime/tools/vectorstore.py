@@ -199,13 +199,12 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             data = store.get(include=['documents', 'metadatas'])
             # re-structure data to be more usable
             for doc_str, meta, db_id in zip(data['documents'], data['metadatas'], data['ids']):
-                doc = json.loads(doc_str)
                 doc_id = str(meta['id'])
                 dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
                 parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
                 result[doc_id] = {
                     'metadata': meta,
-                    'document': doc,
+                    'document': doc_str,
                     'id': db_id,
                     IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
                     IndexerKeywords.PARENT.value: parent_id

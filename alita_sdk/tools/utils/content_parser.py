@@ -11,8 +11,11 @@ import pymupdf
 from langchain_core.tools import ToolException
 from transformers import BlipProcessor, BlipForConditionalGeneration
 from langchain_core.messages import HumanMessage
+from logging import getLogger
 
 from ...runtime.langchain.tools.utils import bytes_to_base64
+
+logger = getLogger(__name__)
 
 image_processing_prompt='''
 You are an AI model designed for analyzing images. Your task is to accurately describe the content of the given image. Depending on the type of image, follow these specific instructions:
@@ -56,7 +59,33 @@ Be as precise and thorough as possible in your responses. If something is unclea
 
 IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'svg']
 
-def parse_file_content(file_name, file_content, is_capture_image: bool = False, page_number: int = None, sheet_name: str = None, llm=None):
+
+def parse_file_content(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
+                       sheet_name: str = None, llm=None, file_path: str = None):
+    """Parse the content of a file based on its type and return the parsed content.
+
+    Args:
+        file_name (str): The name of the file to parse.
+        file_content (bytes): The content of the file as bytes.
+        is_capture_image (bool): Whether to capture images from the file.
+        page_number (int, optional): The specific page number to parse for PDF or PPTX files.
+        sheet_name (str, optional): The specific sheet name to parse for Excel files.
+        llm: The language model to use for image processing.
+        file_path (str, optional): The path to the file if it needs to be read from disk.
+    Returns:
+        str: The parsed content of the file.
+    Raises:
+        ToolException: If the file type is not supported or if there is an error reading the file.
+        """
+
+    if (file_path and (file_name or file_content)) or (not file_path and (not file_name or file_content is None)):
+        raise ToolException("Either (file_name and file_content) or file_path must be provided, but not both.")
+
+    if file_path:
+        file_content = file_to_bytes(file_path)
+        if file_content is None:
+            return ToolException(f"File not found or could not be read: {file_path}")
+        file_name = file_path.split('/')[-1]  # Extract file name from path
     if file_name.endswith('.txt'):
         return parse_txt(file_content)
     elif file_name.endswith('.docx'):
@@ -177,3 +206,24 @@ def __perform_llm_prediction_for_image(llm, image: bytes, image_format='png', pr
             ])
     ])
     return f"\n[Image description: {result.content}]\n"
+
+def file_to_bytes(filepath):
+    """
+    Reads a file and returns its content as a bytes object.
+
+    Args:
+        filepath (str): The path to the file.
+
+    Returns:
+        bytes: The content of the file as a bytes object.
+    """
+    try:
+        with open(filepath, "rb") as f:
+            file_content_bytes = f.read()
+        return file_content_bytes
+    except FileNotFoundError:
+        logger.error(f"File not found: {filepath}")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading file {filepath}: {e}")
+        return None

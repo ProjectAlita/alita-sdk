@@ -11,6 +11,7 @@ from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
 from langchain_core.documents import Document
 
 from ...runtime.utils.utils import IndexerKeywords
+from ..utils.content_parser import parse_file_content
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -658,8 +659,12 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         page_content = "This filetype is not supported."
         if attachment['filetype'] == 'txt' :
             page_content =  self._client.get(endpoint=f"get_attachment/{attachment['id']}")
-        # TODO: add support for other file types
-        # use utility to handle different types (tools/utils)
+        else:
+            try:
+                attachment_path = self._client.attachments.get_attachment(attachment_id=attachment['id'], path=f"./{attachment['filename']}")
+                page_content = parse_file_content(file_name=attachment['filename'], file_content=attachment_path.read_bytes(), llm=self.llm, is_capture_image=True)
+            except Exception as e:
+                logger.error(f"Unable to parse page's content with type: {attachment['filetype']}: {e}")
         return page_content
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
