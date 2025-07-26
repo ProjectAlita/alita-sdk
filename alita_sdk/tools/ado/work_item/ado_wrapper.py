@@ -1,17 +1,23 @@
 import json
 import logging
 import urllib.parse
-from typing import Optional, Dict, List
+from typing import Any, Dict, List, Generator, Optional
 
+from alita_sdk.tools.elitea_base import BaseIndexParams, BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from azure.devops.connection import Connection
 from azure.devops.v7_1.core import CoreClient
 from azure.devops.v7_1.wiki import WikiClient
 from azure.devops.v7_1.work_item_tracking import TeamContext, Wiql, WorkItemTrackingClient
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from msrest.authentication import BasicAuthentication
 from pydantic import create_model, PrivateAttr, SecretStr
 from pydantic import model_validator
 from pydantic.fields import Field
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 from ...elitea_base import BaseToolApiWrapper
 
@@ -89,8 +95,17 @@ ADOUnlinkWorkItemsFromWikiPage = create_model(
     page_name=(str, Field(description="Wiki page path to unlink the work items from", examples=["/TargetPage"]))
 )
 
+indexData = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    wiki_identifier=(str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False,
+                       description="Optional flag to enforce clean existing index before indexing new data")),
+)
 
-class AzureDevOpsApiWrapper(BaseToolApiWrapper):
+class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
     organization_url: str
     project: str
     token: SecretStr
@@ -99,6 +114,13 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
     _wiki_client: Optional[WikiClient] = PrivateAttr() # Add WikiClient instance
     _core_client: Optional[CoreClient] = PrivateAttr() # Add CoreClient instance
     _relation_types: Dict = PrivateAttr(default_factory=dict) # track actual relation types for instance
+    
+    llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     class Config:
         arbitrary_types_allowed = True  # Allow arbitrary types (e.g., WorkItemTrackingClient, WikiClient, CoreClient)
@@ -504,6 +526,41 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error unlinking work items from wiki page '{page_name}': {str(e)}")
             return ToolException(f"An unexpected error occurred while unlinking work items from wiki page '{page_name}': {str(e)}")
 
+    def index_data(
+            self,
+            wiql: str,
+            collection_suffix: str = '',
+            progress_step: int = None,
+            clean_index: bool = False
+    ):
+        docs = self._base_loader(wiql)
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+    def _base_loader(self, wiql: str) -> Generator[Document, None, None]:
+        ref_items = self._client.query_by_wiql(Wiql(query=wiql)).work_items
+        for ref in ref_items:
+            wi = self._client.get_work_item(id=ref.id, project=self.project, expand='all')
+            yield Document(page_content=json.dumps(wi.fields), metadata={
+                'id': wi.id,
+                'type': wi.fields.get('System.WorkItemType', ''),
+                'title': wi.fields.get('System.Title', ''),
+                'state': wi.fields.get('System.State', ''),
+                'area': wi.fields.get('System.AreaPath', ''),
+                'reason': wi.fields.get('System.Reason', ''),
+                'iteration': wi.fields.get('System.IterationPath', ''),
+                'updated_on': wi.fields.get('System.ChangedDate', ''),
+                'attachment_ids': [rel.url.split('/')[-1] for rel in wi.relations or [] if rel.rel == 'AttachedFile']
+            })
+
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        for attachment_id in document.metadata.get('attachment_ids', []):
+            content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
+            content = ''.join(str(item) for item in content_generator)
+            yield Document(page_content=content, metadata={'id': attachment_id})
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         """Return a list of available tools."""
         return [
@@ -560,5 +617,11 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
                 "description": self.unlink_work_items_from_wiki_page.__doc__,
                 "args_schema": ADOUnlinkWorkItemsFromWikiPage,
                 "ref": self.unlink_work_items_from_wiki_page,
+            },
+            {
+                "name": "index_data",
+                "ref": self.index_data,
+                "description": self.index_data.__doc__,
+                "args_schema": indexData,
             }
         ]
