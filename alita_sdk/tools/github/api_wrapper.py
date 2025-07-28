@@ -167,6 +167,14 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
         # Use the GitHub client's method to get files
         return self.github_client_instance._get_files(path, branch or self.active_branch)
 
+    def _file_commit_hash(self, file_path: str, branch: str):
+        """Get the commit hash of a file in the GitHub repository."""
+        if not self.github_client_instance:
+            raise ValueError("GitHub client not initialized")
+
+        # Use the GitHub client's method to get commit hash
+        return self.github_client_instance._file_commit_hash(file_path, branch or self.active_branch)
+
     def _read_file(self, file_path: str, branch: str):
         """Read file content from GitHub repository."""
         if not self.github_client_instance:

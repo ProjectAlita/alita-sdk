@@ -1393,6 +1393,24 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"An error occurred while updating the issue: {str(e)}"
 
+    def _file_commit_hash(self, file_path: str, branch: str, repo_name: Optional[str] = None) -> str:
+        """
+        Get the commit hash of a file in a specific branch.
+        Parameters:
+            file_path(str): the file path
+            branch(str): the branch to read the file from
+            repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+
+        Returns:
+            str: The commit hash of the file, or an error message if not found
+        """
+        try:
+            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            file = repo.get_contents(file_path, ref=branch)
+            return file.sha
+        except Exception as e:
+            return f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}"
+
     def _read_file(self, file_path: str, branch: str, repo_name: Optional[str] = None) -> str:
         """
         Read a file from specified branch

@@ -39,13 +39,17 @@ def parse_code_files_for_db(file_content_generator: Generator[str, None, None], 
         if programming_language == Language.UNKNOWN:
             documents = TokenTextSplitter(encoding_name="gpt2", chunk_size=256, chunk_overlap=30).split_text(file_content)
             for document in documents:
+                metadata = {
+                    "filename": file_name,
+                    "method_name": node.name,
+                    "language": programming_language.value,
+                }
+                commit_hash = data.get("commit_hash")
+                if commit_hash is not None:
+                    metadata["commit_hash"] = commit_hash
                 document = Document(
                     page_content=document,
-                    metadata={
-                        "filename": file_name,
-                        "method_name": 'text',
-                        "language": programming_language.value,
-                    },
+                    metadata=metadata,
                 )
                 yield document
         else:
@@ -73,13 +77,17 @@ def parse_code_files_for_db(file_content_generator: Generator[str, None, None], 
                         splitted_documents = code_splitter.split_text(method_source_code)
 
                     for splitted_document in splitted_documents:
+                        metadata = {
+                            "filename": file_name,
+                            "method_name": node.name,
+                            "language": programming_language.value,
+                        }
+                        commit_hash = data.get("commit_hash")
+                        if commit_hash is not None:
+                            metadata["commit_hash"] = commit_hash
                         document = Document(
                             page_content=splitted_document,
-                            metadata={
-                                "filename": file_name,
-                                "method_name": node.name,
-                                "language": programming_language.value,
-                            },
+                            metadata=metadata,
                         )
                         yield document
             except Exception as e:

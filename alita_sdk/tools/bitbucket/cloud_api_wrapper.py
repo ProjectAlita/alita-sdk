@@ -104,6 +104,22 @@ class BitbucketServerApi(BitbucketApiAbstract):
                                                    data=json.loads(pr_json_data)
                                                    )
 
+    # TODO: review this method, it may not work as expected
+    def get_file_commit_hash(self, file_path: str, branch: str):
+        """
+        Get the commit hash of a file in a specific branch.
+        Parameters:
+            file_path (str): The path to the file.
+            branch (str): The branch name.
+        Returns:
+            str: The commit hash of the file.
+        """
+        commits = self.api_client.get_commits(project_key=self.project, repository_slug=self.repository,
+                                              filename=file_path, at=branch, limit=1)
+        if commits:
+            return commits[0]['id']
+        return None
+
     def get_file(self, file_path: str, branch: str) -> str:
         return self.api_client.get_content_of_file(project_key=self.project, repository_slug=self.repository, at=branch,
                                                    filename=file_path).decode('utf-8')
@@ -261,6 +277,21 @@ class BitbucketCloudApi(BitbucketApiAbstract):
     def create_pull_request(self, pr_json_data: str) -> Any:
         response = self.repository.pullrequests.post(None, data=json.loads(pr_json_data))
         return response['links']['self']['href']
+
+    # TODO: review this method, it may not work as expected
+    def get_file_commit_hash(self, file_path: str, branch: str):
+        """
+        Get the commit hash of a file in a specific branch.
+        Parameters:
+            file_path (str): The path to the file.
+            branch (str): The branch name.
+        Returns:
+            str: The commit hash of the file.
+        """
+        commits = self.repository.commits.get(path=file_path, branch=branch, pagelen=1)
+        if commits['values']:
+            return commits['values'][0]['hash']
+        return None
 
     def get_file(self, file_path: str, branch: str) -> str:
         return self.repository.get(path=f'src/{branch}/{file_path}')

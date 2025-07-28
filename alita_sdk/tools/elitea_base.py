@@ -382,6 +382,9 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
     def _read_file(self, file_path: str, branch: str):
         raise NotImplementedError("Subclasses should implement this method")
 
+    def _file_commit_hash(self, file_path: str, branch: str):
+        pass
+
     def __handle_get_files(self, path: str, branch: str):
         """
         Handles the retrieval of files from a specific path and branch.
@@ -447,7 +450,8 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             for file in _files:
                 if is_whitelisted(file) and not is_blacklisted(file):
                     yield {"file_name": file,
-                           "file_content": self._read_file(file, branch=branch or self.active_branch)}
+                           "file_content": self._read_file(file, branch=branch or self.active_branch),
+                           "commit_hash": self._file_commit_hash(file, branch=branch or self.active_branch)}
 
         return parse_code_files_for_db(file_content_generator())
     
@@ -467,7 +471,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             blacklist=blacklist
         )
         vectorstore = self._init_vector_store(collection_suffix)
-        return vectorstore.index_documents(documents)
+        return vectorstore.index_documents(documents, clean_index=False, is_code=True)
 
     def _get_vector_search_tools(self):
         """
