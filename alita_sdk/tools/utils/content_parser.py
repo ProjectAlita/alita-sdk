@@ -61,7 +61,7 @@ IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'svg']
 
 
 def parse_file_content(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
-                       sheet_name: str = None, llm=None, file_path: str = None):
+                       sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False):
     """Parse the content of a file based on its type and return the parsed content.
 
     Args:
@@ -91,7 +91,7 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
     elif file_name.endswith('.docx'):
         return read_docx_from_bytes(file_content)
     elif file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-        return parse_excel(file_content, sheet_name)
+        return parse_excel(file_content, sheet_name, excel_by_sheets)
     elif file_name.endswith('.pdf'):
         return parse_pdf(file_content, page_number, is_capture_image, llm)
     elif file_name.endswith('.pptx'):
@@ -109,17 +109,26 @@ def parse_txt(file_content):
     except Exception as e:
         return ToolException(f"Error decoding file content: {e}")
 
-def parse_excel(file_content, sheet_name = None):
+def parse_excel(file_content, sheet_name = None, return_by_sheets: bool = False):
     try:
         excel_file = io.BytesIO(file_content)
         if sheet_name:
             return parse_sheet(excel_file, sheet_name)
         dfs = pd.read_excel(excel_file, sheet_name=sheet_name)
-        result = []
-        for sheet_name, df in dfs.items():
-            df.fillna('', inplace=True)
-            result.append(f"=== Sheet: {sheet_name} ===\n{df.to_string(index=False)}")
-        return "\n\n".join(result)
+
+        if return_by_sheets:
+            result = {}
+            for sheet_name, df in dfs.items():
+                df.fillna('', inplace=True)
+                result[sheet_name] = df.to_dict(orient='records')
+            return result
+        else:
+            result = []
+            for sheet_name, df in dfs.items():
+                df.fillna('', inplace=True)
+                string_content = df.to_string(index=False)
+                result.append(f"====== Sheet name: {sheet_name} ======\n{string_content}")
+            return "\n\n".join(result)
     except Exception as e:
         return ToolException(f"Error reading Excel file: {e}")
 

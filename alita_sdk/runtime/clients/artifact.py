@@ -24,7 +24,14 @@ class Artifact:
             logger.error(f"Error: {e}")
             return f"Error: {e}"
     
-    def get(self, artifact_name: str, bucket_name: str = None, is_capture_image: bool = False, page_number: int = None, sheet_name: str = None):
+    def get(self,
+            artifact_name: str,
+            bucket_name: str = None,
+            is_capture_image: bool = False,
+            page_number: int = None,
+            sheet_name: str = None,
+            excel_by_sheets: bool = False,
+            llm = None):
         if not bucket_name:
             bucket_name = self.bucket_name
         data = self.client.download_artifact(bucket_name, artifact_name)
@@ -37,7 +44,13 @@ class Artifact:
         if detected['encoding'] is not None:
             return data.decode(detected['encoding'])
         else:
-            return parse_file_content(artifact_name, data, is_capture_image, page_number, sheet_name)
+            return parse_file_content(file_name=artifact_name,
+                                  file_content=data,
+                                  is_capture_image=is_capture_image,
+                                  page_number=page_number,
+                                  sheet_name=sheet_name,
+                                  excel_by_sheets=excel_by_sheets,
+                                  llm=llm)
 
     def delete(self, artifact_name: str, bucket_name = None):
         if not bucket_name:

@@ -9,7 +9,7 @@ from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
-from ..elitea_base import BaseToolApiWrapper, BaseIndexParams, BaseVectorStoreToolApiWrapper
+from ..elitea_base import BaseToolApiWrapper, BaseIndexParams, BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from ...runtime.langchain.interfaces.llm_processor import get_embeddings
 from langchain_core.documents import Document
 
@@ -143,7 +143,11 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
             logging.error(f"Failed to load files from sharepoint: {e}")
             return ToolException("Can not get files. Please, double check folder name and read permissions.")
 
-    def read_file(self, path, is_capture_image: bool = False, page_number: int = None, sheet_name: str=None):
+    def read_file(self, path,
+                  is_capture_image: bool = False,
+                  page_number: int = None,
+                  sheet_name: str = None,
+                  excel_by_sheets: bool = False):
         """ Reads file located at the specified server-relative path. """
         try:
             file = self._client.web.get_file_by_server_relative_path(path)
@@ -159,6 +163,7 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                                   is_capture_image=is_capture_image,
                                   page_number=page_number,
                                   sheet_name=sheet_name,
+                                  excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
 
     def _base_loader(self) -> List[Document]:
@@ -170,7 +175,7 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
         docs: List[Document] = []
         for file in all_files:
             metadata = {
-                ("updated_at" if k == "Modified" else k): str(v)
+                ("updated_on" if k == "Modified" else k): str(v)
                 for k, v in file.items()
             }
             docs.append(Document(page_content="", metadata=metadata))
@@ -180,25 +185,33 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                    collection_suffix: str = '',
                    progress_step: int = None,
                    clean_index: bool = False):
+        """Load files content into the vector store."""
         docs = self._base_loader()
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
         return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+    def _process_document(self, document: Document, chunker = None) -> Generator[Document, None, None]:
         config = {
             "max_tokens": self.llm.model_config.get('max_tokens', 512),
             "token_overlap": self.llm.model_config.get('token_overlap',
-                                                       int(self.llm.model_config.get('max_tokens', 512) * 0.05))
+                                                       int(self.llm.model_config.get('max_tokens', 512) * 0.05)),
         }
         chunks = markdown_chunker(file_content_generator=self._generate_file_content(document), config=config)
         yield from chunks
 
     def _generate_file_content(self, document: Document) -> Generator[Document, None, None]:
-        page_content = self.read_file(document.metadata['Path'], is_capture_image=True)
-        document.page_content = json.dumps(str(page_content))
-        yield document
+        page_content = self.read_file(document.metadata['Path'], is_capture_image=True, excel_by_sheets=True)
+        if isinstance(page_content, dict):
+            for key, value in page_content.items():
+                metadata = document.metadata
+                metadata['page'] = key
+                yield Document(page_content=str(value), metadata=metadata)
+        else:
+            document.page_content = json.dumps(str(page_content))
+            yield document
 
+    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {
