@@ -628,12 +628,14 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             # process each attachment to extract its content
             for attachment in attachments:
                 attachment_id = f"attach_{attachment['id']}"
+                # add attachment id to metadata of parent
+                document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
                 # TODO: pass it to chunkers
                 yield Document(page_content=self._process_attachment(attachment),
                                                      metadata={
                                                          'project_id': base_data.get('project_id', ''),
-                                                         'id': str(case_id),
-                                                         IndexerKeywords.DEPENDENCY_ID.value: attachment_id,
+                                                         'id': str(attachment_id),
+                                                         IndexerKeywords.PARENT.value: str(case_id),
                                                          'filename': attachment['filename'],
                                                          'filetype': attachment['filetype'],
                                                          'created_on': attachment['created_on'],

@@ -188,7 +188,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
-    def _get_indexed_data(self, store) -> Dict[str, List[Dict[str, Any]]]:
+    def _get_indexed_data(self, store):
         """ Get all indexed data from vectorstore """
 
         # get already indexed data
@@ -196,17 +196,19 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         try:
             self._log_data("Retrieving already indexed data from vectorstore",
                            tool_name="index_documents")
-            data = store.get(include=['documents', 'metadatas'])
+            data = store.get(include=['metadatas'])
             # re-structure data to be more usable
-            for doc_str, meta, db_id in zip(data['documents'], data['metadatas'], data['ids']):
+            for meta, db_id in zip(data['metadatas'], data['ids']):
                 # get document id from metadata
                 doc_id = str(meta['id'])
-                # add document to result including metadata and db_id to delete correct record if any
-                result.setdefault(doc_id, []).append({
+                dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
+                parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
+                result[doc_id] = {
                     'metadata': meta,
-                    'document': doc_str,
                     'id': db_id,
-                })
+                    IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
+                    IndexerKeywords.PARENT.value: parent_id
+                }
         except Exception as e:
             logger.error(f"Failed to get indexed data from vectorstore: {str(e)}. Continuing with empty index.")
         return result
@@ -228,24 +230,20 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         for document in documents:
             doc_id = document.metadata.get('id')
             # get document's metadata and id and check if already indexed
-            if doc_id in indexed_ids and not document.metadata.get(IndexerKeywords.DEPENDENCY_ID.value):
+            if doc_id in indexed_ids:
                 # document has been indexed already, then verify `updated_on`
-                # and type of document (skip for dependent docs, by `dependency_id` in metadata)
-                to_index_updated_on = document.metadata.get(IndexerKeywords.UPDATED_ON.value)
-                # find independent object from the indexed list (since this one contains required metadata: 'id' and 'updated_on')
-                for indexed_doc in indexed_data[doc_id]:
-                    if not indexed_doc['metadata'].get(IndexerKeywords.DEPENDENCY_ID.value):
-                        indexed_meta = indexed_doc['metadata']
-                        break
-                indexed_updated_on = indexed_meta.get(IndexerKeywords.UPDATED_ON.value)
+                to_index_updated_on = document.metadata.get('updated_on')
+                indexed_meta = indexed_data[doc_id]['metadata']
+                indexed_updated_on = indexed_meta.get('updated_on')
                 if to_index_updated_on and indexed_updated_on and to_index_updated_on == indexed_updated_on:
                     # same updated_on, skip indexing
                     continue
                 # if updated_on is missing or different, we will re-index the document and remove old one
-                # add document to final list for re-indexing
-                final_docs.append(document)
-                # get all documents with the id marked for re-indexing to delete old ones
-                docs_to_remove.extend(doc['id'] for doc in indexed_data[doc_id])
+                # parent doc removal
+                docs_to_remove.append(indexed_data[doc_id]['id'])
+                # mark dependent docs for removal
+                for dependent_doc_id in indexed_data[doc_id][IndexerKeywords.DEPENDENT_DOCS.value]:
+                    docs_to_remove.append(indexed_data[dependent_doc_id]['id'])
             else:
                 final_docs.append(document)
 
