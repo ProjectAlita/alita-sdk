@@ -205,12 +205,19 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 if dependent_docs:
                     dependent_docs = [d.strip() for d in dependent_docs.split(';') if d.strip()]
                 parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
-                result[doc_id] = {
-                    'metadata': meta,
-                    'id': db_id,
-                    IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
-                    IndexerKeywords.PARENT.value: parent_id
-                }
+                #
+                chunk_id = meta.get('chunk_id')
+                if doc_id in result and chunk_id:
+                    # if document with the same id already saved, add db_id fof current one as chunk
+                    result[doc_id]['all_chunks'].append(db_id)
+                else:
+                    result[doc_id] = {
+                        'metadata': meta,
+                        'id': db_id,
+                        'all_chunks': [db_id],
+                        IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
+                        IndexerKeywords.PARENT.value: parent_id
+                    }
         except Exception as e:
             logger.error(f"Failed to get indexed data from vectorstore: {str(e)}. Continuing with empty index.")
         return result
@@ -259,7 +266,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             return list(documents)
 
         final_docs = []
-        docs_to_remove = []
+        docs_to_remove = set()
 
         for document in documents:
             key = key_fn(document)
@@ -267,7 +274,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 if compare_fn(document, indexed_data[key]):
                     continue
                 final_docs.append(document)
-                docs_to_remove.extend(remove_ids_fn(indexed_data, key))
+                docs_to_remove.update(remove_ids_fn(indexed_data, key))
             else:
                 final_docs.append(document)
 
@@ -276,7 +283,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 f"Removing {len(docs_to_remove)} documents from vectorstore that are already indexed with different updated_on.",
                 tool_name="index_documents"
             )
-            store.delete(ids=docs_to_remove)
+            store.delete(ids=list(docs_to_remove))
 
         return final_docs
 
@@ -291,7 +298,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                     idx['metadata'].get('updated_on') and
                     doc.metadata.get('updated_on') == idx['metadata'].get('updated_on')
             ),
-            lambda idx_data, key: [idx_data[key]['id']] + [
+            lambda idx_data, key: idx_data[key]['all_chunks'] + [
                 idx_data[dep_id]['id'] for dep_id in idx_data[key][IndexerKeywords.DEPENDENT_DOCS.value]
             ],
             log_msg="Verification of documents to index started"

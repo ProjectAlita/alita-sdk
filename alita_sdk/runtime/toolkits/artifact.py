@@ -3,7 +3,7 @@ from typing import List, Any, Literal, Optional
 from alita_sdk.tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
-from pydantic import create_model, BaseModel, ConfigDict, Field
+from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from pydantic.fields import FieldInfo
 from ..tools.artifact import ArtifactWrapper
 from alita_sdk.tools.base.tool import BaseAction
@@ -22,15 +22,19 @@ class ArtifactToolkit(BaseToolkit):
             # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             bucket = (str, FieldInfo(description="Bucket name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ArtifactToolkit.toolkit_max_length})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+            # indexer settings
+            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                            default=None,
+                                                            json_schema_extra={'secret': True})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})
         )
     
     @classmethod
-    def get_toolkit(cls, client: Any, bucket: str, toolkit_name: Optional[str] = None, selected_tools: list[str] = []):
+    def get_toolkit(cls, client: Any, bucket: str, toolkit_name: Optional[str] = None, selected_tools: list[str] = [], **kwargs):
         if selected_tools is None:
             selected_tools = []
         tools = []
-        artifact_wrapper = ArtifactWrapper(client=client, bucket=bucket)
+        artifact_wrapper = ArtifactWrapper(client=client, bucket=bucket, **kwargs)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = artifact_wrapper.get_available_tools()
         for tool in available_tools:
