@@ -63,7 +63,7 @@ class BigQueryToolkitConfig(BaseModel):
     dataset: Optional[str] = Field(
         default=None,
         description="BigQuery dataset name",
-        json_schema_extra={"configuration": True},
+        json_schema_extra={"configuration": True, "configuration_title": True},
     )
     table: Optional[str] = Field(
         default=None,
