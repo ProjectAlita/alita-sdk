@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Any, Optional, List, Dict, Tuple, Union
+from typing import Any, Optional, List, Dict, Tuple, Union, Generator
 
 from pydantic import model_validator, BaseModel, SecretStr
 from langchain_core.tools import ToolException
@@ -1296,16 +1296,16 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
                 if isinstance(v, (str, int, float, bool, list, dict))
             }
             if last_version and isinstance(last_version, dict) and 'createdOn' in last_version:
-                metadata['updated_at'] = last_version['createdOn']
+                metadata['updated_on'] = last_version['createdOn']
             else:
-                metadata['updated_at'] = case['createdOn']
+                metadata['updated_on'] = case['createdOn']
 
             case['type'] = "TEST_CASE"
 
             docs.append(Document(page_content=json.dumps(case), metadata=metadata))
         return docs
 
-    def _process_document(self, document: Document) -> Document:
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
         try:
             base_data = json.loads(document.page_content)
 
@@ -1314,7 +1314,7 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
                 base_data['test_case_content'] = additional_content
 
             document.page_content = json.dumps(base_data)
-            return document
+            yield document
         except json.JSONDecodeError as e:
             raise ToolException(f"Failed to decode JSON from document: {e}")
 
