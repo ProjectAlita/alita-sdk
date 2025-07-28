@@ -100,7 +100,6 @@ BaseStepbackSearchParams = create_model(
 
 
 class BaseToolApiWrapper(BaseModel):
-    chunker = None
 
     def get_available_tools(self):
         raise NotImplementedError("Subclasses should implement this method")

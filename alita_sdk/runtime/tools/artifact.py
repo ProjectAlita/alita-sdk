@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from alita_sdk.tools.chunkers import markdown_chunker
@@ -34,8 +35,8 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
         values["artifact"] = values['client'].artifact(values['bucket'])
         return values
 
-    def list_files(self, bucket_name = None):
-        return self.artifact.list(bucket_name)
+    def list_files(self, bucket_name = None, return_as_string = True):
+        return self.artifact.list(bucket_name, return_as_string)
 
     def create_file(self, filename: str, filedata: str, bucket_name = None):
         return self.artifact.create(filename, filedata, bucket_name)
@@ -47,7 +48,7 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
                   page_number: int = None,
                   sheet_name: str = None,
                   excel_by_sheets: bool = False):
-        return self.artifact.get(file_name=filename,
+        return self.artifact.get(artifact_name=filename,
                                  bucket_name=bucket_name,
                                   is_capture_image=is_capture_image,
                                   page_number=page_number,
@@ -79,18 +80,25 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
 
     def _base_loader(self) -> List[Document]:
         try:
-            all_files = self.list_files(self.bucket)
+            all_files = self.list_files(self.bucket, False)
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
         docs: List[Document] = []
-        for file in all_files:
+        for file in all_files['rows']:
             metadata = {
-                ("updated_on" if k == "Modified" else k): str(v)
+                ("updated_on" if k == "modified" else k): str(v)
                 for k, v in file.items()
             }
+            metadata['id'] = self.get_hash_from_bucket_and_file_name(self.bucket, file['name'])
             docs.append(Document(page_content="", metadata=metadata))
         return docs
+
+    def get_hash_from_bucket_and_file_name(self, bucket, file_name):
+        hasher = hashlib.sha256()
+        hasher.update(bucket.encode('utf-8'))
+        hasher.update(file_name.encode('utf-8'))
+        return hasher.hexdigest()
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         config = {
@@ -102,7 +110,7 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
         yield from chunks
 
     def _generate_file_content(self, document: Document) -> Generator[Document, None, None]:
-        page_content = self.read_file(document.metadata['Path'], is_capture_image=True, excel_by_sheets=True)
+        page_content = self.read_file(document.metadata['name'], is_capture_image=True, excel_by_sheets=True)
         if isinstance(page_content, dict):
             for key, value in page_content.items():
                 metadata = document.metadata

@@ -57,10 +57,11 @@ class Artifact:
             bucket_name = self.bucket_name
         self.client.delete_artifact(bucket_name, artifact_name)
     
-    def list(self, bucket_name: str = None) -> str:
+    def list(self, bucket_name: str = None, return_as_string = True) -> str|dict:
         if not bucket_name:
             bucket_name = self.bucket_name
-        return str(self.client.list_artifacts(bucket_name))
+        artifacts = self.client.list_artifacts(bucket_name)
+        return str(artifacts) if return_as_string else artifacts
 
     def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None):
         if not bucket_name:
