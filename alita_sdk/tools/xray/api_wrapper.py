@@ -1,15 +1,19 @@
 import logging
-from typing import Optional, Any, List, Dict
+from typing import Any, Dict, Generator, List, Optional
 
 import requests
-from langchain_core.tools import ToolException
 from langchain_core.documents import Document
-from pydantic import create_model, PrivateAttr, SecretStr
-from pydantic import model_validator
+from langchain_core.tools import ToolException
+from pydantic import PrivateAttr, SecretStr, create_model, model_validator, Field
+from pydantic.fields import Field
 from pydantic.fields import Field
 from python_graphql_client import GraphqlClient
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
+from ..elitea_base import (
+    BaseIndexParams,
+    BaseVectorStoreToolApiWrapper,
+    extend_with_vector_tools,
+)
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -201,6 +205,14 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 return ToolException(f"Please, check you credentials ({values['client_id']} / {masked_secret}). Unable")
         return values
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Set private attributes after initialization if they were passed
+        if '_auth_token' in data:
+            self._auth_token = data['_auth_token']
+        if '_graphql_endpoint' in data:
+            self._graphql_endpoint = data['_graphql_endpoint']
+
     def get_tests(self, jql: str):
         """get all tests"""
 
@@ -250,7 +262,9 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
 
-    def _base_loader(self, jql: Optional[str] = None, graphql: Optional[str] = None) -> str:
+    def _base_loader(
+        self, jql: Optional[str] = None, graphql: Optional[str] = None
+    ) -> Generator[Document, None, None]:
         """
         Index Xray test cases into vector store using JQL query or custom GraphQL.
 
@@ -260,119 +274,135 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         Examples:
             # Using JQL
             jql = 'project = "CALC" AND testType = "Manual" AND labels in ("Smoke", "Critical")'
-            
+
             # Using GraphQL
             graphql = 'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) steps { action result } } } }'
         """
-        
+
         if not jql and not graphql:
             raise ToolException("Either 'jql' or 'graphql' parameter must be provided.")
-        
+
         if jql and graphql:
             raise ToolException("Please provide either 'jql' or 'graphql', not both.")
-        
+
         try:
             if jql:
                 tests_data = self._get_tests_direct(jql)
-                
+
             elif graphql:
                 # Use direct GraphQL execution
                 graphql_data = self._execute_graphql_direct(graphql)
-                
+
                 # Extract tests from GraphQL response (handle different possible structures)
-                if 'data' in graphql_data:
-                    if 'getTests' in graphql_data['data']:
-                        tests_data = graphql_data['data']['getTests'].get('results', [])
+                if "data" in graphql_data:
+                    if "getTests" in graphql_data["data"]:
+                        tests_data = graphql_data["data"]["getTests"].get("results", [])
                     else:
                         # Try to find any list of test objects in the data
                         tests_data = []
-                        for key, value in graphql_data['data'].items():
+                        for key, value in graphql_data["data"].items():
                             if isinstance(value, list):
                                 tests_data = value
                                 break
-                            elif isinstance(value, dict) and 'results' in value:
-                                tests_data = value['results']
+                            elif isinstance(value, dict) and "results" in value:
+                                tests_data = value["results"]
                                 break
                 else:
                     tests_data = graphql_data if isinstance(graphql_data, list) else []
-                
+
                 if not tests_data:
                     raise ToolException("No test data found in GraphQL response")
-            
+
             docs: List[Document] = []
             for test in tests_data:
                 page_content = ""
-                test_type_name = test.get('testType', {}).get('name', '').lower()
-                
-                if test_type_name == 'manual' and 'steps' in test and test['steps']:
+                test_type_name = test.get("testType", {}).get("name", "").lower()
+
+                if test_type_name == "manual" and "steps" in test and test["steps"]:
                     import json
+
                     steps_content = []
-                    for step in test['steps']:
+                    for step in test["steps"]:
                         step_obj = {}
-                        if step.get('action'):
-                            step_obj['action'] = step['action']
-                        if step.get('data'):
-                            step_obj['data'] = step['data']
-                        if step.get('result'):
-                            step_obj['result'] = step['result']
+                        if step.get("action"):
+                            step_obj["action"] = step["action"]
+                        if step.get("data"):
+                            step_obj["data"] = step["data"]
+                        if step.get("result"):
+                            step_obj["result"] = step["result"]
                         if step_obj:
                             steps_content.append(step_obj)
                     page_content = json.dumps(steps_content, indent=2)
-                
-                elif test_type_name == 'cucumber' and test.get('gherkin'):
-                    page_content = test['gherkin']
-                
-                elif test.get('unstructured'):
-                    page_content = test['unstructured']
 
-                metadata = {
-                    'doctype': self.doctype
-                }
-                
-                if 'jira' in test and test['jira']:
-                    jira_data = test['jira']
-                    metadata['key'] = jira_data.get('key', '')
-                    metadata['summary'] = jira_data.get('summary', '')
-                    
-                    if 'created' in jira_data:
-                        metadata['created_on'] = jira_data['created']
-                    if 'updated' in jira_data:
-                        metadata['updated_on'] = jira_data['updated']
-                    
-                    if 'assignee' in jira_data and jira_data['assignee']:
-                        metadata['assignee'] = str(jira_data['assignee'])
-                    
-                    if 'reporter' in jira_data and jira_data['reporter']:
-                        metadata['reporter'] = str(jira_data['reporter'])
-                
-                if 'issueId' in test:
-                    metadata['issueId'] = str(test['issueId'])
-                    metadata['id'] = str(test['issueId'])
-                if 'projectId' in test:
-                    metadata['projectId'] = str(test['projectId'])
-                if 'testType' in test and test['testType']:
-                    metadata['testType'] = test['testType'].get('name', '')
-                    metadata['testKind'] = test['testType'].get('kind', '')
-                
+                elif test_type_name == "cucumber" and test.get("gherkin"):
+                    page_content = test["gherkin"]
+
+                elif test.get("unstructured"):
+                    page_content = test["unstructured"]
+
+                metadata = {"doctype": self.doctype}
+
+                if "jira" in test and test["jira"]:
+                    jira_data = test["jira"]
+                    metadata["key"] = jira_data.get("key", "")
+                    metadata["summary"] = jira_data.get("summary", "")
+
+                    if "created" in jira_data:
+                        metadata["created_on"] = jira_data["created"]
+                    if "updated" in jira_data:
+                        metadata["updated_on"] = jira_data["updated"]
+
+                    if "assignee" in jira_data and jira_data["assignee"]:
+                        metadata["assignee"] = str(jira_data["assignee"])
+
+                    if "reporter" in jira_data and jira_data["reporter"]:
+                        metadata["reporter"] = str(jira_data["reporter"])
+
+                if "issueId" in test:
+                    metadata["issueId"] = str(test["issueId"])
+                    metadata["id"] = str(test["issueId"])
+                if "projectId" in test:
+                    metadata["projectId"] = str(test["projectId"])
+                if "testType" in test and test["testType"]:
+                    metadata["testType"] = test["testType"].get("name", "")
+                    metadata["testKind"] = test["testType"].get("kind", "")
+
                 docs.append(Document(page_content=page_content, metadata=metadata))
         except Exception as e:
             logger.error(f"Error processing test data: {e}")
             raise ToolException(f"Error processing test data: {e}")
 
         return docs
+    
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        yield document
 
-
-    def index_data(self, jql: Optional[str] = None, graphql: Optional[str] = None,
-                   collection_suffix: str = '', progress_step: Optional[int] = None,
-                   clean_index: Optional[bool] = False) -> str:
+    def index_data(
+        self,
+        jql: Optional[str] = None,
+        graphql: Optional[str] = None,
+        collection_suffix: str = "",
+        progress_step: Optional[int] = None,
+        clean_index: Optional[bool] = False,
+    ) -> str:
         """Index Xray test cases into vector store using JQL query or custom GraphQL."""
         if not get_embeddings:
-            raise ToolException("get_embeddings function not available. Please check the import.")
+            raise ToolException(
+                "get_embeddings function not available. Please check the import."
+            )
         docs = self._base_loader(jql=jql, graphql=graphql)
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        
-        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+        return vs.index_documents(
+            docs, progress_step=progress_step, clean_index=clean_index
+        )
+    
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        for attachment_id in document.metadata.get('attachment_ids', []):
+            content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
+            content = ''.join(str(item) for item in content_generator)
+            yield Document(page_content=content, metadata={'id': attachment_id})
 
     def _get_tests_direct(self, jql: str) -> List[Dict]:
         """Direct method to get test data without string formatting"""
@@ -409,6 +439,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             raise ToolException(f"Unable to execute GraphQL due to error: {str(e)}")
 
+    @extend_with_vector_tools
     def get_available_tools(self):
         tools = [
             {
