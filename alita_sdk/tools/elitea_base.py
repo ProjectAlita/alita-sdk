@@ -191,12 +191,12 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
 
     doctype: str = "document"
 
-    def _base_loader(self, **kwargs) -> List[Document]:
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         """ Loads documents from a source, processes them,
         and returns a list of Document objects with base metadata: id and created_on."""
         pass
 
-    def _process_document(self, base_document: Document) -> Document:
+    def _process_document(self, base_document: Document) -> Generator[Document, None, None]:
         """ Process an existing base document to extract relevant metadata for full document preparation.
         Used for late processing of documents after we ensure that the document has to be indexed to avoid
         time-consuming operations for documents which might be useless.
