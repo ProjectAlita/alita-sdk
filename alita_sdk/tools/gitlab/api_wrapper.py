@@ -167,6 +167,16 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
         gitlab_files = self._get_all_files(path, recursive, branch)
         return [file['path'] for file in gitlab_files if file['type'] == 'blob']
 
+    def _file_commit_hash(self, file_path: str, branch: str):
+        """
+        Get the commit hash of a file in a specific branch.
+        """
+        try:
+            file = self._repo_instance.files.get(file_path, branch)
+            return file.commit_id
+        except Exception as e:
+            return f"Unable to get commit hash for {file_path} due to error:\n{e}"
+
     def _read_file(self, file_path: str, branch: str):
         return self.read_file(file_path, branch)
 

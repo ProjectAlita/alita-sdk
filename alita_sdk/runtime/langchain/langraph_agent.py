@@ -505,7 +505,7 @@ def create_graph(
                 if isinstance(connected_tools, dict):
                     for toolkit, selected_tools in connected_tools.items():
                         for tool in selected_tools:
-                            tool_names.append(f"{toolkit}___{tool}")
+                            tool_names.append(f"{toolkit}{TOOLKIT_SPLITTER}{tool}")
                 elif isinstance(connected_tools, list):
                     # for cases when tools are provided as a list of names with already bound toolkit_name
                     tool_names = connected_tools

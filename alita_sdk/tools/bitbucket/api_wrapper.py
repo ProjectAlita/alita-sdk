@@ -41,6 +41,18 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
     """Bitbucket installation type: true for cloud, false for server.
     """
 
+    llm: Optional[Any] = None
+    # Alita instance
+    alita: Optional[Any] = None
+
+    # Vector store configuration
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    doctype: Optional[str] = 'code'
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
+
     @model_validator(mode='before')
     @classmethod
     def validate_env(cls, values: Dict) -> Dict:
@@ -59,7 +71,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             password=values['password'],
             workspace=values['project'],
             repository=values['repository']
-        ) if values['cloud'] else BitbucketServerApi(
+        ) if values.get('cloud') else BitbucketServerApi(
             url=values['url'],
             username=values['username'],
             password=values['password'],
@@ -213,16 +225,31 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
         except Exception as e:
             return ToolException(f"Can't add comment to pull request `{pr_id}` due to error:\n{str(e)}")
 
-    def _get_files(self, file_path: str, branch: str) -> str:
+    def _get_files(self, path: str, branch: str) -> str:
         """
         Get files from the bitbucket repo
         Parameters:
-            file_path(str): the file path
+            path(str): the file path
             branch(str): branch name (by default: active_branch)
         Returns:
             str: List of the files
         """
-        return str(self._bitbucket.get_files_list(file_path=file_path if file_path else '', branch=branch if branch else self._active_branch))
+        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self._active_branch))
+
+    # TODO: review this method, it may not work as expected
+    # def _file_commit_hash(self, file_path: str, branch: str):
+    #     """
+    #     Get the commit hash of a file in the gitlab repo
+    #     Parameters:
+    #         file_path(str): the file path
+    #         branch(str): branch name (by default: active_branch)
+    #     Returns:
+    #         str: The commit hash of the file
+    #     """
+    #     try:
+    #         return self._bitbucket.get_file_commit_hash(file_path=file_path, branch=branch)
+    #     except Exception as e:
+    #         raise ToolException(f"Can't extract file commit hash (`{file_path}`) due to error:\n{str(e)}")
 
     def _read_file(self, file_path: str, branch: str) -> str:
         """

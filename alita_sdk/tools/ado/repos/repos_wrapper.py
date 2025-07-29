@@ -302,6 +302,43 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
 
         return values
 
+    def _get_commits(self, file_path: str, branch: str, top: int = None) -> List[GitCommitRef]:
+        """
+        Get commits for a specific file in a specific branch.
+
+        Args:
+            file_path (str): Path to the file in the repository.
+            branch (str): Branch name to get commits from.
+            top (int, optional): Maximum number of commits to return. Defaults to None.
+
+        Returns:
+            List[GitCommitRef]: List of commit references.
+        """
+        try:
+            version_descriptor = GitVersionDescriptor(
+                version=branch, version_type="branch"
+            )
+            commits = self._client.get_commits(
+                repository_id=self.repository_id,
+                project=self.project,
+                search_criteria=GitQueryCommitsCriteria(item_path=file_path,
+                                                       item_version=version_descriptor, top=top if top else 100),
+            )
+            return commits
+        except Exception as e:
+            msg = f"Failed to get commits for file '{file_path}' on branch '{branch}': {str(e)}"
+            logger.error(msg)
+            return ToolException(msg)
+
+    def _file_commit_hash(self, file_path: str, branch: str) -> str:
+        """Get the commit hash of the last commit that modified a file in a specific branch."""
+
+        commits = self._get_commits(file_path, branch, top=1)
+        if commits:
+            return commits[0].commit_id
+        else:
+            return None
+
     def _get_files(
             self,
             path: str = "",

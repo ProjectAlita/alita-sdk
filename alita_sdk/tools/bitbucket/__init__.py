@@ -24,7 +24,15 @@ def get_tools(tool):
         password=tool['settings']['password'],
         branch=tool['settings']['branch'],
         cloud=tool['settings'].get('cloud'),
-        toolkit_name=tool.get('toolkit_name'),
+        llm=tool['settings'].get('llm', None),
+        alita=tool['settings'].get('alita', None),
+        connection_string=tool['settings'].get('connection_string', None),
+        collection_name=str(tool['id']),
+        doctype='code',
+        embedding_model="HuggingFaceEmbeddings",
+        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        vectorstore_type="PGVector",
+        toolkit_name=tool.get('toolkit_name')
     ).get_tools()
 
 
@@ -48,6 +56,10 @@ class AlitaBitbucketToolkit(BaseToolkit):
             username=(str, Field(description="Username", json_schema_extra={'configuration': True})),
             password=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True, 'configuration': True})),
             cloud=(Optional[bool], Field(description="Hosting Option", default=None)),
+            # indexer settings
+            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                          default=None,
+                                                          json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
             {

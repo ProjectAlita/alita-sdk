@@ -189,22 +189,24 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
     def _get_indexed_data(self, store):
-        """ Get all indexed data from vectorstore """
+        """ Get all indexed data from vectorstore for non-code content """
 
         # get already indexed data
         result = {}
         try:
             self._log_data("Retrieving already indexed data from vectorstore",
                            tool_name="index_documents")
-            data = store.get(include=['documents', 'metadatas'])
+            data = store.get(include=['metadatas'])
             # re-structure data to be more usable
-            for doc_str, meta, db_id in zip(data['documents'], data['metadatas'], data['ids']):
+            for meta, db_id in zip(data['metadatas'], data['ids']):
+                # get document id from metadata
                 doc_id = str(meta['id'])
                 dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
+                if dependent_docs:
+                    dependent_docs = [d.strip() for d in dependent_docs.split(';') if d.strip()]
                 parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
                 result[doc_id] = {
                     'metadata': meta,
-                    'document': doc_str,
                     'id': db_id,
                     IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
                     IndexerKeywords.PARENT.value: parent_id
@@ -213,14 +215,46 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             logger.error(f"Failed to get indexed data from vectorstore: {str(e)}. Continuing with empty index.")
         return result
 
-    def _reduce_duplicates(self, documents: Generator[Document, None, None], store) -> List[Any]:
-        """Remove documents already indexed in the vectorstore based on metadata 'id' and 'updated_on' fields."""
+    def _get_code_indexed_data(self, store) -> Dict[str, Dict[str, Any]]:
+        """ Get all indexed data from vectorstore for code content """
 
-        self._log_data("Verification of documents to index started", tool_name="index_documents")
+        # get already indexed data
+        result = {}
+        try:
+            self._log_data("Retrieving already indexed code data from vectorstore",
+                           tool_name="index_documents")
+            data = store.get(include=['metadatas'])
+            # re-structure data to be more usable
+            for meta, db_id in zip(data['metadatas'], data['ids']):
+                filename = meta['filename']
+                commit_hash = meta.get('commit_hash')
+                if filename not in result:
+                    result[filename] = {
+                        'commit_hashes': [],
+                        'ids': []
+                    }
+                if commit_hash is not None:
+                    result[filename]['commit_hashes'].append(commit_hash)
+                result[filename]['ids'].append(db_id)
+        except Exception as e:
+            logger.error(f"Failed to get indexed code data from vectorstore: {str(e)}. Continuing with empty index.")
+        return result
 
-        indexed_data = self._get_indexed_data(store)
-        indexed_ids = set(indexed_data.keys())
-        if not indexed_ids:
+    def _reduce_duplicates(
+            self,
+            documents: Generator[Any, None, None],
+            store,
+            get_indexed_data: Callable,
+            key_fn: Callable,
+            compare_fn: Callable,
+            remove_ids_fn: Callable,
+            log_msg: str = "Verification of documents to index started"
+    ) -> List[Any]:
+        """Generic duplicate reduction logic for documents."""
+        self._log_data(log_msg, tool_name="index_documents")
+        indexed_data = get_indexed_data(store)
+        indexed_keys = set(indexed_data.keys())
+        if not indexed_keys:
             self._log_data("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
             return list(documents)
 
@@ -228,22 +262,12 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         docs_to_remove = []
 
         for document in documents:
-            doc_id = document.metadata.get('id')
-            # get document's metadata and id and check if already indexed
-            if doc_id in indexed_ids:
-                # document has been indexed already, then verify `updated_on`
-                to_index_updated_on = document.metadata.get('updated_on')
-                indexed_meta = indexed_data[doc_id]['metadata']
-                indexed_updated_on = indexed_meta.get('updated_on')
-                if to_index_updated_on and indexed_updated_on and to_index_updated_on == indexed_updated_on:
-                    # same updated_on, skip indexing
+            key = key_fn(document)
+            if key in indexed_keys:
+                if compare_fn(document, indexed_data[key]):
                     continue
-                # if updated_on is missing or different, we will re-index the document and remove old one
-                # parent doc removal
-                docs_to_remove.append(indexed_data[doc_id]['id'])
-                # mark dependent docs for removal
-                for dependent_doc_id in indexed_data[doc_id][IndexerKeywords.DEPENDENT_DOCS.value]:
-                    docs_to_remove.append(indexed_data[dependent_doc_id]['id'])
+                final_docs.append(document)
+                docs_to_remove.extend(remove_ids_fn(indexed_data, key))
             else:
                 final_docs.append(document)
 
@@ -256,7 +280,39 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         return final_docs
 
-    def index_documents(self, documents: Generator[Document, None, None], progress_step: int = 20, clean_index: bool = True):
+    def _reduce_non_code_duplicates(self, documents: Generator[Any, None, None], store) -> List[Any]:
+        return self._reduce_duplicates(
+            documents,
+            store,
+            self._get_indexed_data,
+            lambda doc: doc.metadata.get('id'),
+            lambda doc, idx: (
+                    doc.metadata.get('updated_on') and
+                    idx['metadata'].get('updated_on') and
+                    doc.metadata.get('updated_on') == idx['metadata'].get('updated_on')
+            ),
+            lambda idx_data, key: [idx_data[key]['id']] + [
+                idx_data[dep_id]['id'] for dep_id in idx_data[key][IndexerKeywords.DEPENDENT_DOCS.value]
+            ],
+            log_msg="Verification of documents to index started"
+        )
+
+    def _reduce_code_duplicates(self, documents: Generator[Any, None, None], store) -> List[Any]:
+        return self._reduce_duplicates(
+            documents,
+            store,
+            self._get_code_indexed_data,
+            lambda doc: doc.metadata.get('filename'),
+            lambda doc, idx: (
+                    doc.metadata.get('commit_hash') and
+                    idx.get('commit_hashes') and
+                    doc.metadata.get('commit_hash') in idx.get('commit_hashes')
+            ),
+            lambda idx_data, key: idx_data[key]['ids'],
+            log_msg="Verification of code documents to index started"
+        )
+
+    def index_documents(self, documents: Generator[Document, None, None], progress_step: int = 20, clean_index: bool = True, is_code: bool = False):
         """ Index documents in the vectorstore.
 
         Args:
@@ -282,9 +338,9 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             if isinstance(documents, types.GeneratorType):
                 documents = list(documents)
         else:
-            # remove duplicates based on metadata 'id' and 'updated_on' fields
-            documents = self._reduce_duplicates(documents, self.vectoradapter.vectorstore)
-
+            # remove duplicates based on metadata 'id' and 'updated_on' or 'commit_hash' fields
+            documents = self._reduce_code_duplicates(documents, self.vectoradapter.vectorstore) if is_code \
+                else self._reduce_non_code_duplicates(documents, self.vectoradapter.vectorstore)
 
         if not documents or len(documents) == 0:
             logger.info("No new documents to index after duplicate check.")

@@ -56,6 +56,8 @@ class Application(BaseTool):
         schema_values = self.args_schema(**input).model_dump() if self.args_schema else {}
         extras = {k: v for k, v in input.items() if k not in schema_values}
         all_kwargs = {**kwargs, **extras, **schema_values}
+        if config is None:
+            config = {}
         return self._run(*config, **all_kwargs)
 
     def _run(self, *args, **kwargs):
