@@ -8,7 +8,7 @@ from openai import BadRequestError
 from pydantic import SecretStr, create_model, model_validator
 from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
-from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
+from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from langchain_core.documents import Document
 
 from ...runtime.utils.utils import IndexerKeywords
@@ -290,20 +290,6 @@ updateCase = create_model(
     ),
 )
 
-# Schema for indexing TestRail data into vector store
-indexData = create_model(
-    "indexData",
-    __base__=BaseIndexParams,
-    project_id=(str, Field(description="TestRail project ID to index data from")),
-    suite_id=(Optional[str], Field(default=None, description="Optional TestRail suite ID to filter test cases")),
-    section_id=(Optional[int], Field(default=None, description="Optional section ID to filter test cases")),
-    title_keyword=(Optional[str], Field(default=None, description="Optional keyword to filter test cases by title")),
-    progress_step=(Optional[int],
-                   Field(default=None, ge=0, le=100, description="Optional step size for progress reporting during indexing")),
-    clean_index=(Optional[bool],
-                       Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
-)
-
 SUPPORTED_KEYS = {
     "id", "title", "section_id", "template_id", "type_id", "priority_id", "milestone_id",
     "refs", "created_by", "created_on", "updated_by", "updated_on", "estimate",
@@ -318,14 +304,6 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
     password: Optional[SecretStr] = None,
     email: Optional[str] = None,
     _client: Optional[TestRailAPI] = PrivateAttr() # Private attribute for the TestRail client
-    llm: Any = None
-
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
-
 
     @model_validator(mode="before")
     @classmethod
@@ -589,22 +567,6 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'entity_type': 'test_case',
             })
 
-    def index_data(
-            self,
-            project_id: str,
-            suite_id: Optional[str] = None,
-            collection_suffix: str = "",
-            section_id: Optional[int] = None,
-            title_keyword: Optional[str] = None,
-            progress_step: Optional[int] = None,
-            clean_index: Optional[bool] = False
-    ):
-        """Load TestRail test cases into the vector store."""
-        docs = self._base_loader(project_id, suite_id, section_id, title_keyword)
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
-
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         """
         Process an existing base document to extract relevant metadata for full document preparation.
@@ -669,6 +631,14 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 logger.error(f"Unable to parse page's content with type: {attachment['filetype']}: {e}")
         return page_content
 
+    def _index_tool_params(self):
+        return {
+            'project_id': (str, Field(description="TestRail project ID to index data from")),
+            'suite_id': (Optional[str],
+                         Field(default=None, description="Optional TestRail suite ID to filter test cases")),
+            'section_id': (Optional[int], Field(default=None, description="Optional section ID to filter test cases")),
+        }
+
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """
         Converts the given data into the specified format: 'json', 'csv', or 'markdown'.
@@ -696,6 +666,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         if output_format == "markdown":
             return df.to_markdown(index=False)
 
+    @extend_with_vector_tools
     def get_available_tools(self):
         tools = [
             {
@@ -733,14 +704,6 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 "ref": self.update_case,
                 "description": self.update_case.__doc__,
                 "args_schema": updateCase,
-            },
-            {
-                "name": "index_data",
-                "ref": self.index_data,
-                "description": self.index_data.__doc__,
-                "args_schema": indexData,
             }
         ]
-        # Add vector search from base
-        tools.extend(self._get_vector_search_tools())
         return tools

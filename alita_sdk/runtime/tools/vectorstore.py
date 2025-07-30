@@ -298,9 +298,12 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                     idx['metadata'].get('updated_on') and
                     doc.metadata.get('updated_on') == idx['metadata'].get('updated_on')
             ),
-            lambda idx_data, key: idx_data[key]['all_chunks'] + [
-                idx_data[dep_id]['id'] for dep_id in idx_data[key][IndexerKeywords.DEPENDENT_DOCS.value]
-            ],
+            lambda idx_data, key: (
+                    idx_data[key]['all_chunks'] +
+                    [idx_data[dep_id]['id'] for dep_id in idx_data[key][IndexerKeywords.DEPENDENT_DOCS.value]] +
+                    [chunk_db_id for dep_id in idx_data[key][IndexerKeywords.DEPENDENT_DOCS.value]
+                     for chunk_db_id in idx_data[dep_id]['all_chunks']]
+            ),
             log_msg="Verification of documents to index started"
         )
 
@@ -517,8 +520,12 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             )
             
         # Initialize document map for tracking by ID
-        doc_map = {doc.metadata.get('id', f"idx_{i}"): (doc, score) 
-                  for i, (doc, score) in enumerate(vector_items)}
+        doc_map = {
+            f"{doc.metadata.get('id', f'idx_{i}')}_{doc.metadata['chunk_id']}"
+            if 'chunk_id' in doc.metadata
+            else doc.metadata.get('id', f"idx_{i}"): (doc, score)
+            for i, (doc, score) in enumerate(vector_items)
+        }
         
         # Process full-text search if configured
         if full_text_search and full_text_search.get('enabled') and full_text_search.get('fields'):
