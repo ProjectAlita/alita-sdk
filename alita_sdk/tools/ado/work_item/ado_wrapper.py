@@ -1,19 +1,24 @@
 import json
 import logging
 import urllib.parse
-from typing import Optional, Dict, List
+from typing import Dict, List, Generator, Optional
 
+from alita_sdk.tools.elitea_base import BaseIndexParams, BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from azure.devops.connection import Connection
 from azure.devops.v7_1.core import CoreClient
 from azure.devops.v7_1.wiki import WikiClient
 from azure.devops.v7_1.work_item_tracking import TeamContext, Wiql, WorkItemTrackingClient
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from msrest.authentication import BasicAuthentication
 from pydantic import create_model, PrivateAttr, SecretStr
 from pydantic import model_validator
 from pydantic.fields import Field
 
-from ...elitea_base import BaseToolApiWrapper
+try:
+    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+except ImportError:
+    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +94,7 @@ ADOUnlinkWorkItemsFromWikiPage = create_model(
     page_name=(str, Field(description="Wiki page path to unlink the work items from", examples=["/TargetPage"]))
 )
 
-
-class AzureDevOpsApiWrapper(BaseToolApiWrapper):
+class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
     organization_url: str
     project: str
     token: SecretStr
@@ -504,6 +508,35 @@ class AzureDevOpsApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error unlinking work items from wiki page '{page_name}': {str(e)}")
             return ToolException(f"An unexpected error occurred while unlinking work items from wiki page '{page_name}': {str(e)}")
 
+    def _base_loader(self, wiql: str, **kwargs) -> Generator[Document, None, None]:
+        ref_items = self._client.query_by_wiql(Wiql(query=wiql)).work_items
+        for ref in ref_items:
+            wi = self._client.get_work_item(id=ref.id, project=self.project, expand='all')
+            yield Document(page_content=json.dumps(wi.fields), metadata={
+                'id': str(wi.id),
+                'type': wi.fields.get('System.WorkItemType', ''),
+                'title': wi.fields.get('System.Title', ''),
+                'state': wi.fields.get('System.State', ''),
+                'area': wi.fields.get('System.AreaPath', ''),
+                'reason': wi.fields.get('System.Reason', ''),
+                'iteration': wi.fields.get('System.IterationPath', ''),
+                'updated_on': wi.fields.get('System.ChangedDate', ''),
+                'attachment_ids': [rel.url.split('/')[-1] for rel in wi.relations or [] if rel.rel == 'AttachedFile']
+            })
+
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        for attachment_id in document.metadata.get('attachment_ids', []):
+            content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
+            content = ''.join(str(item) for item in content_generator)
+            yield Document(page_content=content, metadata={'id': attachment_id})
+
+    def _index_tool_params(self):
+        """Return the parameters for indexing data."""
+        return {
+            "wiql": (str, Field(description="WIQL (Work Item Query Language) query string to select and filter Azure DevOps work items."))
+        }
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         """Return a list of available tools."""
         return [

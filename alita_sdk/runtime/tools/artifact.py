@@ -1,13 +1,13 @@
 import hashlib
 import json
+from typing import Any, Optional, Generator, List
 
-from alita_sdk.tools.chunkers import markdown_chunker
-from alita_sdk.tools.elitea_base import BaseToolApiWrapper, BaseVectorStoreToolApiWrapper, extend_with_vector_tools, \
-    BaseIndexParams
-from langchain_core.tools import ToolException
-from typing import Any, Optional, Generator, Dict, List
-from pydantic import SecretStr, create_model, Field, model_validator
 from langchain_core.documents import Document
+from langchain_core.tools import ToolException
+from pydantic import create_model, Field, model_validator
+
+from alita_sdk.tools.elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 except ImportError:
@@ -17,13 +17,6 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
     client: Any
     bucket: str
     artifact: Optional[Any] = None
-
-    llm: Any = None
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
     
     @model_validator(mode='before')
     @classmethod
@@ -68,17 +61,7 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
     def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
         return self.artifact.client.create_bucket(bucket_name, expiration_measure, expiration_value)
 
-    def index_data(self,
-                   collection_suffix: str = '',
-                   progress_step: int = None,
-                   clean_index: bool = False):
-        """Load files content into the vector store."""
-        docs = self._base_loader()
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
-
-    def _base_loader(self) -> List[Document]:
+    def _base_loader(self, **kwargs) -> List[Document]:
         try:
             all_files = self.list_files(self.bucket, False)
         except Exception as e:
@@ -101,15 +84,6 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
         return hasher.hexdigest()
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        config = {
-            "max_tokens": self.llm.model_config.get('max_tokens', 512),
-            "token_overlap": self.llm.model_config.get('token_overlap',
-                                                       int(self.llm.model_config.get('max_tokens', 512) * 0.05))
-        }
-        chunks = markdown_chunker(file_content_generator=self._generate_file_content(document), config=config)
-        yield from chunks
-
-    def _generate_file_content(self, document: Document) -> Generator[Document, None, None]:
         page_content = self.read_file(document.metadata['name'], is_capture_image=True, excel_by_sheets=True)
         if isinstance(page_content, dict):
             for key, value in page_content.items():
@@ -207,19 +181,6 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
                                                                          "Possible values: `days`, `weeks`, `months`, `years`.",
                                                              default="weeks")),
                     expiration_value=(Optional[int], Field(description="Expiration time values.", default=1))
-                )
-            },
-            {
-                "name": "index_data",
-                "ref": self.index_data,
-                "description": "Load files content into the vector store.",
-                "args_schema": create_model(
-                    "indexData",
-                    __base__=BaseIndexParams,
-                    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
-                         description="Optional step size for progress reporting during indexing")),
-                    clean_index=(Optional[bool], Field(default=False,
-                       description="Optional flag to enforce clean existing index before indexing new data")),
                 )
             }
         ]
