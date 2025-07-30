@@ -20,7 +20,14 @@ def get_tools(tool):
         client_secret=tool['settings'].get('client_secret', None),
         limit=tool['settings'].get('limit', 20),
         verify_ssl=tool['settings'].get('verify_ssl', True),
-        toolkit_name=tool.get('toolkit_name')
+        toolkit_name=tool.get('toolkit_name'),
+
+        # indexer settings
+        connection_string=tool['settings'].get('connection_string', None),
+        collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
+        embedding_model="HuggingFaceEmbeddings",
+        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        vectorstore_type="PGVector"
     ).get_tools()
 
 
