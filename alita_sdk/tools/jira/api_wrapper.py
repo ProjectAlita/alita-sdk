@@ -419,13 +419,6 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
     _image_cache: ImageDescriptionCache = PrivateAttr(default_factory=lambda: ImageDescriptionCache(max_size=50))
     issue_search_pattern: str = r'/rest/api/\d+/search'
 
-    llm: Any = None
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
-
     @model_validator(mode='before')
     @classmethod
     def validate_toolkit(cls, values):
@@ -1255,6 +1248,9 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
         include_attachments = kwargs.get('include_attachments', False)
         max_total_issues = kwargs.get('max_total_issues', 1000)
 
+        # set values for skipped attachment extensions
+        self._skipped_attachment_extensions = kwargs.get('skip_attachment_extensions', [])
+
         try:
             # Prepare fields to extract
             DEFAULT_FIELDS = ['status', 'summary', 'reporter', 'description', 'created', 'updated', 'assignee', 'project', 'issuetype']
@@ -1428,75 +1424,75 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error processing issue {issue.get('key', 'unknown')}: {str(e)}")
             return None
 
-    def index_data(self,
-                   jql: Optional[str] = None,
-                   fields_to_extract: Optional[List[str]] = None,
-                   fields_to_index: Optional[List[str]] = None,
-                   include_attachments: Optional[bool] = False,
-                   max_total_issues: Optional[int] = 1000,
-                   skip_attachment_extensions: Optional[List[str]] = None,
-                   collection_suffix: str = "",
-                   progress_step: Optional[int] = None,
-                   clean_index: Optional[bool] = False):
-        """
-        Index Jira issues into the vector store.
-
-        Args:
-            jql: JQL query to filter issues. If not provided, all accessible issues will be indexed
-            fields_to_extract: Additional fields to extract from issues
-            fields_to_index: Additional fields to include in indexed content
-            include_attachments: Whether to include attachment content in indexing
-            max_total_issues: Maximum number of issues to index
-            skip_attachment_extensions: Comma-separated list of file extensions to skip when processing attachments
-            collection_suffix: Optional suffix for collection name (max 7 characters)
-            progress_step: Optional step size for progress reporting during indexing
-            clean_index: Optional flag to enforce clean existing index before indexing new data
-
-        Returns:
-            Result message from the vector store indexing operation
-        """
-        try:
-            # Validate that at least one filter is provided
-            if not any([jql]):
-                raise ToolException("Must provide at least one of: jql to filter issues for indexing")
-
-            # set extensions to skip for post-processing
-            self._skipped_attachment_extensions = skip_attachment_extensions if skip_attachment_extensions else []
-
-            # Get embeddings
-            from ...runtime.langchain.interfaces.llm_processor import get_embeddings
-            embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-
-            # Initialize vector store
-            vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-
-            # Prepare parameters for the loader
-            loader_params = {
-                'jql': jql,
-                'fields_to_extract': fields_to_extract,
-                'fields_to_index': fields_to_index,
-                'include_attachments': include_attachments,
-                'max_total_issues': max_total_issues,
-                'skip_attachment_extensions': skip_attachment_extensions,
-            }
-
-            # Load documents using _base_loader
-            docs = self._base_loader(**loader_params)
-
-            if not docs:
-                return "No Jira issues found matching the specified criteria."
-
-            docs = list(docs)  # Convert generator to list for logging and indexing
-            logger.info(f"Loaded {len(docs)} Jira issues for indexing")
-
-            # Index the documents
-            result = vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
-
-            return f"Successfully indexed {len(docs)} Jira issues. {result}"
-
-        except Exception as e:
-            logger.error(f"Error indexing Jira issues: {str(e)}")
-            raise ToolException(f"Error indexing Jira issues: {str(e)}")
+    # def index_data(self,
+    #                jql: Optional[str] = None,
+    #                fields_to_extract: Optional[List[str]] = None,
+    #                fields_to_index: Optional[List[str]] = None,
+    #                include_attachments: Optional[bool] = False,
+    #                max_total_issues: Optional[int] = 1000,
+    #                skip_attachment_extensions: Optional[List[str]] = None,
+    #                collection_suffix: str = "",
+    #                progress_step: Optional[int] = None,
+    #                clean_index: Optional[bool] = False):
+    #     """
+    #     Index Jira issues into the vector store.
+    #
+    #     Args:
+    #         jql: JQL query to filter issues. If not provided, all accessible issues will be indexed
+    #         fields_to_extract: Additional fields to extract from issues
+    #         fields_to_index: Additional fields to include in indexed content
+    #         include_attachments: Whether to include attachment content in indexing
+    #         max_total_issues: Maximum number of issues to index
+    #         skip_attachment_extensions: Comma-separated list of file extensions to skip when processing attachments
+    #         collection_suffix: Optional suffix for collection name (max 7 characters)
+    #         progress_step: Optional step size for progress reporting during indexing
+    #         clean_index: Optional flag to enforce clean existing index before indexing new data
+    #
+    #     Returns:
+    #         Result message from the vector store indexing operation
+    #     """
+    #     try:
+    #         # Validate that at least one filter is provided
+    #         if not any([jql]):
+    #             raise ToolException("Must provide at least one of: jql to filter issues for indexing")
+    #
+    #         # set extensions to skip for post-processing
+    #         self._skipped_attachment_extensions = skip_attachment_extensions if skip_attachment_extensions else []
+    #
+    #         # Get embeddings
+    #         from ...runtime.langchain.interfaces.llm_processor import get_embeddings
+    #         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+    #
+    #         # Initialize vector store
+    #         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+    #
+    #         # Prepare parameters for the loader
+    #         loader_params = {
+    #             'jql': jql,
+    #             'fields_to_extract': fields_to_extract,
+    #             'fields_to_index': fields_to_index,
+    #             'include_attachments': include_attachments,
+    #             'max_total_issues': max_total_issues,
+    #             'skip_attachment_extensions': skip_attachment_extensions,
+    #         }
+    #
+    #         # Load documents using _base_loader
+    #         docs = self._base_loader(**loader_params)
+    #
+    #         if not docs:
+    #             return "No Jira issues found matching the specified criteria."
+    #
+    #         docs = list(docs)  # Convert generator to list for logging and indexing
+    #         logger.info(f"Loaded {len(docs)} Jira issues for indexing")
+    #
+    #         # Index the documents
+    #         result = vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+    #
+    #         return f"Successfully indexed {len(docs)} Jira issues. {result}"
+    #
+    #     except Exception as e:
+    #         logger.error(f"Error indexing Jira issues: {str(e)}")
+    #         raise ToolException(f"Error indexing Jira issues: {str(e)}")
 
     @extend_with_vector_tools
     def get_available_tools(self):
@@ -1584,12 +1580,6 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
                 "description": self.get_attachments_content.__doc__,
                 "args_schema": GetRemoteLinks,
                 "ref": self.get_attachments_content,
-            },
-            {
-                "name": "index_data",
-                "description": self.index_data.__doc__,
-                "args_schema": JiraIndexData,
-                "ref": self.index_data,
             },
             {
                 "name": "execute_generic_rq",

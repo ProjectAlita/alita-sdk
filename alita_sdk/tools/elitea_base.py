@@ -215,6 +215,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
         """
         Returns a list of fields for index_data args schema.
+        NOTE: override this method in subclasses to provide specific parameters for certain toolkit.
         """
         return {}
 
@@ -246,7 +247,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def get_index_data_tool(self):
         return {
             "name": "index_data",
-            "ref": self._run_index_data_tool,
+            "ref": self.index_data,
             "description": "Loads data to index.",
             "args_schema": create_model(
                 "IndexData",
@@ -255,7 +256,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             )
         }
 
-    def _run_index_data_tool(self, **kwargs):
+    def index_data(self, **kwargs):
         from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
         docs = self._base_loader(**kwargs)
         #

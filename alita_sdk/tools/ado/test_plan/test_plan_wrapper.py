@@ -184,13 +184,6 @@ class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
     limit: Optional[int] = 5
     _client: Optional[TestPlanClient] = PrivateAttr()
 
-    llm: Any = None
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
-
     class Config:
         arbitrary_types_allowed = True
 
