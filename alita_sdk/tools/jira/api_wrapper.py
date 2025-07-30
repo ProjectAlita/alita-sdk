@@ -126,19 +126,6 @@ GetCommentsWithImageDescriptions = create_model(
     context_radius=(Optional[int], Field(description="Number of characters to include before and after each image for context. Default is 500", default=500))
 )
 
-JiraIndexData = create_model(
-    "JiraIndexData",
-    jql=(Optional[str], Field(description="JQL query to filter issues. If not provided, all accessible issues will be indexed. Examples: 'project=PROJ', 'parentEpic=EPIC-123', 'status=Open'", default=None)),
-    fields_to_extract=(Optional[List[str]], Field(description="Additional fields to extract from issues", default=None)),
-    fields_to_index=(Optional[List[str]], Field(description="Additional fields to include in indexed content", default=None)),
-    include_attachments=(Optional[bool], Field(description="Whether to include attachment content in indexing", default=False)),
-    max_total_issues=(Optional[int], Field(description="Maximum number of issues to index", default=1000)),
-    skip_attachment_extensions=(Optional[str], Field(description="Comma-separated list of file extensions to skip when processing attachments", default=None)),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-    progress_step=(Optional[int], Field(default=None, ge=0, le=100, description="Optional step size for progress reporting during indexing")),
-    clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
-)
-
 GetRemoteLinks = create_model(
     "GetRemoteLinksModel",
     jira_issue_key=(str, Field(description="Jira issue key from which remote links will be extracted, e.g. TEST-1234"))
@@ -1250,6 +1237,7 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
 
         # set values for skipped attachment extensions
         self._skipped_attachment_extensions = kwargs.get('skip_attachment_extensions', [])
+        self._included_fields = fields_to_extract.copy() if fields_to_extract else []
 
         try:
             # Prepare fields to extract
@@ -1423,6 +1411,24 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             logger.error(f"Error processing issue {issue.get('key', 'unknown')}: {str(e)}")
             return None
+
+    def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
+        return {
+            'jql': (Optional[str], Field(
+                description="JQL query to filter issues. If not provided, all accessible issues will be indexed. Examples: 'project=PROJ', 'parentEpic=EPIC-123', 'status=Open'",
+                default=None)),
+            'fields_to_extract': (Optional[List[str]],
+                                  Field(description="Additional fields to extract from issues", default=None)),
+            'fields_to_index': (Optional[List[str]],
+                                Field(description="Additional fields to include in indexed content", default=None)),
+            'include_attachments': (Optional[bool],
+                                    Field(description="Whether to include attachment content in indexing",
+                                          default=False)),
+            'max_total_issues': (Optional[int], Field(description="Maximum number of issues to index", default=1000)),
+            'skip_attachment_extensions': (Optional[str], Field(
+                description="Comma-separated list of file extensions to skip when processing attachments",
+                default=None)),
+        }
 
     # def index_data(self,
     #                jql: Optional[str] = None,
