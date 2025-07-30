@@ -1,4 +1,3 @@
-import shortuuid
 import re
 import logging
 import requests
@@ -17,7 +16,7 @@ from langchain_core.messages import HumanMessage
 from markdownify import markdownify
 from langchain_community.document_loaders.confluence import ContentFormat
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams
+from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from ..llm.img_utils import ImageDescriptionCache
 from ..utils import is_cookie_token, parse_cookie_string
 
@@ -139,50 +138,6 @@ pageId = create_model(
         description="Required parameter: The relative URI for Confluence API. URI must start with a forward slash and '/rest/...'. Do not include query parameters in the URL, they must be provided separately in 'params'.")),
     params=(Optional[str], Field(default="",
                                  description="Optional JSON of parameters to be sent in request body or query params. MUST be string with valid JSON. For search/read operations, you MUST always get minimum fields and set max results, until users ask explicitly for more fields. For search/read operations you must generate CQL query string and pass it as params."))
-)
-
-# loaderParams = create_model(
-#     "LoaderParams",
-#     content_format=(str, Field(description="The format of the content to be retrieved.")),
-#     page_ids=(Optional[List[str]], Field(description="List of page IDs to retrieve.", default=None)),
-#     label=(Optional[str], Field(description="Label to filter pages.", default=None)),
-#     cql=(Optional[str], Field(description="CQL query to filter pages.", default=None)),
-#     include_restricted_content=(Optional[bool], Field(description="Include restricted content.", default=False)),
-#     include_archived_content=(Optional[bool], Field(description="Include archived content.", default=False)),
-#     include_attachments=(Optional[bool], Field(description="Include attachments.", default=False)),
-#     include_comments=(Optional[bool], Field(description="Include comments.", default=False)),
-#     include_labels=(Optional[bool], Field(description="Include labels.", default=False)),
-#     limit=(Optional[int], Field(description="Limit the number of results.", default=10)),
-#     max_pages=(Optional[int], Field(description="Maximum number of pages to retrieve.", default=1000)),
-#     ocr_languages=(Optional[str], Field(description="OCR languages for processing attachments.", default=None)),
-#     keep_markdown_format=(Optional[bool], Field(description="Keep the markdown format.", default=True)),
-#     keep_newlines=(Optional[bool], Field(description="Keep newlines in the content.", default=True)),
-#     bins_with_llm=(Optional[bool], Field(description="Use LLM for processing binary files.", default=False)),
-# )
-
-indexPagesParams = create_model(
-    "indexPagesParams",
-    __base__=BaseIndexParams,
-    content_format=(Literal['view', 'storage', 'export_view', 'editor', 'anonymous'],
-                    Field(description="The format of the content to be retrieved.")),
-    ### Loader Parameters
-    page_ids=(Optional[List[str]], Field(description="List of page IDs to retrieve.", default=None)),
-    label=(Optional[str], Field(description="Label to filter pages.", default=None)),
-    cql=(Optional[str], Field(description="CQL query to filter pages.", default=None)),
-    limit=(Optional[int], Field(description="Limit the number of results.", default=10)),
-    max_pages=(Optional[int], Field(description="Maximum number of pages to retrieve.", default=1000)),
-    include_restricted_content=(Optional[bool], Field(description="Include restricted content.", default=False)),
-    include_archived_content=(Optional[bool], Field(description="Include archived content.", default=False)),
-    include_attachments=(Optional[bool], Field(description="Include attachments.", default=False)),
-    include_comments=(Optional[bool], Field(description="Include comments.", default=False)),
-    include_labels=(Optional[bool], Field(description="Include labels.", default=True)),
-    ocr_languages=(Optional[str], Field(description="OCR languages for processing attachments.", default='eng')),
-    keep_markdown_format=(Optional[bool], Field(description="Keep the markdown format.", default=True)),
-    keep_newlines=(Optional[bool], Field(description="Keep newlines in the content.", default=True)),
-    bins_with_llm=(Optional[bool], Field(description="Use LLM for processing binary files.", default=False)),
-    ### Chunking Parameters
-    chunking_tool=(Literal['markdown', 'statistical', 'proposal'], Field(description="Name of chunking tool", default="markdown")),
-    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 
 GetPageWithImageDescriptions = create_model(
@@ -849,7 +804,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             docs.extend(batch)
         return docs[:max_pages]
 
-    def _loader(self, **kwargs) -> Generator[str, None, None]:
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         """
         Loads content from Confluence based on parameters.
         Returns:
@@ -858,7 +813,15 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         from .loader import AlitaConfluenceLoader
         from copy import copy
         content_format = kwargs.get('content_format', 'view').lower()
+        base_params = {
+            'url': self.base_url,
+            'space_key': self.space,
+            'min_retry_seconds': self.min_retry_seconds,
+            'max_retry_seconds': self.max_retry_seconds,
+            'number_of_retries': self.number_of_retries
+        }
         confluence_loader_params = copy(kwargs)
+        confluence_loader_params.update(base_params)
         mapping = {
             'view': ContentFormat.VIEW,
             'storage': ContentFormat.STORAGE,
@@ -878,86 +841,9 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         for document in loader._lazy_load(kwargs={}):
             yield document
 
-    def index_data(self, content_format: str,
-                    collection_suffix: str = "",
-                    page_ids: Optional[List[str]] = None,
-                    label: Optional[str] = None,
-                    cql: Optional[str] = None,
-                    include_restricted_content: Optional[bool] = False,
-                    include_archived_content: Optional[bool] = False,
-                    include_attachments: Optional[bool] = False,
-                    include_comments: Optional[bool] = False,
-                    include_labels: Optional[bool] = False,
-                    limit: Optional[int] = 10,
-                    max_pages: Optional[int] = 10,
-                    keep_markdown_format: Optional[bool] = True,
-                    keep_newlines: Optional[bool] = True,
-                    bins_with_llm: bool = False,
-                    chunking_tool: str = "markdown",
-                    chunking_config: Optional[Dict[str, Any]] = None,
-                    **kwargs) -> Generator[str, None, None]:
-        """Load Confluence pages and index them in the vector store."""
-
-        from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
-        try:
-            from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
-        except ImportError:
-            from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-
-        loader_params = {
-            'url': self.base_url,
-            'space_key': self.space,
-            'content_format': content_format,
-            'page_ids': page_ids,
-            'label': label,
-            'cql': cql,
-            'include_restricted_content': include_restricted_content,
-            'include_archived_content': include_archived_content,
-            'include_attachments': include_attachments,
-            'include_comments': include_comments,
-            'include_labels': include_labels,
-            'limit': limit,
-            'max_pages': max_pages,
-            'keep_markdown_format': keep_markdown_format,
-            'keep_newlines': keep_newlines,
-            'bins_with_llm': bins_with_llm,
-            'min_retry_seconds': self.min_retry_seconds,
-            'max_retry_seconds': self.max_retry_seconds,
-            'number_of_retries': self.number_of_retries
-        }
-        documents = self._loader(**loader_params)
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-
-        chunker = chunkers.get(chunking_tool)
-
-        chunking_config = chunking_config or {}
-
-        if chunker:
-            # Validate and prepare chunking configuration using Pydantic models
-            config_model = models.get(chunking_tool)
-            if config_model:
-                # Set required fields that should come from the instance
-                chunking_config['embedding'] = embedding
-                chunking_config['llm'] = self.llm
-
-                try:
-                    # Validate the configuration using the appropriate Pydantic model
-                    validated_config = config_model(**chunking_config)
-                    chunking_config = validated_config.model_dump()
-                except Exception as e:
-                    logger.error(f"Invalid chunking configuration for {chunking_tool}: {e}")
-                    raise ToolException(f"Invalid chunking configuration: {e}")
-            else:
-                # Fallback for chunkers without models
-                chunking_config['embedding'] = embedding
-                chunking_config['llm'] = self.llm
-
-            documents = chunker(documents, chunking_config)
-
-        # passing embedding to avoid re-initialization
-        vectorstore = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vectorstore.index_documents(documents)
-
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        for attachment in self.get_page_attachments(document.metadata.get('id')):
+            yield Document(page_content=attachment.get('content', ''), metadata=attachment.get('metadata', {}))
 
     def _download_image(self, image_url):
         """
@@ -1685,6 +1571,28 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error retrieving attachments for page {page_id}: {str(e)}")
             return f"Error retrieving attachments: {str(e)}"
 
+    def _index_tool_params(self):
+        """Return the parameters for indexing data."""
+        return {
+            "content_format": (Literal['view', 'storage', 'export_view', 'editor', 'anonymous'],
+                            Field(description="The format of the content to be retrieved.")),
+            "page_ids": (Optional[List[str]], Field(description="List of page IDs to retrieve.", default=None)),
+            "label": (Optional[str], Field(description="Label to filter pages.", default=None)),
+            "cql": (Optional[str], Field(description="CQL query to filter pages.", default=None)),
+            "limit": (Optional[int], Field(description="Limit the number of results.", default=10)),
+            "max_pages": (Optional[int], Field(description="Maximum number of pages to retrieve.", default=1000)),
+            "include_restricted_content": (Optional[bool], Field(description="Include restricted content.", default=False)),
+            "include_archived_content": (Optional[bool], Field(description="Include archived content.", default=False)),
+            "include_attachments": (Optional[bool], Field(description="Include attachments.", default=False)),
+            "include_comments": (Optional[bool], Field(description="Include comments.", default=False)),
+            "include_labels": (Optional[bool], Field(description="Include labels.", default=True)),
+            "ocr_languages": (Optional[str], Field(description="OCR languages for processing attachments.", default='eng')),
+            "keep_markdown_format": (Optional[bool], Field(description="Keep the markdown format.", default=True)),
+            "keep_newlines": (Optional[bool], Field(description="Keep newlines in the content.", default=True)),
+            "bins_with_llm": (Optional[bool], Field(description="Use LLM for processing binary files.", default=False)),
+        }
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         # Confluence-specific tools
         confluence_tools = [
@@ -1795,13 +1703,6 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                 "ref": self.get_page_id_by_title,
                 "description": self.get_page_id_by_title.__doc__,
                 "args_schema": getPageIdByTitleInput,
-            },
-            # Confluence-specific vector store indexing
-            {
-                "name": "index_data",
-                "ref": self.index_data,
-                "description": self.index_data.__doc__,
-                "args_schema": indexPagesParams,
             },
             {
                 "name": "get_page_attachments",
