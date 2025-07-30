@@ -71,7 +71,14 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 client=alita_client,
                 bucket=tool['settings']['bucket'],
                 toolkit_name=tool.get('toolkit_name', ''),
-                selected_tools=tool['settings'].get('selected_tools', [])
+                selected_tools=tool['settings'].get('selected_tools', []),
+                llm=tool['settings'].get('llm'),
+                # indexer settings
+                connection_string=tool['settings'].get('connection_string', None),
+                collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
+                embedding_model="HuggingFaceEmbeddings",
+                embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+                vectorstore_type="PGVector"
             ).get_tools())
         elif tool['type'] == 'vectorstore':
             tools.extend(VectorStoreToolkit.get_toolkit(

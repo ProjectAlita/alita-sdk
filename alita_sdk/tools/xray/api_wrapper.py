@@ -160,9 +160,9 @@ def _parse_tests(test_results) -> List[Any]:
 class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
     _default_base_url: str = 'https://xray.cloud.getxray.app'
     base_url: str = ""
-    client_id: str = None,
-    client_secret: SecretStr = None,
-    limit: Optional[int] = 100,
+    client_id: str = None
+    client_secret: SecretStr = None
+    limit: Optional[int] = 100
     _client: Optional[GraphqlClient] = PrivateAttr()
     _auth_token: Optional[str] = PrivateAttr(default=None)
 

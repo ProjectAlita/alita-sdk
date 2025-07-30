@@ -1,17 +1,15 @@
 import json
 import logging
-from typing import Optional, List, Dict, Any, Generator
+from typing import Optional, List, Generator
 
-from ..chunkers import markdown_chunker
-from ..utils.content_parser import parse_file_content
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
-from ..elitea_base import BaseToolApiWrapper, BaseIndexParams, BaseVectorStoreToolApiWrapper, extend_with_vector_tools
-from ...runtime.langchain.interfaces.llm_processor import get_embeddings
-from langchain_core.documents import Document
+from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from ..utils.content_parser import parse_file_content
 
 NoInput = create_model(
     "NoInput"
@@ -39,15 +37,6 @@ ReadDocument = create_model(
                         default=None))
 )
 
-indexData = create_model(
-    "indexData",
-    __base__=BaseIndexParams,
-    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
-                         description="Optional step size for progress reporting during indexing")),
-    clean_index=(Optional[bool], Field(default=False,
-                       description="Optional flag to enforce clean existing index before indexing new data")),
-)
-
 
 class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
     site_url: str
@@ -55,13 +44,6 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
     client_secret: SecretStr = None
     token: SecretStr = None
     _client: Optional[ClientContext] = PrivateAttr()  # Private attribute for the office365 client
-
-    llm: Any = None
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
 
     @model_validator(mode='before')
     @classmethod
@@ -166,7 +148,7 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                                   excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
 
-    def _base_loader(self) -> List[Document]:
+    def _base_loader(self, **kwargs) -> List[Document]:
         try:
             all_files = self.get_files_list()
         except Exception as e:
@@ -181,26 +163,7 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
             docs.append(Document(page_content="", metadata=metadata))
         return docs
 
-    def index_data(self,
-                   collection_suffix: str = '',
-                   progress_step: int = None,
-                   clean_index: bool = False):
-        """Load files content into the vector store."""
-        docs = self._base_loader()
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
-
-    def _process_document(self, document: Document, chunker = None) -> Generator[Document, None, None]:
-        config = {
-            "max_tokens": self.llm.model_config.get('max_tokens', 512),
-            "token_overlap": self.llm.model_config.get('token_overlap',
-                                                       int(self.llm.model_config.get('max_tokens', 512) * 0.05)),
-        }
-        chunks = markdown_chunker(file_content_generator=self._generate_file_content(document), config=config)
-        yield from chunks
-
-    def _generate_file_content(self, document: Document) -> Generator[Document, None, None]:
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
         page_content = self.read_file(document.metadata['Path'], is_capture_image=True, excel_by_sheets=True)
         if isinstance(page_content, dict):
             for key, value in page_content.items():
@@ -231,11 +194,5 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                 "description": self.read_file.__doc__,
                 "args_schema": ReadDocument,
                 "ref": self.read_file
-            },
-            {
-                "name": "index_data",
-                "ref": self.index_data,
-                "description": self.index_data.__doc__,
-                "args_schema": indexData,
             }
         ]

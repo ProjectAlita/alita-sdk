@@ -37,6 +37,10 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
             token=(SecretStr, Field(description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
             limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+            # indexer settings
+            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                            default=None,
+                                                            json_schema_extra={'secret': True})),
             __config__={
                 'json_schema_extra': {
                     'metadata': {

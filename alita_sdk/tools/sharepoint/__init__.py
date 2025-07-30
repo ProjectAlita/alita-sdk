@@ -15,7 +15,13 @@ def get_tools(tool):
         client_id=tool['settings'].get('client_id', None),
         client_secret=tool['settings'].get('client_secret', None),
         toolkit_name=tool.get('toolkit_name'),
-        llm=tool['settings'].get('llm'))
+        llm=tool['settings'].get('llm'),
+        # indexer settings
+        connection_string=tool['settings'].get('connection_string', None),
+        collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
+        embedding_model="HuggingFaceEmbeddings",
+        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        vectorstore_type="PGVector")
             .get_tools())
 
 
@@ -33,6 +39,10 @@ class SharepointToolkit(BaseToolkit):
             client_id=(str, Field(description="Client ID")),
             client_secret=(SecretStr, Field(description="Client Secret", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+            # indexer settings
+            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                            default=None,
+                                                            json_schema_extra={'secret': True})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Sharepoint", "icon_url": "sharepoint.svg",

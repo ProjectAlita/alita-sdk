@@ -4,17 +4,20 @@ import re
 import traceback
 from json import JSONDecodeError
 from traceback import format_exc
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Generator
 import os
 
 from atlassian import Jira
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
 import requests
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from ..llm.img_utils import ImageDescriptionCache
 from ..utils import is_cookie_token, parse_cookie_string
+from ..utils.content_parser import parse_file_content, load_content_from_bytes
+from ...runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +124,19 @@ GetCommentsWithImageDescriptions = create_model(
     jira_issue_key=(str, Field(description="Jira issue key from which comments with images will be extracted, e.g. TEST-1234")),
     prompt=(Optional[str], Field(description="Custom prompt to use for image description generation. If not provided, a default prompt will be used", default=None)),
     context_radius=(Optional[int], Field(description="Number of characters to include before and after each image for context. Default is 500", default=500))
+)
+
+JiraIndexData = create_model(
+    "JiraIndexData",
+    jql=(Optional[str], Field(description="JQL query to filter issues. If not provided, all accessible issues will be indexed. Examples: 'project=PROJ', 'parentEpic=EPIC-123', 'status=Open'", default=None)),
+    fields_to_extract=(Optional[List[str]], Field(description="Additional fields to extract from issues", default=None)),
+    fields_to_index=(Optional[List[str]], Field(description="Additional fields to include in indexed content", default=None)),
+    include_attachments=(Optional[bool], Field(description="Whether to include attachment content in indexing", default=False)),
+    max_total_issues=(Optional[int], Field(description="Maximum number of issues to index", default=1000)),
+    skip_attachment_extensions=(Optional[str], Field(description="Comma-separated list of file extensions to skip when processing attachments", default=None)),
+    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100, description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
 )
 
 GetRemoteLinks = create_model(
@@ -388,7 +404,7 @@ def process_search_response(jira_url, response, payload_params: Dict[str, Any] =
 
     return str(processed_issues)
 
-class JiraApiWrapper(BaseToolApiWrapper):
+class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
     base_url: str
     api_version: Optional[str] = "2",
     api_key: Optional[SecretStr] = None,
@@ -402,7 +418,13 @@ class JiraApiWrapper(BaseToolApiWrapper):
     _client: Jira = PrivateAttr()
     _image_cache: ImageDescriptionCache = PrivateAttr(default_factory=lambda: ImageDescriptionCache(max_size=50))
     issue_search_pattern: str = r'/rest/api/\d+/search'
+
     llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
 
     @model_validator(mode='before')
     @classmethod
@@ -1061,7 +1083,7 @@ class JiraApiWrapper(BaseToolApiWrapper):
             def process_image_match(match):
                 """Process each image reference and get its contextual description"""
                 image_ref = match.group(1)
-                full_match = match.group(0)  # The complete image reference with markers
+                full_match = match.group(0) # The complete image reference with markers
 
                 logger.info(f"Processing image reference: {image_ref} (full match: {full_match})")
 
@@ -1221,6 +1243,262 @@ class JiraApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error processing comments with images: {stacktrace}")
             return f"Error processing comments with images: {str(e)}"
 
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
+        """
+        Base loader for Jira issues, used to load issues as documents.
+        Uses the existing Jira client instance to fetch and process issues.
+        """
+        # Extract parameters from kwargs
+        jql = kwargs.get('jql')
+        fields_to_extract = kwargs.get('fields_to_extract')
+        fields_to_index = kwargs.get('fields_to_index')
+        include_attachments = kwargs.get('include_attachments', False)
+        max_total_issues = kwargs.get('max_total_issues', 1000)
+
+        try:
+            # Prepare fields to extract
+            DEFAULT_FIELDS = ['status', 'summary', 'reporter', 'description', 'created', 'updated', 'assignee', 'project', 'issuetype']
+            fields = DEFAULT_FIELDS.copy()
+
+            if fields_to_extract:
+                fields.extend(fields_to_extract)
+
+            if include_attachments:
+                fields.append('attachment')
+
+            # Use provided JQL query or default to all issues
+            if not jql:
+                jql_query = "ORDER BY updated DESC"  # Default to get all issues ordered by update time
+            else:
+                jql_query = jql
+
+            # Remove duplicates and prepare fields
+            final_fields = ','.join({field.lower() for field in fields})
+
+            # Fetch issues using the existing Jira client
+            issue_generator = self._jql_get_tickets(
+                jql_query,
+                fields=final_fields,
+                limit=max_total_issues
+            )
+
+            # Process each batch of issues
+            for issues_batch in issue_generator:
+                for issue in issues_batch:
+                    issue_doc = self._process_issue_for_indexing(
+                        issue,
+                        fields_to_index
+                    )
+                    if issue_doc:
+                        yield issue_doc
+
+        except Exception as e:
+            logger.error(f"Error loading Jira issues: {str(e)}")
+            raise ToolException(f"Unable to load Jira issues: {str(e)}")
+
+    def _process_document(self, base_document: Document) -> Generator[Document, None, None]:
+        """
+        Process a base document to extract and index Jira issues extra fields: comments, attachments, etc..
+        """
+
+        issue_key = base_document.metadata.get('issue_key')
+        # get attachments content
+
+        issue = self._client.issue(issue_key, fields="attachment")
+        attachments = issue.get('fields', {}).get('attachment', [])
+        for attachment in attachments:
+            # get extension
+            ext = f".{attachment['filename'].split('.')[-1].lower()}"
+            if ext not in self._skipped_attachment_extensions:
+                attachment_id = f"attach_{attachment['id']}"
+                base_document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
+                try:
+                    attachment_content = self._client.get_attachment_content(attachment['id'])
+                except Exception as e:
+                    logger.error(f"Failed to download attachment {attachment['filename']} for issue {issue_key}: {str(e)}")
+                    attachment_content = self._client.get(path=f"secure/attachment/{attachment['id']}/{attachment['filename']}", not_json_response=True)
+                content = load_content_from_bytes(attachment_content, ext, llm=self.llm) if ext not in '.pdf' \
+                    else parse_file_content(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True)
+                if not content:
+                    continue
+                yield Document(page_content=content,
+                               metadata={
+                                   'id': attachment_id,
+                                   'issue_key': issue_key,
+                                   'source': f"{self.base_url}/browse/{issue_key}",
+                                   'filename': attachment['filename'],
+                                   'created': attachment['created'],
+                                   'mimeType': attachment['mimeType'],
+                                   'author': attachment.get('author', {}).get('name'),
+                                   IndexerKeywords.PARENT.value: base_document.metadata.get('id', None),
+                                   'type': 'attachment',
+                               })
+
+    def _jql_get_tickets(self, jql, fields="*all", start=0, limit=None, expand=None, validate_query=None):
+        """
+        Generator that yields batches of Jira issues based on JQL query.
+        """
+        from atlassian.errors import ApiError
+
+        params = {}
+        if limit is not None:
+            params["maxResults"] = int(limit)
+        if fields is not None:
+            if isinstance(fields, (list, tuple, set)):
+                fields = ",".join(fields)
+            params["fields"] = fields
+        if jql is not None:
+            params["jql"] = jql
+        if expand is not None:
+            params["expand"] = expand
+        if validate_query is not None:
+            params["validateQuery"] = validate_query
+
+        url = self._client.resource_url("search")
+
+        while True:
+            params["startAt"] = int(start)
+            try:
+                response = self._client.get(url, params=params)
+                if not response:
+                    break
+            except ApiError as e:
+                error_message = f"Jira API error: {str(e)}"
+                raise ValueError(f"Failed to fetch issues from Jira: {error_message}")
+
+            issues = response["issues"]
+            yield issues
+            if limit is not None and len(response["issues"]) + start >= limit:
+                break
+            if not response["issues"]:
+                break
+            start += len(issues)
+
+    def _process_issue_for_indexing(self, issue: dict, fields_to_index=None) -> Document:
+        """
+        Process a single Jira issue into a Document for indexing.
+        Copied and adapted from AlitaJiraLoader logic.
+        """
+        try:
+            # Build content starting with summary
+            content = f"{issue['fields']['summary']}\n"
+
+            # Add description if present
+            description = issue['fields'].get('description', '')
+            if description:
+                content += f"{description}\n"
+            else:
+                # If no description, still create document but with minimal content
+                logger.debug(f"Issue {issue.get('key', 'unknown')} has no description")
+
+            # Add comments if present
+            if 'comment' in issue['fields'] and issue['fields']['comment'].get('comments'):
+                for comment in issue['fields']['comment']['comments']:
+                    content += f"{comment['body']}\n"
+
+            # Add additional fields to index
+            if fields_to_index:
+                for field in fields_to_index:
+                    if field in issue['fields'] and issue['fields'][field]:
+                        field_value = issue['fields'][field]
+                        # Convert complex objects to string representation
+                        if isinstance(field_value, dict):
+                            field_value = str(field_value)
+                        elif isinstance(field_value, list):
+                            field_value = ', '.join(str(item) for item in field_value)
+                        content += f"{field_value}\n"
+
+            # Create metadata
+            metadata = {
+                "id": issue["id"],
+                "issue_key": issue["key"],
+                "source": f"{self.base_url}/browse/{issue['key']}",
+                "author": issue["fields"].get("reporter", {}).get("emailAddress") if issue["fields"].get("reporter") else None,
+                "status": issue["fields"].get("status", {}).get("name") if issue["fields"].get("status") else None,
+                "updated_on": issue["fields"].get("updated"),
+                "created_on": issue["fields"].get("created"),
+                "project": issue["fields"].get("project", {}).get("key") if issue["fields"].get("project") else None,
+                "issuetype": issue["fields"].get("issuetype", {}).get("name") if issue["fields"].get("issuetype") else None,
+                "type": "jira_issue",
+            }
+
+            return Document(page_content=content, metadata=metadata)
+
+        except Exception as e:
+            logger.error(f"Error processing issue {issue.get('key', 'unknown')}: {str(e)}")
+            return None
+
+    def index_data(self,
+                   jql: Optional[str] = None,
+                   fields_to_extract: Optional[List[str]] = None,
+                   fields_to_index: Optional[List[str]] = None,
+                   include_attachments: Optional[bool] = False,
+                   max_total_issues: Optional[int] = 1000,
+                   skip_attachment_extensions: Optional[List[str]] = None,
+                   collection_suffix: str = "",
+                   progress_step: Optional[int] = None,
+                   clean_index: Optional[bool] = False):
+        """
+        Index Jira issues into the vector store.
+
+        Args:
+            jql: JQL query to filter issues. If not provided, all accessible issues will be indexed
+            fields_to_extract: Additional fields to extract from issues
+            fields_to_index: Additional fields to include in indexed content
+            include_attachments: Whether to include attachment content in indexing
+            max_total_issues: Maximum number of issues to index
+            skip_attachment_extensions: Comma-separated list of file extensions to skip when processing attachments
+            collection_suffix: Optional suffix for collection name (max 7 characters)
+            progress_step: Optional step size for progress reporting during indexing
+            clean_index: Optional flag to enforce clean existing index before indexing new data
+
+        Returns:
+            Result message from the vector store indexing operation
+        """
+        try:
+            # Validate that at least one filter is provided
+            if not any([jql]):
+                raise ToolException("Must provide at least one of: jql to filter issues for indexing")
+
+            # set extensions to skip for post-processing
+            self._skipped_attachment_extensions = skip_attachment_extensions if skip_attachment_extensions else []
+
+            # Get embeddings
+            from ...runtime.langchain.interfaces.llm_processor import get_embeddings
+            embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+
+            # Initialize vector store
+            vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+
+            # Prepare parameters for the loader
+            loader_params = {
+                'jql': jql,
+                'fields_to_extract': fields_to_extract,
+                'fields_to_index': fields_to_index,
+                'include_attachments': include_attachments,
+                'max_total_issues': max_total_issues,
+                'skip_attachment_extensions': skip_attachment_extensions,
+            }
+
+            # Load documents using _base_loader
+            docs = self._base_loader(**loader_params)
+
+            if not docs:
+                return "No Jira issues found matching the specified criteria."
+
+            docs = list(docs)  # Convert generator to list for logging and indexing
+            logger.info(f"Loaded {len(docs)} Jira issues for indexing")
+
+            # Index the documents
+            result = vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+
+            return f"Successfully indexed {len(docs)} Jira issues. {result}"
+
+        except Exception as e:
+            logger.error(f"Error indexing Jira issues: {str(e)}")
+            raise ToolException(f"Error indexing Jira issues: {str(e)}")
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {
@@ -1306,6 +1584,12 @@ class JiraApiWrapper(BaseToolApiWrapper):
                 "description": self.get_attachments_content.__doc__,
                 "args_schema": GetRemoteLinks,
                 "ref": self.get_attachments_content,
+            },
+            {
+                "name": "index_data",
+                "description": self.index_data.__doc__,
+                "args_schema": JiraIndexData,
+                "ref": self.index_data,
             },
             {
                 "name": "execute_generic_rq",

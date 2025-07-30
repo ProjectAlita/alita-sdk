@@ -2,11 +2,14 @@ import ast
 import fnmatch
 import logging
 import traceback
-from typing import Any, Optional, List, Dict, Generator
+from typing import Any, Optional, List, Literal, Dict, Generator
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, create_model, Field
+from pydantic import BaseModel, create_model, Field, SecretStr
+
+from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
+from .chunkers import markdown_chunker
 from .utils import TOOLKIT_SPLITTER
 
 logger = logging.getLogger(__name__)
@@ -96,6 +99,17 @@ BaseStepbackSearchParams = create_model(
         description="List of additional fields to include in the search results.",
         default=None
     )),
+)
+
+BaseIndexDataParams = create_model(
+    "indexData",
+    __base__=BaseIndexParams,
+    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
+    clean_index=(Optional[bool], Field(default=False,
+                       description="Optional flag to enforce clean existing index before indexing new data")),
+    chunking_tool=(Literal['markdown', 'statistical', 'proposal'], Field(description="Name of chunking tool", default="markdown")),
+    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 
 
@@ -191,12 +205,33 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
 
     doctype: str = "document"
 
-    def _base_loader(self, **kwargs) -> List[Document]:
+    llm: Any = None
+    connection_string: Optional[SecretStr] = None
+    collection_name: Optional[str] = None
+    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
+    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+    vectorstore_type: Optional[str] = "PGVector"
+
+    def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
+        """
+        Returns a list of fields for index_data args schema.
+        """
+        return {}
+
+    def _get_dependencies_chunker(self, document: Optional[Document] = None):
+        return markdown_chunker
+
+    def _get_dependencies_chunker_config(self, document: Optional[Document] = None):
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        #
+        return {'embedding': embedding, 'llm': self.llm}
+
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         """ Loads documents from a source, processes them,
         and returns a list of Document objects with base metadata: id and created_on."""
         pass
 
-    def _process_document(self, base_document: Document) -> Document:
+    def _process_document(self, base_document: Document) -> Generator[Document, None, None]:
         """ Process an existing base document to extract relevant metadata for full document preparation.
         Used for late processing of documents after we ensure that the document has to be indexed to avoid
         time-consuming operations for documents which might be useless.
@@ -207,6 +242,54 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         Returns:
             Document: The processed document with metadata."""
         pass
+
+    def get_index_data_tool(self):
+        return {
+            "name": "index_data",
+            "ref": self._run_index_data_tool,
+            "description": "Loads data to index.",
+            "args_schema": create_model(
+                "IndexData",
+                __base__=BaseIndexDataParams,
+                **self._index_tool_params() if self._index_tool_params() else {}
+            )
+        }
+
+    def _run_index_data_tool(self, **kwargs):
+        from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
+        docs = self._base_loader(**kwargs)
+        #
+        # TODO resolve chunker from document
+        chunking_tool = kwargs.get("chunking_tool")
+        if chunking_tool:
+            # Resolve chunker from the provided chunking_tool name
+            base_chunker = chunkers.get(chunking_tool)
+            # Resolve chunking configuration
+            base_chunking_config = kwargs.get("chunking_config", {})
+            config_model = models.get(chunking_tool)
+            embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+            # Set required fields that should come from the instance (and Fallback for chunkers without models)
+            base_chunking_config['embedding'] = embedding
+            base_chunking_config['llm'] = self.llm
+            #
+            if config_model:
+                try:
+                    # Validate the configuration using the appropriate Pydantic model
+                    validated_config = config_model(**base_chunking_config)
+                    base_chunking_config = validated_config.model_dump()
+                except Exception as e:
+                    logger.error(f"Invalid chunking configuration for {chunking_tool}: {e}")
+                    raise ToolException(f"Invalid chunking configuration: {e}")
+            #
+            docs = base_chunker(file_content_generator=docs, config=base_chunking_config)
+        #
+        collection_suffix = kwargs.get("collection_suffix")
+        progress_step = kwargs.get("progress_step")
+        clean_index = kwargs.get("clean_index")
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        #
+        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
 
     def _process_documents(self, documents: List[Document]) -> Generator[Document, None, None]:
         """
@@ -222,10 +305,20 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             Generator[Document, None, None]: A generator yielding processed documents with metadata.
         """
         for doc in documents:
-            processed_docs = self._process_document(doc)
-            if processed_docs:  # Only proceed if the list is not empty
-                for processed_doc in processed_docs:
-                    yield processed_doc
+            # Filter documents to process only those that either:
+            # - do not have a 'chunk_id' in their metadata, or
+            # - have 'chunk_id' explicitly set to 1.
+            # This prevents processing of irrelevant or duplicate chunks, improving efficiency.
+            chunk_id = doc.metadata.get("chunk_id")
+            if chunk_id is None or chunk_id == 1:
+                processed_docs = self._process_document(doc)
+                if processed_docs:  # Only proceed if the list is not empty
+                    for processed_doc in processed_docs:
+                        # TODO resolve chunker from processed_doc
+                        if chunker:=self._get_dependencies_chunker(processed_doc):
+                            yield from chunker(file_content_generator=iter([processed_doc]), config=self._get_dependencies_chunker_config())
+                        else:
+                            yield processed_doc
 
 
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
@@ -498,7 +591,11 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
 def extend_with_vector_tools(method):
     def wrapper(self, *args, **kwargs):
         tools = method(self, *args, **kwargs)
-        tools.extend(self._get_vector_search_tools())
+        tools.extend(self._get_vector_search_tools())        
+        #
+        if isinstance(self, BaseVectorStoreToolApiWrapper):
+            tools.append(self.get_index_data_tool())
+        #
         return tools
 
     return wrapper

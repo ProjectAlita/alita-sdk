@@ -47,6 +47,10 @@ class AlitaGitlabToolkit(BaseToolkit):
             repository=(str, Field(description="GitLab repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaGitlabToolkit.toolkit_max_length})),
             private_token=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True, 'configuration': True})),
             branch=(str, Field(description="Main branch", default="main")),
+            # indexer settings
+            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                          default=None,
+                                                          json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
