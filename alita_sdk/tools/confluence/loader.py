@@ -10,8 +10,8 @@ from langchain_community.document_loaders import ConfluenceLoader
 from langchain_community.document_loaders.confluence import ContentFormat
 from langchain_core.messages import HumanMessage
 from pdf2image import convert_from_bytes
-from reportlab.graphics import renderPM
-from svglib.svglib import svg2rlg
+# from reportlab.graphics import renderPM
+# from svglib.svglib import svg2rlg
 
 from .utils import image_to_byte_array, bytes_to_base64
 
@@ -125,6 +125,7 @@ class AlitaConfluenceLoader(ConfluenceLoader):
                     text = title + self.process_doc(absolute_url)
                 elif media_type == "application/vnd.ms-excel":
                     text = title + self.process_xls(absolute_url)
+                # TODO review usage
                 # elif media_type == "image/svg+xml":
                 #     text = title + self.process_svg(absolute_url, ocr_languages)
                 else:
@@ -192,29 +193,30 @@ class AlitaConfluenceLoader(ConfluenceLoader):
         else:
             return super().process_image(link, ocr_languages)
 
-    def process_svg(
-            self,
-            link: str,
-            ocr_languages: Optional[str] = None,
-    ) -> str:
-        if self.bins_with_llm and self.llm:
-            response = self.confluence.request(path=link, absolute=True)
-            text = ""
-
-            if (
-                    response.status_code != 200
-                    or response.content == b""
-                    or response.content is None
-            ):
-                return text
-
-            drawing = svg2rlg(BytesIO(response.content))
-
-            img_data = BytesIO()
-            renderPM.drawToFile(drawing, img_data, fmt="PNG")
-            img_data.seek(0)
-            image = Image.open(img_data)
-            result = self.__perform_llm_prediction_for_image(image)
-            return result
-        else:
-            return super().process_svg(link, ocr_languages)
+    # TODO review usage
+    # def process_svg(
+    #         self,
+    #         link: str,
+    #         ocr_languages: Optional[str] = None,
+    # ) -> str:
+    #     if self.bins_with_llm and self.llm:
+    #         response = self.confluence.request(path=link, absolute=True)
+    #         text = ""
+    # 
+    #         if (
+    #                 response.status_code != 200
+    #                 or response.content == b""
+    #                 or response.content is None
+    #         ):
+    #             return text
+    # 
+    #         drawing = svg2rlg(BytesIO(response.content))
+    # 
+    #         img_data = BytesIO()
+    #         renderPM.drawToFile(drawing, img_data, fmt="PNG")
+    #         img_data.seek(0)
+    #         image = Image.open(img_data)
+    #         result = self.__perform_llm_prediction_for_image(image)
+    #         return result
+    #     else:
+    #         return super().process_svg(link, ocr_languages)
