@@ -14,7 +14,7 @@ from ..elitea_base import (
     extend_with_vector_tools,
 )
 from ...runtime.utils.utils import IndexerKeywords
-from ..utils.content_parser import parse_file_content
+from ..utils.content_parser import parse_file_content, load_content_from_bytes
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -142,6 +142,8 @@ XrayIndexData = create_model(
     Example:
         'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) testType { name } steps { action result } } } }'
     """, default=None)),
+    include_attachments=(Optional[bool], Field(description="Whether to include attachment content in indexing", default=False)),
+    skip_attachment_extensions=(Optional[List[str]], Field(description="List of file extensions to skip when processing attachments (e.g., ['.exe', '.zip', '.bin'])", default=None)),
     progress_step=(Optional[int], Field(description="Progress step for tracking indexing progress", default=None)),
     clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
 )
@@ -268,7 +270,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             return ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
 
     def _base_loader(
-        self, jql: Optional[str] = None, graphql: Optional[str] = None
+        self, jql: Optional[str] = None, graphql: Optional[str] = None, include_attachments: Optional[bool] = False
     ) -> Generator[Document, None, None]:
         """
         Index Xray test cases into vector store using JQL query or custom GraphQL.
@@ -276,6 +278,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         Args:
             jql: JQL query for searching test cases
             graphql: Custom GraphQL query for advanced data extraction
+            include_attachments: Whether to include attachment content in indexing
         Examples:
             # Using JQL
             jql = 'project = "CALC" AND testType = "Manual" AND labels in ("Smoke", "Critical")'
@@ -318,7 +321,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 if not tests_data:
                     raise ToolException("No test data found in GraphQL response")
 
-            docs: List[Document] = []
             for test in tests_data:
                 page_content = ""
                 test_type_name = test.get("testType", {}).get("name", "").lower()
@@ -370,17 +372,18 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                     metadata["testType"] = test["testType"].get("name", "")
                     metadata["testKind"] = test["testType"].get("kind", "")
 
-                docs.append(Document(page_content=page_content, metadata=metadata))
+                yield Document(page_content=page_content, metadata=metadata)
+                
         except Exception as e:
             logger.error(f"Error processing test data: {e}")
             raise ToolException(f"Error processing test data: {e}")
-
-        return docs
 
     def index_data(
         self,
         jql: Optional[str] = None,
         graphql: Optional[str] = None,
+        include_attachments: Optional[bool] = False,
+        skip_attachment_extensions: Optional[List[str]] = None,
         collection_suffix: str = "",
         progress_step: Optional[int] = None,
         clean_index: Optional[bool] = False,
@@ -390,7 +393,19 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             raise ToolException(
                 "get_embeddings function not available. Please check the import."
             )
-        docs = self._base_loader(jql=jql, graphql=graphql)
+        
+        if not jql and not graphql:
+            raise ToolException("Either 'jql' or 'graphql' parameter must be provided.")
+
+        if jql and graphql:
+            raise ToolException("Please provide either 'jql' or 'graphql', not both.")
+
+        self._skipped_attachment_extensions = skip_attachment_extensions if skip_attachment_extensions else []
+        
+        self._include_attachments = include_attachments
+        
+        docs = self._base_loader(jql=jql, graphql=graphql, include_attachments=include_attachments)
+        processed_docs = (doc for base_doc in docs for doc in self._process_document(base_doc))
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
 
@@ -400,12 +415,12 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 original_log_data(message, tool_name)
             except Exception:
                 pass
-        
+
         vs._log_data = silent_log_data
-        
+
         try:
             return vs.index_documents(
-                docs, progress_step=progress_step, clean_index=clean_index
+                processed_docs, progress_step=progress_step, clean_index=clean_index
             )
         finally:
             vs._log_data = original_log_data
@@ -423,6 +438,10 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             Generator[Document, None, None]: A generator yielding processed Document objects with metadata.
         """
         try:
+            if not getattr(self, '_include_attachments', False):
+                yield document
+                return
+                
             issue_id = document.metadata.get("issueId")
             if not issue_id:
                 yield document
@@ -436,22 +455,48 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             attachments = self._extract_attachments_from_test(test_data)
             
             for attachment in attachments:
+                filename = attachment.get('filename', '')
+                if filename:
+                    ext = f".{filename.split('.')[-1].lower()}"
+                else:
+                    ext = ""
+
+                if hasattr(self, '_skipped_attachment_extensions') and ext in self._skipped_attachment_extensions:
+                    logger.info(f"Skipping attachment {filename} due to extension filter: {ext}")
+                    continue
+                
                 attachment_id = f"attach_{attachment['id']}"
                 document.metadata.setdefault(
                     IndexerKeywords.DEPENDENT_DOCS.value, []
                 ).append(attachment_id)
 
+                try:
+                    content = self._process_attachment(attachment)
+                    if not content or content.startswith("Attachment processing failed"):
+                        logger.warning(f"Skipping attachment {filename} due to processing failure")
+                        continue
+                except Exception as e:
+                    logger.error(f"Failed to process attachment {filename}: {str(e)}")
+                    continue
+
+                attachment_metadata = {
+                    'id': str(attachment_id),
+                    'issue_key': document.metadata.get('key', ''),
+                    'issueId': str(issue_id),
+                    'projectId': document.metadata.get('projectId', ''),
+                    'source': f"xray_test_{issue_id}",
+                    'filename': filename,
+                    'download_link': attachment.get('downloadLink', ''),
+                    'entity_type': 'test_case_attachment',
+                    'key': document.metadata.get('key', ''),
+                    IndexerKeywords.PARENT.value: document.metadata.get('id', str(issue_id)),
+                    'type': 'attachment',
+                    'doctype': self.doctype,
+                }
+
                 yield Document(
-                    page_content=self._process_attachment(attachment),
-                    metadata={
-                        'project_id': document.metadata.get('projectId', ''),
-                        'id': str(attachment_id),
-                        IndexerKeywords.PARENT.value: str(issue_id),
-                        'filename': attachment['filename'],
-                        'download_link': attachment.get('downloadLink', ''),
-                        'entity_type': 'test_case_attachment',
-                        'key': document.metadata.get('key', ''),
-                    }
+                    page_content=content,
+                    metadata=attachment_metadata
                 )
             
             yield document
@@ -543,23 +588,61 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             
             if not download_link:
                 return f"Attachment: {filename} (no download link available)"
-            
+
             try:
                 headers = {'Authorization': f'Bearer {self._auth_token}'}
                 response = requests.get(download_link, headers=headers, timeout=30)
                 response.raise_for_status()
                 
-                page_content = parse_file_content(
-                    file_name=filename,
-                    file_content=response.content,
-                    llm=self.llm,
-                    is_capture_image=True
-                )
-                return page_content
+                ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
+                
+                if ext == '.pdf':
+                    content = parse_file_content(
+                        file_content=response.content,
+                        file_name=filename,
+                        llm=self.llm,
+                        is_capture_image=True
+                    )
+                else:
+                    content = load_content_from_bytes(
+                        response.content,
+                        ext,
+                        llm=self.llm
+                    )
+
+                if content:
+                    return f"filename: {filename}\ncontent: {content}"
+                else:
+                    logger.warning(f"No content extracted from attachment {filename}")
+                    return f"filename: {filename}\ncontent: [No extractable content]"
                 
             except requests.RequestException as req_e:
                 logger.error(f"Unable to download attachment {filename}: {req_e}")
-                return f"Attachment: {filename} (download failed: {str(req_e)})"
+                try:
+                    fallback_headers = {
+                        'Authorization': f'Bearer {self._auth_token}',
+                        'User-Agent': 'Mozilla/5.0 (compatible; XrayAPI/1.0; Python)'
+                    }
+                    response = requests.get(download_link, headers=fallback_headers, timeout=60)
+                    response.raise_for_status()
+                    
+                    ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
+                    content = parse_file_content(
+                        file_content=response.content,
+                        file_name=filename,
+                        llm=self.llm,
+                        is_capture_image=True
+                    ) if ext == '.pdf' else load_content_from_bytes(response.content, ext, llm=self.llm)
+                    
+                    if content:
+                        return f"filename: {filename}\ncontent: {content}"
+                    else:
+                        return f"filename: {filename}\ncontent: [Content extraction failed after fallback]"
+                        
+                except Exception as fallback_e:
+                    logger.error(f"Fallback download also failed for {filename}: {fallback_e}")
+                    return f"Attachment: {filename} (download failed: {str(req_e)}, fallback failed: {str(fallback_e)})"
+                    
             except Exception as parse_e:
                 logger.error(f"Unable to parse attachment {filename}: {parse_e}")
                 return f"Attachment: {filename} (parsing failed: {str(parse_e)})"
@@ -582,12 +665,10 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             except Exception as e:
                 raise ToolException(f"Unable to get tests due to error: {str(e)}")
             
-            # Get raw test data without parsing
             tests = _parse_tests(get_tests_response["results"])
             total = get_tests_response['total']
             all_tests.extend(tests)
 
-            # Check if more results are available
             if len(all_tests) == total:
                 break
 
