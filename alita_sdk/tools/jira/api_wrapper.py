@@ -1317,8 +1317,10 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
                 except Exception as e:
                     logger.error(f"Failed to download attachment {attachment['filename']} for issue {issue_key}: {str(e)}")
                     attachment_content = self._client.get(path=f"secure/attachment/{attachment['id']}/{attachment['filename']}", not_json_response=True)
-                content = load_content_from_bytes(attachment_content, ext, {'llm': self.llm})
-                # content = parse_file_content(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True)
+                content = load_content_from_bytes(attachment_content, ext, llm=self.llm) if ext not in '.pdf' \
+                    else parse_file_content(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True)
+                if not content:
+                    continue
                 yield Document(page_content=content,
                                metadata={
                                    'id': attachment_id,
@@ -1328,13 +1330,13 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
                                    'created': attachment['created'],
                                    'mimeType': attachment['mimeType'],
                                    'author': attachment.get('author', {}).get('name'),
-                                   IndexerKeywords.PARENT.value: base_document.metadata.get('id', None)
+                                   IndexerKeywords.PARENT.value: base_document.metadata.get('id', None),
+                                   'type': 'attachment',
                                })
 
     def _jql_get_tickets(self, jql, fields="*all", start=0, limit=None, expand=None, validate_query=None):
         """
         Generator that yields batches of Jira issues based on JQL query.
-        Copied from AlitaJiraLoader logic.
         """
         from atlassian.errors import ApiError
 
@@ -1417,6 +1419,7 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
                 "created_on": issue["fields"].get("created"),
                 "project": issue["fields"].get("project", {}).get("key") if issue["fields"].get("project") else None,
                 "issuetype": issue["fields"].get("issuetype", {}).get("name") if issue["fields"].get("issuetype") else None,
+                "type": "jira_issue",
             }
 
             return Document(page_content=content, metadata=metadata)

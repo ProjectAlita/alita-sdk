@@ -19,11 +19,15 @@ Image.MAX_IMAGE_PIXELS = 300_000_000
 class AlitaImageLoader(BaseLoader):
     """Loads image files using pytesseract for OCR or optionally LLM for advanced analysis, including SVG support."""
 
-    def __init__(self, **kwargs):
-        if not kwargs.get('path'):
-            raise ValueError("Path parameter 'path' is required")
-        else:
+    def __init__(self, file_path=None, **kwargs):
+        # Handle both positional and keyword arguments for file_path
+        if file_path is not None:
+            self.file_path = file_path
+        elif kwargs.get('path'):
             self.file_path = kwargs['path']
+        else:
+            raise ValueError(
+                "Path parameter is required (either as 'file_path' positional argument or 'path' keyword argument)")
         self.llm = kwargs.get('llm', None)
         self.ocr_language = kwargs.get('ocr_language', None)
         self.prompt = kwargs.get('prompt') if kwargs.get(

@@ -219,7 +219,7 @@ def __perform_llm_prediction_for_image(llm, image: bytes, image_format='png', pr
     return f"\n[Image description: {result.content}]\n"
 
 # TODO: review usage of this function alongside with functions above
-def load_content(file_path: str, extension: str = None, loader_extra_config: dict = None) -> str:
+def load_content(file_path: str, extension: str = None, loader_extra_config: dict = None, llm = None) -> str:
     """
     Loads the content of a file based on its extension using a configured loader.
     """
@@ -231,15 +231,18 @@ def load_content(file_path: str, extension: str = None, loader_extra_config: dic
 
         loader_config = loaders_map.get(extension)
         if not loader_config:
+            logger.warning(f"No loader found for file extension: {extension}. File: {file_path}")
             return ""
 
         loader_cls = loader_config['class']
         loader_kwargs = loader_config['kwargs']
 
-        loader_kwargs.update(loader_extra_config)
-        loader_kwargs.update({'path': file_path})
+        if loader_extra_config:
+            loader_kwargs.update(loader_extra_config)
+        if loader_config['is_multimodal_processing'] and llm:
+            loader_kwargs.update({'llm': llm})
 
-        loader = loader_cls(**loader_kwargs)
+        loader = loader_cls(file_path, **loader_kwargs)
         documents = loader.load()
 
         page_contents = [doc.page_content for doc in documents]
@@ -249,7 +252,7 @@ def load_content(file_path: str, extension: str = None, loader_extra_config: dic
         logger.warning(f"{error_message} for file {file_path}")
         return ""
 
-def load_content_from_bytes(file_content: bytes, extension: str = None, loader_extra_config: dict = None) -> str:
+def load_content_from_bytes(file_content: bytes, extension: str = None, loader_extra_config: dict = None, llm = None) -> str:
     """Loads the content of a file from bytes based on its extension using a configured loader."""
 
     import tempfile
@@ -264,7 +267,7 @@ def load_content_from_bytes(file_content: bytes, extension: str = None, loader_e
         temp_path = temp_file.name
 
         # Perform your operations
-        return load_content(temp_path, extension, loader_extra_config)
+        return load_content(temp_path, extension, loader_extra_config, llm)
 
 
 
