@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any, Dict, Generator, List, Optional
 
@@ -5,8 +6,6 @@ import requests
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import PrivateAttr, SecretStr, create_model, model_validator, Field
-from pydantic.fields import Field
-from pydantic.fields import Field
 from python_graphql_client import GraphqlClient
 
 from ..elitea_base import (
@@ -14,6 +13,8 @@ from ..elitea_base import (
     BaseVectorStoreToolApiWrapper,
     extend_with_vector_tools,
 )
+from ...runtime.utils.utils import IndexerKeywords
+from ..utils.content_parser import parse_file_content
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -44,6 +45,7 @@ _get_tests_query = """query GetTests($jql: String!, $limit:Int!, $start: Int)
                 attachments {
                     id
                     filename
+                    downloadLink
                 }
             }
             preconditions(limit: $limit) {
@@ -162,6 +164,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
     client_secret: SecretStr = None,
     limit: Optional[int] = 100,
     _client: Optional[GraphqlClient] = PrivateAttr()
+    _auth_token: Optional[str] = PrivateAttr(default=None)
 
     # Vector store fields
     llm: Any = None
@@ -197,6 +200,8 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         try:
             auth_response = requests.post(auth_url, json=auth_data)
             token = auth_response.json()
+            values['_auth_token'] = token
+
             cls._client = GraphqlClient(endpoint=f"{values['base_url']}/api/v2/graphql",
                                         headers={'Authorization': f'Bearer {token}'})
         except Exception as e:
@@ -319,8 +324,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 test_type_name = test.get("testType", {}).get("name", "").lower()
 
                 if test_type_name == "manual" and "steps" in test and test["steps"]:
-                    import json
-
                     steps_content = []
                     for step in test["steps"]:
                         step_obj = {}
@@ -373,9 +376,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             raise ToolException(f"Error processing test data: {e}")
 
         return docs
-    
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        yield document
 
     def index_data(
         self,
@@ -394,15 +394,179 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
 
-        return vs.index_documents(
-            docs, progress_step=progress_step, clean_index=clean_index
-        )
+        original_log_data = vs._log_data
+        def silent_log_data(message: str, tool_name: str = "index_data"):
+            try:
+                original_log_data(message, tool_name)
+            except Exception:
+                pass
+        
+        vs._log_data = silent_log_data
+        
+        try:
+            return vs.index_documents(
+                docs, progress_step=progress_step, clean_index=clean_index
+            )
+        finally:
+            vs._log_data = original_log_data
     
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        for attachment_id in document.metadata.get('attachment_ids', []):
-            content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
-            content = ''.join(str(item) for item in content_generator)
-            yield Document(page_content=content, metadata={'id': attachment_id})
+        """
+        Process an existing base document to extract relevant metadata for full document preparation.
+        Used for late processing of documents after we ensure that the document has to be indexed to avoid
+        time-consuming operations for documents which might be useless.
+
+        Args:
+            document (Document): The base document to process.
+
+        Returns:
+            Generator[Document, None, None]: A generator yielding processed Document objects with metadata.
+        """
+        try:
+            issue_id = document.metadata.get("issueId")
+            if not issue_id:
+                yield document
+                return
+                
+            test_data = self._get_test_with_attachments(issue_id)
+            if not test_data:
+                yield document
+                return
+                
+            attachments = self._extract_attachments_from_test(test_data)
+            
+            for attachment in attachments:
+                attachment_id = f"attach_{attachment['id']}"
+                document.metadata.setdefault(
+                    IndexerKeywords.DEPENDENT_DOCS.value, []
+                ).append(attachment_id)
+
+                yield Document(
+                    page_content=self._process_attachment(attachment),
+                    metadata={
+                        'project_id': document.metadata.get('projectId', ''),
+                        'id': str(attachment_id),
+                        IndexerKeywords.PARENT.value: str(issue_id),
+                        'filename': attachment['filename'],
+                        'download_link': attachment.get('downloadLink', ''),
+                        'entity_type': 'test_case_attachment',
+                        'key': document.metadata.get('key', ''),
+                    }
+                )
+            
+            yield document
+            
+        except Exception as e:
+            logger.error(f"Error processing document for attachments: {e}")
+            yield document
+
+    def _get_test_with_attachments(self, issue_id: str) -> Optional[Dict]:
+        """
+        Get test data with attachments for a specific issue ID.
+        
+        Args:
+            issue_id (str): The Xray test issue ID
+            
+        Returns:
+            Optional[Dict]: Test data with attachments or None if not found
+        """
+        try:
+            query = """query GetTestWithAttachments($jql: String!, $limit: Int!)
+            {
+                getTests(jql: $jql, limit: $limit) {
+                    total
+                    results {
+                        issueId
+                        steps {
+                            id
+                            data
+                            action
+                            result
+                            attachments {
+                                id
+                                filename
+                                downloadLink
+                            }
+                        }
+                    }
+                }
+            }
+            """
+            
+            jql = f'issueId = "{issue_id}"'
+            response = self._client.execute(
+                query=query,
+                variables={"jql": jql, "limit": 1}
+            )
+            
+            if response and "data" in response and "getTests" in response["data"]:
+                results = response["data"]["getTests"]["results"]
+                if results:
+                    return results[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting test data for issue {issue_id}: {e}")
+            return None
+
+    def _extract_attachments_from_test(self, test_data: Dict) -> List[Dict]:
+        """
+        Extract all attachments from test steps.
+        
+        Args:
+            test_data (Dict): The test data containing steps with attachments
+            
+        Returns:
+            List[Dict]: List of attachment dictionaries
+        """
+        attachments = []
+        if "steps" in test_data:
+            for step in test_data["steps"]:
+                if "attachments" in step and step["attachments"]:
+                    for attachment in step["attachments"]:
+                        if attachment and "id" in attachment and "filename" in attachment:
+                            attachments.append(attachment)
+        return attachments
+
+    def _process_attachment(self, attachment: Dict[str, Any]) -> str:
+        """
+        Processes an attachment to extract its content.
+
+        Args:
+            attachment (Dict[str, Any]): The attachment data containing id, filename, and downloadLink.
+
+        Returns:
+            str: String description/content of the attachment.
+        """
+        try:
+            download_link = attachment.get('downloadLink')
+            filename = attachment.get('filename', '')
+            
+            if not download_link:
+                return f"Attachment: {filename} (no download link available)"
+            
+            try:
+                headers = {'Authorization': f'Bearer {self._auth_token}'}
+                response = requests.get(download_link, headers=headers, timeout=30)
+                response.raise_for_status()
+                
+                page_content = parse_file_content(
+                    file_name=filename,
+                    file_content=response.content,
+                    llm=self.llm,
+                    is_capture_image=True
+                )
+                return page_content
+                
+            except requests.RequestException as req_e:
+                logger.error(f"Unable to download attachment {filename}: {req_e}")
+                return f"Attachment: {filename} (download failed: {str(req_e)})"
+            except Exception as parse_e:
+                logger.error(f"Unable to parse attachment {filename}: {parse_e}")
+                return f"Attachment: {filename} (parsing failed: {str(parse_e)})"
+                
+        except Exception as e:
+            logger.error(f"Error processing attachment: {e}")
+            return f"Attachment processing failed: {str(e)}"
 
     def _get_tests_direct(self, jql: str) -> List[Dict]:
         """Direct method to get test data without string formatting"""
