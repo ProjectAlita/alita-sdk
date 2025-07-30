@@ -201,24 +201,79 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         }
         try:
             auth_response = requests.post(auth_url, json=auth_data)
+            auth_response.raise_for_status()
             token = auth_response.json()
             values['_auth_token'] = token
 
-            cls._client = GraphqlClient(endpoint=f"{values['base_url']}/api/v2/graphql",
-                                        headers={'Authorization': f'Bearer {token}'})
+            values['_client_endpoint'] = f"{values['base_url']}/api/v2/graphql"
+            values['_client_headers'] = {'Authorization': f'Bearer {token}'}
+            
         except Exception as e:
             if "invalid or doesn't have the required permissions" in str(e):
                 masked_secret = '*' * (len(client_secret) - 4) + client_secret[-4:] if client_secret is not None else "UNDEFINED"
                 return ToolException(f"Please, check you credentials ({values['client_id']} / {masked_secret}). Unable")
+            else:
+                return ToolException(f"Authentication failed: {str(e)}")
         return values
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Set private attributes after initialization if they were passed
-        if '_auth_token' in data:
-            self._auth_token = data['_auth_token']
+        
+        from python_graphql_client import GraphqlClient
+        
+        if not hasattr(self, '_auth_token') or self._auth_token is None:
+            if hasattr(self, 'client_id') and hasattr(self, 'client_secret'):
+                try:
+                    auth_url = f"{self.base_url}/api/v1/authenticate"
+                    auth_data = {
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret.get_secret_value() if hasattr(self.client_secret, 'get_secret_value') else str(self.client_secret)
+                    }
+                    auth_response = requests.post(auth_url, json=auth_data, timeout=30)
+                    auth_response.raise_for_status()
+                    self._auth_token = auth_response.json()
+                except Exception as e:
+                    raise ToolException(f"Failed to authenticate in __init__: {str(e)}")
+            else:
+                raise ToolException("No client_id or client_secret available for authentication")
+        
+        # Initialize the GraphQL client
+        if self._auth_token and hasattr(self, 'base_url'):
+            endpoint = f"{self.base_url}/api/v2/graphql"
+            headers = {'Authorization': f'Bearer {self._auth_token}'}
+            self._client = GraphqlClient(endpoint=endpoint, headers=headers)
+        else:
+            raise ToolException(f"GraphQL client could not be initialized - missing auth_token: {self._auth_token is not None}, base_url: {hasattr(self, 'base_url')}")
+        
         if '_graphql_endpoint' in data:
             self._graphql_endpoint = data['_graphql_endpoint']
+
+    def _ensure_auth_token(self) -> str:
+        """
+        Ensure we have a valid auth token, refreshing if necessary.
+        
+        Returns:
+            str: The authentication token
+            
+        Raises:
+            ToolException: If authentication fails
+        """
+        if self._auth_token is None:
+            logger.warning("Auth token is None, attempting to re-authenticate")
+            try:
+                auth_url = f"{self.base_url}/api/v1/authenticate"
+                auth_data = {
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret.get_secret_value() if hasattr(self.client_secret, 'get_secret_value') else str(self.client_secret)
+                }
+                auth_response = requests.post(auth_url, json=auth_data, timeout=30)
+                auth_response.raise_for_status()
+                self._auth_token = auth_response.json()
+                logger.info("Successfully re-authenticated and obtained new token")
+            except Exception as e:
+                raise ToolException(f"Failed to authenticate: {str(e)}")
+        
+        return self._auth_token
 
     def get_tests(self, jql: str):
         """get all tests"""
@@ -372,6 +427,16 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                     metadata["testType"] = test["testType"].get("name", "")
                     metadata["testKind"] = test["testType"].get("kind", "")
 
+                if include_attachments and "steps" in test:
+                    attachments_data = []
+                    for step in test["steps"]:
+                        if "attachments" in step and step["attachments"]:
+                            for attachment in step["attachments"]:
+                                if attachment and "id" in attachment and "filename" in attachment:
+                                    attachments_data.append(attachment)
+                    if attachments_data:
+                        metadata["_attachments_data"] = attachments_data
+
                 yield Document(page_content=page_content, metadata=metadata)
                 
         except Exception as e:
@@ -442,19 +507,14 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 yield document
                 return
                 
+            attachments_data = document.metadata.get("_attachments_data", [])
+            if not attachments_data:
+                yield document
+                return
+                
             issue_id = document.metadata.get("issueId")
-            if not issue_id:
-                yield document
-                return
-                
-            test_data = self._get_test_with_attachments(issue_id)
-            if not test_data:
-                yield document
-                return
-                
-            attachments = self._extract_attachments_from_test(test_data)
             
-            for attachment in attachments:
+            for attachment in attachments_data:
                 filename = attachment.get('filename', '')
                 if filename:
                     ext = f".{filename.split('.')[-1].lower()}"
@@ -499,78 +559,14 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                     metadata=attachment_metadata
                 )
             
+            if "_attachments_data" in document.metadata:
+                del document.metadata["_attachments_data"]
+            
             yield document
             
         except Exception as e:
             logger.error(f"Error processing document for attachments: {e}")
             yield document
-
-    def _get_test_with_attachments(self, issue_id: str) -> Optional[Dict]:
-        """
-        Get test data with attachments for a specific issue ID.
-        
-        Args:
-            issue_id (str): The Xray test issue ID
-            
-        Returns:
-            Optional[Dict]: Test data with attachments or None if not found
-        """
-        try:
-            query = """query GetTestWithAttachments($jql: String!, $limit: Int!)
-            {
-                getTests(jql: $jql, limit: $limit) {
-                    total
-                    results {
-                        issueId
-                        steps {
-                            id
-                            data
-                            action
-                            result
-                            attachments {
-                                id
-                                filename
-                                downloadLink
-                            }
-                        }
-                    }
-                }
-            }
-            """
-            
-            jql = f'issueId = "{issue_id}"'
-            response = self._client.execute(
-                query=query,
-                variables={"jql": jql, "limit": 1}
-            )
-            
-            if response and "data" in response and "getTests" in response["data"]:
-                results = response["data"]["getTests"]["results"]
-                if results:
-                    return results[0]
-            return None
-        except Exception as e:
-            logger.error(f"Error getting test data for issue {issue_id}: {e}")
-            return None
-
-    def _extract_attachments_from_test(self, test_data: Dict) -> List[Dict]:
-        """
-        Extract all attachments from test steps.
-        
-        Args:
-            test_data (Dict): The test data containing steps with attachments
-            
-        Returns:
-            List[Dict]: List of attachment dictionaries
-        """
-        attachments = []
-        if "steps" in test_data:
-            for step in test_data["steps"]:
-                if "attachments" in step and step["attachments"]:
-                    for attachment in step["attachments"]:
-                        if attachment and "id" in attachment and "filename" in attachment:
-                            attachments.append(attachment)
-        return attachments
 
     def _process_attachment(self, attachment: Dict[str, Any]) -> str:
         """
@@ -590,7 +586,8 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 return f"Attachment: {filename} (no download link available)"
 
             try:
-                headers = {'Authorization': f'Bearer {self._auth_token}'}
+                auth_token = self._ensure_auth_token()
+                headers = {'Authorization': f'Bearer {auth_token}'}
                 response = requests.get(download_link, headers=headers, timeout=30)
                 response.raise_for_status()
                 
@@ -617,31 +614,69 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                     return f"filename: {filename}\ncontent: [No extractable content]"
                 
             except requests.RequestException as req_e:
-                logger.error(f"Unable to download attachment {filename}: {req_e}")
-                try:
-                    fallback_headers = {
-                        'Authorization': f'Bearer {self._auth_token}',
-                        'User-Agent': 'Mozilla/5.0 (compatible; XrayAPI/1.0; Python)'
-                    }
-                    response = requests.get(download_link, headers=fallback_headers, timeout=60)
-                    response.raise_for_status()
-                    
-                    ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
-                    content = parse_file_content(
-                        file_content=response.content,
-                        file_name=filename,
-                        llm=self.llm,
-                        is_capture_image=True
-                    ) if ext == '.pdf' else load_content_from_bytes(response.content, ext, llm=self.llm)
-                    
-                    if content:
-                        return f"filename: {filename}\ncontent: {content}"
-                    else:
-                        return f"filename: {filename}\ncontent: [Content extraction failed after fallback]"
+                logger.error(f"Unable to download attachment {filename} with existing token: {req_e}")
+                
+                # If the token fails (401 Unauthorized), try to re-authenticate and retry
+                if "401" in str(req_e) or "Unauthorized" in str(req_e):
+                    try:
+                        logger.info(f"Re-authenticating for attachment download: {filename}")
+                        # Re-authenticate to get a fresh token
+                        auth_url = f"{self.base_url}/api/v1/authenticate"
+                        auth_data = {
+                            "client_id": self.client_id,
+                            "client_secret": self.client_secret.get_secret_value() if hasattr(self.client_secret, 'get_secret_value') else str(self.client_secret)
+                        }
+                        auth_response = requests.post(auth_url, json=auth_data, timeout=30)
+                        auth_response.raise_for_status()
+                        fresh_token = auth_response.json()
                         
-                except Exception as fallback_e:
-                    logger.error(f"Fallback download also failed for {filename}: {fallback_e}")
-                    return f"Attachment: {filename} (download failed: {str(req_e)}, fallback failed: {str(fallback_e)})"
+                        fresh_headers = {'Authorization': f'Bearer {fresh_token}'}
+                        response = requests.get(download_link, headers=fresh_headers, timeout=60)
+                        response.raise_for_status()
+                        
+                        ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
+                        content = parse_file_content(
+                            file_content=response.content,
+                            file_name=filename,
+                            llm=self.llm,
+                            is_capture_image=True
+                        ) if ext == '.pdf' else load_content_from_bytes(response.content, ext, llm=self.llm)
+                        
+                        if content:
+                            return f"filename: {filename}\ncontent: {content}"
+                        else:
+                            return f"filename: {filename}\ncontent: [Content extraction failed after re-auth]"
+                            
+                    except Exception as reauth_e:
+                        logger.error(f"Re-authentication and retry failed for {filename}: {reauth_e}")
+                        return f"Attachment: {filename} (download failed: {str(req_e)}, re-auth failed: {str(reauth_e)})"
+                else:
+                    try:
+                        auth_token = self._ensure_auth_token()
+                        fallback_headers = {
+                            'Authorization': f'Bearer {auth_token}',
+                            'User-Agent': 'Mozilla/5.0 (compatible; XrayAPI/1.0; Python)',
+                            'Accept': '*/*'
+                        }
+                        response = requests.get(download_link, headers=fallback_headers, timeout=60)
+                        response.raise_for_status()
+                        
+                        ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
+                        content = parse_file_content(
+                            file_content=response.content,
+                            file_name=filename,
+                            llm=self.llm,
+                            is_capture_image=True
+                        ) if ext == '.pdf' else load_content_from_bytes(response.content, ext, llm=self.llm)
+                        
+                        if content:
+                            return f"filename: {filename}\ncontent: {content}"
+                        else:
+                            return f"filename: {filename}\ncontent: [Content extraction failed after fallback]"
+                            
+                    except Exception as fallback_e:
+                        logger.error(f"Fallback download also failed for {filename}: {fallback_e}")
+                        return f"Attachment: {filename} (download failed: {str(req_e)}, fallback failed: {str(fallback_e)})"
                     
             except Exception as parse_e:
                 logger.error(f"Unable to parse attachment {filename}: {parse_e}")
