@@ -1,16 +1,18 @@
+import base64
 import functools
 import json
 import logging
 import re
 from enum import Enum
-from typing import Dict, Optional, Union
+from typing import Dict, Generator, Optional, Union
 
 import requests
 from FigmaPy import FigmaPy
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 
 GLOBAL_LIMIT = 10000
 
@@ -226,12 +228,53 @@ class ArgsSchema(Enum):
     )
 
 
-class FigmaApiWrapper(BaseToolApiWrapper):
+class FigmaApiWrapper(BaseVectorStoreToolApiWrapper):
     token: Optional[SecretStr] = Field(default=None)
     oauth2: Optional[SecretStr] = Field(default=None)
     global_limit: Optional[int] = Field(default=GLOBAL_LIMIT)
     global_regexp: Optional[str] = Field(default=None)
     _client: Optional[FigmaPy] = PrivateAttr()
+
+    def _base_loader(self, project_id: str, **kwargs) -> Generator[Document, None, None]:
+        files = json.loads(self.get_project_files(project_id)).get('files', [])
+        for file in files:
+            yield Document(page_content=json.dumps(file), metadata={
+                'id': file.get('key', ''),
+                'file_key': file.get('key', ''),
+                'name': file.get('name', ''),
+                'updated_on': file.get('last_modified', '')
+            })
+
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        file_key = document.metadata.get('id', '')
+        #
+        node_ids = []
+        children = self._client.get_file(file_key).document.get('children', [])
+        if children:
+            nodes = children[0].get('children', [])
+            node_ids = [node['id'] for node in nodes if 'id' in node]
+        images = self._client.get_file_images(file_key, node_ids).images or {}
+
+        # iterate over images values
+        for node_id, image_url in images.items():
+            response = requests.get(image_url)
+            if response.status_code == 200:
+                content_type = response.headers.get('Content-Type', '')
+                if 'text/html' not in content_type.lower():
+                    yield Document(
+                                    page_content=base64.b64encode(response.content).decode("utf-8"),
+                                    metadata={
+                                        'file_key': file_key,
+                                        'node_id': node_id,
+                                        'image_url': image_url
+                                    }
+                                )
+
+    def _index_tool_params(self):
+        """Return the parameters for indexing data."""
+        return {
+            "project_id": (str, Field(description="ID of the project to list files from", examples=["55391681"]))
+        }
 
     def _send_request(
         self,
@@ -442,6 +485,7 @@ class FigmaApiWrapper(BaseToolApiWrapper):
         """Retrieves all files for a specified project ID from Figma."""
         return self._client.get_project_files(project_id)
 
+    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {

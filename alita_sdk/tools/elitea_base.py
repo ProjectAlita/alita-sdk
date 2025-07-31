@@ -11,6 +11,7 @@ from pydantic import BaseModel, create_model, Field, SecretStr
 from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 from .chunkers import markdown_chunker
 from .utils import TOOLKIT_SPLITTER
+from ..runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,8 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 processed_docs = self._process_document(doc)
                 if processed_docs:  # Only proceed if the list is not empty
                     for processed_doc in processed_docs:
-                        # TODO resolve chunker from processed_doc
+                        # map processed document (child) to the original document (parent)
+                        processed_doc.metadata[IndexerKeywords.PARENT.value] = doc.metadata.get('id', None)
                         if chunker:=self._get_dependencies_chunker(processed_doc):
                             yield from chunker(file_content_generator=iter([processed_doc]), config=self._get_dependencies_chunker_config())
                         else:
