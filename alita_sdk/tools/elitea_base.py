@@ -255,12 +255,11 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 **self._index_tool_params() if self._index_tool_params() else {}
             )
         }
-
+    # TODO: add chunks generator
     def index_data(self, **kwargs):
         from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
         docs = self._base_loader(**kwargs)
-        #
-        # TODO resolve chunker from document
+        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         chunking_tool = kwargs.get("chunking_tool")
         if chunking_tool:
             # Resolve chunker from the provided chunking_tool name
@@ -268,7 +267,6 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             # Resolve chunking configuration
             base_chunking_config = kwargs.get("chunking_config", {})
             config_model = models.get(chunking_tool)
-            embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
             # Set required fields that should come from the instance (and Fallback for chunkers without models)
             base_chunking_config['embedding'] = embedding
             base_chunking_config['llm'] = self.llm
@@ -287,7 +285,6 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         collection_suffix = kwargs.get("collection_suffix")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
         vs = self._init_vector_store(collection_suffix, embeddings=embedding)
         #
         return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)

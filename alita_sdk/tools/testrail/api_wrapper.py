@@ -469,7 +469,8 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 project_id=project_id, **params
             )
 
-            cases = extracted_cases.get("cases")
+            # support old versions of testrail_api
+            cases = extracted_cases.get("cases") if isinstance(extracted_cases, dict) else extracted_cases
 
             if cases is None:
                 return ToolException("No test cases found in the extracted data.")
