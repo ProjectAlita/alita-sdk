@@ -110,45 +110,6 @@ XrayCreateTests = create_model(
     graphql_mutations=(list[str], Field(description="list of GraphQL mutations:\n" + _graphql_mutation_description))
 )
 
-# Schema for indexing Xray data into vector store
-XrayIndexData = create_model(
-    "XrayIndexData",
-    __base__=BaseIndexParams,
-    jql=(Optional[str], Field(description="""JQL query for searching test cases in Xray.
-
-    Standard JQL query syntax for filtering Xray test cases. Examples:
-    - project = "CALC" AND testType = "Manual"
-    - project = "CALC" AND labels in ("Smoke", "Regression")
-    - project = "CALC" AND summary ~ "login"
-    - project = "CALC" AND testType = "Manual" AND labels = "Critical"
-
-    Supported fields:
-    - project: project key filter (e.g., project = "CALC")
-    - testType: filter by test type (e.g., testType = "Manual")
-    - labels: filter by labels (e.g., labels = "Smoke" or labels in ("Smoke", "Regression"))
-    - summary: search in test summary (e.g., summary ~ "login")
-    - description: search in test description
-    - status: filter by test status
-    - priority: filter by test priority
-
-    Example:
-        'project = "CALC" AND testType = "Manual" AND labels in ("Smoke", "Critical")'
-    """, default=None)),
-    graphql=(Optional[str], Field(description="""Custom GraphQL query for advanced data extraction.
-    
-    Use this for custom GraphQL queries that return test data. The query should return test objects
-    with relevant fields like issueId, jira, testType, steps, etc.
-    
-    Example:
-        'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) testType { name } steps { action result } } } }'
-    """, default=None)),
-    include_attachments=(Optional[bool], Field(description="Whether to include attachment content in indexing", default=False)),
-    skip_attachment_extensions=(Optional[List[str]], Field(description="List of file extensions to skip when processing attachments (e.g., ['.exe', '.zip', '.bin'])", default=None)),
-    progress_step=(Optional[int], Field(description="Progress step for tracking indexing progress", default=None)),
-    clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
-)
-
-
 def _parse_tests(test_results) -> List[Any]:
     """Handles tests in order to minimize tests' output"""
 
@@ -168,13 +129,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
     _client: Optional[GraphqlClient] = PrivateAttr()
     _auth_token: Optional[str] = PrivateAttr(default=None)
 
-    # Vector store fields
-    llm: Any = None
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
     doctype: str = "xray_test"
 
     class Config:
@@ -325,7 +279,8 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             return ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
 
     def _base_loader(
-        self, jql: Optional[str] = None, graphql: Optional[str] = None, include_attachments: Optional[bool] = False
+            self, jql: Optional[str] = None, graphql: Optional[str] = None, include_attachments: Optional[bool] = False,
+            skip_attachment_extensions: Optional[List[str]] = None, **kwargs: Any
     ) -> Generator[Document, None, None]:
         """
         Index Xray test cases into vector store using JQL query or custom GraphQL.
@@ -341,6 +296,9 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             # Using GraphQL
             graphql = 'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) steps { action result } } } }'
         """
+
+        self._skipped_attachment_extensions = skip_attachment_extensions if skip_attachment_extensions else []
+        self._include_attachments = include_attachments
 
         if not jql and not graphql:
             raise ToolException("Either 'jql' or 'graphql' parameter must be provided.")
@@ -409,6 +367,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
                     if "created" in jira_data:
                         metadata["created_on"] = jira_data["created"]
+                    # TODO: update_on has to be set as hash of document content for correct re-indexing
                     if "updated" in jira_data:
                         metadata["updated_on"] = jira_data["updated"]
 
@@ -443,53 +402,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error processing test data: {e}")
             raise ToolException(f"Error processing test data: {e}")
 
-    def index_data(
-        self,
-        jql: Optional[str] = None,
-        graphql: Optional[str] = None,
-        include_attachments: Optional[bool] = False,
-        skip_attachment_extensions: Optional[List[str]] = None,
-        collection_suffix: str = "",
-        progress_step: Optional[int] = None,
-        clean_index: Optional[bool] = False,
-    ) -> str:
-        """Index Xray test cases into vector store using JQL query or custom GraphQL."""
-        if not get_embeddings:
-            raise ToolException(
-                "get_embeddings function not available. Please check the import."
-            )
-        
-        if not jql and not graphql:
-            raise ToolException("Either 'jql' or 'graphql' parameter must be provided.")
-
-        if jql and graphql:
-            raise ToolException("Please provide either 'jql' or 'graphql', not both.")
-
-        self._skipped_attachment_extensions = skip_attachment_extensions if skip_attachment_extensions else []
-        
-        self._include_attachments = include_attachments
-        
-        docs = self._base_loader(jql=jql, graphql=graphql, include_attachments=include_attachments)
-        processed_docs = (doc for base_doc in docs for doc in self._process_document(base_doc))
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
-        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
-
-        original_log_data = vs._log_data
-        def silent_log_data(message: str, tool_name: str = "index_data"):
-            try:
-                original_log_data(message, tool_name)
-            except Exception:
-                pass
-
-        vs._log_data = silent_log_data
-
-        try:
-            return vs.index_documents(
-                processed_docs, progress_step=progress_step, clean_index=clean_index
-            )
-        finally:
-            vs._log_data = original_log_data
-    
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         """
         Process an existing base document to extract relevant metadata for full document preparation.
@@ -512,7 +424,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 yield document
                 return
                 
-            issue_id = document.metadata.get("issueId")
+            issue_id = document.metadata.get("id")
             
             for attachment in attachments_data:
                 filename = attachment.get('filename', '')
@@ -686,6 +598,44 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error processing attachment: {e}")
             return f"Attachment processing failed: {str(e)}"
 
+    def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
+        return {
+            'jql': (Optional[str], Field(description="""JQL query for searching test cases in Xray.
+
+            Standard JQL query syntax for filtering Xray test cases. Examples:
+            - project = "CALC" AND testType = "Manual"
+            - project = "CALC" AND labels in ("Smoke", "Regression")
+            - project = "CALC" AND summary ~ "login"
+            - project = "CALC" AND testType = "Manual" AND labels = "Critical"
+
+            Supported fields:
+            - project: project key filter (e.g., project = "CALC")
+            - testType: filter by test type (e.g., testType = "Manual")
+            - labels: filter by labels (e.g., labels = "Smoke" or labels in ("Smoke", "Regression"))
+            - summary: search in test summary (e.g., summary ~ "login")
+            - description: search in test description
+            - status: filter by test status
+            - priority: filter by test priority
+
+            Example:
+                'project = "CALC" AND testType = "Manual" AND labels in ("Smoke", "Critical")'
+            """, default=None)),
+            'graphql': (Optional[str], Field(description="""Custom GraphQL query for advanced data extraction.
+
+            Use this for custom GraphQL queries that return test data. The query should return test objects
+            with relevant fields like issueId, jira, testType, steps, etc.
+
+            Example:
+                'query { getTests(jql: "project = \\"CALC\\"") { results { issueId jira(fields: ["key"]) testType { name } steps { action result } } } }'
+            """, default=None)),
+            'include_attachments': (Optional[bool],
+                                    Field(description="Whether to include attachment content in indexing",
+                                          default=False)),
+            'skip_attachment_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to skip when processing attachments (e.g., ['.exe', '.zip', '.bin'])",
+                default=None)),
+        }
+
     def _get_tests_direct(self, jql: str) -> List[Dict]:
         """Direct method to get test data without string formatting"""
         start_at = 0
@@ -745,12 +695,6 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 "description": self.execute_graphql.__doc__,
                 "args_schema": XrayGrapql,
                 "ref": self.execute_graphql,
-            },
-            {
-                "name": "index_data",
-                "description": self.index_data.__doc__,
-                "args_schema": XrayIndexData,
-                "ref": self.index_data,
             }
         ]
 
