@@ -1,5 +1,6 @@
 import json
 import logging
+import hashlib
 from typing import Any, Dict, Generator, List, Optional
 
 import requests
@@ -9,7 +10,6 @@ from pydantic import PrivateAttr, SecretStr, create_model, model_validator, Fiel
 from python_graphql_client import GraphqlClient
 
 from ..elitea_base import (
-    BaseIndexParams,
     BaseVectorStoreToolApiWrapper,
     extend_with_vector_tools,
 )
@@ -311,15 +311,12 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 tests_data = self._get_tests_direct(jql)
 
             elif graphql:
-                # Use direct GraphQL execution
                 graphql_data = self._execute_graphql_direct(graphql)
 
-                # Extract tests from GraphQL response (handle different possible structures)
                 if "data" in graphql_data:
                     if "getTests" in graphql_data["data"]:
                         tests_data = graphql_data["data"]["getTests"].get("results", [])
                     else:
-                        # Try to find any list of test objects in the data
                         tests_data = []
                         for key, value in graphql_data["data"].items():
                             if isinstance(value, list):
@@ -338,6 +335,14 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 page_content = ""
                 test_type_name = test.get("testType", {}).get("name", "").lower()
 
+                attachment_ids = []
+                if include_attachments and "steps" in test:
+                    for step in test["steps"]:
+                        if "attachments" in step and step["attachments"]:
+                            for attachment in step["attachments"]:
+                                if attachment and "id" in attachment:
+                                    attachment_ids.append(str(attachment["id"]))
+
                 if test_type_name == "manual" and "steps" in test and test["steps"]:
                     steps_content = []
                     for step in test["steps"]:
@@ -350,13 +355,23 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                             step_obj["result"] = step["result"]
                         if step_obj:
                             steps_content.append(step_obj)
-                    page_content = json.dumps(steps_content, indent=2)
+                    
+                    content_structure = {"steps": steps_content}
+                    if attachment_ids:
+                        content_structure["attachment_ids"] = sorted(attachment_ids)
+                    page_content = json.dumps(content_structure, indent=2)
 
                 elif test_type_name == "cucumber" and test.get("gherkin"):
-                    page_content = test["gherkin"]
+                    content_structure = {"gherkin": test["gherkin"]}
+                    if attachment_ids:
+                        content_structure["attachment_ids"] = sorted(attachment_ids)
+                    page_content = json.dumps(content_structure, indent=2)
 
                 elif test.get("unstructured"):
-                    page_content = test["unstructured"]
+                    content_structure = {"unstructured": test["unstructured"]}
+                    if attachment_ids:
+                        content_structure["attachment_ids"] = sorted(attachment_ids)
+                    page_content = json.dumps(content_structure, indent=2)
 
                 metadata = {"doctype": self.doctype}
 
@@ -367,9 +382,9 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
                     if "created" in jira_data:
                         metadata["created_on"] = jira_data["created"]
-                    # TODO: update_on has to be set as hash of document content for correct re-indexing
-                    if "updated" in jira_data:
-                        metadata["updated_on"] = jira_data["updated"]
+                    
+                    content_hash = hashlib.sha256(page_content.encode('utf-8')).hexdigest()[:16]
+                    metadata["updated_on"] = content_hash
 
                     if "assignee" in jira_data and jira_data["assignee"]:
                         metadata["assignee"] = str(jira_data["assignee"])
