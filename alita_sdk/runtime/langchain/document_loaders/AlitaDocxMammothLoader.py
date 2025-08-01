@@ -18,19 +18,19 @@ class AlitaDocxMammothLoader(BaseLoader):
     Loader for Docx files using Mammoth to convert to HTML, with image handling,
     and then Markdownify to convert HTML to markdown.
     """
-    def __init__(self, path: str, **kwargs):
+    def __init__(self, file_path: str, **kwargs):
         """
         Initializes AlitaDocxMammothLoader.
 
         Args:
             **kwargs: Keyword arguments, including:
-                path (str): Path to the Docx file. Required.
+                file_path (str): Path to the Docx file. Required.
                 llm (LLM, optional): Language model for processing images.
                 prompt (str, optional): Prompt for the language model.
         Raises:
             ValueError: If the 'path' parameter is not provided.
         """
-        self.path = path
+        self.path = file_path
         self.llm = kwargs.get("llm")
         self.prompt = kwargs.get("prompt")
 

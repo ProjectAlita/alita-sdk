@@ -26,7 +26,7 @@ class AlitaTableLoader(BaseLoader):
                  json_documents: bool = True,
                  raw_content: bool = False,
                  columns: Optional[List[str]] = None,
-                 cleanse: bool = True):
+                 cleanse: bool = True, **kwargs):
 
         self.raw_content = raw_content
         self.file_path = file_path

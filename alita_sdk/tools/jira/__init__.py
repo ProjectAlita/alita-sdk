@@ -11,19 +11,27 @@ name = "jira"
 
 def get_tools(tool):
     return JiraToolkit().get_toolkit(
-            selected_tools=tool['settings'].get('selected_tools', []),
-            base_url=tool['settings'].get('base_url'),
-            cloud=tool['settings'].get('cloud', True),
-            api_key=tool['settings'].get('api_key', None),
-            username=tool['settings'].get('username', None),
-            token=tool['settings'].get('token', None),
-            limit=tool['settings'].get('limit', 5),
-            labels=parse_list(tool['settings'].get('labels', [])),
-            additional_fields=tool['settings'].get('additional_fields', []),
-            toolkit_name=tool.get('toolkit_name'),
-            verify_ssl=tool['settings'].get('verify_ssl', True),
-            llm=tool['settings'].get('llm', None)
-            ).get_tools()
+        selected_tools=tool['settings'].get('selected_tools', []),
+        base_url=tool['settings'].get('base_url'),
+        cloud=tool['settings'].get('cloud', True),
+        api_key=tool['settings'].get('api_key', None),
+        username=tool['settings'].get('username', None),
+        token=tool['settings'].get('token', None),
+        limit=tool['settings'].get('limit', 5),
+        labels=parse_list(tool['settings'].get('labels', [])),
+        additional_fields=tool['settings'].get('additional_fields', []),
+        verify_ssl=tool['settings'].get('verify_ssl', True),
+        # indexer settings
+        llm=tool['settings'].get('llm', None),
+        alita=tool['settings'].get('alita', None),
+        connection_string=tool['settings'].get('connection_string', None),
+        collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
+        doctype='code',
+        embedding_model="HuggingFaceEmbeddings",
+        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        vectorstore_type="PGVector",
+        toolkit_name=tool.get('toolkit_name')
+    ).get_tools()
             
 
 class JiraToolkit(BaseToolkit):

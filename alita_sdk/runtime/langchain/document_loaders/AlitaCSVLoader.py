@@ -26,7 +26,8 @@ class AlitaCSVLoader(AlitaTableLoader):
                  json_documents: bool = True,
                  raw_content: bool = False,
                  columns: Optional[List[str]] = None,
-                 cleanse: bool = True):
+                 cleanse: bool = True,
+                 **kwargs):
         super().__init__(file_path=file_path, json_documents=json_documents, columns=columns, raw_content=raw_content, cleanse=cleanse)
         self.encoding = encoding
         self.autodetect_encoding = autodetect_encoding
