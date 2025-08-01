@@ -188,6 +188,21 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
+    def _clean_collection(self):
+        """
+        Clean the vectorstore collection by deleting all indexed data.
+        """
+        self._log_data(
+            f"Cleaning collection '{self.dataset}'",
+            tool_name="_clean_collection"
+        )
+        data = self.vectoradapter.vectorstore.get(include=['metadatas'])
+        self.vectoradapter.vectorstore.delete(ids=data['ids'])
+        self._log_data(
+            f"Collection '{self.dataset}' has been cleaned. ",
+            tool_name="_clean_collection"
+        )
+
     def _get_indexed_data(self, store):
         """ Get all indexed data from vectorstore for non-code content """
 
@@ -338,7 +353,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             logger.info("Cleaning index before re-indexing all documents.")
             self._log_data("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
             try:
-                self.vectoradapter.delete_dataset(self.dataset)
+                self._clean_collection()
                 self.vectoradapter.persist()
                 self.vectoradapter.vacuum()
                 self._log_data("Previous index has been removed",

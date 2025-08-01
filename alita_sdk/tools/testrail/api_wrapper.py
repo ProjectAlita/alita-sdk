@@ -534,7 +534,8 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
     def _base_loader(self, project_id: str,
                      suite_id: Optional[str] = None,
                      section_id: Optional[int] = None,
-                     title_keyword: Optional[str] = None
+                     title_keyword: Optional[str] = None,
+                     **kwargs: Any
                      ) -> Generator[Document, None, None]:
         try:
             if suite_id:

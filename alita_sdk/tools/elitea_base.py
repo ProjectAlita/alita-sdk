@@ -255,7 +255,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 **self._index_tool_params() if self._index_tool_params() else {}
             )
         }
-    # TODO: add chunks generator
+
     def index_data(self, **kwargs):
         from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
         docs = self._base_loader(**kwargs)
