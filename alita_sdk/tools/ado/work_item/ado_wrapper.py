@@ -3,7 +3,7 @@ import logging
 import urllib.parse
 from typing import Dict, List, Generator, Optional
 
-from alita_sdk.tools.elitea_base import BaseIndexParams, BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from alita_sdk.tools.elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from azure.devops.connection import Connection
 from azure.devops.v7_1.core import CoreClient
 from azure.devops.v7_1.wiki import WikiClient

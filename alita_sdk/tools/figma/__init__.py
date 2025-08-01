@@ -18,7 +18,15 @@ def get_tools(tool):
             oauth2=tool["settings"].get("oauth2", None),
             global_limit=tool["settings"].get("global_limit", GLOBAL_LIMIT),
             global_regexp=tool["settings"].get("global_regexp", None),
-            toolkit_name=tool.get('toolkit_name')
+            toolkit_name=tool.get('toolkit_name'),
+            # indexer settings
+            llm=tool['settings'].get('llm', None),
+            connection_string = tool['settings'].get('connection_string', None),
+            collection_name=str(tool['id']),
+            doctype='doc',
+            embedding_model="HuggingFaceEmbeddings",
+            embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+            vectorstore_type="PGVector"
         )
         .get_tools()
     )
@@ -45,6 +53,10 @@ class FigmaToolkit(BaseToolkit):
                 List[Literal[tuple(selected_tools)]],
                 Field(default=[], json_schema_extra={"args_schemas": selected_tools}),
             ),
+            # indexer settings
+            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                            default=None,
+                                                            json_schema_extra={'secret': True})),
             __config__=ConfigDict(
                 json_schema_extra={
                      "metadata": {
