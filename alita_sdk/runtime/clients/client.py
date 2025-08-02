@@ -180,6 +180,7 @@ class AlitaClient:
             temperature=model_config.get("temperature"),
             max_retries=model_config.get("max_retries", 3),
             seed=model_config.get("seed", None),
+            openai_organization=str(self.project_id),
         )
          
     
