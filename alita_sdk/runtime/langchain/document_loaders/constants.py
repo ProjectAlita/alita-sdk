@@ -12,24 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from langchain_community.document_loaders import (TextLoader,
+from langchain_community.document_loaders import (
         UnstructuredMarkdownLoader,
-        PyPDFLoader,
-        UnstructuredPDFLoader,UnstructuredWordDocumentLoader,
-        JSONLoader, AirbyteJSONLoader, UnstructuredHTMLLoader,
-        UnstructuredPowerPointLoader, PythonLoader)
-
-from langchain_community.document_loaders import (TextLoader,
-        UnstructuredMarkdownLoader,
-        PyPDFLoader,
-        UnstructuredPDFLoader,UnstructuredWordDocumentLoader,
-        JSONLoader, AirbyteJSONLoader, UnstructuredHTMLLoader,
+        AirbyteJSONLoader, UnstructuredHTMLLoader,
         UnstructuredPowerPointLoader, PythonLoader)
 
 from .AlitaCSVLoader import AlitaCSVLoader
 from .AlitaDocxMammothLoader import AlitaDocxMammothLoader
 from .AlitaExcelLoader import AlitaExcelLoader
 from .AlitaImageLoader import AlitaImageLoader
+from .AlitaPDFLoader import AlitaPDFLoader
+from .AlitaTextLoader import AlitaTextLoader
+from .AlitaPowerPointLoader import AlitaPowerPointLoader
 
 loaders_map = {
     '.png': {
@@ -63,28 +57,28 @@ loaders_map = {
         'kwargs': {}
     },
     '.txt': {
-        'class': TextLoader,
+        'class': AlitaTextLoader,
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
         }
     },
     '.yml': {
-        'class': TextLoader,
+        'class': AlitaTextLoader,
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
         }
     },
     '.yaml': {
-        'class': TextLoader,
+        'class': AlitaTextLoader,
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
         }
     },
     '.groovy': {
-        'class': TextLoader,
+        'class': AlitaTextLoader,
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
@@ -121,7 +115,7 @@ loaders_map = {
         }
     },
     '.pdf': {
-        'class': PyPDFLoader,
+        'class': AlitaPDFLoader,
         'is_multimodal_processing': False,
         'kwargs': {}
     },
@@ -131,7 +125,7 @@ loaders_map = {
         'kwargs': {}
     },
     '.json': {
-        'class': TextLoader,
+        'class': AlitaTextLoader,
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
@@ -153,12 +147,12 @@ loaders_map = {
         'kwargs': {}
     },
     '.ppt': {
-        'class': UnstructuredPowerPointLoader,
+        'class': AlitaPowerPointLoader,
         'is_multimodal_processing': False,
         'kwargs': {}
     },
     '.pptx': {
-        'class': UnstructuredPowerPointLoader,
+        'class': AlitaPowerPointLoader,
         'is_multimodal_processing': False,
         'kwargs': {}
     },

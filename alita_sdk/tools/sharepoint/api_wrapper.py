@@ -129,7 +129,8 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                   is_capture_image: bool = False,
                   page_number: int = None,
                   sheet_name: str = None,
-                  excel_by_sheets: bool = False):
+                  excel_by_sheets: bool = False,
+                  return_type: str = 'str') -> str | dict | ToolException:
         """ Reads file located at the specified server-relative path. """
         try:
             file = self._client.web.get_file_by_server_relative_path(path)
@@ -146,7 +147,8 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                                   page_number=page_number,
                                   sheet_name=sheet_name,
                                   excel_by_sheets=excel_by_sheets,
-                                  llm=self.llm)
+                                  llm=self.llm,
+                                  return_type=return_type)
 
     def _base_loader(self, **kwargs) -> List[Document]:
         try:
@@ -164,15 +166,12 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
         return docs
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        page_content = self.read_file(document.metadata['Path'], is_capture_image=True, excel_by_sheets=True)
-        if isinstance(page_content, dict):
-            for key, value in page_content.items():
-                metadata = document.metadata
-                metadata['page'] = key
-                yield Document(page_content=str(value), metadata=metadata)
-        else:
-            document.page_content = json.dumps(str(page_content))
-            yield document
+        content_docs: List[Document] = self.read_file(document.metadata['Path'],
+                                      is_capture_image=True,
+                                      excel_by_sheets=True,
+                                      return_docs=True)
+        for doc in content_docs:
+            yield doc
 
     @extend_with_vector_tools
     def get_available_tools(self):
