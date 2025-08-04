@@ -235,10 +235,11 @@ class AlitaClient:
         if llm is None:
             llm = self.get_llm(
                 model_name=data['llm_settings']['model_name'],
-                model_config = {
+                model_config={
                     "max_tokens": data['llm_settings']['max_tokens'],
                     "top_p": data['llm_settings']['top_p'],
-                    "temperature": data['llm_settings']['temperature']
+                    "temperature": data['llm_settings']['temperature'],
+                    "model_project_id": data['llm_settings'].get('model_project_id'),
                 }
             )
         if not app_type:
