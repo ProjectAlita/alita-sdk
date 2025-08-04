@@ -839,6 +839,8 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         loader = AlitaConfluenceLoader(self.client, self.llm, bins_with_llm, **confluence_loader_params)
 
         for document in loader._lazy_load(kwargs={}):
+            if 'updated_on' not in document.metadata and 'when' in document.metadata:
+                document.metadata['updated_on'] = document.metadata['when']
             yield document
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
