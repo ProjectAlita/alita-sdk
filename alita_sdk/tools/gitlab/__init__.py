@@ -85,13 +85,14 @@ class AlitaGitlabToolkit(BaseToolkit):
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+
             tools.append(BaseAction(
                 api_wrapper=gitlab_api_wrapper,
                 name=prefix + tool["name"],
-                description=tool["description"] + "\nrepo: " + gitlab_api_wrapper.repository,
+                description=tool["description"] +  f"\nrepo: {gitlab_api_wrapper.repository}",
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)
 
-    def get_tools(self):
+    def get_tools(self)-> List[BaseTool]:
         return self.tools

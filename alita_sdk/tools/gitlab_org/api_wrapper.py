@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import Optional, Any, List, Dict
+import fnmatch
 
 from gitlab import GitlabGetError
 from langchain_core.tools import ToolException
@@ -22,7 +23,9 @@ GitLabCreateBranch = create_model(
 
 GitLabListBranches = create_model(
     "GitLabListBranchesModel",
-    repository=(Optional[str], Field(description="Name of the repository", default=None))
+    repository=(Optional[str], Field(description="Name of the repository", default=None)),
+    limit=(Optional[int], Field(description="Maximum number of branches to return. If not provided, all branches will be returned.", default=None)),
+    branch_wildcard=(Optional[str], Field(description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned.", default=None))
 )
 
 GitlabSetActiveBranch = create_model(
@@ -209,16 +212,32 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
         self._active_branch = branch
         return f"Active branch set to {branch}"
 
-    def list_branches_in_repo(self, repository: Optional[str] = None) -> List[str]:
-        """List all branches in the repository."""
+    def list_branches_in_repo(self, repository: Optional[str] = None, limit: Optional[int] = None, branch_wildcard: Optional[str] = None) -> List[str]:
+        """
+        Lists branches in the repository with optional limit and wildcard filtering.
+
+        Parameters:
+            repository (Optional[str]): Name of the repository. If None, uses the active repository.
+            limit (Optional[int]): Maximum number of branches to return
+            branch_wildcard (Optional[str]): Wildcard pattern to filter branches (e.g., '*dev')
+
+        Returns:
+            List[str]: List containing names of branches
+        """
         try:
             repo_instance = self._get_repo(repository)
-            branches = repo_instance.branches.list()
-            return [branch.name for branch in branches]
+            branches = repo_instance.branches.list(get_all=True)
+            
+            if branch_wildcard:
+                branches = [branch for branch in branches if fnmatch.fnmatch(branch.name, branch_wildcard)]
+            
+            if limit:
+                branches = branches[:limit]
+            
+            branch_names = [branch.name for branch in branches]
+            return branch_names
         except Exception as e:
-            return ToolException(f"Unable to list branches due to error: {str(e)}")
-
-
+            return f"Failed to list branches: {str(e)}"
 
     def create_branch(self, branch_name: str, repository: Optional[str] = None) -> str:
         """Create a new branch in the repository."""
@@ -568,104 +587,104 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
         return [
             {
                 "name": "create_branch",
-                "description": self.create_branch.__doc__,
+                "description": self.create_branch.__doc__ or "Create a new branch in the repository.",
                 "args_schema": GitLabCreateBranch,
                 "ref": self.create_branch,
             },
             {
                 "name": "set_active_branch",
-                "description": self.set_active_branch.__doc__,
+                "description": self.set_active_branch.__doc__ or "Set the active branch for the bot.",
                 "args_schema": GitlabSetActiveBranch,
                 "ref": self.set_active_branch,
             },
             {
                 "name": "list_branches_in_repo",
-                "description": self.list_branches_in_repo.__doc__,
+                "description": self.list_branches_in_repo.__doc__ or "List branches in the repository with optional limit and wildcard filtering.",
                 "args_schema": GitLabListBranches,
                 "ref": self.list_branches_in_repo,
             },
             {
                 "name": "get_issues",
-                "description": self.get_issues.__doc__,
+                "description": self.get_issues.__doc__ or "Fetches all open issues from the repository.",
                 "args_schema": GitLabGetIssues,
                 "ref": self.get_issues,
             },
             {
                 "name": "get_issue",
-                "description": self.get_issue.__doc__,
+                "description": self.get_issue.__doc__ or "Fetches a specific issue and its first 10 comments.",
                 "args_schema": GitLabGetIssue,
                 "ref": self.get_issue,
             },
             {
                 "name": "create_pull_request",
-                "description": self.create_pull_request.__doc__,
+                "description": self.create_pull_request.__doc__ or "Creates a pull request in the repository.",
                 "args_schema": GitLabCreatePullRequest,
                 "ref": self.create_pull_request,
             },
             {
                 "name": "comment_on_issue",
-                "description": self.comment_on_issue.__doc__,
+                "description": self.comment_on_issue.__doc__ or "Adds a comment to a GitLab issue.",
                 "args_schema": GitLabCommentOnIssue,
                 "ref": self.comment_on_issue,
             },
             {
                 "name": "create_file",
-                "description": self.create_file.__doc__,
+                "description": self.create_file.__doc__ or "Creates a new file in the GitLab repository.",
                 "args_schema": GitLabCreateFile,
                 "ref": self.create_file,
             },
             {
                 "name": "read_file",
-                "description": self.read_file.__doc__,
+                "description": self.read_file.__doc__ or "Reads a file from the GitLab repository.",
                 "args_schema": GitLabReadFile,
                 "ref": self.read_file,
             },
             {
                 "name": "update_file",
-                "description": self.update_file.__doc__,
+                "description": self.update_file.__doc__ or "Updates a file in the GitLab repository.",
                 "args_schema": GitLabUpdateFile,
                 "ref": self.update_file,
             },
             {
                 "name": "delete_file",
-                "description": self.delete_file.__doc__,
+                "description": self.delete_file.__doc__ or "Deletes a file from the GitLab repository.",
                 "args_schema": GitLabDeleteFile,
                 "ref": self.delete_file,
             },
             {
                 "name": "get_pr_changes",
-                "description": self.get_pr_changes.__doc__,
+                "description": self.get_pr_changes.__doc__ or "Get pull request changes from the specified PR number and repository.",
                 "args_schema": GitLabGetPRChanges,
                 "ref": self.get_pr_changes,
             },
             {
                 "name": "create_pr_change_comment",
-                "description": self.create_pr_change_comment.__doc__,
+                "description": self.create_pr_change_comment.__doc__ or "Create a comment on a pull request change in GitLab.",
                 "args_schema": GitLabCreatePullRequestChangeCommentInput,
                 "ref": self.create_pr_change_comment,
             },
             {
                 "name": "list_files",
-                "description": self.list_files.__doc__,
+                "description": self.list_files.__doc__ or "List files by defined path.",
                 "args_schema": ListFilesModel,
                 "ref": self.list_files,
             },
             {
                 "name": "list_folders",
-                "description": self.list_folders.__doc__,
+                "description": self.list_folders.__doc__ or "List folders by defined path.",
                 "args_schema": ListFilesModel,
                 "ref": self.list_folders,
             },
             {
                 "name": "append_file",
-                "description": self.append_file.__doc__,
+                "description": self.append_file.__doc__ or "Appends new content to the end of a file.",
                 "args_schema": AppendFileInput,
                 "ref": self.append_file,
             },
             {
                 "ref": self.get_commits,
                 "name": "get_commits",
-                "description": self.get_commits.__doc__,
+                "description": self.get_commits.__doc__ or "Retrieves a list of commits from the repository.",
                 "args_schema": GetCommits,
             }
         ]
