@@ -61,21 +61,19 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
     def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
         return self.artifact.client.create_bucket(bucket_name, expiration_measure, expiration_value)
 
-    def _base_loader(self, **kwargs) -> List[Document]:
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         try:
             all_files = self.list_files(self.bucket, False)
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
-        docs: List[Document] = []
         for file in all_files['rows']:
             metadata = {
                 ("updated_on" if k == "modified" else k): str(v)
                 for k, v in file.items()
             }
             metadata['id'] = self.get_hash_from_bucket_and_file_name(self.bucket, file['name'])
-            docs.append(Document(page_content="", metadata=metadata))
-        return docs
+            yield Document(page_content="", metadata=metadata)
 
     def get_hash_from_bucket_and_file_name(self, bucket, file_name):
         hasher = hashlib.sha256()

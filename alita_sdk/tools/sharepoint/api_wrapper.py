@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, List, Generator
+from typing import Optional, List, Generator, Any
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
@@ -148,20 +148,18 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                                   excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
 
-    def _base_loader(self, **kwargs) -> List[Document]:
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         try:
             all_files = self.get_files_list()
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
-        docs: List[Document] = []
         for file in all_files:
             metadata = {
                 ("updated_on" if k == "Modified" else k): str(v)
                 for k, v in file.items()
             }
-            docs.append(Document(page_content="", metadata=metadata))
-        return docs
+            yield Document(page_content="", metadata=metadata)
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         doc_content = self.read_file(document.metadata['Path'],
@@ -171,9 +169,9 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
             for page, content in doc_content:
                 new_metadata = document.metadata
                 new_metadata['page'] = page
-                yield Document(page_content=content, metadata=new_metadata)
+                yield Document(page_content=str(content), metadata=new_metadata)
         else:
-            document.page_content = doc_content
+            document.page_content = str(doc_content)
             yield document
 
     @extend_with_vector_tools
