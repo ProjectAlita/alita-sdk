@@ -53,8 +53,7 @@ IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'svg']
 
 
 def parse_file_content(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
-                       sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False,
-                       return_type: str = "str") -> str | list[Document] | ToolException:
+                       sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False) -> str | ToolException:
     """Parse the content of a file based on its type and return the parsed content.
 
     Args:
@@ -87,8 +86,7 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
         "llm": llm,
         "page_number": page_number,
         "sheet_name": sheet_name,
-        "excel_by_sheets": excel_by_sheets,
-        "return_type": return_type
+        "excel_by_sheets": excel_by_sheets
     })
     loader = loader_object['class'](**loader_kwargs)
 
