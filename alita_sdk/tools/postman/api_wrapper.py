@@ -814,11 +814,30 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                     raw_body = request_body.get('raw', '')
                     body = resolve_variables(raw_body)
                     
+                    # Auto-detect JSON content and set Content-Type if not already set
+                    if not content_type and body.strip():
+                        # Try to parse as JSON to detect if it's JSON content
+                        try:
+                            # Remove JavaScript-style comments before JSON parsing
+                            import re
+                            clean_body = re.sub(r'//.*?(?=\n|$)', '', body, flags=re.MULTILINE)
+                            json.loads(clean_body)
+                            headers['Content-Type'] = 'application/json'
+                            content_type = 'application/json'
+                            # Update body to cleaned version without comments
+                            body = clean_body
+                        except json.JSONDecodeError:
+                            # Not JSON, leave as is
+                            pass
+                    
                     # Try to parse as JSON if content type suggests it
                     if 'application/json' in content_type:
                         try:
-                            # Validate JSON
-                            json.loads(body)
+                            # Remove comments and validate JSON
+                            import re
+                            clean_body = re.sub(r'//.*?(?=\n|$)', '', body, flags=re.MULTILINE)
+                            json.loads(clean_body)
+                            body = clean_body  # Use cleaned version
                         except json.JSONDecodeError:
                             logger.warning("Body is not valid JSON despite Content-Type")
                     
@@ -870,7 +889,12 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                     request_kwargs['data'] = body
                 elif isinstance(body, str):
                     if 'application/json' in content_type:
-                        request_kwargs['json'] = json.loads(body) if body.strip() else {}
+                        # For JSON content, parse and use json parameter for proper handling
+                        try:
+                            request_kwargs['json'] = json.loads(body) if body.strip() else {}
+                        except json.JSONDecodeError:
+                            # Fallback to raw data if JSON parsing fails
+                            request_kwargs['data'] = body
                     else:
                         request_kwargs['data'] = body
                 else:
