@@ -8,6 +8,8 @@ from openai import BadRequestError
 from pydantic import SecretStr, create_model, model_validator
 from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
+
+from ..chunkers.code.constants import get_file_extension
 from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from langchain_core.documents import Document
 
@@ -537,6 +539,9 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                      title_keyword: Optional[str] = None,
                      **kwargs: Any
                      ) -> Generator[Document, None, None]:
+        self._include_attachments = kwargs.get('include_attachments', False)
+        self._skip_attachment_extensions = kwargs.get('skip_attachment_extensions', [])
+
         try:
             if suite_id:
                 resp = self._client.cases.get_cases(project_id=project_id, suite_id=int(suite_id))
@@ -582,6 +587,11 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             Generator[Document, None, None]: A generator yielding processed Document objects with metadata.
         """
         try:
+            if not self._include_attachments:
+                # If attachments are not included, return the document as is
+                yield document
+                return
+
             # get base data from the document required to extract attachments and other metadata
             base_data = json.loads(document.page_content)
             case_id = base_data.get("id")
@@ -591,6 +601,10 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
 
             # process each attachment to extract its content
             for attachment in attachments:
+                if get_file_extension(attachment['filename']) in self._skip_attachment_extensions:
+                    logger.info(f"Skipping attachment {attachment['filename']} with unsupported extension.")
+                    continue
+
                 attachment_id = f"attach_{attachment['id']}"
                 # add attachment id to metadata of parent
                 document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
@@ -639,6 +653,12 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             'suite_id': (Optional[str],
                          Field(default=None, description="Optional TestRail suite ID to filter test cases")),
             'section_id': (Optional[int], Field(default=None, description="Optional section ID to filter test cases")),
+            'include_attachments': (Optional[bool],
+                                    Field(description="Whether to include attachment content in indexing",
+                                          default=False)),
+            'skip_attachment_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to skip when processing attachments: i.e. ['.png', '.jpg']",
+                default=[])),
         }
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
