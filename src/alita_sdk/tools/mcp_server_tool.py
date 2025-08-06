@@ -52,6 +52,7 @@ class McpServerTool(BaseTool):
                     float if item_schema['type'] == 'number' else
                     bool if item_schema['type'] == 'boolean' else
                     list if item_schema['type'] == 'array' else# ADO-MCP testplan_add_test_cases_to_suite
+                    str if item_schema['type'] == 'null' else#for mcp-atlassian
                     None
                 )
                 if item_type is None:
