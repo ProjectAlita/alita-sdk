@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, List, Generator
+from typing import Optional, List, Generator, Any
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
@@ -129,7 +129,7 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                   is_capture_image: bool = False,
                   page_number: int = None,
                   sheet_name: str = None,
-                  excel_by_sheets: bool = False):
+                  excel_by_sheets: bool = False) -> str | dict | ToolException:
         """ Reads file located at the specified server-relative path. """
         try:
             file = self._client.web.get_file_by_server_relative_path(path)
@@ -148,30 +148,30 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                                   excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
 
-    def _base_loader(self, **kwargs) -> List[Document]:
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         try:
             all_files = self.get_files_list()
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
-        docs: List[Document] = []
         for file in all_files:
             metadata = {
                 ("updated_on" if k == "Modified" else k): str(v)
                 for k, v in file.items()
             }
-            docs.append(Document(page_content="", metadata=metadata))
-        return docs
+            yield Document(page_content="", metadata=metadata)
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        page_content = self.read_file(document.metadata['Path'], is_capture_image=True, excel_by_sheets=True)
-        if isinstance(page_content, dict):
-            for key, value in page_content.items():
-                metadata = document.metadata
-                metadata['page'] = key
-                yield Document(page_content=str(value), metadata=metadata)
+        doc_content = self.read_file(document.metadata['Path'],
+                                      is_capture_image=True,
+                                      excel_by_sheets=True)
+        if isinstance(doc_content, dict):
+            for page, content in doc_content:
+                new_metadata = document.metadata
+                new_metadata['page'] = page
+                yield Document(page_content=str(content), metadata=new_metadata)
         else:
-            document.page_content = json.dumps(str(page_content))
+            document.page_content = str(doc_content)
             yield document
 
     @extend_with_vector_tools

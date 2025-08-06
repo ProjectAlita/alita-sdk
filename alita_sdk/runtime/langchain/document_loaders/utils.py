@@ -2,7 +2,8 @@ import re
 import string
 from gensim.parsing import remove_stopwords
 
-from ..tools.log import print_log
+from ..tools.utils import bytes_to_base64
+from langchain_core.messages import HumanMessage
 
 
 def cleanse_data(document: str) -> str:
@@ -32,3 +33,31 @@ def cleanse_data(document: str) -> str:
     #     document = document.replace(kw, "")
 
     return document
+
+def perform_llm_prediction_for_image_bytes(image_bytes: bytes, llm, prompt: str) -> str:
+    """Performs LLM prediction for image content."""
+    base64_string = bytes_to_base64(image_bytes)
+    result = llm.invoke([
+        HumanMessage(
+            content=[
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{base64_string}"},
+                },
+            ]
+        )
+    ])
+    return result.content
+
+def create_temp_file(file_content: bytes):
+    import tempfile
+
+    # Automatic cleanup with context manager
+    with tempfile.NamedTemporaryFile(mode='w+b', delete=True) as temp_file:
+        # Write data to temp file
+        temp_file.write(file_content)
+        temp_file.flush()  # Ensure data is written
+
+        # Get the file path for operations
+        return temp_file.name

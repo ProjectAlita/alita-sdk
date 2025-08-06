@@ -1,16 +1,15 @@
-import base64
 import re
+from io import BytesIO
 
 import mammoth.images
 import pytesseract
 from PIL import Image
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
 from mammoth import convert_to_html
 from markdownify import markdownify
 
-from ..constants import DEFAULT_MULTIMODAL_PROMPT
+from .utils import perform_llm_prediction_for_image_bytes
 
 
 class AlitaDocxMammothLoader(BaseLoader):
@@ -18,7 +17,7 @@ class AlitaDocxMammothLoader(BaseLoader):
     Loader for Docx files using Mammoth to convert to HTML, with image handling,
     and then Markdownify to convert HTML to markdown.
     """
-    def __init__(self, file_path: str, **kwargs):
+    def __init__(self, **kwargs):
         """
         Initializes AlitaDocxMammothLoader.
 
@@ -30,7 +29,10 @@ class AlitaDocxMammothLoader(BaseLoader):
         Raises:
             ValueError: If the 'path' parameter is not provided.
         """
-        self.path = file_path
+        self.path =  kwargs.get('file_path')
+        self.file_content = kwargs.get('file_content')
+        self.file_name = kwargs.get('file_name')
+        self.extract_images = kwargs.get('extract_images')
         self.llm = kwargs.get("llm")
         self.prompt = kwargs.get("prompt")
 
@@ -52,20 +54,7 @@ class AlitaDocxMammothLoader(BaseLoader):
             if self.llm:
                 # Use LLM for image understanding
                 with image.open() as image_bytes:
-                    base64_string = base64.b64encode(image_bytes.read()).decode()
-                url_path = f"data:image/{image.content_type};base64,{base64_string}"
-                result = self.llm.invoke([
-                    HumanMessage(
-                        content=[
-                            {"type": "text",
-                             "text": self.prompt if self.prompt is not None else DEFAULT_MULTIMODAL_PROMPT},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": url_path},
-                            },
-                        ]
-                    )
-                ]).content
+                    result = perform_llm_prediction_for_image_bytes(image_bytes, self.llm, self.prompt)
                 output['src'] = result  # LLM image transcript in src
                 return output
             else:
@@ -114,9 +103,44 @@ class AlitaDocxMammothLoader(BaseLoader):
             List[Document]: A list containing a single Document with the markdown content
                           and metadata including the source file path.
         """
-        with open(self.path, 'rb') as docx_file:
-            result = convert_to_html(docx_file, convert_image=mammoth.images.img_element(self.__handle_image))
-            content = markdownify(result.value, heading_style="ATX")
-            result_content = self.__postprocess_original_md(content)
-            return [Document(page_content=result_content, metadata={'source': str(self.path)})]
+        result_content = self.get_content()
+        return [Document(page_content=result_content, metadata={'source': str(self.path)})]
 
+    def get_content(self):
+        """
+        Extracts and converts the content of the Docx file to markdown format.
+
+        Handles both file paths and in-memory file content.
+
+        Returns:
+            str: The markdown content extracted from the Docx file.
+        """
+        if self.path:
+            # If path is provided, read from file system
+            with open(self.path, 'rb') as docx_file:
+                return self._convert_docx_to_markdown(docx_file)
+        elif self.file_content and self.file_name:
+            # If file_content and file_name are provided, read from memory
+            docx_file = BytesIO(self.file_content)
+            return self._convert_docx_to_markdown(docx_file)
+        else:
+            raise ValueError("Either 'path' or 'file_content' and 'file_name' must be provided.")
+
+    def _convert_docx_to_markdown(self, docx_file):
+        """
+        Converts the content of a Docx file to markdown format.
+
+        Args:
+            docx_file (BinaryIO): The Docx file object.
+
+        Returns:
+            str: The markdown content extracted from the Docx file.
+        """
+        if self.extract_images:
+            # Extract images using the provided image handler
+            result = convert_to_html(docx_file, convert_image=mammoth.images.img_element(self.__handle_image))
+        else:
+            # Ignore images
+            result = convert_to_html(docx_file, convert_image=lambda image: "")
+        content = markdownify(result.value, heading_style="ATX")
+        return self.__postprocess_original_md(content)

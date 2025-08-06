@@ -1,19 +1,11 @@
-import re
+from pathlib import Path
 
-from docx import Document
-from io import BytesIO
-import pandas as pd
-from PIL import Image
-from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE_TYPE
-import io
-import pymupdf
 from langchain_core.tools import ToolException
-from transformers import BlipProcessor, BlipForConditionalGeneration
-from langchain_core.messages import HumanMessage
 from logging import getLogger
+from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map
+from langchain_core.documents import Document
 
-from ...runtime.langchain.tools.utils import bytes_to_base64
+from ...runtime.langchain.document_loaders.utils import create_temp_file
 
 logger = getLogger(__name__)
 
@@ -61,7 +53,7 @@ IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'svg']
 
 
 def parse_file_content(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
-                       sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False):
+                       sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False) -> str | ToolException:
     """Parse the content of a file based on its type and return the parsed content.
 
     Args:
@@ -72,6 +64,7 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
         sheet_name (str, optional): The specific sheet name to parse for Excel files.
         llm: The language model to use for image processing.
         file_path (str, optional): The path to the file if it needs to be read from disk.
+        return_type (str, optional): Tipe of returned result. Possible values are 'str', 'docs'.
     Returns:
         str: The parsed content of the file.
     Raises:
@@ -81,142 +74,39 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
     if (file_path and (file_name or file_content)) or (not file_path and (not file_name or file_content is None)):
         raise ToolException("Either (file_name and file_content) or file_path must be provided, but not both.")
 
-    if file_path:
-        file_content = file_to_bytes(file_path)
-        if file_content is None:
-            return ToolException(f"File not found or could not be read: {file_path}")
-        file_name = file_path.split('/')[-1]  # Extract file name from path
-    if file_name.endswith('.txt'):
-        return parse_txt(file_content)
-    elif file_name.endswith('.docx'):
-        return read_docx_from_bytes(file_content)
-    elif file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-        return parse_excel(file_content, sheet_name, excel_by_sheets)
-    elif file_name.endswith('.pdf'):
-        return parse_pdf(file_content, page_number, is_capture_image, llm)
-    elif file_name.endswith('.pptx'):
-        return parse_pptx(file_content, page_number, is_capture_image, llm)
-    elif any(file_name.lower().endswith(f".{ext}") for ext in IMAGE_EXTENSIONS):
-        match = re.search(r'\.([a-zA-Z0-9]+)$', file_name)
-        return __perform_llm_prediction_for_image(llm, file_content, match.group(1), image_processing_prompt)
-    else:
+    extension = Path(file_path if file_path else file_name).suffix
+
+    loader_object = loaders_map.get(extension)
+    loader_kwargs = loader_object['kwargs']
+    loader_kwargs.update({
+        "file_path": file_path,
+        "file_content": file_content,
+        "file_name": file_name,
+        "extract_images": is_capture_image,
+        "llm": llm,
+        "page_number": page_number,
+        "sheet_name": sheet_name,
+        "excel_by_sheets": excel_by_sheets
+    })
+    loader = loader_object['class'](**loader_kwargs)
+
+    if not loader:
         return ToolException(
             "Not supported type of files entered. Supported types are TXT, DOCX, PDF, PPTX, XLSX and XLS only.")
 
-def parse_txt(file_content):
-    try:
-        return file_content.decode('utf-8')
-    except Exception as e:
-        return ToolException(f"Error decoding file content: {e}")
-
-def parse_excel(file_content, sheet_name = None, return_by_sheets: bool = False):
-    try:
-        excel_file = io.BytesIO(file_content)
-        if sheet_name:
-            return parse_sheet(excel_file, sheet_name)
-        dfs = pd.read_excel(excel_file, sheet_name=sheet_name)
-
-        if return_by_sheets:
-            result = {}
-            for sheet_name, df in dfs.items():
-                df.fillna('', inplace=True)
-                result[sheet_name] = df.to_dict(orient='records')
-            return result
-        else:
-            result = []
-            for sheet_name, df in dfs.items():
-                df.fillna('', inplace=True)
-                string_content = df.to_string(index=False)
-                result.append(f"====== Sheet name: {sheet_name} ======\n{string_content}")
-            return "\n\n".join(result)
-    except Exception as e:
-        return ToolException(f"Error reading Excel file: {e}")
-
-def parse_sheet(excel_file, sheet_name):
-    df = pd.read_excel(excel_file, sheet_name=sheet_name)
-    df.fillna('', inplace=True)
-    return df.to_string()
-
-def parse_pdf(file_content, page_number, is_capture_image, llm):
-    with pymupdf.open(stream=file_content, filetype="pdf") as report:
-        text_content = ''
-        if page_number is not None:
-            page = report.load_page(page_number - 1)
-            text_content += read_pdf_page(report, page, page_number, is_capture_image, llm)
-        else:
-            for index, page in enumerate(report, start=1):
-                text_content += read_pdf_page(report, page, index, is_capture_image, llm)
-        return text_content
-
-def parse_pptx(file_content, page_number, is_capture_image, llm=None):
-    prs = Presentation(io.BytesIO(file_content))
-    text_content = ''
-    if page_number is not None:
-        text_content += read_pptx_slide(prs.slides[page_number - 1], page_number, is_capture_image, llm)
+    if hasattr(loader, 'get_content'):
+        return loader.get_content()
     else:
-        for index, slide in enumerate(prs.slides, start=1):
-            text_content += read_pptx_slide(slide, index, is_capture_image, llm)
-    return text_content
-
-def read_pdf_page(report, page, index, is_capture_images, llm=None):
-    text_content = f'Page: {index}\n'
-    text_content += page.get_text()
-    if is_capture_images:
-        images = page.get_images(full=True)
-        for i, img in enumerate(images):
-            xref = img[0]
-            base_image = report.extract_image(xref)
-            img_bytes = base_image["image"]
-            text_content += __perform_llm_prediction_for_image(llm, img_bytes)
-    return text_content
-
-def read_docx_from_bytes(file_content):
-    """Read and return content from a .docx file using a byte stream."""
-    try:
-        doc = Document(BytesIO(file_content))
-        text = []
-        for paragraph in doc.paragraphs:
-            text.append(paragraph.text)
-        return '\n'.join(text)
-    except Exception as e:
-        print(f"Error reading .docx from bytes: {e}")
-        return ""
-
-def read_pptx_slide(slide, index, is_capture_image, llm):
-    text_content = f'Slide: {index}\n'
-    for shape in slide.shapes:
-        if hasattr(shape, "text"):
-            text_content += shape.text + "\n"
-        elif is_capture_image and shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-            try:
-                caption = __perform_llm_prediction_for_image(llm, shape.image.blob)
-            except:
-                caption = "\n[Picture: unknown]\n"
-            text_content += caption
-    return text_content
-
-def describe_image(image):
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-    inputs = processor(image, return_tensors="pt")
-    out = model.generate(**inputs)
-    return "\n[Picture: " + processor.decode(out[0], skip_special_tokens=True) + "]\n"
-
-def __perform_llm_prediction_for_image(llm, image: bytes, image_format='png', prompt=image_processing_prompt) -> str:
-    if not llm:
-        raise ToolException("LLM is not provided for image processing.")
-    base64_string = bytes_to_base64(image)
-    result = llm.invoke([
-        HumanMessage(
-            content=[
-                {"type": "text", "text": prompt},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/{image_format};base64,{base64_string}"},
-                },
-            ])
-    ])
-    return f"\n[Image description: {result.content}]\n"
+        if file_content:
+            return load_content_from_bytes(file_content=file_content,
+                                           extension=extension,
+                                           loader_extra_config=loader_kwargs,
+                                           llm=llm)
+        else:
+            return load_content(file_path=file_path,
+                                extension=extension,
+                                loader_extra_config=loader_kwargs,
+                                llm=llm)
 
 # TODO: review usage of this function alongside with functions above
 def load_content(file_path: str, extension: str = None, loader_extra_config: dict = None, llm = None) -> str:
@@ -254,22 +144,7 @@ def load_content(file_path: str, extension: str = None, loader_extra_config: dic
 
 def load_content_from_bytes(file_content: bytes, extension: str = None, loader_extra_config: dict = None, llm = None) -> str:
     """Loads the content of a file from bytes based on its extension using a configured loader."""
-
-    import tempfile
-
-    # Automatic cleanup with context manager
-    with tempfile.NamedTemporaryFile(mode='w+b', delete=True) as temp_file:
-        # Write data to temp file
-        temp_file.write(file_content)
-        temp_file.flush()  # Ensure data is written
-
-        # Get the file path for operations
-        temp_path = temp_file.name
-
-        # Perform your operations
-        return load_content(temp_path, extension, loader_extra_config, llm)
-
-
+    return load_content(create_temp_file(file_content), extension, loader_extra_config, llm)
 
 def file_to_bytes(filepath):
     """
