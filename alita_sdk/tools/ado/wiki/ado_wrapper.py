@@ -240,10 +240,6 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
                 'updated_on': ''
             })
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        if False:
-            yield  # Unreachable, but keeps the function a generator
-
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
