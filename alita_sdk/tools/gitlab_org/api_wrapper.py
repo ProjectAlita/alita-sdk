@@ -24,7 +24,7 @@ GitLabCreateBranch = create_model(
 GitLabListBranches = create_model(
     "GitLabListBranchesModel",
     repository=(Optional[str], Field(description="Name of the repository", default=None)),
-    limit=(Optional[int], Field(description="Maximum number of branches to return. If not provided, all branches will be returned.", default=None)),
+    limit=(Optional[int], Field(description="Maximum number of branches to return. If not provided, all branches will be returned.", default=20)),
     branch_wildcard=(Optional[str], Field(description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned.", default=None))
 )
 
@@ -212,7 +212,7 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
         self._active_branch = branch
         return f"Active branch set to {branch}"
 
-    def list_branches_in_repo(self, repository: Optional[str] = None, limit: Optional[int] = None, branch_wildcard: Optional[str] = None) -> List[str]:
+    def list_branches_in_repo(self, repository: Optional[str] = None, limit: Optional[int] = 20, branch_wildcard: Optional[str] = None) -> List[str]:
         """
         Lists branches in the repository with optional limit and wildcard filtering.
 

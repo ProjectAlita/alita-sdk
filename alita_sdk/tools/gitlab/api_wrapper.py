@@ -1,7 +1,7 @@
 # api_wrapper.py
 from typing import Any, Dict, List, Optional
 import fnmatch
-from alita_sdk.tools.elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from alita_sdk.tools.elitea_base import extend_with_vector_tools
 from alita_sdk.tools.elitea_base import BaseCodeToolApiWrapper
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
@@ -54,7 +54,7 @@ CreateBranchModel = create_model(
 )
 ListBranchesInRepoModel = create_model(
     "ListBranchesInRepoModel",
-    limit=(Optional[int], Field(None, description="Maximum number of branches to return. If not provided, all branches will be returned.")),
+    limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.")),
     branch_wildcard=(Optional[str], Field(default=None, description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned."))
 
 )
@@ -98,7 +98,7 @@ GetCommitsModel = create_model(
     author=(Optional[str], Field(description="Author name", default=None)),
 )
 
-class GitLabAPIWrapper(BaseVectorStoreToolApiWrapper):
+class GitLabAPIWrapper(BaseCodeToolApiWrapper):
     url: str
     repository: str
     private_token: SecretStr
@@ -147,7 +147,7 @@ class GitLabAPIWrapper(BaseVectorStoreToolApiWrapper):
         self._repo_instance.default_branch = branch_name
         return f"Active branch set to {branch_name}"
 
-    def list_branches_in_repo(self, limit: Optional[int] = None, branch_wildcard: Optional[str] = None) -> List[str]:
+    def list_branches_in_repo(self, limit: Optional[int] = 20, branch_wildcard: Optional[str] = None) -> List[str]:
         """
         Lists branches in the repository with optional limit and wildcard filtering.
 
