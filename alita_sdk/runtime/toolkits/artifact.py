@@ -26,6 +26,11 @@ class ArtifactToolkit(BaseToolkit):
             connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
                                                             default=None,
                                                             json_schema_extra={'secret': True})),
+            # embedding model settings
+            embedding_model=(str, Field(default="HuggingFaceEmbeddings", description="Embedding model to use")),
+            embedding_model_params=(dict, Field(default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+                                                description="Parameters for embedding model")),
+
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})
         )
     

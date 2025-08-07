@@ -114,7 +114,7 @@ BaseIndexDataParams = create_model(
                          description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
-    chunking_tool=(Literal['markdown', 'statistical', 'proposal'], Field(description="Name of chunking tool", default="markdown")),
+    chunking_tool=(Literal['markdown', 'statistical', 'proposal'], Field(description="Name of chunking tool", default=None)),
     chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 
@@ -350,7 +350,9 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 "alita_sdk_options": {
                     "target_schema": collection_name,
                 },
-                "connection_string": self.connection_string.get_secret_value()
+                # "connection_string": self.connection_string.get_secret_value()
+                # 'postgresql+psycopg://project_23_user:Rxu4QtM2InLVNnm62GX7@pgvector:5432/project_23'
+                "connection_string": 'postgresql+psycopg://postgres:yourpassword@localhost:5432/postgres'
             }
         elif self.vectorstore_type == 'Chroma':
             vectorstore_params = {
