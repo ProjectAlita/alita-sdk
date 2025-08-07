@@ -350,9 +350,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 "alita_sdk_options": {
                     "target_schema": collection_name,
                 },
-                # "connection_string": self.connection_string.get_secret_value()
-                # 'postgresql+psycopg://project_23_user:Rxu4QtM2InLVNnm62GX7@pgvector:5432/project_23'
-                "connection_string": 'postgresql+psycopg://postgres:yourpassword@localhost:5432/postgres'
+                "connection_string": self.connection_string.get_secret_value()
             }
         elif self.vectorstore_type == 'Chroma':
             vectorstore_params = {
