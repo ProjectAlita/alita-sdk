@@ -1,6 +1,7 @@
 # api_wrapper.py
 from typing import Any, Dict, List, Optional
-
+import fnmatch
+from alita_sdk.tools.elitea_base import extend_with_vector_tools
 from alita_sdk.tools.elitea_base import BaseCodeToolApiWrapper
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
@@ -53,7 +54,11 @@ CreateBranchModel = create_model(
 )
 ListBranchesInRepoModel = create_model(
     "ListBranchesInRepoModel",
+    limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.")),
+    branch_wildcard=(Optional[str], Field(default=None, description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned."))
+
 )
+
 ListFilesModel = create_model(
     "ListFilesModel",
     path=(Optional[str], Field(description="The path to list files from")),
@@ -142,9 +147,30 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
         self._repo_instance.default_branch = branch_name
         return f"Active branch set to {branch_name}"
 
-    def list_branches_in_repo(self) -> List[str]:
-        branches = self._repo_instance.branches.list()
-        return [branch.name for branch in branches]
+    def list_branches_in_repo(self, limit: Optional[int] = 20, branch_wildcard: Optional[str] = None) -> List[str]:
+        """
+        Lists branches in the repository with optional limit and wildcard filtering.
+
+        Parameters:
+            limit (Optional[int]): Maximum number of branches to return
+            branch_wildcard (Optional[str]): Wildcard pattern to filter branches (e.g., '*dev')
+
+        Returns:
+            List[str]: List containing names of branches
+        """
+        try:
+            branches = self._repo_instance.branches.list(get_all=True)
+            
+            if branch_wildcard:
+                branches = [branch for branch in branches if fnmatch.fnmatch(branch.name, branch_wildcard)]
+            
+            if limit is not None:
+                branches = branches[:limit]
+            
+            branch_names = [branch.name for branch in branches]
+            return branch_names
+        except Exception as e:
+            return f"Failed to list branches: {str(e)}"
 
     def list_files(self, path: str = None, recursive: bool = True, branch: str = None) -> List[str]:
         branch = branch if branch else self._active_branch
@@ -404,84 +430,85 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             for commit in commits
         ]
 
+    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {
                 "name": "create_branch",
                 "ref": self.create_branch,
-                "description": self.create_branch.__doc__,
+                "description": self.create_branch.__doc__ or "Create a new branch in the repository.",
                 "args_schema": CreateBranchModel,
             },
             {
                 "name": "list_branches_in_repo",
                 "ref": self.list_branches_in_repo,
-                "description": self.list_branches_in_repo.__doc__,
+                "description": self.list_branches_in_repo.__doc__ or "List branches in the repository with optional limit and wildcard filtering.",
                 "args_schema": ListBranchesInRepoModel,
             },
             {
                 "name": "list_files",
                 "ref": self.list_files,
-                "description": self.list_files.__doc__,
+                "description": self.list_files.__doc__ or "List files in the repository with optional path, recursive search, and branch.",
                 "args_schema": ListFilesModel,
             },
             {
                 "name": "list_folders",
                 "ref": self.list_folders,
-                "description": self.list_folders.__doc__,
+                "description": self.list_folders.__doc__ or "List folders in the repository with optional path, recursive search, and branch.",
                 "args_schema": ListFoldersModel,
             },
             {
                 "name": "get_issues",
                 "ref": self.get_issues,
-                "description": self.get_issues.__doc__,
+                "description": self.get_issues.__doc__ or "Get all open issues in the repository.",
                 "args_schema": GetIssuesModel,
             },
             {
                 "name": "get_issue",
                 "ref": self.get_issue,
-                "description": self.get_issue.__doc__,
+                "description": self.get_issue.__doc__ or "Get details of a specific issue by its number.",
                 "args_schema": GetIssueModel,
             },
             {
                 "name": "create_pull_request",
                 "ref": self.create_pull_request,
-                "description": self.create_pull_request.__doc__,
+                "description": self.create_pull_request.__doc__ or "Create a pull request (merge request) in the repository.",
                 "args_schema": CreatePullRequestModel,
             },
             {
                 "name": "comment_on_issue",
                 "ref": self.comment_on_issue,
-                "description": self.comment_on_issue.__doc__,
+                "description": self.comment_on_issue.__doc__ or "Comment on an issue in the repository.",
                 "args_schema": CommentOnIssueModel,
             },
             {
                 "name": "create_file",
                 "ref": self.create_file,
-                "description": self.create_file.__doc__,
+                "description": self.create_file.__doc__ or "Create a new file in the repository.",
                 "args_schema": CreateFileModel,
             },
             {
                 "name": "read_file",
                 "ref": self.read_file,
-                "description": self.read_file.__doc__,
+                "description": self.read_file.__doc__ or "Read the contents of a file in the repository.",
                 "args_schema": ReadFileModel,
             },
             {
                 "name": "update_file",
                 "ref": self.update_file,
-                "description": self.update_file.__doc__,
+                "description": self.update_file.__doc__ or "Update the contents of a file in the repository.",
                 "args_schema": UpdateFileModel,
             },
             {
                 "name": "append_file",
                 "ref": self.append_file,
-                "description": self.append_file.__doc__,
+                "description": self.append_file.__doc__ or "Append content to a file in the repository.",
                 "args_schema": AppendFileModel,
             },
             {
                 "name": "delete_file",
                 "ref": self.delete_file,
-                "description": self.delete_file.__doc__,
+                "description": self.delete_file.__doc__ or "Delete a file from the repository.",
                 "args_schema": DeleteFileModel,
             },
             {
@@ -507,5 +534,5 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 "ref": self.get_commits,
                 "description": "Retrieve a list of commits from the repository.",
                 "args_schema": GetCommitsModel,
-            },
+            }
         ] + self._get_vector_search_tools()
