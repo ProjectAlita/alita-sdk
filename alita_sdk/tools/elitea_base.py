@@ -41,6 +41,11 @@ BaseCodeIndexParams = create_model(
     blacklist=(Optional[List[str]], Field(description="File extensions or paths to exclude. Defaults to no exclusions if None.", default=None)),
 )
 
+RemoveIndexParams = create_model(
+    "RemoveIndexParams",
+    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+)
+
 BaseSearchParams = create_model(
     "BaseSearchParams",
     query=(str, Field(description="Query text to search in the index")),
@@ -363,6 +368,13 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             process_document_func=self._process_documents,
         )
 
+    def remove_index(self, collection_suffix: str = ""):
+        """
+            Cleans the indexed data in the collection
+        """
+
+        self._init_vector_store(collection_suffix)._clean_collection()
+
     def search_index(self,
                      query: str,
                      collection_suffix: str = "",
@@ -463,7 +475,14 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 "ref": self.stepback_summary_index,
                 "description": self.stepback_summary_index.__doc__,
                 "args_schema": BaseStepbackSearchParams
-            }
+            },
+            {
+                "name": "remove_index",
+                "mode": "remove_index",
+                "ref": self.remove_index,
+                "description": self.remove_index.__doc__,
+                "args_schema": RemoveIndexParams
+            },
         ]
 
 

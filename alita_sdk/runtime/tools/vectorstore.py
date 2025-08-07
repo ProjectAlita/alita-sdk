@@ -197,7 +197,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             tool_name="_clean_collection"
         )
         data = self.vectoradapter.vectorstore.get(include=['metadatas'])
-        self.vectoradapter.vectorstore.delete(ids=data['ids'])
+        if data['ids']:
+            self.vectoradapter.vectorstore.delete(ids=data['ids'])
         self._log_data(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
