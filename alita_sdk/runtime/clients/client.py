@@ -249,9 +249,9 @@ class AlitaClient:
         elif app_type == "llama":
             app_type = "react"
         elif app_type == "dial":
-            app_type = "openai"
+            app_type = "react"
         elif app_type == 'autogen':
-            app_type = "openai"
+            app_type = "react"
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
                                       tools=tools, memory=memory, store=store)
