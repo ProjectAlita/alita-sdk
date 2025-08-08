@@ -1,5 +1,6 @@
 import ast
 import fnmatch
+import json
 import logging
 import traceback
 from typing import Any, Optional, List, Literal, Dict, Generator
@@ -375,6 +376,12 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
 
         self._init_vector_store(collection_suffix)._clean_collection()
 
+    def list_collections(self):
+        """
+            Lists all collections in the vector store
+        """
+        return ','.join([collection.name for collection in self.vectoradapter.vectorstore._client.list_collections()])
+
     def search_index(self,
                      query: str,
                      collection_suffix: str = "",
@@ -386,17 +393,18 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      **kwargs):
         """ Searches indexed documents in the vector store."""
         vectorstore = self._init_vector_store(collection_suffix)
-        return vectorstore.search_documents(
-            query, 
-            doctype=self.doctype, 
-            filter=filter, 
-            cut_off=cut_off, 
-            search_top=search_top, 
+        found_docs = vectorstore.search_documents(
+            query,
+            doctype=self.doctype,
+            filter=filter,
+            cut_off=cut_off,
+            search_top=search_top,
             reranker=reranker,
-            full_text_search=full_text_search, 
-            reranking_config=reranking_config, 
+            full_text_search=full_text_search,
+            reranking_config=reranking_config,
             extended_search=extended_search
         )
+        return f"Found {len(found_docs)} documents matching the query\n{json.dumps(found_docs, indent=4)}" if found_docs else "No documents found matching the query."
 
     def stepback_search_index(self,
                      query: str,
@@ -410,17 +418,18 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      **kwargs):
         """ Searches indexed documents in the vector store."""
         vectorstore = self._init_vector_store(collection_suffix)
-        return vectorstore.stepback_search(
-            query, 
-            messages, 
-            self.doctype, 
-            filter=filter, 
-            cut_off=cut_off, 
+        found_docs = vectorstore.stepback_search(
+            query,
+            messages,
+            self.doctype,
+            filter=filter,
+            cut_off=cut_off,
             search_top=search_top,
-            full_text_search=full_text_search, 
-            reranking_config=reranking_config, 
+            full_text_search=full_text_search,
+            reranking_config=reranking_config,
             extended_search=extended_search
         )
+        return f"Found {len(found_docs)} documents matching the query\n{json.dumps(found_docs, indent=4)}" if found_docs else "No documents found matching the query."
 
     def stepback_summary_index(self,
                      query: str,
@@ -483,6 +492,14 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 "description": self.remove_index.__doc__,
                 "args_schema": RemoveIndexParams
             },
+            {
+                "name": "list_collections",
+                "mode": "list_collections",
+                "ref": self.list_collections,
+                "description": self.list_collections.__doc__,
+                "args_schema": create_model("ListCollectionsParams")  # No parameters
+            },
+
         ]
 
 
