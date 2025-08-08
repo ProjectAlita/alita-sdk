@@ -188,6 +188,59 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
+    def _remove_collection(self):
+        """
+        Remove the vectorstore collection entirely.
+        """
+        self._log_data(
+            f"Remove collection '{self.dataset}'",
+            tool_name="_remove_collection"
+        )
+        from sqlalchemy import text
+        from sqlalchemy.orm import Session
+
+        schema_name = self.vectorstore.collection_name
+        with Session(self.vectorstore.session_maker.bind) as session:
+            drop_schema_query = text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE;")
+            session.execute(drop_schema_query)
+            session.commit()
+            logger.info(f"Schema '{schema_name}' has been dropped.")
+        self._log_data(
+            f"Collection '{self.dataset}' has been removed. ",
+            tool_name="_remove_collection"
+        )
+
+    def _get_indexed_ids(self, store):
+        """Get all indexed document IDs from vectorstore"""
+
+        # Check if this is a PGVector store
+        if hasattr(store, 'session_maker') and hasattr(store, 'EmbeddingStore'):
+            return self._get_pgvector_indexed_ids(store)
+        else:
+            # Fall back to Chroma implementation
+            return self._get_chroma_indexed_ids(store)
+
+    def _get_pgvector_indexed_ids(self, store):
+        """Get all indexed document IDs from PGVector"""
+        from sqlalchemy.orm import Session
+
+        try:
+            with Session(store.session_maker.bind) as session:
+                ids = session.query(store.EmbeddingStore.id).all()
+            return [str(id_tuple[0]) for id_tuple in ids]
+        except Exception as e:
+            logger.error(f"Failed to get indexed IDs from PGVector: {str(e)}")
+            return []
+
+    def _get_chroma_indexed_ids(self, store):
+        """Get all indexed document IDs from Chroma"""
+        try:
+            data = store.get(include=[])  # Only get IDs, no metadata
+            return data.get('ids', [])
+        except Exception as e:
+            logger.error(f"Failed to get indexed IDs from Chroma: {str(e)}")
+            return []
+
     def _clean_collection(self):
         """
         Clean the vectorstore collection by deleting all indexed data.
@@ -196,13 +249,10 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
-        # This logic deletes the entire collection
-        # Works for PGVector and Chroma
-        self.vectoradapter.vectorstore.delete_collection()
         # This logic deletes all data from the vectorstore collection without removal of collection.
-        # data = self.vectoradapter.vectorstore.get(include=['metadatas'])
-        # if data['ids']:
-        #     self.vectoradapter.vectorstore.delete(ids=data['ids'])
+        # Collection itself remains available for future indexing.
+        self.vectoradapter.vectorstore.delete(ids=self._get_indexed_ids(self.vectoradapter.vectorstore))
+
         self._log_data(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"

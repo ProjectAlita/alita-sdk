@@ -375,12 +375,30 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             Cleans the indexed data in the collection
         """
 
-        self._init_vector_store(collection_suffix)._clean_collection()
+        self._init_vector_store(collection_suffix)._remove_collection()
 
     def list_collections(self):
         """
             Lists all collections in the vector store
         """
+        if self.vectorstore_type == 'PGVector'.lower():
+            from sqlalchemy import text
+            from sqlalchemy.orm import Session
+
+            # schema_name = self.vectorstore.collection_name
+            with Session(self._init_vector_store().vectorstore.session_maker.bind) as session:
+                get_collections = text("""
+                    SELECT table_schema
+                    FROM information_schema.columns
+                    WHERE udt_name = 'vector';
+                """)
+
+                # Execute the raw SQL query
+                result = session.execute(get_collections)
+
+                # Fetch all rows from the result
+                docs = result.fetchall()
+            return str(docs)
         vector_client = self._init_vector_store().vectoradapter.vectorstore._client
         return ','.join([collection.name for collection in vector_client.list_collections()])
 
