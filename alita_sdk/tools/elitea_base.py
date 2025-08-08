@@ -381,7 +381,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         """
             Lists all collections in the vector store
         """
-        if self.vectorstore_type == 'PGVector'.lower():
+        if self.vectorstore_type.lower() == 'PGVector'.lower():
             from sqlalchemy import text
             from sqlalchemy.orm import Session
 
