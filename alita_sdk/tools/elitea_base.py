@@ -327,6 +327,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                             yield processed_doc
 
 
+    # TODO: init store once and re-use the instance
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
         """ Initializes the vector store wrapper with the provided parameters."""
         try:
@@ -380,7 +381,8 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         """
             Lists all collections in the vector store
         """
-        return ','.join([collection.name for collection in self.vectoradapter.vectorstore._client.list_collections()])
+        vector_client = self._init_vector_store().vectoradapter.vectorstore._client
+        return ','.join([collection.name for collection in vector_client.list_collections()])
 
     def search_index(self,
                      query: str,

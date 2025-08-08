@@ -13,7 +13,15 @@ def get_tools(tool):
     return ZephyrEssentialToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         token=tool['settings']["token"],
-        toolkit_name=tool.get('toolkit_name')
+        toolkit_name=tool.get('toolkit_name'),
+        llm = tool['settings'].get('llm', None),
+
+        # indexer settings
+        connection_string = tool['settings'].get('connection_string', None),
+        collection_name = f"{tool.get('toolkit_name')}_{str(tool['id'])}",
+        embedding_model = "HuggingFaceEmbeddings",
+        embedding_model_params = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        vectorstore_type = "PGVector"
     ).get_tools()
 
 class ZephyrEssentialToolkit(BaseToolkit):
@@ -29,6 +37,10 @@ class ZephyrEssentialToolkit(BaseToolkit):
             token=(str, Field(description="Bearer api token")),
             base_url=(Optional[str], Field(description="Zephyr Essential base url", default=None)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+            # indexer settings
+            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                          default=None,
+                                                          json_schema_extra={'secret': True})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Essential", "icon_url": "zephyr.svg",
                             "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
