@@ -19,7 +19,7 @@ class McpServerTool(BaseTool):
 
 
     @staticmethod
-    def create_pydantic_model_from_schema(schema: dict):
+    def create_pydantic_model_from_schema(schema: dict, model_name: str = "ArgsSchema"):
         def parse_type(field: dict, name: str = "Field") -> Any:
             if "allOf" in field:
                 merged = {}
@@ -67,7 +67,7 @@ class McpServerTool(BaseTool):
             if t == "boolean":
                 return bool
             if t == "object":
-                return McpServerTool.create_pydantic_model_from_schema(field)
+                return McpServerTool.create_pydantic_model_from_schema(field, name.capitalize())
             if t == "array":
                 items = field.get("items", {})
                 return List[parse_type(items, name + "Item")]
@@ -85,7 +85,16 @@ class McpServerTool(BaseTool):
             if "format" in prop:
                 field_args["format"] = prop["format"]
             fields[name] = (typ, Field(default, **field_args))
-        return create_model("DynamicModel", **fields)
+        return create_model(model_name, **fields)
+
+    def _to_args_and_kwargs(
+        self, tool_input: Union[str, dict], tool_call_id: Optional[str]
+    ) -> tuple[tuple, dict]:
+        # just return input as is without any transformation to/from pydentic model
+        if isinstance(tool_input, str):
+            return (tool_input,), {}
+        else:
+            return (), tool_input
 
     def _run(self, *args, **kwargs):
         call_data = {
