@@ -14,6 +14,5 @@ class PgVectorConfiguration(BaseModel):
     )
     connection_string: SecretStr = Field(
         description="Connection string for PgVector database",
-        default=None,
-        json_schema_extra={'configuration_title': True}
+        default=None
     )

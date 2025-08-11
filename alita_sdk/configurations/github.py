@@ -35,8 +35,7 @@ class GithubConfiguration(BaseModel):
             }
         }
     )
-    base_url: Optional[str] = Field(description="Base API URL", default="https://api.github.com",
-                                    json_schema_extra={'configuration_title': True})
+    base_url: Optional[str] = Field(description="Base API URL", default="https://api.github.com")
     app_id: Optional[str] = Field(description="Github APP ID", default=None)
     app_private_key: Optional[SecretStr] = Field(description="Github APP private key", default=None)
 
