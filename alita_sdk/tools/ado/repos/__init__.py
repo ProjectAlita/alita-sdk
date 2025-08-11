@@ -4,6 +4,9 @@ from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, Field, create_model, SecretStr
 
 import requests
+
+from ....configurations.ado import AdoReposConfiguration
+from ....configurations.pgvector import PgVectorConfiguration
 from ...base.tool import BaseAction
 from .repos_wrapper import ReposApiWrapper
 from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
@@ -46,25 +49,13 @@ class AzureDevOpsReposToolkit(BaseToolkit):
         AzureDevOpsReposToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            organization_url=(str, Field(title="Organization URL",
-                                                   description="ADO organization url",
-                                                   json_schema_extra={
-                                                       'configuration': True,
-                                                       "configuration_title": True
-                                                   })),
-            project=(str, Field(title="Project", description="ADO project", json_schema_extra={'configuration': True})),
-            repository_id=(str, Field(title="Repository ID", description="ADO repository ID",
-                                                json_schema_extra={
-                                                    'max_toolkit_length': AzureDevOpsReposToolkit.toolkit_max_length,
-                                                    'configuration': True})),
-            token=(SecretStr, Field(title="Token", description="ADO token", json_schema_extra={'secret': True, 'configuration': True})),
+            ado_repos_configuration=(Optional[AdoReposConfiguration], Field(description="Ado Repos configuration", default=None,
+                                                                       json_schema_extra={'configuration_types': ['ado_repos']})),
             base_branch=(Optional[str], Field(default="", title="Base branch", description="ADO base branch (e.g., main)")),
             active_branch=(Optional[str], Field(default="", title="Active branch", description="ADO active branch (e.g., main)")),
 
             # indexer settings
-            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                            default=None,
-                                                            json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector configuration", default=None, json_schema_extra={'configuration_types': ['pgvector']})),
             
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={'json_schema_extra': {'metadata':
@@ -84,11 +75,11 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                     },
                     "categories": ["code repositories"],
                     "extra_categories": ["code", "repository", "version control"],
-                    "configuration_group": {
-                        "name": "ado_repos",
-                        "label": "Azure DevOps Repositories",
-                        "icon_url": "ado-repos-icon.svg",
-                    }
+                    # "configuration_group": {
+                    #     "name": "ado_repos",
+                    #     "label": "Azure DevOps Repositories",
+                    #     "icon_url": "ado-repos-icon.svg",
+                    # }
                 }}}
         )
 
