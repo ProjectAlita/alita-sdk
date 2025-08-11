@@ -3,6 +3,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 AVAILABLE_CONFIGURATIONS = {}
+AVAILABLE_CLASS_CONFIGURATIONS = {}
 FAILED_IMPORTS = {}
 
 
@@ -14,6 +15,7 @@ def _safe_import_configuration(
         module = __import__(f'alita_sdk.configurations.{module_path}', fromlist=[''])
         configuration_class = getattr(module, configuration_class_name)
         AVAILABLE_CONFIGURATIONS[configuration_name] = configuration_class.model_json_schema()
+        AVAILABLE_CLASS_CONFIGURATIONS[configuration_name] = configuration_class
         logger.debug(f"Successfully imported {configuration_name}")
     except Exception as e:
         FAILED_IMPORTS[configuration_name] = str(e)
@@ -31,8 +33,14 @@ logger.info(f"Configuration imports completed: {available_count}/{total_attempte
 
 
 def get_configurations():
-    """Return all available configuration classes."""
+    """Return all available configuration schemas."""
     return AVAILABLE_CONFIGURATIONS.copy()
+
+
+def get_class_configurations():
+    """Return all available configuration classes."""
+    return AVAILABLE_CLASS_CONFIGURATIONS.copy()
+
 
 def get_available_configurations():
     """Return list of available configuration class names."""
