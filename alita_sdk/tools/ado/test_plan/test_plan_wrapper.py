@@ -364,7 +364,7 @@ class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error getting test cases: {e}")
             return ToolException(f"Error getting test cases: {e}")
 
-    def _base_loader(self, plan_id: str, suite_ids: Optional[list[str]] = []) -> Generator[Document, None, None]:
+    def _base_loader(self, plan_id: str, suite_ids: Optional[list[str]] = [], **kwargs) -> Generator[Document, None, None]:
         cases = []
         for sid in suite_ids:
             cases.extend(self.get_test_cases(plan_id, sid))

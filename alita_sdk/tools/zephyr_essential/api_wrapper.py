@@ -229,7 +229,7 @@ class ZephyrEssentialApiWrapper(BaseVectorStoreToolApiWrapper):
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON string: {str(e)}")
 
-    def _base_loader(self) -> Generator[Document, None, None]:
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         try:
             test_cases = self.list_test_cases()
         except Exception as e:

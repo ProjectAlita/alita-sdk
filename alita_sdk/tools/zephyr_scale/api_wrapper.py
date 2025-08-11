@@ -1213,7 +1213,7 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
             """))
         }
 
-    def _base_loader(self, project_key: str, jql: str) -> Generator[Document, None, None]:
+    def _base_loader(self, project_key: str, jql: str, **kwargs) -> Generator[Document, None, None]:
         for test_case_doc in self._get_test_cases_docs(project_key, jql):
             yield test_case_doc
         for folder_doc in self._get_folders_docs(project_key):

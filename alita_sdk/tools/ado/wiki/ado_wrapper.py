@@ -229,7 +229,7 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Unable to modify wiki page: {str(e)}")
             return ToolException(f"Unable to modify wiki page: {str(e)}")
 
-    def _base_loader(self, wiki_identifier: str) -> Generator[Document, None, None]:
+    def _base_loader(self, wiki_identifier: str, **kwargs) -> Generator[Document, None, None]:
         pages = self._client.get_pages_batch(pages_batch_request={}, project=self.project, wiki_identifier=wiki_identifier)
         #
         for page in pages:
