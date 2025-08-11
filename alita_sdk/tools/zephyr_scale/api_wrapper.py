@@ -1283,7 +1283,6 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
                 base_data['test_case_content'] = additional_content
 
             document.page_content = json.dumps(base_data)
-            yield document
         except json.JSONDecodeError as e:
             raise ToolException(f"Failed to decode JSON from document: {e}")
 

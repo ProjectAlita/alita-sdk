@@ -90,7 +90,6 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
                 yield Document(page_content=str(value), metadata=metadata)
         else:
             document.page_content = json.dumps(str(page_content))
-            yield document
 
     @extend_with_vector_tools
     def get_available_tools(self):

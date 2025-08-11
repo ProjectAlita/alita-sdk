@@ -172,7 +172,6 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                 yield Document(page_content=str(content), metadata=new_metadata)
         else:
             document.page_content = str(doc_content)
-            yield document
 
     @extend_with_vector_tools
     def get_available_tools(self):
