@@ -60,20 +60,20 @@ BaseSearchParams = create_model(
     )),
     cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
     search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
-    reranker=(Optional[dict], Field(
-        description="Reranker configuration. Can be a dictionary with reranking parameters.",
-        default={}
-    )),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
         default=None
     )),
-    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
-        description="Reranking configuration. Can be a dictionary with reranking settings.",
-        default=None
-    )),
     extended_search=(Optional[List[str]], Field(
         description="List of additional fields to include in the search results.",
+        default=None
+    )),
+    reranker=(Optional[dict], Field(
+        description="Reranker configuration. Can be a dictionary with reranking parameters.",
+        default={}
+    )),
+    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
+        description="Reranking configuration. Can be a dictionary with reranking settings.",
         default=None
     )),
 )
@@ -112,7 +112,7 @@ BaseStepbackSearchParams = create_model(
 BaseIndexDataParams = create_model(
     "indexData",
     __base__=BaseIndexParams,
-    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
                          description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
