@@ -13,7 +13,15 @@ def get_tools(tool):
         selected_tools=tool['settings'].get('selected_tools', []),
         base_url=tool['settings']['base_url'],
         token=tool['settings']['token'],
-        toolkit_name=tool.get('toolkit_name')
+        toolkit_name=tool.get('toolkit_name'),
+        llm=tool['settings'].get('llm', None),
+
+        # indexer settings
+        connection_string=tool['settings'].get('connection_string', None),
+        collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
+        embedding_model="HuggingFaceEmbeddings",
+        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        vectorstore_type="PGVector"
     ).get_tools()
 
 class ZephyrEnterpriseToolkit(BaseToolkit):
@@ -29,6 +37,10 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
             name,
             base_url=(str, Field(description="Zephyr Enterprise base URL", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ZephyrEnterpriseToolkit.toolkit_max_length })),
             token=(SecretStr, Field(description="API token", json_schema_extra={'secret': True})),
+            # indexer settings
+            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
+                                                          default=None,
+                                                          json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], []),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {

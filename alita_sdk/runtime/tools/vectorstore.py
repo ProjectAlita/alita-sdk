@@ -188,6 +188,59 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
+    def _remove_collection(self):
+        """
+        Remove the vectorstore collection entirely.
+        """
+        self._log_data(
+            f"Remove collection '{self.dataset}'",
+            tool_name="_remove_collection"
+        )
+        from sqlalchemy import text
+        from sqlalchemy.orm import Session
+
+        schema_name = self.vectorstore.collection_name
+        with Session(self.vectorstore.session_maker.bind) as session:
+            drop_schema_query = text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE;")
+            session.execute(drop_schema_query)
+            session.commit()
+            logger.info(f"Schema '{schema_name}' has been dropped.")
+        self._log_data(
+            f"Collection '{self.dataset}' has been removed. ",
+            tool_name="_remove_collection"
+        )
+
+    def _get_indexed_ids(self, store):
+        """Get all indexed document IDs from vectorstore"""
+
+        # Check if this is a PGVector store
+        if hasattr(store, 'session_maker') and hasattr(store, 'EmbeddingStore'):
+            return self._get_pgvector_indexed_ids(store)
+        else:
+            # Fall back to Chroma implementation
+            return self._get_chroma_indexed_ids(store)
+
+    def _get_pgvector_indexed_ids(self, store):
+        """Get all indexed document IDs from PGVector"""
+        from sqlalchemy.orm import Session
+
+        try:
+            with Session(store.session_maker.bind) as session:
+                ids = session.query(store.EmbeddingStore.id).all()
+            return [str(id_tuple[0]) for id_tuple in ids]
+        except Exception as e:
+            logger.error(f"Failed to get indexed IDs from PGVector: {str(e)}")
+            return []
+
+    def _get_chroma_indexed_ids(self, store):
+        """Get all indexed document IDs from Chroma"""
+        try:
+            data = store.get(include=[])  # Only get IDs, no metadata
+            return data.get('ids', [])
+        except Exception as e:
+            logger.error(f"Failed to get indexed IDs from Chroma: {str(e)}")
+            return []
+
     def _clean_collection(self):
         """
         Clean the vectorstore collection by deleting all indexed data.
@@ -196,35 +249,92 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
-        data = self.vectoradapter.vectorstore.get(include=['metadatas'])
-        if data['ids']:
-            self.vectoradapter.vectorstore.delete(ids=data['ids'])
+        # This logic deletes all data from the vectorstore collection without removal of collection.
+        # Collection itself remains available for future indexing.
+        self.vectoradapter.vectorstore.delete(ids=self._get_indexed_ids(self.vectoradapter.vectorstore))
+
         self._log_data(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
 
+    # TODO: refactor to use common method for different vectorstores in a separate vectorstore wrappers
     def _get_indexed_data(self, store):
         """ Get all indexed data from vectorstore for non-code content """
 
-        # get already indexed data
+        # Check if this is a PGVector store
+        if hasattr(store, 'session_maker') and hasattr(store, 'EmbeddingStore'):
+            return self._get_pgvector_indexed_data(store)
+        else:
+            # Fall back to original Chroma implementation
+            return self._get_chroma_indexed_data(store)
+
+    def _get_pgvector_indexed_data(self, store):
+        """ Get all indexed data from PGVector for non-code content """
+        from sqlalchemy.orm import Session
+
         result = {}
         try:
-            self._log_data("Retrieving already indexed data from vectorstore",
+            self._log_data("Retrieving already indexed data from PGVector vectorstore",
+                           tool_name="index_documents")
+
+            with Session(store.session_maker.bind) as session:
+                docs = session.query(
+                    store.EmbeddingStore.id,
+                    store.EmbeddingStore.document,
+                    store.EmbeddingStore.cmetadata
+                ).all()
+
+            # Process the retrieved data
+            for doc in docs:
+                db_id = doc.id
+                meta = doc.cmetadata or {}
+
+                # Get document id from metadata
+                doc_id = str(meta.get('id', db_id))
+                dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
+                if dependent_docs:
+                    dependent_docs = [d.strip() for d in dependent_docs.split(';') if d.strip()]
+                parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
+
+                chunk_id = meta.get('chunk_id')
+                if doc_id in result and chunk_id:
+                    # If document with the same id already saved, add db_id for current one as chunk
+                    result[doc_id]['all_chunks'].append(db_id)
+                else:
+                    result[doc_id] = {
+                        'metadata': meta,
+                        'id': db_id,
+                        'all_chunks': [db_id],
+                        IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
+                        IndexerKeywords.PARENT.value: parent_id
+                    }
+
+        except Exception as e:
+            logger.error(f"Failed to get indexed data from PGVector: {str(e)}. Continuing with empty index.")
+
+        return result
+
+    def _get_chroma_indexed_data(self, store):
+        """ Get all indexed data from Chroma for non-code content """
+        result = {}
+        try:
+            self._log_data("Retrieving already indexed data from Chroma vectorstore",
                            tool_name="index_documents")
             data = store.get(include=['metadatas'])
-            # re-structure data to be more usable
+
+            # Re-structure data to be more usable
             for meta, db_id in zip(data['metadatas'], data['ids']):
-                # get document id from metadata
+                # Get document id from metadata
                 doc_id = str(meta['id'])
                 dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
                 if dependent_docs:
                     dependent_docs = [d.strip() for d in dependent_docs.split(';') if d.strip()]
                 parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
-                #
+
                 chunk_id = meta.get('chunk_id')
                 if doc_id in result and chunk_id:
-                    # if document with the same id already saved, add db_id fof current one as chunk
+                    # If document with the same id already saved, add db_id for current one as chunk
                     result[doc_id]['all_chunks'].append(db_id)
                 else:
                     result[doc_id] = {
@@ -235,7 +345,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                         IndexerKeywords.PARENT.value: parent_id
                     }
         except Exception as e:
-            logger.error(f"Failed to get indexed data from vectorstore: {str(e)}. Continuing with empty index.")
+            logger.error(f"Failed to get indexed data from Chroma: {str(e)}. Continuing with empty index.")
+
         return result
 
     def _get_code_indexed_data(self, store) -> Dict[str, Dict[str, Any]]:

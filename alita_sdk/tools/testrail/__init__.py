@@ -21,7 +21,7 @@ def get_tools(tool):
 
         # indexer settings
         connection_string=tool['settings'].get('connection_string', None),
-        collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
+        collection_name=f"{tool.get('toolkit_name')}",
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
         vectorstore_type="PGVector"
