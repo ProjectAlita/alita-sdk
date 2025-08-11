@@ -55,6 +55,10 @@ class TestrailToolkit(BaseToolkit):
             connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
                                                           default=None,
                                                           json_schema_extra={'secret': True})),
+
+            # embedder settings
+            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
+            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata':
                                                          {"label": "Testrail", "icon_url": "testrail-icon.svg",
