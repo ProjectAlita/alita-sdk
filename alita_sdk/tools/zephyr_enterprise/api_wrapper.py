@@ -153,10 +153,10 @@ class ZephyrApiWrapper(BaseVectorStoreToolApiWrapper):
         Returns a list of fields for index_data args schema.
         """
         return {
-            "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""))
+            "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""]))
         }
 
-    def _base_loader(self, zql: str) -> Generator[Document, None, None]:
+    def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:
         test_cases = self.get_testcases_by_zql(zql)
         for test_case in test_cases:
             metadata = {
