@@ -1,7 +1,6 @@
 # api_wrapper.py
 from typing import Any, Dict, List, Optional
 import fnmatch
-from alita_sdk.tools.elitea_base import extend_with_vector_tools
 from alita_sdk.tools.elitea_base import BaseCodeToolApiWrapper
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
@@ -430,7 +429,6 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             for commit in commits
         ]
 
-    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {

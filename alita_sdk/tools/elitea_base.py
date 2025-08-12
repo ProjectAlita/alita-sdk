@@ -12,6 +12,7 @@ from pydantic import BaseModel, create_model, Field, SecretStr
 from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 from .chunkers import markdown_chunker
 from .utils import TOOLKIT_SPLITTER
+from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
@@ -59,20 +60,20 @@ BaseSearchParams = create_model(
     )),
     cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
     search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
-    reranker=(Optional[dict], Field(
-        description="Reranker configuration. Can be a dictionary with reranking parameters.",
-        default={}
-    )),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
         default=None
     )),
-    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
-        description="Reranking configuration. Can be a dictionary with reranking settings.",
-        default=None
-    )),
     extended_search=(Optional[List[str]], Field(
         description="List of additional fields to include in the search results.",
+        default=None
+    )),
+    reranker=(Optional[dict], Field(
+        description="Reranker configuration. Can be a dictionary with reranking parameters.",
+        default={}
+    )),
+    reranking_config=(Optional[Dict[str, Dict[str, Any]]], Field(
+        description="Reranking configuration. Can be a dictionary with reranking settings.",
         default=None
     )),
 )
@@ -111,7 +112,7 @@ BaseStepbackSearchParams = create_model(
 BaseIndexDataParams = create_model(
     "indexData",
     __base__=BaseIndexParams,
-    progress_step=(Optional[int], Field(default=None, ge=0, le=100,
+    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
                          description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
@@ -218,6 +219,10 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     embedding_model: Optional[str] = "HuggingFaceEmbeddings"
     embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
     vectorstore_type: Optional[str] = "PGVector"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._adapter = VectorStoreAdapterFactory.create_adapter(self.vectorstore_type)
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
         """
@@ -329,36 +334,24 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
 
     # TODO: init store once and re-use the instance
     def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
-        """ Initializes the vector store wrapper with the provided parameters."""
+        """Initializes the vector store wrapper with the provided parameters."""
         try:
             from alita_sdk.runtime.tools.vectorstore import VectorStoreWrapper
         except ImportError:
             from alita_sdk.runtime.tools.vectorstore import VectorStoreWrapper
-        
+
         # Validate collection_suffix length
         if collection_suffix and len(collection_suffix.strip()) > 7:
             raise ToolException("collection_suffix must be 7 characters or less")
-        
+
         # Create collection name with suffix if provided
         collection_name = str(self.collection_name)
         if collection_suffix and collection_suffix.strip():
             collection_name = f"{self.collection_name}_{collection_suffix.strip()}"
-        
-        if self.vectorstore_type == 'PGVector':
-            vectorstore_params = {
-                "use_jsonb": True,
-                "collection_name": collection_name,
-                "create_extension": True,
-                "alita_sdk_options": {
-                    "target_schema": collection_name,
-                },
-                "connection_string": self.connection_string.get_secret_value()
-            }
-        elif self.vectorstore_type == 'Chroma':
-            vectorstore_params = {
-                "collection_name": collection_name,
-                "persist_directory": "./indexer_db"
-            }
+
+        # Get database-specific parameters using adapter
+        connection_string = self.connection_string.get_secret_value() if self.connection_string else None
+        vectorstore_params = self._adapter.get_vectorstore_params(collection_name, connection_string)
 
         return VectorStoreWrapper(
             llm=self.llm,
@@ -371,36 +364,17 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         )
 
     def remove_index(self, collection_suffix: str = ""):
-        """
-            Cleans the indexed data in the collection
-        """
-
-        self._init_vector_store(collection_suffix)._remove_collection()
+        """Cleans the indexed data in the collection."""
+        vectorstore_wrapper = self._init_vector_store(collection_suffix)
+        collection_name = f"{self.collection_name}_{collection_suffix}" if collection_suffix else str(self.collection_name)
+        self._adapter.remove_collection(vectorstore_wrapper, collection_name)
+        return (f"Collection '{collection_name}' has been removed from the vector store.\n"
+                f"Available collections: {self.list_collections()}")
 
     def list_collections(self):
-        """
-            Lists all collections in the vector store
-        """
-        if self.vectorstore_type.lower() == 'PGVector'.lower():
-            from sqlalchemy import text
-            from sqlalchemy.orm import Session
-
-            # schema_name = self.vectorstore.collection_name
-            with Session(self._init_vector_store().vectorstore.session_maker.bind) as session:
-                get_collections = text("""
-                    SELECT table_schema
-                    FROM information_schema.columns
-                    WHERE udt_name = 'vector';
-                """)
-
-                # Execute the raw SQL query
-                result = session.execute(get_collections)
-
-                # Fetch all rows from the result
-                docs = result.fetchall()
-            return str(docs)
-        vector_client = self._init_vector_store().vectoradapter.vectorstore._client
-        return ','.join([collection.name for collection in vector_client.list_collections()])
+        """Lists all collections in the vector store."""
+        vectorstore_wrapper = self._init_vector_store()
+        return self._adapter.list_collections(vectorstore_wrapper, self.collection_name or "")
 
     def search_index(self,
                      query: str,
@@ -581,7 +555,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         """
         from .chunkers.code.codeparser import parse_code_files_for_db
 
-        _files = self.__handle_get_files("", branch or self.active_branch)
+        _files = self.__handle_get_files("", branch or self.active_branch or self._active_branch)
 
         logger.info(f"Files in branch: {_files}")
 
@@ -599,8 +573,8 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             for file in _files:
                 if is_whitelisted(file) and not is_blacklisted(file):
                     yield {"file_name": file,
-                           "file_content": self._read_file(file, branch=branch or self.active_branch),
-                           "commit_hash": self._file_commit_hash(file, branch=branch or self.active_branch)}
+                           "file_content": self._read_file(file, branch=branch or self.active_branch or self._active_branch),
+                           "commit_hash": self._file_commit_hash(file, branch=branch or self.active_branch or self._active_branch)}
 
         return parse_code_files_for_db(file_content_generator())
     

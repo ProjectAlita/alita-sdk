@@ -532,10 +532,10 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
     def search_documents(self, query:str, doctype: str = 'code', 
                          filter:dict|str={}, cut_off: float=0.5,
-                         search_top:int=10, reranker:dict = {}, 
-                         full_text_search: Optional[Dict[str, Any]] = None,
-                         reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
-                         extended_search: Optional[List[str]] = None):
+                         search_top:int=10, full_text_search: Optional[Dict[str, Any]] = None,
+                         extended_search: Optional[List[str]] = None,
+                         reranker: dict = {}, reranking_config: Optional[Dict[str, Dict[str, Any]]] = None
+                         ):
         """Enhanced search documents method using JSON configurations for full-text search and reranking"""
         from alita_sdk.tools.code.loaders.codesearcher import search_format as code_format
         
@@ -705,9 +705,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             combined_items = [item for item in combined_items if abs(item[1]) >= cut_off]
         
         # Sort by score and limit results
-
-        # for chroma we want ascending order (lower score is better), for others descending
-        combined_items.sort(key=lambda x: x[1], reverse= self.vectorstore_type.lower() != 'chroma')
+        # DISABLED: for chroma we want ascending order (lower score is better), for others descending
+        # combined_items.sort(key=lambda x: x[1], reverse= self.vectorstore_type.lower() != 'chroma')
         combined_items = combined_items[:search_top]
 
         # Format output based on doctype

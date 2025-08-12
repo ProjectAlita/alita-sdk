@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from typing import Any, Dict, Generator, Optional
 
@@ -229,21 +230,26 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Unable to modify wiki page: {str(e)}")
             return ToolException(f"Unable to modify wiki page: {str(e)}")
 
-    def _base_loader(self, wiki_identifier: str) -> Generator[Document, None, None]:
+    def _base_loader(self, wiki_identifier: str, title_contains: Optional[str] = None, **kwargs) -> Generator[Document, None, None]:
         pages = self._client.get_pages_batch(pages_batch_request={}, project=self.project, wiki_identifier=wiki_identifier)
         #
         for page in pages:
             content = self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_identifier, id=page.id, include_content=True).page.content
-            yield Document(page_content=content, metadata={
-                'id': page.id, 
-                'path': page.path,
-                'updated_on': ''
-            })
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            title = page.path.rsplit("/", 1)[-1]
+            if not title_contains or (title_contains and title_contains.lower() in title.lower()):
+                yield Document(page_content=content, metadata={
+                    'id': str(page.id),
+                    'path': page.path,
+                    'title': title,
+                    'updated_on': content_hash
+                })
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
-            "wiki_identifier": (str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'"))
+            "wiki_identifier": (str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
+            'title_contains': (Optional[str], Field(default=None, description="Optional filter to include only pages with titles containing exact this string"))
         }
 
     @extend_with_vector_tools

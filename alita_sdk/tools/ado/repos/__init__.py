@@ -1,7 +1,7 @@
 from typing import List, Literal, Optional
 
 from langchain_core.tools import BaseTool, BaseToolkit
-from pydantic import BaseModel, Field, create_model, SecretStr
+from pydantic import BaseModel, Field, create_model
 
 import requests
 
@@ -26,7 +26,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         active_branch=tool['settings'].get('active_branch', ""),
         toolkit_name=tool['settings'].get('toolkit_name', ""),
         connection_string=tool['settings'].get('connection_string', None),
-        collection_name=str(tool['id']),
+        collection_name=tool['toolkit_name'],
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -56,7 +56,14 @@ class AzureDevOpsReposToolkit(BaseToolkit):
 
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector configuration", default=None, json_schema_extra={'configuration_types': ['pgvector']})),
-            
+                                      json_schema_extra={'secret': True})),
+            # embedder settings
+            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.",
+                                    default="HuggingFaceEmbeddings")),
+            embedding_model_params=(dict, Field(
+            description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}",
+            default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={'json_schema_extra': {'metadata':
                 {

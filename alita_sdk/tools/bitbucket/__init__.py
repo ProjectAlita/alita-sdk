@@ -29,7 +29,7 @@ def get_tools(tool):
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
         connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
-        collection_name=str(tool['id']),
+        collection_name=str(tool['toolkit_name']),
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -58,6 +58,9 @@ class AlitaBitbucketToolkit(BaseToolkit):
             cloud=(Optional[bool], Field(description="Hosting Option", default=None)),
             bitbucket_configuration=(Optional[BitbucketConfiguration], Field(description="Bitbucket Configuration", json_schema_extra={'configuration_types': ['bitbucket']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", default={'configuration_types': ['pgvector']})),
+            # embedder settings
+            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
+            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
             {

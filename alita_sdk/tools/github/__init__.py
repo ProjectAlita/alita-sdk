@@ -27,7 +27,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
         connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
-        collection_name=str(tool['id']),
+        collection_name=str(tool['toolkit_name']),
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -74,6 +74,8 @@ class AlitaGitHubToolkit(BaseToolkit):
             connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
                                                           default=None,
                                                           json_schema_extra={'secret': True})),
+            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
+            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools}))
         )
@@ -102,4 +104,3 @@ class AlitaGitHubToolkit(BaseToolkit):
 
     def get_tools(self):
         return self.tools
-

@@ -214,8 +214,11 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
                 "`atlassian` package not found, please run "
                 "`pip install atlassian-python-api`"
             )
-
+        if not values.get('base_url'):
+            raise ValueError("Base URL is required for Confluence API Wrapper.")
         url = values['base_url']
+        if not (values.get('token') or (values.get('api_key') and values.get('username'))):
+            raise ValueError("Either 'token' or both 'api_key' and 'username' must be provided for authentication.")
         api_key = values.get('api_key')
         username = values.get('username')
         token = values.get('token')
@@ -844,8 +847,12 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             yield document
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        for attachment in self.get_page_attachments(document.metadata.get('id')):
-            yield Document(page_content=attachment.get('content', ''), metadata=attachment.get('metadata', {}))
+        attachments = self.get_page_attachments(document.metadata.get('id'))
+        if isinstance(attachments, str):
+            logger.info(f" {document.metadata.get('id')}: {attachments}")
+            return
+        for attachment in attachments:
+            yield Document(page_content=attachment.get('content', '') or attachment.get('llm_analysis', ''), metadata=attachment.get('metadata', {}))
 
     def _download_image(self, image_url):
         """
@@ -1577,7 +1584,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         """Return the parameters for indexing data."""
         return {
             "content_format": (Literal['view', 'storage', 'export_view', 'editor', 'anonymous'],
-                            Field(description="The format of the content to be retrieved.")),
+                            Field(description="The format of the content to be retrieved.", default='view')),
             "page_ids": (Optional[List[str]], Field(description="List of page IDs to retrieve.", default=None)),
             "label": (Optional[str], Field(description="Label to filter pages.", default=None)),
             "cql": (Optional[str], Field(description="CQL query to filter pages.", default=None)),

@@ -23,7 +23,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
     """Wrapper for Bitbucket API."""
 
     _bitbucket: Any = PrivateAttr()
-    _active_branch: Any = PrivateAttr() 
+    _active_branch: Any = PrivateAttr()
     url: str = ''
     project: str = ''
     """The key of the project this repo belongs to"""
@@ -161,7 +161,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return result if isinstance(result, ToolException) else f"File has been updated: {file_path}."
         except Exception as e:
             return ToolException(f"File was not updated due to error: {str(e)}")
-    
+
     def get_pull_requests_commits(self, pr_id: str) -> List[Dict[str, Any]]:
         """
         Get commits from a pull request
@@ -175,7 +175,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return result
         except Exception as e:
             return ToolException(f"Can't get commits from pull request `{pr_id}` due to error:\n{str(e)}")
-        
+
     def get_pull_requests(self) -> List[Dict[str, Any]]:
         """
         Get pull requests from the repository
@@ -183,7 +183,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             List[Dict[str, Any]]: List of pull requests in the repository
         """
         return self._bitbucket.get_pull_requests()
-    
+
     def get_pull_request(self, pr_id: str) -> Dict[str, Any]:
         """
         Get details of a pull request
@@ -196,7 +196,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return self._bitbucket.get_pull_request(pr_id=pr_id)
         except Exception as e:
             return ToolException(f"Can't get pull request `{pr_id}` due to error:\n{str(e)}")
-        
+
     def get_pull_requests_changes(self, pr_id: str) -> Dict[str, Any]:
         """
         Get changes of a pull request
@@ -209,7 +209,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return self._bitbucket.get_pull_requests_changes(pr_id=pr_id)
         except Exception as e:
             return ToolException(f"Can't get changes from pull request `{pr_id}` due to error:\n{str(e)}")
-        
+
     def add_pull_request_comment(self, pr_id: str, content, inline=None) -> str:
         """
         Add a comment to a pull request. Supports multiple content types and inline comments.

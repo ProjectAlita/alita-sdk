@@ -1,15 +1,29 @@
 import logging
-from typing import Optional, List
+from importlib.metadata import metadata
+from operator import ifloordiv
+from typing import Optional, List, Generator
 
 from langchain_core.tools import ToolException
 from pydantic import create_model, model_validator, PrivateAttr, Field, SecretStr
 
+from langchain_core.documents import Document
 from .zephyr_enterprise import ZephyrClient
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseToolApiWrapper, BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 
 logger = logging.getLogger(__name__)
 
-class ZephyrApiWrapper(BaseToolApiWrapper):
+zql_description = """
+                    ZQL query to search for test cases. 
+                    Supported: estimatedTime, testcaseId, creator, release,
+                    project, priority, altId, version,
+                    versionId, automated, folder, contents,
+                    name, comment, tag
+
+                    It has to follow the syntax in examples:
+                    "folder=\"TestToolkit\"", "name~\"TestToolkit5\"
+                    """
+
+class ZephyrApiWrapper(BaseVectorStoreToolApiWrapper):
     base_url: str
     token: SecretStr
     _client: Optional[ZephyrClient] = PrivateAttr()
@@ -39,7 +53,7 @@ class ZephyrApiWrapper(BaseToolApiWrapper):
             return ToolException(f"Unable to retrieve Zephyr entities: {e}")
 
 
-    def get_testcases_by_zql(self, zql: str):
+    def get_testcases_by_zql(self, zql: str, return_as_list: bool = False):
 
         """
         Retrieve testcases by zql.
@@ -50,8 +64,12 @@ class ZephyrApiWrapper(BaseToolApiWrapper):
             testcases = self._client.get_testcases_by_zql(zql)
             parsed_test_cases = []
             if testcases['resultSize'] == 0:
+                if return_as_list:
+                    return []
                 return "No test cases found for the provided ZQL query."
             logger.info(f"Retrieved test cases: {testcases}")
+            if return_as_list:
+                return [test_case['testcase'] for test_case in testcases['results']]
             for test_case in testcases['results']:
                 parsed_test_cases.append(f"Test case ID: {test_case.get('id')}, Test case: {test_case['testcase']}")
             return "\n".join(parsed_test_cases)
@@ -69,6 +87,20 @@ class ZephyrApiWrapper(BaseToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to retrieve Zephyr entities: {e}")
 
+    def get_test_case_steps(self, testcase_tree_id: str):
+        last_version = self.get_last_version(testcase_tree_id)
+        return self._client.get_testcase_steps(last_version)
+
+    def get_last_version(self, testcase_tree_id: str):
+        # get test case id
+        test_case_id = self._client.get_test_case(testcase_tree_id)['testcase']['testcaseId']
+        logger.info(f"Test case id: {test_case_id}")
+        # get test case version id
+        return self._client.get_testcase_versions(test_case_id)[-1]['id']
+
+    def get_test_case_steps_by_version(self, test_case_version_id: str):
+        return self._client.get_testcase_steps(test_case_version_id)
+
     def add_steps(self, testcase_tree_id: str, steps: Optional[List[dict]] = []):
 
         """
@@ -81,14 +113,10 @@ class ZephyrApiWrapper(BaseToolApiWrapper):
             if not steps:
                 return ToolException("Steps cannot be empty.")
 
-            # get test case id
-            test_case_id = self._client.get_test_case(testcase_tree_id)['testcase']['testcaseId']
-            logger.info(f"Test case id: {test_case_id}")
-            # get test case version id
-            test_case_version_id = self._client.get_testcase_versions(test_case_id)[-1]['id']
+            test_case_version_id = self.get_last_version(testcase_tree_id)
             logger.info(f"Test case version id: {test_case_version_id}")
             # get test case steps
-            test_case_steps = self._client.get_testcase_steps(test_case_version_id)
+            test_case_steps = self.get_test_case_steps_by_version(test_case_version_id)
             logger.info(f"Test case steps: {test_case_steps}")
             # add steps
             actual_steps = test_case_steps['steps'] if test_case_steps else None
@@ -120,6 +148,30 @@ class ZephyrApiWrapper(BaseToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to retrieve Zephyr entities: {e}")
 
+    def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
+        """
+        Returns a list of fields for index_data args schema.
+        """
+        return {
+            "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""]))
+        }
+
+    def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:
+        test_cases = self.get_testcases_by_zql(zql)
+        for test_case in test_cases:
+            metadata = {
+                ("updated_on" if k == "lastModifiedOn" else "id" if k == "testcaseId" else k): str(v)
+                for k, v in test_case
+                if k != "id"
+            }
+            yield Document(page_content='', metadata=metadata)
+
+    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+        id = document.metadata['id']
+        test_case_content = self.get_test_case_steps(id)
+        document.page_content = test_case_content
+
+    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {
@@ -188,16 +240,7 @@ class ZephyrApiWrapper(BaseToolApiWrapper):
                 "description": self.get_testcases_by_zql.__doc__,
                 "args_schema": create_model(
                     "TestCaseByZqlModel",
-                    zql=(str, Field(description="""
-                    ZQL query to search for test cases. 
-                    Supported: estimatedTime, testcaseId, creator, release,
-                    project, priority, altId, version,
-                    versionId, automated, folder, contents,
-                    name, comment, tag
-                    
-                    It has to follow the syntax in examples:
-                    "folder=\"TestToolkit\"", "name~\"TestToolkit5\"
-                    """, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""]))
+                    zql=(str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""]))
                 ),
                 "ref": self.get_testcases_by_zql,
             }
