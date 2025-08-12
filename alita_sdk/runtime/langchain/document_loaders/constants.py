@@ -18,6 +18,7 @@ from langchain_community.document_loaders import (
         UnstructuredPowerPointLoader, PythonLoader)
 
 from .AlitaCSVLoader import AlitaCSVLoader
+from .AlitaDocLoader import AlitaDocLoader
 from .AlitaDocxMammothLoader import AlitaDocxMammothLoader
 from .AlitaExcelLoader import AlitaExcelLoader
 from .AlitaImageLoader import AlitaImageLoader
@@ -121,6 +122,11 @@ loaders_map = {
     },
     '.docx': {
         'class': AlitaDocxMammothLoader,
+        'is_multimodal_processing': True,
+        'kwargs': {}
+    },
+    '.doc': {
+        'class': AlitaDocLoader,
         'is_multimodal_processing': True,
         'kwargs': {}
     },
