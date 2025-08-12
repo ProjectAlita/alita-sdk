@@ -23,7 +23,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
     """Wrapper for Bitbucket API."""
 
     _bitbucket: Any = PrivateAttr()
-    active_branch: Any = PrivateAttr()
+    _active_branch: Any = PrivateAttr()
     url: str = ''
     project: str = ''
     """The key of the project this repo belongs to"""
@@ -78,12 +78,12 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             project=values['project'],
             repository=values['repository']
         )
-        cls.active_branch = values.get('branch')
+        cls._active_branch = values.get('branch')
         return values
 
     def set_active_branch(self, branch: str) -> None:
         """Set the active branch for the bot."""
-        self.active_branch = branch
+        self._active_branch = branch
         return f"Active branch set to `{branch}`"
 
     def list_branches_in_repo(self) -> List[str]:
@@ -93,15 +93,15 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
     def create_branch(self, branch_name: str) -> None:
         """Create a new branch in the repository."""
         try:
-            self._bitbucket.create_branch(branch_name, self.active_branch)
+            self._bitbucket.create_branch(branch_name, self._active_branch)
         except Exception as e:
             if "not permitted to access this resource" in str(e):
                 return f"Please, verify you token/password: {str}"
             if "already exists" in str(e):
-                self.active_branch = branch_name
+                self._active_branch = branch_name
                 return f"Branch {branch_name} already exists. set it as active"
             return f"Unable to create branch due to error:\n{e}"
-        self.active_branch = branch_name
+        self._active_branch = branch_name
         return f"Branch {branch_name} created successfully and set as active"
 
     def create_pull_request(self, pr_json_data: str) -> str:
@@ -161,7 +161,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return result if isinstance(result, ToolException) else f"File has been updated: {file_path}."
         except Exception as e:
             return ToolException(f"File was not updated due to error: {str(e)}")
-    
+
     def get_pull_requests_commits(self, pr_id: str) -> List[Dict[str, Any]]:
         """
         Get commits from a pull request
@@ -175,7 +175,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return result
         except Exception as e:
             return ToolException(f"Can't get commits from pull request `{pr_id}` due to error:\n{str(e)}")
-        
+
     def get_pull_requests(self) -> List[Dict[str, Any]]:
         """
         Get pull requests from the repository
@@ -183,7 +183,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             List[Dict[str, Any]]: List of pull requests in the repository
         """
         return self._bitbucket.get_pull_requests()
-    
+
     def get_pull_request(self, pr_id: str) -> Dict[str, Any]:
         """
         Get details of a pull request
@@ -196,7 +196,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return self._bitbucket.get_pull_request(pr_id=pr_id)
         except Exception as e:
             return ToolException(f"Can't get pull request `{pr_id}` due to error:\n{str(e)}")
-        
+
     def get_pull_requests_changes(self, pr_id: str) -> Dict[str, Any]:
         """
         Get changes of a pull request
@@ -209,7 +209,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return self._bitbucket.get_pull_requests_changes(pr_id=pr_id)
         except Exception as e:
             return ToolException(f"Can't get changes from pull request `{pr_id}` due to error:\n{str(e)}")
-        
+
     def add_pull_request_comment(self, pr_id: str, content, inline=None) -> str:
         """
         Add a comment to a pull request. Supports multiple content types and inline comments.
@@ -234,7 +234,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
         Returns:
             str: List of the files
         """
-        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self.active_branch))
+        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self._active_branch))
 
     # TODO: review this method, it may not work as expected
     # def _file_commit_hash(self, file_path: str, branch: str):

@@ -555,7 +555,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         """
         from .chunkers.code.codeparser import parse_code_files_for_db
 
-        _files = self.__handle_get_files("", branch or self.active_branch)
+        _files = self.__handle_get_files("", branch or self.active_branch or self._active_branch)
 
         logger.info(f"Files in branch: {_files}")
 
@@ -573,8 +573,8 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             for file in _files:
                 if is_whitelisted(file) and not is_blacklisted(file):
                     yield {"file_name": file,
-                           "file_content": self._read_file(file, branch=branch or self.active_branch),
-                           "commit_hash": self._file_commit_hash(file, branch=branch or self.active_branch)}
+                           "file_content": self._read_file(file, branch=branch or self.active_branch or self._active_branch),
+                           "commit_hash": self._file_commit_hash(file, branch=branch or self.active_branch or self._active_branch)}
 
         return parse_code_files_for_db(file_content_generator())
     
