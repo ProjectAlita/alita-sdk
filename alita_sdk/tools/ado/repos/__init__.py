@@ -23,7 +23,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         active_branch=tool['settings'].get('active_branch', ""),
         toolkit_name=tool['settings'].get('toolkit_name', ""),
         connection_string=tool['settings'].get('connection_string', None),
-        collection_name=str(tool['id']),
+        collection_name=tool['toolkit_name'],
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
