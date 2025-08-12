@@ -1,7 +1,6 @@
 # api_wrapper.py
 from typing import Any, Dict, List, Optional
 import fnmatch
-from alita_sdk.tools.elitea_base import extend_with_vector_tools
 from alita_sdk.tools.elitea_base import BaseCodeToolApiWrapper
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
@@ -105,7 +104,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
     branch: Optional[str] = 'main'
     _git: Any = PrivateAttr()
     _repo_instance: Any = PrivateAttr()
-    _active_branch: Any = PrivateAttr()
+    active_branch: Any = PrivateAttr()
 
     llm: Optional[Any] = None
     # Alita instance
@@ -139,11 +138,11 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
         g.auth()
         cls._repo_instance = g.projects.get(values.get('repository'))
         cls._git = g
-        cls._active_branch = values.get('branch')
+        cls.active_branch = values.get('branch')
         return values
 
     def set_active_branch(self, branch_name: str) -> str:
-        self._active_branch = branch_name
+        self.active_branch = branch_name
         self._repo_instance.default_branch = branch_name
         return f"Active branch set to {branch_name}"
 
@@ -173,19 +172,19 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             return f"Failed to list branches: {str(e)}"
 
     def list_files(self, path: str = None, recursive: bool = True, branch: str = None) -> List[str]:
-        branch = branch if branch else self._active_branch
+        branch = branch if branch else self.active_branch
         files = self._get_all_files(path, recursive, branch)
         paths = [file['path'] for file in files if file['type'] == 'blob']
         return paths
 
     def list_folders(self, path: str = None, recursive: bool = True, branch: str = None) -> List[str]:
-        branch = branch if branch else self._active_branch
+        branch = branch if branch else self.active_branch
         files = self._get_all_files(path, recursive, branch)
         paths = [file['path'] for file in files if file['type'] == 'tree']
         return paths
 
     def _get_all_files(self, path: str = None, recursive: bool = True, branch: str = None):
-        branch = branch if branch else self._active_branch
+        branch = branch if branch else self.active_branch
         return self._repo_instance.repository_tree(path=path, ref=branch, recursive=recursive, all=True)
 
     # overrided for indexer
@@ -211,15 +210,15 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             self._repo_instance.branches.create(
                 {
                     'branch': branch_name,
-                    'ref': self._active_branch,
+                    'ref': self.active_branch,
                 }
             )
         except Exception as e:
             if "Branch already exists" in str(e):
-                self._active_branch = branch_name
+                self.active_branch = branch_name
                 return f"Branch {branch_name} already exists. set it as active"
             return f"Unable to create branch due to error:\n{e}"
-        self._active_branch = branch_name
+        self.active_branch = branch_name
         return f"Branch {branch_name} created successfully and set as active"
 
     def parse_issues(self, issues: List[Any]) -> List[dict]:
@@ -430,7 +429,6 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             for commit in commits
         ]
 
-    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {

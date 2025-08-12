@@ -23,7 +23,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
     """Wrapper for Bitbucket API."""
 
     _bitbucket: Any = PrivateAttr()
-    _active_branch: Any = PrivateAttr() 
+    active_branch: Any = PrivateAttr()
     url: str = ''
     project: str = ''
     """The key of the project this repo belongs to"""
@@ -78,12 +78,12 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             project=values['project'],
             repository=values['repository']
         )
-        cls._active_branch = values.get('branch')
+        cls.active_branch = values.get('branch')
         return values
 
     def set_active_branch(self, branch: str) -> None:
         """Set the active branch for the bot."""
-        self._active_branch = branch
+        self.active_branch = branch
         return f"Active branch set to `{branch}`"
 
     def list_branches_in_repo(self) -> List[str]:
@@ -93,15 +93,15 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
     def create_branch(self, branch_name: str) -> None:
         """Create a new branch in the repository."""
         try:
-            self._bitbucket.create_branch(branch_name, self._active_branch)
+            self._bitbucket.create_branch(branch_name, self.active_branch)
         except Exception as e:
             if "not permitted to access this resource" in str(e):
                 return f"Please, verify you token/password: {str}"
             if "already exists" in str(e):
-                self._active_branch = branch_name
+                self.active_branch = branch_name
                 return f"Branch {branch_name} already exists. set it as active"
             return f"Unable to create branch due to error:\n{e}"
-        self._active_branch = branch_name
+        self.active_branch = branch_name
         return f"Branch {branch_name} created successfully and set as active"
 
     def create_pull_request(self, pr_json_data: str) -> str:
@@ -234,7 +234,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
         Returns:
             str: List of the files
         """
-        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self._active_branch))
+        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self.active_branch))
 
     # TODO: review this method, it may not work as expected
     # def _file_commit_hash(self, file_path: str, branch: str):
