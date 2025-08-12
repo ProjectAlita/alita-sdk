@@ -1,12 +1,14 @@
 from typing import List, Literal, Optional
 
 from langchain_core.tools import BaseTool, BaseToolkit
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 import requests
 
 from .api_wrapper import TestrailAPIWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+from ...configurations.testrail import TestRailConfiguration
+from ...configurations.pgvector import PgVectorConfiguration
 
 name = "testrail"
 
@@ -14,13 +16,13 @@ def get_tools(tool):
     return TestrailToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         url=tool['settings']['url'],
-        password=tool['settings'].get('password', None),
-        email=tool['settings'].get('email', None),
+        password=tool['settings'].get('testrail_configuration', {}).get('api_key', None),
+        email=tool['settings'].get('testrail_configuration', {}).get('username', None),
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm', None),
 
         # indexer settings
-        connection_string=tool['settings'].get('connection_string', None),
+        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
         collection_name=f"{tool.get('toolkit_name')}",
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -49,13 +51,8 @@ class TestrailToolkit(BaseToolkit):
                     }
                 )
             ),
-            email=(str, Field(description="User's email", json_schema_extra={'configuration': True})),
-            password=(SecretStr, Field(description="User's password", json_schema_extra={'secret': True, 'configuration': True})),
-            # indexer settings
-            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                          default=None,
-                                                          json_schema_extra={'secret': True})),
-
+            testrail_configuration=(Optional[TestRailConfiguration], Field(description="TestRail Configuration", json_schema_extra={'configuration_types': ['testrail']})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
             embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),

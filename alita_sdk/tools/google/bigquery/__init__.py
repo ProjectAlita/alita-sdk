@@ -2,8 +2,9 @@ from functools import lru_cache
 from typing import List, Optional, Type
 
 from langchain_core.tools import BaseTool, BaseToolkit
-from pydantic import BaseModel, Field, SecretStr, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
+from ....configurations.bigquery import BigQueryConfiguration
 from ...utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length
 from .api_wrapper import BigQueryApiWrapper
 from .tool import BigQueryAction
@@ -45,30 +46,8 @@ class BigQueryToolkitConfig(BaseModel):
             }
         }
 
-    api_key: Optional[SecretStr] = Field(
-        default=None,
-        description="GCP API key",
-        json_schema_extra={"secret": True, "configuration": True},
-    )
-    project: Optional[str] = Field(
-        default=None,
-        description="BigQuery project ID",
-        json_schema_extra={"configuration": True},
-    )
-    location: Optional[str] = Field(
-        default=None,
-        description="BigQuery location",
-        json_schema_extra={"configuration": True},
-    )
-    dataset: Optional[str] = Field(
-        default=None,
-        description="BigQuery dataset name",
-        json_schema_extra={"configuration": True, "configuration_title": True},
-    )
-    table: Optional[str] = Field(
-        default=None,
-        description="BigQuery table name",
-        json_schema_extra={"configuration": True},
+    bigquery_configuration: Optional[BigQueryConfiguration] = Field(
+        description="BigQuery configuration", json_schema_extra={"configuration_types": ["bigquery"]}
     )
     selected_tools: List[str] = Field(
         default=[],
@@ -85,7 +64,7 @@ class BigQueryToolkitConfig(BaseModel):
 def _get_toolkit(tool) -> BaseToolkit:
     return BigQueryToolkit().get_toolkit(
         selected_tools=tool["settings"].get("selected_tools", []),
-        api_key=tool["settings"].get("api_key", ""),
+        api_key=tool["settings"].get('bigquery_configuration').get("api_key", ""),
         toolkit_name=tool.get("toolkit_name"),
     )
 

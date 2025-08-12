@@ -5,6 +5,7 @@ from typing import List, Optional, Type
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, Field, SecretStr, computed_field, field_validator
 
+from alita_sdk.configurations.delta_lake import DeltaLakeConfiguration
 from ...utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length
 from .api_wrapper import DeltaLakeApiWrapper
 from .tool import DeltaLakeAction
@@ -53,12 +54,7 @@ class DeltaLakeToolkitConfig(BaseModel):
             }
         }
 
-    aws_access_key_id: Optional[SecretStr] = Field(default=None, description="AWS access key ID", json_schema_extra={"secret": True, "configuration": True})
-    aws_secret_access_key: Optional[SecretStr] = Field(default=None, description="AWS secret access key", json_schema_extra={"secret": True, "configuration": True})
-    aws_session_token: Optional[SecretStr] = Field(default=None, description="AWS session token (optional)", json_schema_extra={"secret": True, "configuration": True})
-    aws_region: Optional[str] = Field(default=None, description="AWS region for Delta Lake storage", json_schema_extra={"configuration": True})
-    s3_path: Optional[str] = Field(default=None, description="S3 path to Delta Lake data (e.g., s3://bucket/path)", json_schema_extra={"configuration": True, "configuration_title": True})
-    table_path: Optional[str] = Field(default=None, description="Delta Lake table path (if not using s3_path)", json_schema_extra={"configuration": True})
+    delta_lake_configuration: Optional[DeltaLakeConfiguration] = Field(description="Delta Lake Configuration", json_schema_extra={"configuration_types": ["delta_lake"]})
     selected_tools: List[str] = Field(default=[], description="Selected tools", json_schema_extra={"args_schemas": get_available_tools()})
 
     @field_validator("selected_tools", mode="before", check_fields=False)
@@ -69,12 +65,12 @@ class DeltaLakeToolkitConfig(BaseModel):
 def _get_toolkit(tool) -> BaseToolkit:
     return DeltaLakeToolkit().get_toolkit(
         selected_tools=tool["settings"].get("selected_tools", []),
-        aws_access_key_id=tool["settings"].get("aws_access_key_id", None),
-        aws_secret_access_key=tool["settings"].get("aws_secret_access_key", None),
-        aws_session_token=tool["settings"].get("aws_session_token", None),
-        aws_region=tool["settings"].get("aws_region", None),
-        s3_path=tool["settings"].get("s3_path", None),
-        table_path=tool["settings"].get("table_path", None),
+        aws_access_key_id=tool["settings"].get("delta_lake_configuration").get("aws_access_key_id", None),
+        aws_secret_access_key=tool["settings"].get("delta_lake_configuration").get("aws_secret_access_key", None),
+        aws_session_token=tool["settings"].get("delta_lake_configuration").get("aws_session_token", None),
+        aws_region=tool["settings"].get("delta_lake_configuration").get("aws_region", None),
+        s3_path=tool["settings"].get("delta_lake_configuration").get("s3_path", None),
+        table_path=tool["settings"].get("delta_lake_configuration").get("table_path", None),
         toolkit_name=tool.get("toolkit_name"),
     )
 
@@ -103,9 +99,9 @@ class DeltaLakeToolkit(BaseToolkit):
     def available_tools(self) -> List[dict]:
         return self.api_wrapper.get_available_tools()
 
-    @staticmethod
     def toolkit_config_schema() -> Type[BaseModel]:
         return DeltaLakeToolkitConfig
+        return m
 
     @classmethod
     def get_toolkit(

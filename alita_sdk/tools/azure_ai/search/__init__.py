@@ -3,8 +3,9 @@ from typing import List, Optional, Literal
 from .api_wrapper import AzureSearchApiWrapper
 from ...base.tool import BaseAction
 from langchain_core.tools import BaseToolkit, BaseTool
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+from ....configurations.azure_search import AzureSearchConfiguration
 import requests
 
 logger = getLogger(__name__)
@@ -14,10 +15,10 @@ name = "azure_search"
 def get_tools(tool):
     return AzureSearchToolkit().get_toolkit(
             selected_tools=tool['settings'].get('selected_tools', []),
-            api_key=tool['settings'].get('api_key', None),
-            endpoint=tool['settings'].get('endpoint', None),
+            api_key=tool['settings'].get('azure_search_configuration', {}).get('api_key', None),
+            endpoint=tool['settings'].get('azure_search_configuration', {}).get('endpoint', None),
             index_name=tool['settings'].get('index_name', None),
-            api_base=tool['settings'].get('api_base', None),
+            api_base=tool['settings'].get('azure_search_configuration', {}).get('api_base', None),
             api_version=tool['settings'].get('api_version', None),
             openai_api_key=tool['settings'].get('access_token', None),
             model_name=tool['settings'].get('model_name', None),
@@ -38,18 +39,11 @@ class AzureSearchToolkit(BaseToolkit):
         AzureSearchToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            api_key=(SecretStr, Field(description="API key", json_schema_extra={'secret': True, 'configuration': True})),
-            endpoint=(str, Field(title="Azure Search endpoint",
-                                                   description="Azure Search endpoint",
-                                                   json_schema_extra={
-                                                       'configuration': True,
-                                                       "configuration_title": True
-                                                   })),
             index_name=(str, Field(description="Azure Search index name")),
-            api_base=(Optional[str], Field(description="Azure OpenAI base URL", default=None,
-                                           json_schema_extra={
-                                               'max_toolkit_length': AzureSearchToolkit.toolkit_max_length,
-                                               'configuration': True})),
+            azure_search_configuration=(
+                Optional[AzureSearchConfiguration],
+                Field(description="Azure Search Configuration", json_schema_extra={'configuration_types': ['azure_search']})
+            ),
             api_version=(Optional[str], Field(description="API version", default=None)),
             openai_api_key=(Optional[str], Field(description="Azure OpenAI API Key", default=None, json_schema_extra={'secret': True})),
             model_name=(str, Field(description="Model name for Embeddings model", default=None)),

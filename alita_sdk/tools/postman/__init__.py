@@ -1,13 +1,13 @@
 from typing import List, Literal, Optional, Type
-import json
 
 import requests
 from langchain_core.tools import BaseToolkit, BaseTool
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import create_model, BaseModel, ConfigDict, Field, field_validator
 from ..base.tool import BaseAction
 
 from .api_wrapper import PostmanApiWrapper
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER, check_connection_response
+from ...configurations.postman import PostmanConfiguration
 
 name = "postman"
 
@@ -30,7 +30,7 @@ def get_tools(tool):
     environment_config = tool['settings'].get('environment_config', {})
     toolkit = PostmanToolkit.get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        api_key=tool['settings'].get('api_key', None),
+        api_key=tool['settings'].get('postman_configuration', {}).get('api_key', None),
         base_url=tool['settings'].get(
             'base_url', 'https://api.getpostman.com'),
         collection_id=tool['settings'].get('collection_id', None),
@@ -53,8 +53,8 @@ class PostmanToolkit(BaseToolkit):
             selected_tools)
         m = create_model(
             name,
-            api_key=(SecretStr, Field(description="Postman API key",
-                     json_schema_extra={'secret': True, 'configuration': True})),
+            postman_configuration=(Optional[PostmanConfiguration], Field(description="Postman Configuration",
+                                                                         json_schema_extra={'configuration_types': ['postman']})),
             base_url=(str, Field(description="Postman API base URL",
                       default="https://api.getpostman.com", json_schema_extra={'configuration': True})),
             collection_id=(str, Field(description="Default collection ID", json_schema_extra={

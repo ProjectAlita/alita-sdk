@@ -3,8 +3,10 @@ from langchain_community.agent_toolkits.base import BaseToolkit
 from .api_wrapper import ConfluenceAPIWrapper
 from langchain_core.tools import BaseTool
 from ..base.tool import BaseAction
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
+from ...configurations.confluence import ConfluenceConfiguration
+from ...configurations.pgvector import PgVectorConfiguration
 import requests
 
 name = "confluence"
@@ -15,9 +17,9 @@ def get_tools(tool):
         base_url=tool['settings']['base_url'],
         space=tool['settings'].get('space', None),
         cloud=tool['settings'].get('cloud', True),
-        api_key=tool['settings'].get('api_key', None),
-        username=tool['settings'].get('username', None),
-        token=tool['settings'].get('token', None),
+        api_key=tool['settings'].get('confluence_configuration', {}).get('api_key', None),
+        username=tool['settings'].get('confluence_configuration', {}).get('username', None),
+        token=tool['settings'].get('confluence_configuration', {}).get('token', None),
         limit=tool['settings'].get('limit', 5),
         labels=parse_list(tool['settings'].get('labels', None)),
         additional_fields=tool['settings'].get('additional_fields', []),
@@ -26,7 +28,7 @@ def get_tools(tool):
         llm=tool['settings'].get('llm', None),
         toolkit_name=tool.get('toolkit_name'),
         # indexer settings
-        connection_string = tool['settings'].get('connection_string', None),
+        connection_string = tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
         collection_name=str(tool['toolkit_name']),
         doctype='doc',
         embedding_model="HuggingFaceEmbeddings",
@@ -50,10 +52,15 @@ class ConfluenceToolkit(BaseToolkit):
             url = self.base_url.rstrip('/') + '/wiki/rest/api/space'
             headers = {'Accept': 'application/json'}
             auth = None
-            if self.token:
-                headers['Authorization'] = f'Bearer {self.token}'
-            elif self.username and self.api_key:
-                auth = (self.username, self.api_key)
+            confluence_config = self.confluence_configuration or {}
+            token = confluence_config.get('token')
+            username = confluence_config.get('username')
+            api_key = confluence_config.get('api_key')
+
+            if token:
+                headers['Authorization'] = f'Bearer {token}'
+            elif username and api_key:
+                auth = (username, api_key)
             else:
                 raise ValueError('Confluence connection requires either token or username+api_key')
             response = requests.get(url, headers=headers, auth=auth, timeout=5, verify=getattr(self, 'verify_ssl', True))
@@ -62,9 +69,6 @@ class ConfluenceToolkit(BaseToolkit):
         model = create_model(
             name,
             base_url=(str, Field(description="Confluence URL", json_schema_extra={'configuration': True, 'configuration_title': True})),
-            token=(SecretStr, Field(description="Token", default=None, json_schema_extra={'secret': True, 'configuration': True})),
-            api_key=(SecretStr, Field(description="API key", default=None, json_schema_extra={'secret': True, 'configuration': True})),
-            username=(str, Field(description="Username", default=None, json_schema_extra={'configuration': True})),
             space=(str, Field(description="Space", json_schema_extra={'toolkit_name': True,
                                                                                     'max_toolkit_length': ConfluenceToolkit.toolkit_max_length})),
             cloud=(bool, Field(description="Hosting Option", json_schema_extra={'configuration': True})),
@@ -78,17 +82,13 @@ class ConfluenceToolkit(BaseToolkit):
             number_of_retries=(int, Field(description="Number of retries", default=2)),
             min_retry_seconds=(int, Field(description="Min retry, sec", default=10)),
             max_retry_seconds=(int, Field(description="Max retry, sec", default=60)),
-            selected_tools=(List[Literal[tuple(selected_tools)]],
-                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            # indexer settings
-            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                            default=None,
-                                                            json_schema_extra={'secret': True})),
-
-            # embedder settings
+            confluence_configuration=(Optional[ConfluenceConfiguration], Field(description="Confluence Configuration", json_schema_extra={'configuration_types': ['confluence']})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
             embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
 
+            selected_tools=(List[Literal[tuple(selected_tools)]],
+                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Confluence",

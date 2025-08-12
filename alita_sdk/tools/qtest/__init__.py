@@ -7,6 +7,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from .api_wrapper import QtestApiWrapper
 from .tool import QtestAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER, check_connection_response
+from ...configurations.qtest import QtestConfiguration
 
 name = "qtest"
 
@@ -16,7 +17,7 @@ def get_tools(tool):
         selected_tools=tool['settings'].get('selected_tools', []),
         base_url=tool['settings'].get('base_url', None),
         qtest_project_id=tool['settings'].get('qtest_project_id', tool['settings'].get('project_id', None)),
-        qtest_api_token=tool['settings'].get('qtest_api_token', None),
+        qtest_api_token=tool['settings'].get('qtest_configuration', {}).get('qtest_api_token', None),
         toolkit_name=tool.get('toolkit_name')
     )
     return toolkit.tools
@@ -34,7 +35,7 @@ class QtestToolkit(BaseToolkit):
             name,
             base_url=(str, Field(description="QTest base url", json_schema_extra={'configuration': True, 'configuration_title': True})),
             qtest_project_id=(int, Field(description="QTest project id", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': QtestToolkit.toolkit_max_length})),
-            qtest_api_token=(SecretStr, Field(description="QTest API token", json_schema_extra={'secret': True, 'configuration': True})),
+            qtest_configuration=(Optional[QtestConfiguration], Field(description="QTest API token", json_schema_extra={'configuration_types': ['qtest']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "QTest", "icon_url": "qtest.svg",
                                                                   "categories": ["test management"],
