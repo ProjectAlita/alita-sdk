@@ -35,15 +35,16 @@ class PGVectorAdapter(VectorStoreAdapter):
             "connection_string": connection_string
         }
 
-    def list_collections(self, vectorstore_wrapper) -> str:
+    def list_collections(self, vectorstore_wrapper, collection_name) -> str:
         from sqlalchemy import text
         from sqlalchemy.orm import Session
 
         with Session(vectorstore_wrapper.vectorstore.session_maker.bind) as session:
-            get_collections = text("""
-                SELECT table_schema
-                FROM information_schema.columns
-                WHERE udt_name = 'vector';
+            get_collections = text(f"""
+                 SELECT table_schema
+                 FROM information_schema.columns
+                 WHERE udt_name = 'vector'
+                   AND table_schema LIKE '%{collection_name}%';
             """)
             result = session.execute(get_collections)
             docs = result.fetchall()

@@ -374,7 +374,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def list_collections(self):
         """Lists all collections in the vector store."""
         vectorstore_wrapper = self._init_vector_store()
-        return self._adapter.list_collections(vectorstore_wrapper)
+        return self._adapter.list_collections(vectorstore_wrapper, self.collection_name or "")
 
     def search_index(self,
                      query: str,
