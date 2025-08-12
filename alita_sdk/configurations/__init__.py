@@ -34,6 +34,7 @@ _safe_import_configuration('jira', 'jira', 'JiraConfiguration')
 _safe_import_configuration('postman', 'postman', 'PostmanConfiguration')
 _safe_import_configuration('service_now', 'service_now', 'ServiceNowConfiguration')
 _safe_import_configuration('testrail', 'testrail', 'TestRailConfiguration')
+_safe_import_configuration('slack', 'slack', 'SlackConfiguration')
 
 # Log import summary
 available_count = len(AVAILABLE_CONFIGURATIONS)

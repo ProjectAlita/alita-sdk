@@ -2,10 +2,12 @@ from typing import List, Optional, Literal
 
 import logging
 
+from ...configurations.slack import SlackConfiguration
+
 logger = logging.getLogger(__name__)
 
 from langchain_core.tools import BaseToolkit, BaseTool
-from pydantic import create_model, BaseModel, Field, SecretStr
+from pydantic import create_model, BaseModel, Field
 from ..base.tool import BaseAction
 
 from .api_wrapper import SlackApiWrapper
@@ -18,7 +20,7 @@ name = "slack"
 def get_tools(tool):
     return SlackToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        slack_token=tool['settings'].get('slack_token'),
+        slack_token=tool['settings'].get('slack_configuration', {}).get('slack_token', None),
         channel_id=tool['settings'].get('channel_id'),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
@@ -48,11 +50,8 @@ class SlackToolkit(BaseToolkit):
 
          model = create_model(
              name,
-             name=(str, Field(description="Toolkit name", json_schema_extra={'max_toolkit_length': SlackToolkit.toolkit_max_length,
-                                                                             'configuration': True,
-                                                                             'configuration_title': True})),
-             slack_token=(SecretStr, Field(description="Slack Token like XOXB-*****-*****-*****-*****",
-                                           json_schema_extra={'secret': True, 'configuration': True})),
+             slack_configuration=(Optional[SlackConfiguration], Field(default=None, description="Slack configuration",
+                                                             json_schema_extra={'configuration_types': ['slack']})),
              channel_id=(Optional[str], Field(default=None, description="Channel ID", json_schema_extra={'configuration': True})),
              selected_tools=(List[Literal[tuple(selected_tools)]],
                              Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
