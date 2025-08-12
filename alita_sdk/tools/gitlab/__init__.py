@@ -21,11 +21,11 @@ def get_tools(tool):
         url=tool['settings']['url'],
         repository=tool['settings']['repository'],
         branch=tool['settings']['branch'],
-        private_token=tool['settings']['private_token'],
+        private_token=tool['settings'].get('gitlab_configuration', {}).get('private_token', ''),
 
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
-        connection_string=tool['settings'].get('connection_string', None),
+        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
         collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",

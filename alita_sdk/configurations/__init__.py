@@ -27,6 +27,13 @@ _safe_import_configuration('pgvector', 'pgvector', 'PgVectorConfiguration')
 _safe_import_configuration('ado', 'ado', 'AdoConfiguration')
 _safe_import_configuration('ado_repos', 'ado', 'AdoReposConfiguration')
 _safe_import_configuration('gitlab', 'gitlab', 'GitlabConfiguration')
+_safe_import_configuration('qtest', 'qtest', 'QtestConfiguration')
+_safe_import_configuration('bitbucket', 'bitbucket', 'BitbucketConfiguration')
+_safe_import_configuration('confluence', 'confluence', 'ConfluenceConfiguration')
+_safe_import_configuration('jira', 'jira', 'JiraConfiguration')
+_safe_import_configuration('postman', 'postman', 'PostmanConfiguration')
+_safe_import_configuration('service_now', 'service_now', 'ServiceNowConfiguration')
+_safe_import_configuration('testrail', 'testrail', 'TestRailConfiguration')
 
 # Log import summary
 available_count = len(AVAILABLE_CONFIGURATIONS)

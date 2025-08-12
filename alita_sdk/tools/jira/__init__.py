@@ -2,10 +2,12 @@ from typing import List, Optional, Literal
 from .api_wrapper import JiraApiWrapper
 from langchain_core.tools import BaseTool, BaseToolkit
 from ..base.tool import BaseAction
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 import requests
 
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
+from ...configurations.jira import JiraConfiguration
+from ...configurations.pgvector import PgVectorConfiguration
 
 name = "jira"
 
@@ -14,9 +16,9 @@ def get_tools(tool):
         selected_tools=tool['settings'].get('selected_tools', []),
         base_url=tool['settings'].get('base_url'),
         cloud=tool['settings'].get('cloud', True),
-        api_key=tool['settings'].get('api_key', None),
-        username=tool['settings'].get('username', None),
-        token=tool['settings'].get('token', None),
+        api_key=tool['settings'].get('jira_configuration', {}).get('api_key', None),
+        username=tool['settings'].get('jira_configuration', {}).get('username', None),
+        token=tool['settings'].get('jira_configuration', {}).get('token', None),
         limit=tool['settings'].get('limit', 5),
         labels=parse_list(tool['settings'].get('labels', [])),
         additional_fields=tool['settings'].get('additional_fields', []),
@@ -24,7 +26,7 @@ def get_tools(tool):
         # indexer settings
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
-        connection_string=tool['settings'].get('connection_string', None),
+        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
         collection_name=f"{tool.get('toolkit_name')}_{str(tool['id'])}",
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -47,10 +49,15 @@ class JiraToolkit(BaseToolkit):
             url = self.base_url.rstrip('/') + '/rest/api/2/myself'
             headers = {'Accept': 'application/json'}
             auth = None
-            if self.token:
-                headers['Authorization'] = f'Bearer {self.token}'
-            elif self.username and self.api_key:
-                auth = (self.username, self.api_key)
+            jira_config = self.jira_configuration or {}
+            token = jira_config.get('token')
+            username = jira_config.get('username')
+            api_key = jira_config.get('api_key')
+
+            if token:
+                headers['Authorization'] = f'Bearer {token}'
+            elif username and api_key:
+                auth = (username, api_key)
             else:
                 raise ValueError('Jira connection requires either token or username+api_key')
             response = requests.get(url, headers=headers, auth=auth, timeout=5, verify=getattr(self, 'verify_ssl', True))
@@ -70,9 +77,6 @@ class JiraToolkit(BaseToolkit):
                 )
             ),
             cloud=(bool, Field(description="Hosting Option", json_schema_extra={'configuration': True})),
-            api_key=(Optional[SecretStr], Field(description="API key", default=None, json_schema_extra={'secret': True, 'configuration': True})),
-            username=(Optional[str], Field(description="Jira Username", default=None, json_schema_extra={'configuration': True})),
-            token=(Optional[SecretStr], Field(description="Jira token", default=None, json_schema_extra={'secret': True, 'configuration': True})),
             limit=(int, Field(description="Limit issues")),
             labels=(Optional[str], Field(
                 description="List of comma separated labels used for labeling of agent's created or updated entities",
@@ -81,6 +85,8 @@ class JiraToolkit(BaseToolkit):
             )),
             verify_ssl=(bool, Field(description="Verify SSL", default=True)),
             additional_fields=(Optional[str], Field(description="Additional fields", default="")),
+            jira_configuration=(Optional[JiraConfiguration], Field(description="Jira Configuration", json_schema_extra={'configuration_types': ['jira']})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {

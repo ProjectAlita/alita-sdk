@@ -6,8 +6,10 @@ from .api_wrapper import BitbucketAPIWrapper
 from .tools import __all__
 from langchain_core.tools import BaseToolkit
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, ConfigDict, create_model, SecretStr
+from pydantic import BaseModel, Field, ConfigDict, create_model
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+from ...configurations.bitbucket import BitbucketConfiguration
+from ...configurations.pgvector import PgVectorConfiguration
 import requests
 
 
@@ -20,13 +22,13 @@ def get_tools(tool):
         url=tool['settings']['url'],
         project=tool['settings']['project'],
         repository=tool['settings']['repository'],
-        username=tool['settings']['username'],
-        password=tool['settings']['password'],
+        username=tool['settings'].get('bitbucket_configuration', {}).get('username', ''),
+        password=tool['settings'].get('bitbucket_configuration', {}).get('password', ''),
         branch=tool['settings']['branch'],
         cloud=tool['settings'].get('cloud'),
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
-        connection_string=tool['settings'].get('connection_string', None),
+        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
         collection_name=str(tool['id']),
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
@@ -53,13 +55,9 @@ class AlitaBitbucketToolkit(BaseToolkit):
             project=(str, Field(description="Project/Workspace", json_schema_extra={'configuration': True})),
             repository=(str, Field(description="Repository", json_schema_extra={'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length, 'configuration': True})),
             branch=(str, Field(description="Main branch", default="main")),
-            username=(str, Field(description="Username", json_schema_extra={'configuration': True})),
-            password=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True, 'configuration': True})),
             cloud=(Optional[bool], Field(description="Hosting Option", default=None)),
-            # indexer settings
-            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                          default=None,
-                                                          json_schema_extra={'secret': True})),
+            bitbucket_configuration=(Optional[BitbucketConfiguration], Field(description="Bitbucket Configuration", json_schema_extra={'configuration_types': ['bitbucket']})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", default={'configuration_types': ['pgvector']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
             {

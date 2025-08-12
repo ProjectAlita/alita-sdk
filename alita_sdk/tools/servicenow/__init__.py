@@ -4,8 +4,10 @@ from langchain_community.agent_toolkits.base import BaseToolkit
 from .api_wrapper import ServiceNowAPIWrapper
 from langchain_core.tools import BaseTool
 from ..base.tool import BaseAction
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.service_now import ServiceNowConfiguration
+
 
 name = "service_now"
 
@@ -14,8 +16,8 @@ def get_tools(tool):
         selected_tools=tool['settings'].get('selected_tools', []),
         instance_alias=tool['settings'].get('instance_alias', None),
         base_url=tool['settings']['base_url'],
-        password=tool['settings'].get('password', None),
-        username=tool['settings'].get('username', None),
+        password=tool['settings'].get('servicenow_configuration', {}).get('password', None),
+        username=tool['settings'].get('servicenow_configuration', {}).get('username', None),
         response_fields=tool['settings'].get('response_fields', None),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
@@ -37,9 +39,9 @@ class ServiceNowToolkit(BaseToolkit):
                         'configuration': True,
                         'configuration_title': True
                     })),
-            username=(str, Field(description="Username", default=None, json_schema_extra={'configuration': True})),
-            password=(SecretStr, Field(description="Password", default=None, json_schema_extra={'secret': True, 'configuration': True})),
             response_fields=(Optional[str], Field(description="Response fields", default=None)),
+            servicenow_configuration=(Optional[ServiceNowConfiguration], Field(description="ServiceNow Configuration",
+                                                                               json_schema_extra={'configuration_types': ['service_now']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
