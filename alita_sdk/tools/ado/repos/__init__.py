@@ -17,11 +17,11 @@ name = "ado_repos"
 def _get_toolkit(tool) -> BaseToolkit:
     return AzureDevOpsReposToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        organization_url=tool['settings'].get('organization_url', ""),
-        project=tool['settings'].get('project', ""),
-        token=tool['settings'].get('token', ""),
+        organization_url=tool['settings'].get('ado_repos_configuration').get('ado_configuration').get('organization_url', ""),
+        project=tool['settings'].get('ado_repos_configuration').get('ado_configuration').get('project', ""),
+        token=tool['settings'].get('ado_repos_configuration').get('ado_configuration').get('token', ""),
         limit=tool['settings'].get('limit', 5),
-        repository_id=tool['settings'].get('repository_id', ""),
+        repository_id=tool['settings'].get('ado_repos_configuration').get('repository_id', ""),
         base_branch=tool['settings'].get('base_branch', ""),
         active_branch=tool['settings'].get('active_branch', ""),
         toolkit_name=tool['settings'].get('toolkit_name', ""),
