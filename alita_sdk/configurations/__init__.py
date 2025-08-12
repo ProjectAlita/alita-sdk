@@ -26,6 +26,7 @@ _safe_import_configuration('github', 'github', 'GithubConfiguration')
 _safe_import_configuration('pgvector', 'pgvector', 'PgVectorConfiguration')
 _safe_import_configuration('ado', 'ado', 'AdoConfiguration')
 _safe_import_configuration('ado_repos', 'ado', 'AdoReposConfiguration')
+_safe_import_configuration('gitlab', 'gitlab', 'GitlabConfiguration')
 
 # Log import summary
 available_count = len(AVAILABLE_CONFIGURATIONS)

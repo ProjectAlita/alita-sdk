@@ -3,12 +3,14 @@ from typing import Dict, List, Literal, Optional
 from alita_sdk.tools.base.tool import BaseAction
 from langchain_core.tools import BaseTool
 from langchain_core.tools import BaseToolkit
-from pydantic import create_model, BaseModel, ConfigDict, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict
 from pydantic.fields import Field
 
 from .api_wrapper import GitLabAPIWrapper
 # from .tools import __all__
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.gitlab import GitlabConfiguration
+from ...configurations.pgvector import PgVectorConfiguration
 
 name = "gitlab"
 
@@ -45,12 +47,11 @@ class AlitaGitlabToolkit(BaseToolkit):
             name,
             url=(str, Field(description="GitLab URL", json_schema_extra={'configuration': True, 'configuration_title': True})),
             repository=(str, Field(description="GitLab repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaGitlabToolkit.toolkit_max_length})),
-            private_token=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True, 'configuration': True})),
+            gitlab_configuration=(Optional[GitlabConfiguration], Field(description="GitLab configuration", json_schema_extra={'configuration_types': ['gitlab']})),
             branch=(str, Field(description="Main branch", default="main")),
             # indexer settings
-            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                          default=None,
-                                                          json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector configuration", default=None,
+                                    json_schema_extra={'configuration_types': ['pgvector']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
