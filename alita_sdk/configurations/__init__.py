@@ -24,7 +24,8 @@ def _safe_import_configuration(
 # Safe imports for all tools
 _safe_import_configuration('github', 'github', 'GithubConfiguration')
 _safe_import_configuration('pgvector', 'pgvector', 'PgVectorConfiguration')
-_safe_import_configuration('llm', 'llm', 'LlmConfiguration')
+_safe_import_configuration('ado', 'ado', 'AdoConfiguration')
+_safe_import_configuration('ado_repos', 'ado', 'AdoReposConfiguration')
 
 # Log import summary
 available_count = len(AVAILABLE_CONFIGURATIONS)
