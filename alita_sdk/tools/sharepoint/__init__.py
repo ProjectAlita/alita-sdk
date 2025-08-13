@@ -5,6 +5,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from .api_wrapper import SharepointApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.pgvector import PgVectorConfiguration
 
 name = "sharepoint"
 
@@ -17,7 +18,7 @@ def get_tools(tool):
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm'),
         # indexer settings
-        connection_string=tool['settings'].get('connection_string', None),
+        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
         collection_name=str(tool['toolkit_name']),
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -40,9 +41,7 @@ class SharepointToolkit(BaseToolkit):
             client_secret=(SecretStr, Field(description="Client Secret", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
-            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                            default=None,
-                                                            json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
 
             # embedder settings
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),

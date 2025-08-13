@@ -55,8 +55,7 @@ class AzureDevOpsReposToolkit(BaseToolkit):
             active_branch=(Optional[str], Field(default="", title="Active branch", description="ADO active branch (e.g., main)")),
 
             # indexer settings
-            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector configuration", default=None, json_schema_extra={'configuration_types': ['pgvector']})),
-                                      json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.",
                                     default="HuggingFaceEmbeddings")),
