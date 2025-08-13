@@ -22,7 +22,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         base_branch=tool['settings'].get('base_branch', ""),
         active_branch=tool['settings'].get('active_branch', ""),
         toolkit_name=tool['settings'].get('toolkit_name', ""),
-        pgvector_configuration=tool['settings'].get('pgvector_configuration', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=tool['toolkit_name'],
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
@@ -111,6 +111,7 @@ class AzureDevOpsReposToolkit(BaseToolkit):
             **kwargs,
             # TODO use ado_repos_configuration fields
             **kwargs['ado_repos_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
         }
         azure_devops_repos_wrapper = ReposApiWrapper(**wrapper_payload)
         available_tools = azure_devops_repos_wrapper.get_available_tools()

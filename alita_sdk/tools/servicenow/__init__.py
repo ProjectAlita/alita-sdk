@@ -16,8 +16,7 @@ def get_tools(tool):
         selected_tools=tool['settings'].get('selected_tools', []),
         instance_alias=tool['settings'].get('instance_alias', None),
         base_url=tool['settings']['base_url'],
-        password=tool['settings'].get('servicenow_configuration', {}).get('password', None),
-        username=tool['settings'].get('servicenow_configuration', {}).get('username', None),
+        servicenow_configuration=tool['settings']['servicenow_configuration'],
         response_fields=tool['settings'].get('response_fields', None),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
@@ -72,7 +71,12 @@ class ServiceNowToolkit(BaseToolkit):
             selected_tools = []
         if 'response_fields' in kwargs and isinstance(kwargs['response_fields'], str):
             kwargs['fields'] = [field.strip().lower() for field in kwargs['response_fields'].split(',') if field.strip()]
-        servicenow_api_wrapper = ServiceNowAPIWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use servicenow_configuration fields
+            **kwargs['servicenow_configuration'],
+        }
+        servicenow_api_wrapper = ServiceNowAPIWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = servicenow_api_wrapper.get_available_tools()
         tools = []

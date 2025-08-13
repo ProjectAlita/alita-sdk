@@ -18,7 +18,7 @@ def get_tools(tool):
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm'),
         # indexer settings
-        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -58,7 +58,11 @@ class SharepointToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        sharepoint_api_wrapper = SharepointApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        sharepoint_api_wrapper = SharepointApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = sharepoint_api_wrapper.get_available_tools()
         tools = []

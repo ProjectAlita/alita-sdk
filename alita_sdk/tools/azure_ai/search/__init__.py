@@ -15,10 +15,8 @@ name = "azure_search"
 def get_tools(tool):
     return AzureSearchToolkit().get_toolkit(
             selected_tools=tool['settings'].get('selected_tools', []),
-            api_key=tool['settings'].get('azure_search_configuration', {}).get('api_key', None),
-            endpoint=tool['settings'].get('azure_search_configuration', {}).get('endpoint', None),
+            azure_search_configuration=tool['settings']['azure_search_configuration'],
             index_name=tool['settings'].get('index_name', None),
-            api_base=tool['settings'].get('azure_search_configuration', {}).get('api_base', None),
             api_version=tool['settings'].get('api_version', None),
             openai_api_key=tool['settings'].get('access_token', None),
             model_name=tool['settings'].get('model_name', None),
@@ -71,7 +69,12 @@ class AzureSearchToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        azure_search_api_wrapper = AzureSearchApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use azure_search_configuration fields
+            **kwargs['azure_search_configuration'],
+        }
+        azure_search_api_wrapper = AzureSearchApiWrapper(**wrapper_payload)
         available_tools = azure_search_api_wrapper.get_available_tools()
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         tools = []

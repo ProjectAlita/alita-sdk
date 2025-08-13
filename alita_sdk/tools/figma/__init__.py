@@ -22,7 +22,7 @@ def get_tools(tool):
             toolkit_name=tool.get('toolkit_name'),
             # indexer settings
             llm=tool['settings'].get('llm', None),
-            connection_string = tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+            pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
             embedding_model="HuggingFaceEmbeddings",
@@ -92,7 +92,11 @@ class FigmaToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        figma_api_wrapper = FigmaApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        figma_api_wrapper = FigmaApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = figma_api_wrapper.get_available_tools()
         tools = []

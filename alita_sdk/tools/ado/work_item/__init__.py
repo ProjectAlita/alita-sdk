@@ -89,7 +89,8 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
         wrapper_payload = {
             **kwargs,
             # TODO use ado_configuration fields in AzureDevOpsApiWrapper
-            **kwargs['ado_configuration']
+            **kwargs['ado_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
         }
         azure_devops_api_wrapper = AzureDevOpsApiWrapper(**wrapper_payload)
         available_tools = azure_devops_api_wrapper.get_available_tools()

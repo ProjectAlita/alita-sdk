@@ -20,7 +20,7 @@ name = "slack"
 def get_tools(tool):
     return SlackToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        slack_token=tool['settings'].get('slack_configuration', {}).get('slack_token', None),
+        slack_configuration=tool['settings']['slack_configuration'],
         channel_id=tool['settings'].get('channel_id'),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
@@ -64,7 +64,12 @@ class SlackToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: Optional[List[str]] = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        slack_api_wrapper = SlackApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use slack_configuration fields
+            **kwargs['slack_configuration'],
+        }
+        slack_api_wrapper = SlackApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = slack_api_wrapper.get_available_tools()
         tools = []
@@ -81,4 +86,3 @@ class SlackToolkit(BaseToolkit):
 
     def get_tools(self) -> List[BaseTool]:
         return self.tools
-

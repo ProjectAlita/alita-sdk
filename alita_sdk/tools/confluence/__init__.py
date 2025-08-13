@@ -17,9 +17,7 @@ def get_tools(tool):
         base_url=tool['settings']['base_url'],
         space=tool['settings'].get('space', None),
         cloud=tool['settings'].get('cloud', True),
-        api_key=tool['settings'].get('confluence_configuration', {}).get('api_key', None),
-        username=tool['settings'].get('confluence_configuration', {}).get('username', None),
-        token=tool['settings'].get('confluence_configuration', {}).get('token', None),
+        confluence_configuration=tool['settings']['confluence_configuration'],
         limit=tool['settings'].get('limit', 5),
         labels=parse_list(tool['settings'].get('labels', None)),
         additional_fields=tool['settings'].get('additional_fields', []),
@@ -28,7 +26,7 @@ def get_tools(tool):
         llm=tool['settings'].get('llm', None),
         toolkit_name=tool.get('toolkit_name'),
         # indexer settings
-        connection_string = tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         doctype='doc',
         embedding_model="HuggingFaceEmbeddings",
@@ -120,7 +118,13 @@ class ConfluenceToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        confluence_api_wrapper = ConfluenceAPIWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use confluence_configuration fields
+            **kwargs['confluence_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        confluence_api_wrapper = ConfluenceAPIWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, ConfluenceToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = confluence_api_wrapper.get_available_tools()
         tools = []

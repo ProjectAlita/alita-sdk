@@ -15,7 +15,7 @@ def get_tools(tool_type, tool):
         "toolkit_name": tool.get('toolkit_name', ''),
         # indexer settings
         "llm": tool['settings'].get('llm', None),
-        "pgvector_configuration": tool['settings'].get('pgvector_configuration', None),
+        "pgvector_configuration": tool['settings'].get('pgvector_configuration', {}),
         "collection_name": tool['toolkit_name'],
         "doctype": 'doc',
         "embedding_model": "HuggingFaceEmbeddings",

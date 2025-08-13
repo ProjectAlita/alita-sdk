@@ -16,13 +16,12 @@ def get_tools(tool):
     return TestrailToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         url=tool['settings']['url'],
-        password=tool['settings'].get('testrail_configuration', {}).get('api_key', None),
-        email=tool['settings'].get('testrail_configuration', {}).get('username', None),
+        testrail_configuration=tool['settings']['testrail_configuration'],
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm', None),
 
         # indexer settings
-        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=f"{tool.get('toolkit_name')}",
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -80,7 +79,13 @@ class TestrailToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        testrail_api_wrapper = TestrailAPIWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use testrail_configuration fields
+            **kwargs['testrail_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        testrail_api_wrapper = TestrailAPIWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = testrail_api_wrapper.get_available_tools()
         tools = []

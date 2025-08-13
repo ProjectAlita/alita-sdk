@@ -64,7 +64,7 @@ class BigQueryToolkitConfig(BaseModel):
 def _get_toolkit(tool) -> BaseToolkit:
     return BigQueryToolkit().get_toolkit(
         selected_tools=tool["settings"].get("selected_tools", []),
-        api_key=tool["settings"].get('bigquery_configuration').get("api_key", ""),
+        bigquery_configuration=tool["settings"]["bigquery_configuration"],
         toolkit_name=tool.get("toolkit_name"),
     )
 
@@ -109,7 +109,12 @@ class BigQueryToolkit(BaseToolkit):
         toolkit_name: Optional[str] = None,
         **kwargs,
     ) -> "BigQueryToolkit":
-        bigquery_api_wrapper = BigQueryApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use bigquery_configuration fields
+            **kwargs['bigquery_configuration'],
+        }
+        bigquery_api_wrapper = BigQueryApiWrapper(**wrapper_payload)
         instance = cls(
             tools=[], api_wrapper=bigquery_api_wrapper, toolkit_name=toolkit_name
         )
