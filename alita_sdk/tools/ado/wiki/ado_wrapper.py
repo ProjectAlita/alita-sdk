@@ -61,6 +61,7 @@ RenamePageInput = create_model(
 
 
 class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
+    # TODO use ado_configuration instead of organization_url, project and token
     organization_url: str
     project: str
     token: SecretStr

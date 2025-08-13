@@ -242,6 +242,7 @@ class ArgsSchema(Enum):
 
 
 class ReposApiWrapper(BaseCodeToolApiWrapper):
+    # TODO use ado_repos_configuration fields
     organization_url: Optional[str]
     project: Optional[str]
     repository_id: Optional[str]

@@ -1,9 +1,11 @@
 from typing import List, Literal, Optional
 from .ado_wrapper import AzureDevOpsApiWrapper  # Import the API wrapper for Azure DevOps
 from langchain_core.tools import BaseTool, BaseToolkit
-from pydantic import create_model, BaseModel, Field, SecretStr
+from pydantic import create_model, BaseModel, Field
 
 import requests
+from ....configurations.ado import AdoConfiguration
+from ....configurations.pgvector import PgVectorConfiguration
 from ...base.tool import BaseAction
 from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
 
@@ -25,22 +27,9 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                                  'toolkit_name': True,
                                  'max_toolkit_length': AzureDevOpsWikiToolkit.toolkit_max_length})
                   ),
-            organization_url=(str, Field(title="Organization URL",
-                                         description="ADO organization url", json_schema_extra={
-                    'configuration': True,
-                })),
-            project=(str, Field(description="ADO project",
-                                json_schema_extra={
-                                    'configuration': True
-                                })),
-            token=(SecretStr,
-                   Field(description="ADO token",
-                         json_schema_extra={'secret': True, 'configuration': True }
-                         )),
+            ado_configuration=(AdoConfiguration, Field(description="Ado configuration", json_schema_extra={'configuration_types': ['ado']})),
             # indexer settings
-            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                          default=None,
-                                                          json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.",
                                         default="HuggingFaceEmbeddings")),
@@ -53,7 +42,7 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                 'json_schema_extra': {
                     'metadata': {
                         "label": "ADO wiki",
-                        "icon_url": None,
+                        "icon_url": "ado-wiki-icon.svg",
                         "categories": ["documentation"],
                         "extra_categories": ["knowledge base", "documentation management", "wiki"],
                         "sections": {
@@ -77,9 +66,12 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
 
         @check_connection_response
         def check_connection(self):
+            ado_config = self.ado_wiki_configuration.ado_configuration if self.ado_wiki_configuration else None
+            if not ado_config:
+                raise ValueError("ADO wiki configuration is required")
             response = requests.get(
-                f'{self.organization_url}/{self.project}/_apis/wiki/wikis?api-version=7.0',
-                headers={'Authorization': f'Bearer {self.token}'},
+                f'{ado_config.organization_url}/{ado_config.project}/_apis/wiki/wikis?api-version=7.0',
+                headers={'Authorization': f'Bearer {ado_config.token}'},
                 timeout=5
             )
             return response
@@ -94,7 +86,12 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
             environ['AZURE_DEVOPS_CACHE_DIR'] = '/tmp/.azure-devops'
         if selected_tools is None:
             selected_tools = []
-        azure_devops_api_wrapper = AzureDevOpsApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use ado_configuration fields in AzureDevOpsApiWrapper
+            **kwargs['ado_configuration']
+        }
+        azure_devops_api_wrapper = AzureDevOpsApiWrapper(**wrapper_payload)
         available_tools = azure_devops_api_wrapper.get_available_tools()
         tools = []
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
