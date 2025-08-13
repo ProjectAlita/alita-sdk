@@ -16,9 +16,7 @@ def get_tools(tool):
         selected_tools=tool['settings'].get('selected_tools', []),
         base_url=tool['settings'].get('base_url'),
         cloud=tool['settings'].get('cloud', True),
-        api_key=tool['settings'].get('jira_configuration', {}).get('api_key', None),
-        username=tool['settings'].get('jira_configuration', {}).get('username', None),
-        token=tool['settings'].get('jira_configuration', {}).get('token', None),
+        jira_configuration=tool['settings']['jira_configuration'],
         limit=tool['settings'].get('limit', 5),
         labels=parse_list(tool['settings'].get('labels', [])),
         additional_fields=tool['settings'].get('additional_fields', []),
@@ -26,7 +24,7 @@ def get_tools(tool):
         # indexer settings
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
-        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         embedding_model="HuggingFaceEmbeddings",
         embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
@@ -123,7 +121,13 @@ class JiraToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        jira_api_wrapper = JiraApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use jira_configuration fields
+            **kwargs['jira_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        jira_api_wrapper = JiraApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = jira_api_wrapper.get_available_tools()
         tools = []

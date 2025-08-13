@@ -17,7 +17,7 @@ def get_tools(tool):
         selected_tools=tool['settings'].get('selected_tools', []),
         base_url=tool['settings'].get('base_url', None),
         qtest_project_id=tool['settings'].get('qtest_project_id', tool['settings'].get('project_id', None)),
-        qtest_api_token=tool['settings'].get('qtest_configuration', {}).get('qtest_api_token', None),
+        qtest_configuration=tool['settings']['qtest_configuration'],
         toolkit_name=tool.get('toolkit_name')
     )
     return toolkit.tools
@@ -60,7 +60,12 @@ class QtestToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        qtest_api_wrapper = QtestApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use qtest_configuration fields
+            **kwargs['qtest_configuration'],
+        }
+        qtest_api_wrapper = QtestApiWrapper(**wrapper_payload)
         prefix = clean_string(str(toolkit_name), cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = qtest_api_wrapper.get_available_tools()
         tools = []

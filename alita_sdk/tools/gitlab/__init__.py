@@ -20,11 +20,11 @@ def get_tools(tool):
         url=tool['settings']['url'],
         repository=tool['settings']['repository'],
         branch=tool['settings']['branch'],
-        private_token=tool['settings'].get('gitlab_configuration', {}).get('private_token', ''),
+        gitlab_configuration=tool['settings']['gitlab_configuration'],
 
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
-        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
@@ -49,8 +49,7 @@ class AlitaGitlabToolkit(BaseToolkit):
             gitlab_configuration=(Optional[GitlabConfiguration], Field(description="GitLab configuration", json_schema_extra={'configuration_types': ['gitlab']})),
             branch=(str, Field(description="Main branch", default="main")),
             # indexer settings
-            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector configuration", default=None,
-                                    json_schema_extra={'configuration_types': ['pgvector']})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
             embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
@@ -80,7 +79,13 @@ class AlitaGitlabToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        gitlab_api_wrapper = GitLabAPIWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use gitlab_configuration fields
+            **kwargs['gitlab_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        gitlab_api_wrapper = GitLabAPIWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools: List[Dict] = gitlab_api_wrapper.get_available_tools()
         tools = []

@@ -164,6 +164,7 @@ TestCasesGetModel = create_model(
 )
 
 class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
+    # TODO use ado_configuration instead of organization_url, project and token
     __test__ = False
     organization_url: str
     project: str

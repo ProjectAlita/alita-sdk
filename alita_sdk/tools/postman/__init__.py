@@ -30,7 +30,7 @@ def get_tools(tool):
     environment_config = tool['settings'].get('environment_config', {})
     toolkit = PostmanToolkit.get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        api_key=tool['settings'].get('postman_configuration', {}).get('api_key', None),
+        postman_configuration=tool['settings']['postman_configuration'],
         base_url=tool['settings'].get(
             'base_url', 'https://api.getpostman.com'),
         collection_id=tool['settings'].get('collection_id', None),
@@ -91,7 +91,12 @@ class PostmanToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        postman_api_wrapper = PostmanApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use postman_configuration fields
+            **kwargs['postman_configuration'],
+        }
+        postman_api_wrapper = PostmanApiWrapper(**wrapper_payload)
         prefix = clean_string(str(toolkit_name), cls.toolkit_max_length) + \
             TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = postman_api_wrapper.get_available_tools()

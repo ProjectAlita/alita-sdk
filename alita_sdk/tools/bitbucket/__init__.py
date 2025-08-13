@@ -22,13 +22,12 @@ def get_tools(tool):
         url=tool['settings']['url'],
         project=tool['settings']['project'],
         repository=tool['settings']['repository'],
-        username=tool['settings'].get('bitbucket_configuration', {}).get('username', ''),
-        password=tool['settings'].get('bitbucket_configuration', {}).get('password', ''),
+        bitbucket_configuration=tool['settings']['bitbucket_configuration'],
         branch=tool['settings']['branch'],
         cloud=tool['settings'].get('cloud'),
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
-        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
@@ -91,7 +90,13 @@ class AlitaBitbucketToolkit(BaseToolkit):
             selected_tools = []
         if kwargs["cloud"] is None:
             kwargs["cloud"] = True if "bitbucket.org" in kwargs.get('url') else False
-        bitbucket_api_wrapper = BitbucketAPIWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use bitbucket_configuration fields
+            **kwargs['bitbucket_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        bitbucket_api_wrapper = BitbucketAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = __all__
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         tools = []

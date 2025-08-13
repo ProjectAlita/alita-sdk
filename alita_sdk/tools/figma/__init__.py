@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, SecretStr
 from ..base.tool import BaseAction
 from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.pgvector import PgVectorConfiguration
 
 name = "figma"
 
@@ -21,7 +22,7 @@ def get_tools(tool):
             toolkit_name=tool.get('toolkit_name'),
             # indexer settings
             llm=tool['settings'].get('llm', None),
-            connection_string = tool['settings'].get('connection_string', None),
+            pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
             embedding_model="HuggingFaceEmbeddings",
@@ -54,9 +55,7 @@ class FigmaToolkit(BaseToolkit):
                 Field(default=[], json_schema_extra={"args_schemas": selected_tools}),
             ),
             # indexer settings
-            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                            default=None,
-                                                            json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
 
             # embedder settings
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
@@ -93,7 +92,11 @@ class FigmaToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        figma_api_wrapper = FigmaApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        figma_api_wrapper = FigmaApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = figma_api_wrapper.get_available_tools()
         tools = []

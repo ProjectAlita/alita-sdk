@@ -10,13 +10,12 @@ def get_tools(tool_type, tool):
         # common
         "selected_tools": tool['settings'].get('selected_tools', []),
         "organization_url": tool['settings']['organization_url'],
-        "project": tool['settings'].get('project', None),
-        "token": tool['settings'].get('token', None),
+        "ado_configuration": tool['settings']['ado_configuration'],
         "limit": tool['settings'].get('limit', 5),
         "toolkit_name": tool.get('toolkit_name', ''),
         # indexer settings
         "llm": tool['settings'].get('llm', None),
-        "connection_string": tool['settings'].get('connection_string', None),
+        "pgvector_configuration": tool['settings'].get('pgvector_configuration', {}),
         "collection_name": tool['toolkit_name'],
         "doctype": 'doc',
         "embedding_model": "HuggingFaceEmbeddings",

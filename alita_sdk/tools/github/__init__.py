@@ -19,14 +19,10 @@ def _get_toolkit(tool) -> BaseToolkit:
         github_repository=tool['settings']['repository'],
         active_branch=tool['settings']['active_branch'],
         github_base_branch=tool['settings']['base_branch'],
-        github_access_token=tool['settings'].get('github_configuration', {}).get('access_token', ''),
-        github_username=tool['settings'].get('github_configuration', {}).get('username', ''),
-        github_password=tool['settings'].get('github_configuration', {}).get('password', ''),
-        github_app_id=tool['settings'].get('github_configuration', {}).get('app_id', None),
-        github_app_private_key=tool['settings'].get('github_configuration', {}).get('app_private_key', None),
+        github_configuration=tool['settings']['github_configuration'],
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
-        connection_string=tool['settings'].get('pgvector_configuration', {}).get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         doctype='code',
         embedding_model="HuggingFaceEmbeddings",
@@ -71,9 +67,6 @@ class AlitaGitHubToolkit(BaseToolkit):
             active_branch=(Optional[str], Field(description="Active branch", default="main")),
             base_branch=(Optional[str], Field(description="Github Base branch", default="main")),
             # indexer settings
-            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                          default=None,
-                                                          json_schema_extra={'secret': True})),
             embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
             embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
@@ -84,7 +77,13 @@ class AlitaGitHubToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        github_api_wrapper = AlitaGitHubAPIWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use github_configuration fields
+            **kwargs['github_configuration'],
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        github_api_wrapper = AlitaGitHubAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = github_api_wrapper.get_available_tools()
         tools = []
         prefix = clean_string(toolkit_name, AlitaGitHubToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
