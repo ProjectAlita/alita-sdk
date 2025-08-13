@@ -61,3 +61,24 @@ def create_temp_file(file_content: bytes):
 
         # Get the file path for operations
         return temp_file.name
+
+def file_to_bytes(filepath):
+    """
+    Reads a file and returns its content as a bytes object.
+
+    Args:
+        filepath (str): The path to the file.
+
+    Returns:
+        bytes: The content of the file as a bytes object.
+    """
+    try:
+        with open(filepath, "rb") as f:
+            file_content_bytes = f.read()
+        return file_content_bytes
+    except FileNotFoundError:
+        logger.error(f"File not found: {filepath}")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading file {filepath}: {e}")
+        return None

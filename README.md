@@ -36,7 +36,7 @@ venv\Scripts\activate
 Install all required dependencies for the SDK and toolkits:
 
 ```bash
-pip install -r req_bkup/requirements-all.txt
+pip install -U '.[all]'
 ```
 
 Environment Setup

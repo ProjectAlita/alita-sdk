@@ -1,7 +1,7 @@
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 
-from alita_sdk.tools.utils.content_parser import file_to_bytes
+from .utils import file_to_bytes
 
 
 class AlitaDocLoader(BaseLoader):
