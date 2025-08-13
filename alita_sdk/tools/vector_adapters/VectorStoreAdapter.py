@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 
 class VectorStoreAdapter(ABC):
@@ -36,19 +39,23 @@ class PGVectorAdapter(VectorStoreAdapter):
         }
 
     def list_collections(self, vectorstore_wrapper, collection_name) -> str:
-        from sqlalchemy import text
+        from sqlalchemy import func
         from sqlalchemy.orm import Session
 
-        with Session(vectorstore_wrapper.vectorstore.session_maker.bind) as session:
-            get_collections = text(f"""
-                 SELECT table_schema
-                 FROM information_schema.columns
-                 WHERE udt_name = 'vector'
-                   AND table_schema LIKE '%{collection_name}%';
-            """)
-            result = session.execute(get_collections)
-            docs = result.fetchall()
-        return str(docs)
+        store = vectorstore_wrapper.vectorstore
+        try:
+            with Session(store.session_maker.bind) as session:
+                collections = (
+                    session.query(
+                        func.distinct(func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection'))
+                    )
+                    .filter(store.EmbeddingStore.cmetadata.isnot(None))
+                    .all()
+                )
+                return [collection[0] for collection in collections if collection[0] is not None]
+        except Exception as e:
+            logger.error(f"Failed to get unique collections from PGVector: {str(e)}")
+            return []
 
     def remove_collection(self, vectorstore_wrapper, collection_name: str):
         vectorstore_wrapper._remove_collection()

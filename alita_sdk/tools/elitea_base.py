@@ -30,13 +30,13 @@ LoaderSchema = create_model(
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
     "BaseIndexParams",
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
     vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
 )
 
 BaseCodeIndexParams = create_model(
     "BaseCodeIndexParams",
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
     vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
     branch=(Optional[str], Field(description="Branch to index files from. Defaults to active branch if None.", default=None)),
     whitelist=(Optional[List[str]], Field(description="File extensions or paths to include. Defaults to all files if None.", default=None)),
@@ -51,7 +51,9 @@ RemoveIndexParams = create_model(
 BaseSearchParams = create_model(
     "BaseSearchParams",
     query=(str, Field(description="Query text to search in the index")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    collection_suffix=(Optional[str], Field(
+        description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
+        default="", max_length=7)),
     vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -219,6 +221,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     embedding_model: Optional[str] = "HuggingFaceEmbeddings"
     embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
     vectorstore_type: Optional[str] = "PGVector"
+    _vector_store: Optional[Any] = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -297,9 +300,9 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         collection_suffix = kwargs.get("collection_suffix")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
-        vs = self._init_vector_store(collection_suffix, embeddings=embedding)
+        vs = self._init_vector_store(embeddings=embedding)
         #
-        return vs.index_documents(docs, progress_step=progress_step, clean_index=clean_index)
+        return vs.index_documents(docs, collection_suffix=collection_suffix, progress_step=progress_step, clean_index=clean_index)
 
     def _process_documents(self, documents: List[Document]) -> Generator[Document, None, None]:
         """
@@ -333,42 +336,31 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
 
 
     # TODO: init store once and re-use the instance
-    def _init_vector_store(self, collection_suffix: str = "", embeddings: Optional[Any] = None):
+    def _init_vector_store(self, embeddings: Optional[Any] = None):
         """Initializes the vector store wrapper with the provided parameters."""
         try:
             from alita_sdk.runtime.tools.vectorstore import VectorStoreWrapper
         except ImportError:
             from alita_sdk.runtime.tools.vectorstore import VectorStoreWrapper
 
-        # Validate collection_suffix length
-        if collection_suffix and len(collection_suffix.strip()) > 7:
-            raise ToolException("collection_suffix must be 7 characters or less")
-
-        # Create collection name with suffix if provided
-        collection_name = str(self.collection_name)
-        if collection_suffix and collection_suffix.strip():
-            collection_name = f"{self.collection_name}_{collection_suffix.strip()}"
-
-        # Get database-specific parameters using adapter
-        connection_string = self.connection_string.get_secret_value() if self.connection_string else None
-        vectorstore_params = self._adapter.get_vectorstore_params(collection_name, connection_string)
-
-        return VectorStoreWrapper(
-            llm=self.llm,
-            vectorstore_type=self.vectorstore_type,
-            embedding_model=self.embedding_model,
-            embedding_model_params=self.embedding_model_params,
-            vectorstore_params=vectorstore_params,
-            embeddings=embeddings,
-            process_document_func=self._process_documents,
-        )
+        if not self._vector_store:
+            connection_string = self.connection_string.get_secret_value() if self.connection_string else None
+            vectorstore_params = self._adapter.get_vectorstore_params(self.collection_name, connection_string)
+            self._vector_store = VectorStoreWrapper(
+                llm=self.llm,
+                vectorstore_type=self.vectorstore_type,
+                embedding_model=self.embedding_model,
+                embedding_model_params=self.embedding_model_params,
+                vectorstore_params=vectorstore_params,
+                embeddings=embeddings,
+                process_document_func=self._process_documents,
+            )
+        return self._vector_store
 
     def remove_index(self, collection_suffix: str = ""):
         """Cleans the indexed data in the collection."""
-        vectorstore_wrapper = self._init_vector_store(collection_suffix)
-        collection_name = f"{self.collection_name}_{collection_suffix}" if collection_suffix else str(self.collection_name)
-        self._adapter.remove_collection(vectorstore_wrapper, collection_name)
-        return (f"Collection '{collection_name}' has been removed from the vector store.\n"
+        self._init_vector_store()._clean_collection(collection_suffix=collection_suffix)
+        return (f"Collection '{collection_suffix}' has been removed from the vector store.\n"
                 f"Available collections: {self.list_collections()}")
 
     def list_collections(self):
@@ -386,7 +378,14 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      extended_search: Optional[List[str]] = None,
                      **kwargs):
         """ Searches indexed documents in the vector store."""
-        vectorstore = self._init_vector_store(collection_suffix)
+        vectorstore = self._init_vector_store()
+        # build filter on top of collection_suffix
+        filter = filter if isinstance(filter, dict) else json.loads(filter)
+        if collection_suffix:
+            filter.update({"collection": {
+                "$eq": collection_suffix.strip()
+            }})
+
         found_docs = vectorstore.search_documents(
             query,
             doctype=self.doctype,
@@ -579,22 +578,20 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         return parse_code_files_for_db(file_content_generator())
     
     def index_data(self,
+                   collection_suffix: str,
                    branch: Optional[str] = None,
                    whitelist: Optional[List[str]] = None,
                    blacklist: Optional[List[str]] = None,
-                   collection_suffix: str = "",
                    **kwargs) -> str:
         """Index repository files in the vector store using code parsing."""
-        
-        
         
         documents = self.loader(
             branch=branch,
             whitelist=whitelist,
             blacklist=blacklist
         )
-        vectorstore = self._init_vector_store(collection_suffix)
-        return vectorstore.index_documents(documents, clean_index=False, is_code=True)
+        vectorstore = self._init_vector_store()
+        return vectorstore.index_documents(documents, collection_suffix=collection_suffix, clean_index=False, is_code=True)
 
     def _get_vector_search_tools(self):
         """

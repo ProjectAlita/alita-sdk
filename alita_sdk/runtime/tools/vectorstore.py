@@ -210,38 +210,48 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             tool_name="_remove_collection"
         )
 
-    def _get_indexed_ids(self, store):
+    def _get_indexed_ids(self, collection_suffix: Optional[str] = '') -> List[str]:
         """Get all indexed document IDs from vectorstore"""
 
         # Check if this is a PGVector store
-        if hasattr(store, 'session_maker') and hasattr(store, 'EmbeddingStore'):
-            return self._get_pgvector_indexed_ids(store)
+        if self._is_pgvector():
+            return self._get_pgvector_indexed_ids(collection_suffix)
         else:
             # Fall back to Chroma implementation
-            return self._get_chroma_indexed_ids(store)
+            # TODO: update filter by collection_suffix for Chroma
+            return self._get_chroma_indexed_ids(collection_suffix)
 
-    def _get_pgvector_indexed_ids(self, store):
+    def _get_pgvector_indexed_ids(self, collection_suffix: Optional[str] = ''):
         """Get all indexed document IDs from PGVector"""
         from sqlalchemy.orm import Session
+        from sqlalchemy import func
 
+        store = self.vectorstore
         try:
             with Session(store.session_maker.bind) as session:
-                ids = session.query(store.EmbeddingStore.id).all()
-            return [str(id_tuple[0]) for id_tuple in ids]
+                # Start building the query
+                query = session.query(store.EmbeddingStore.id)
+                # Apply filter only if collection_suffix is provided
+                if collection_suffix:
+                    query = query.filter(
+                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
+                    )
+                ids = query.all()
+                return [str(id_tuple[0]) for id_tuple in ids]
         except Exception as e:
             logger.error(f"Failed to get indexed IDs from PGVector: {str(e)}")
             return []
 
-    def _get_chroma_indexed_ids(self, store):
+    def _get_chroma_indexed_ids(self, collection_suffix: Optional[str] = ''):
         """Get all indexed document IDs from Chroma"""
         try:
-            data = store.get(include=[])  # Only get IDs, no metadata
+            data = self.vectorstore.get(include=[])  # Only get IDs, no metadata
             return data.get('ids', [])
         except Exception as e:
             logger.error(f"Failed to get indexed IDs from Chroma: {str(e)}")
             return []
 
-    def _clean_collection(self):
+    def _clean_collection(self, collection_suffix: str = ''):
         """
         Clean the vectorstore collection by deleting all indexed data.
         """
@@ -251,33 +261,37 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         )
         # This logic deletes all data from the vectorstore collection without removal of collection.
         # Collection itself remains available for future indexing.
-        self.vectoradapter.vectorstore.delete(ids=self._get_indexed_ids(self.vectoradapter.vectorstore))
+        self.vectorstore.delete(ids=self._get_indexed_ids(collection_suffix))
 
         self._log_data(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
 
+    def _is_pgvector(self) -> bool:
+        """Check if the vectorstore is a PGVector store."""
+        return hasattr(self.vectorstore, 'session_maker') and hasattr(self.vectorstore, 'EmbeddingStore')
+
     # TODO: refactor to use common method for different vectorstores in a separate vectorstore wrappers
-    def _get_indexed_data(self, store):
+    def _get_indexed_data(self):
         """ Get all indexed data from vectorstore for non-code content """
 
         # Check if this is a PGVector store
-        if hasattr(store, 'session_maker') and hasattr(store, 'EmbeddingStore'):
-            return self._get_pgvector_indexed_data(store)
+        if self._is_pgvector():
+            return self._get_pgvector_indexed_data()
         else:
             # Fall back to original Chroma implementation
-            return self._get_chroma_indexed_data(store)
+            return self._get_chroma_indexed_data(self.vectorstore)
 
-    def _get_pgvector_indexed_data(self, store):
+    def _get_pgvector_indexed_data(self):
         """ Get all indexed data from PGVector for non-code content """
         from sqlalchemy.orm import Session
 
         result = {}
         try:
             self._log_data("Retrieving already indexed data from PGVector vectorstore",
-                           tool_name="index_documents")
-
+                           tool_name="get_indexed_data")
+            store = self.vectorstore
             with Session(store.session_maker.bind) as session:
                 docs = session.query(
                     store.EmbeddingStore.id,
@@ -320,7 +334,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         result = {}
         try:
             self._log_data("Retrieving already indexed data from Chroma vectorstore",
-                           tool_name="index_documents")
+                           tool_name="get_indexed_data")
             data = store.get(include=['metadatas'])
 
             # Re-structure data to be more usable
@@ -349,19 +363,28 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         return result
 
-    def _get_code_indexed_data(self, store) -> Dict[str, Dict[str, Any]]:
+    def _get_code_indexed_data(self) -> Dict[str, Dict[str, Any]]:
         """ Get all indexed data from vectorstore for code content """
 
         # get already indexed data
+        if self._is_pgvector():
+            result = self._get_pgvector_code_indexed_data()
+        else:
+            result = self._get_chroma_code_indexed_data()
+        return result
+
+    def _get_chroma_code_indexed_data(self) -> Dict[str, Dict[str, Any]]:
+        """Get all indexed code data from Chroma."""
         result = {}
         try:
-            self._log_data("Retrieving already indexed code data from vectorstore",
-                           tool_name="index_documents")
-            data = store.get(include=['metadatas'])
-            # re-structure data to be more usable
+            self._log_data("Retrieving already indexed code data from Chroma vectorstore",
+                           tool_name="index_code_data")
+            data = self.vectorstore.get(include=['metadatas'])
             for meta, db_id in zip(data['metadatas'], data['ids']):
-                filename = meta['filename']
+                filename = meta.get('filename')
                 commit_hash = meta.get('commit_hash')
+                if not filename:
+                    continue
                 if filename not in result:
                     result[filename] = {
                         'commit_hashes': [],
@@ -371,13 +394,97 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                     result[filename]['commit_hashes'].append(commit_hash)
                 result[filename]['ids'].append(db_id)
         except Exception as e:
-            logger.error(f"Failed to get indexed code data from vectorstore: {str(e)}. Continuing with empty index.")
+            logger.error(f"Failed to get indexed code data from Chroma: {str(e)}. Continuing with empty index.")
         return result
+
+    def _get_pgvector_code_indexed_data(self) -> Dict[str, Dict[str, Any]]:
+        """Get all indexed code data from PGVector."""
+        from sqlalchemy.orm import Session
+
+        result = {}
+        try:
+            self._log_data("Retrieving already indexed code data from PGVector vectorstore",
+                           tool_name="index_code_data")
+            store = self.vectorstore
+            with Session(store.session_maker.bind) as session:
+                docs = session.query(
+                    store.EmbeddingStore.id,
+                    store.EmbeddingStore.cmetadata
+                ).all()
+
+            for db_id, meta in docs:
+                filename = meta.get('filename')
+                commit_hash = meta.get('commit_hash')
+                if not filename:
+                    continue
+                if filename not in result:
+                    result[filename] = {
+                        'metadata': meta,
+                        'commit_hashes': [],
+                        'ids': []
+                    }
+                if commit_hash is not None:
+                    result[filename]['commit_hashes'].append(commit_hash)
+                result[filename]['ids'].append(db_id)
+        except Exception as e:
+            logger.error(f"Failed to get indexed code data from PGVector: {str(e)}. Continuing with empty index.")
+        return result
+
+
+    def _add_to_collection(self, entry_id, new_collection_value):
+        """Add a new collection name to the `collection` key in the `metadata` column."""
+
+        from sqlalchemy import func
+        from sqlalchemy.orm import Session
+
+        store = self.vectorstore
+        try:
+            with Session(store.session_maker.bind) as session:
+                # Query the current value of the `collection` key
+                current_collection_query = session.query(
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection')
+                ).filter(store.EmbeddingStore.id == entry_id).scalar()
+
+                # If the `collection` key is NULL or doesn't contain the new value, update it
+                if current_collection_query is None:
+                    # If `collection` is NULL, initialize it with the new value
+                    session.query(store.EmbeddingStore).filter(
+                        store.EmbeddingStore.id == entry_id
+                    ).update(
+                        {
+                            store.EmbeddingStore.cmetadata: func.jsonb_set(
+                                func.coalesce(store.EmbeddingStore.cmetadata, '{}'),
+                                '{collection}',  # Path to the `collection` key
+                                f'"{new_collection_value}"',  # New value for the `collection` key
+                                True  # Create the key if it doesn't exist
+                            )
+                        }
+                    )
+                elif new_collection_value not in current_collection_query.split(";"):
+                    # If `collection` exists but doesn't contain the new value, append it
+                    updated_collection_value = f"{current_collection_query};{new_collection_value}"
+                    session.query(store.EmbeddingStore).filter(
+                        store.EmbeddingStore.id == entry_id
+                    ).update(
+                        {
+                            store.EmbeddingStore.cmetadata: func.jsonb_set(
+                                store.EmbeddingStore.cmetadata,
+                                '{collection}',  # Path to the `collection` key
+                                f'"{updated_collection_value}"',  # Concatenated value as a valid JSON string
+                                True  # Create the key if it doesn't exist
+                            )
+                        }
+                    )
+
+                session.commit()
+                logger.info(f"Successfully updated collection for entry ID {entry_id}.")
+        except Exception as e:
+            logger.error(f"Failed to update collection for entry ID {entry_id}: {str(e)}")
 
     def _reduce_duplicates(
             self,
             documents: Generator[Any, None, None],
-            store,
+            collection_suffix: str,
             get_indexed_data: Callable,
             key_fn: Callable,
             compare_fn: Callable,
@@ -386,7 +493,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     ) -> List[Any]:
         """Generic duplicate reduction logic for documents."""
         self._log_data(log_msg, tool_name="index_documents")
-        indexed_data = get_indexed_data(store)
+        indexed_data = get_indexed_data()
         indexed_keys = set(indexed_data.keys())
         if not indexed_keys:
             self._log_data("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
@@ -397,8 +504,15 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         for document in documents:
             key = key_fn(document)
-            if key in indexed_keys:
+            if key in indexed_keys and collection_suffix == indexed_data[key]['metadata'].get('collection'):
                 if compare_fn(document, indexed_data[key]):
+                    # Disabled addition of new collection to already indexed documents
+                    # # check metadata.collection and update if needed
+                    # for update_collection_id in remove_ids_fn(indexed_data, key):
+                    #     self._add_to_collection(
+                    #         update_collection_id,
+                    #         collection_suffix
+                    #     )
                     continue
                 final_docs.append(document)
                 docs_to_remove.update(remove_ids_fn(indexed_data, key))
@@ -410,14 +524,14 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 f"Removing {len(docs_to_remove)} documents from vectorstore that are already indexed with different updated_on.",
                 tool_name="index_documents"
             )
-            store.delete(ids=list(docs_to_remove))
+            self.vectorstore.delete(ids=list(docs_to_remove))
 
         return final_docs
 
-    def _reduce_non_code_duplicates(self, documents: Generator[Any, None, None], store) -> List[Any]:
+    def _reduce_non_code_duplicates(self, documents: Generator[Any, None, None], collection_suffix: str) -> List[Any]:
         return self._reduce_duplicates(
             documents,
-            store,
+            collection_suffix,
             self._get_indexed_data,
             lambda doc: doc.metadata.get('id'),
             lambda doc, idx: (
@@ -434,10 +548,10 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             log_msg="Verification of documents to index started"
         )
 
-    def _reduce_code_duplicates(self, documents: Generator[Any, None, None], store) -> List[Any]:
+    def _reduce_code_duplicates(self, documents: Generator[Any, None, None], collection_suffix: str) -> List[Any]:
         return self._reduce_duplicates(
             documents,
-            store,
+            collection_suffix,
             self._get_code_indexed_data,
             lambda doc: doc.metadata.get('filename'),
             lambda doc, idx: (
@@ -449,7 +563,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             log_msg="Verification of code documents to index started"
         )
 
-    def index_documents(self, documents: Generator[Document, None, None], progress_step: int = 20, clean_index: bool = True, is_code: bool = False):
+    def index_documents(self, documents: Generator[Document, None, None], collection_suffix: str, progress_step: int = 20, clean_index: bool = True, is_code: bool = False):
         """ Index documents in the vectorstore.
 
         Args:
@@ -465,7 +579,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             logger.info("Cleaning index before re-indexing all documents.")
             self._log_data("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
             try:
-                self._clean_collection()
+                self._clean_collection(collection_suffix)
                 self.vectoradapter.persist()
                 self.vectoradapter.vacuum()
                 self._log_data("Previous index has been removed",
@@ -476,8 +590,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 documents = list(documents)
         else:
             # remove duplicates based on metadata 'id' and 'updated_on' or 'commit_hash' fields
-            documents = self._reduce_code_duplicates(documents, self.vectoradapter.vectorstore) if is_code \
-                else self._reduce_non_code_duplicates(documents, self.vectoradapter.vectorstore)
+            documents = self._reduce_code_duplicates(documents, collection_suffix) if is_code \
+                else self._reduce_non_code_duplicates(documents, collection_suffix)
 
         if not documents or len(documents) == 0:
             logger.info("No new documents to index after duplicate check.")
@@ -498,6 +612,15 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         logger.debug(self.vectoradapter)
 
         documents = documents + list(dependent_docs_generator)
+
+        # if collection_suffix is provided, add it to metadata of each document
+        if collection_suffix:
+            for doc in documents:
+                if not doc.metadata.get('collection'):
+                    doc.metadata['collection'] = collection_suffix
+                else:
+                    doc.metadata['collection'] += f";{collection_suffix}"
+
         total_docs = len(documents)
         documents_count = 0
         _documents = []
@@ -511,8 +634,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             try:
                 _documents.append(document)
                 if len(_documents) >= self.max_docs_per_add:
-                    add_documents(vectorstore=self.vectoradapter.vectorstore, documents=_documents)
-                    self.vectoradapter.persist()
+                    add_documents(vectorstore=self.vectorstore, documents=_documents)
                     _documents = []
 
                 percent = math.floor((documents_count / total_docs) * 100)
@@ -526,8 +648,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 logger.error(f"Error: {format_exc()}")
                 return {"status": "error", "message": f"Error: {format_exc()}"}
         if _documents:
-            add_documents(vectorstore=self.vectoradapter.vectorstore, documents=_documents)
-            self.vectoradapter.persist()
+            add_documents(vectorstore=self.vectorstore, documents=_documents)
         return {"status": "ok", "message": f"successfully indexed {documents_count} documents"}
 
     def search_documents(self, query:str, doctype: str = 'code', 
@@ -562,7 +683,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 }
                 
             try:
-                document_items = self.vectoradapter.vectorstore.similarity_search_with_score(
+                document_items = self.vectorstore.similarity_search_with_score(
                     query, filter=document_filter, k=search_top
                 )                
                 # Add document results to unique docs
@@ -595,7 +716,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                     }
                 
                 try:
-                    chunk_items = self.vectoradapter.vectorstore.similarity_search_with_score(
+                    chunk_items = self.vectorstore.similarity_search_with_score(
                         query, filter=chunk_filter, k=search_top
                     )
                     
@@ -628,7 +749,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                                 }
                                 
                             try:
-                                fetch_items = self.vectoradapter.vectorstore.similarity_search_with_score(
+                                fetch_items = self.vectorstore.similarity_search_with_score(
                                     query, filter=doc_filter, k=1
                                 )
                                 if fetch_items:
@@ -642,7 +763,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         else:
             # Default search behavior (unchanged)
             max_search_results = 30 if search_top * 3 > 30 else search_top * 3
-            vector_items = self.vectoradapter.vectorstore.similarity_search_with_score(
+            vector_items = self.vectorstore.similarity_search_with_score(
                 query, filter=filter, k=max_search_results
             )
             
