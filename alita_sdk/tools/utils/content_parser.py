@@ -1,11 +1,11 @@
+import os
+import tempfile
+from logging import getLogger
 from pathlib import Path
 
 from langchain_core.tools import ToolException
-from logging import getLogger
-from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map
-from langchain_core.documents import Document
 
-from ...runtime.langchain.document_loaders.utils import create_temp_file
+from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map
 
 logger = getLogger(__name__)
 
@@ -147,26 +147,16 @@ def load_content(file_path: str, extension: str = None, loader_extra_config: dic
         return ""
 
 def load_content_from_bytes(file_content: bytes, extension: str = None, loader_extra_config: dict = None, llm = None) -> str:
-    """Loads the content of a file from bytes based on its extension using a configured loader."""
-    return load_content(create_temp_file(file_content), extension, loader_extra_config, llm)
-
-def file_to_bytes(filepath):
-    """
-    Reads a file and returns its content as a bytes object.
-
-    Args:
-        filepath (str): The path to the file.
-
-    Returns:
-        bytes: The content of the file as a bytes object.
-    """
+    temp_file_path = None
     try:
-        with open(filepath, "rb") as f:
-            file_content_bytes = f.read()
-        return file_content_bytes
-    except FileNotFoundError:
-        logger.error(f"File not found: {filepath}")
-        return None
-    except Exception as e:
-        logger.error(f"Error reading file {filepath}: {e}")
-        return None
+        with tempfile.NamedTemporaryFile(mode='w+b', delete=False) as temp_file:
+            temp_file.write(file_content)
+            temp_file.flush()
+            temp_file_path = temp_file.name
+
+        # Now the file is closed and can be read
+        result = load_content(temp_file_path, extension, loader_extra_config, llm)
+        return result
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)

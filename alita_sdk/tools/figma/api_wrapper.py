@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from enum import Enum
-from typing import Dict, Generator, Optional, Union
+from typing import Dict, List, Generator, Optional, Union
 
 import requests
 from FigmaPy import FigmaPy
@@ -13,6 +13,7 @@ from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
 from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from ..utils.content_parser import load_content_from_bytes
 
 GLOBAL_LIMIT = 10000
 
@@ -235,15 +236,27 @@ class FigmaApiWrapper(BaseVectorStoreToolApiWrapper):
     global_regexp: Optional[str] = Field(default=None)
     _client: Optional[FigmaPy] = PrivateAttr()
 
-    def _base_loader(self, project_id: str, **kwargs) -> Generator[Document, None, None]:
-        files = json.loads(self.get_project_files(project_id)).get('files', [])
-        for file in files:
-            yield Document(page_content=json.dumps(file), metadata={
-                'id': file.get('key', ''),
-                'file_key': file.get('key', ''),
-                'name': file.get('name', ''),
-                'updated_on': file.get('last_modified', '')
-            })
+    def _base_loader(self, project_id: Optional[str] = None, file_keys: Optional[List[str]] = None, **kwargs) -> Generator[Document, None, None]:
+        files = []
+        if project_id:
+            files = json.loads(self.get_project_files(project_id)).get('files', [])
+            for file in files:
+                yield Document(page_content=json.dumps(file), metadata={
+                    'id': file.get('key', ''),
+                    'file_key': file.get('key', ''),
+                    'name': file.get('name', ''),
+                    'updated_on': file.get('last_modified', '')
+                })
+        elif file_keys:
+            for file_key in file_keys:
+                file = self._client.get_file(file_key)
+                metadata = {
+                    'id': file_key,
+                    'file_key': file_key,
+                    'name': file.name,
+                    'updated_on': file.last_modified
+                }
+                yield Document(page_content=json.dumps(metadata), metadata=metadata)
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         file_key = document.metadata.get('id', '')
@@ -257,12 +270,19 @@ class FigmaApiWrapper(BaseVectorStoreToolApiWrapper):
 
         # iterate over images values
         for node_id, image_url in images.items():
+            if not image_url:
+                logging.warning(f"Image URL not found for node_id {node_id} in file {file_key}. Skipping.")
+                continue
             response = requests.get(image_url)
             if response.status_code == 200:
                 content_type = response.headers.get('Content-Type', '')
                 if 'text/html' not in content_type.lower():
+                    extension = f".{content_type.split('/')[-1]}" if content_type.startswith('image') else '.txt'
+                    page_content = load_content_from_bytes(
+                        file_content=response.content,
+                        extension=extension, llm = self.llm)
                     yield Document(
-                                    page_content=base64.b64encode(response.content).decode("utf-8"),
+                                    page_content=page_content,
                                     metadata={
                                         'file_key': file_key,
                                         'node_id': node_id,
@@ -273,7 +293,12 @@ class FigmaApiWrapper(BaseVectorStoreToolApiWrapper):
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
-            "project_id": (str, Field(description="ID of the project to list files from", examples=["55391681"]))
+            "project_id": (Optional[str], Field(
+                description="ID of the project to list files from: i.e. '55391681'",
+                default=None)),
+            'file_keys': (Optional[List[str]], Field(
+                description="List of file keys to index: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
+                default=None))
         }
 
     def _send_request(
