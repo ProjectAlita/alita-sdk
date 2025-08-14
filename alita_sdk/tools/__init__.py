@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from importlib import import_module
 from typing import Optional
 
@@ -177,6 +178,10 @@ def get_available_toolkits():
     """Return list of available toolkit class names."""
     return list(AVAILABLE_TOOLKITS.keys())
 
+def get_available_toolkit_models():
+    """Return dict with available toolkit classes."""
+    return deepcopy(AVAILABLE_TOOLS)
+
 def diagnose_imports():
     """Print diagnostic information about tool imports."""
     available_count = len(AVAILABLE_TOOLS)
@@ -216,5 +221,6 @@ __all__ = [
     'get_available_tools',
     'get_failed_imports',
     'get_available_toolkits',
+    'get_available_toolkit_models',
     'diagnose_imports'
 ]

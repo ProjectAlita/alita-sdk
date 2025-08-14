@@ -1,4 +1,6 @@
 import logging
+from copy import deepcopy
+
 import requests
 from urllib.parse import quote
 
@@ -18,6 +20,7 @@ from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
+from alita_sdk.tools import get_available_toolkit_models
 
 
 logger = logging.getLogger(__name__)
@@ -582,14 +585,37 @@ class AlitaClient:
                 'temperature': 0.1,
                 'top_p': 1.0
             }
-            
+        import logging
+        logger = logging.getLogger(__name__)
+        toolkit_config_parsed_json = None
+        try:
+            toolkit_config_type = toolkit_config.get('type')
+            toolkit_class = get_available_toolkit_models().get(toolkit_config_type)['toolkit_class']
+            toolkit_config_model_class = toolkit_class.toolkit_config_schema()
+            toolkit_config_validated_settings = toolkit_config_model_class(
+                **toolkit_config.get('settings', {})
+            ).model_dump(mode='json')
+
+            toolkit_config_parsed_json = deepcopy(toolkit_config)
+            toolkit_config_parsed_json['settings'] = toolkit_config_validated_settings
+        except Exception as toolkit_config_error:
+            logger.error(f"Failed to validate toolkit configuration: {str(toolkit_config_error)}")
+            return {
+                "success": False,
+                "error": f"Failed to validate toolkit configuration: {str(toolkit_config_error)}",
+                "tool_name": tool_name,
+                "toolkit_config": None,
+                "llm_model": llm_model,
+                "events_dispatched": events_dispatched,
+                "execution_time_seconds": 0.0
+            }
+
         try:
             from ..utils.toolkit_utils import instantiate_toolkit_with_client
             from langchain_core.runnables import RunnableConfig
             import logging
             import time
             
-            logger = logging.getLogger(__name__)
             logger.info(f"Testing tool '{tool_name}' from toolkit '{toolkit_config.get('toolkit_name')}' with LLM '{llm_model}'")
             
             # Create RunnableConfig for callback support
@@ -616,7 +642,7 @@ class AlitaClient:
                     "success": False,
                     "error": f"Failed to create LLM instance '{llm_model}': {str(llm_error)}",
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": 0.0
@@ -630,7 +656,7 @@ class AlitaClient:
                     "success": False,
                     "error": f"Failed to instantiate toolkit '{toolkit_config.get('toolkit_name')}' or no tools found",
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": 0.0
@@ -743,7 +769,7 @@ class AlitaClient:
                     "success": False,
                     "error": error_msg,
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": 0.0
@@ -788,7 +814,7 @@ class AlitaClient:
                         "success": False,
                         "error": f"Tool '{tool_name}' is not callable",
                         "tool_name": tool_name,
-                        "toolkit_config": toolkit_config,
+                        "toolkit_config": toolkit_config_parsed_json,
                         "llm_model": llm_model,
                         "events_dispatched": events_dispatched,
                         "execution_time_seconds": execution_time
@@ -812,7 +838,7 @@ class AlitaClient:
                     "success": True,
                     "result": result,
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": execution_time
@@ -836,7 +862,7 @@ class AlitaClient:
                     "success": False,
                     "error": f"Tool execution failed: {str(tool_error)}",
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": execution_time
@@ -849,7 +875,7 @@ class AlitaClient:
                 "success": False,
                 "error": f"Method execution failed: {str(e)}",
                 "tool_name": tool_name,
-                "toolkit_config": toolkit_config,
+                "toolkit_config": toolkit_config_parsed_json,
                 "llm_model": llm_model if 'llm_model' in locals() else None,
                 "events_dispatched": [],
                 "execution_time_seconds": 0.0
