@@ -7,6 +7,8 @@ from pydantic import create_model, BaseModel, Field, SecretStr
 from .api_wrapper import ZephyrScaleApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
+from ...configurations.embedding import EmbeddingConfiguration
+from ...configurations.pgvector import PgVectorConfiguration
 
 name = "zephyr_scale"
 
@@ -41,6 +43,13 @@ class ZephyrScaleToolkit(BaseToolkit):
             password=(Optional[SecretStr], Field(default=None, description="Password", json_schema_extra={'secret': True})),
             cookies=(Optional[str], Field(default=None, description="Cookies", json_schema_extra={'secret': True})),
             max_results=(int, Field(default=100, description="Results count to show")),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
+                                                                           json_schema_extra={
+                                                                               'configuration_types': ['pgvector']})),
+            # embedder settings
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+                                                                             json_schema_extra={'configuration_types': [
+                                                                                 'embedding']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={

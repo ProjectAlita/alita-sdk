@@ -5,6 +5,7 @@ from pydantic import create_model, BaseModel, Field
 
 import requests
 from ....configurations.ado import AdoConfiguration
+from ....configurations.embedding import EmbeddingConfiguration
 from ....configurations.pgvector import PgVectorConfiguration
 from ...base.tool import BaseAction
 from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
@@ -32,11 +33,9 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.",
-                                        default="HuggingFaceEmbeddings")),
-            embedding_model_params=(dict, Field(
-                description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}",
-                default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+                                                                             json_schema_extra={'configuration_types': [
+                                                                                 'embedding']})),
             __config__={
                 'json_schema_extra': {
                     'metadata': {

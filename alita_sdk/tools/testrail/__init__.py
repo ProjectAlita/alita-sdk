@@ -7,6 +7,7 @@ import requests
 from .api_wrapper import TestrailAPIWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.testrail import TestRailConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -39,22 +40,13 @@ class TestrailToolkit(BaseToolkit):
         TestrailToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            url=(
-                str,
-                Field(
-                    description="Testrail URL",
-                    json_schema_extra={
-                        "max_length": TestrailToolkit.toolkit_max_length,
-                        "configuration": True,
-                        "configuration_title": True
-                    }
-                )
-            ),
+            name=(str, Field(description="Toolkit name", json_schema_extra={
+                'toolkit_name': True,
+                "max_length": TestrailToolkit.toolkit_max_length})),
             testrail_configuration=(Optional[TestRailConfiguration], Field(description="TestRail Configuration", json_schema_extra={'configuration_types': ['testrail']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
-            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata':
                                                          {"label": "Testrail", "icon_url": "testrail-icon.svg",

@@ -16,5 +16,6 @@ class TestRailConfiguration(BaseModel):
             }
         }
     )
-    email: Optional[str] = Field(description="TestRail Email", default=None)
-    password: Optional[SecretStr] = Field(description="TestRail Password", default=None)
+    url: str = Field(description="Testrail URL")
+    email: str = Field(description="TestRail Email")
+    password: SecretStr = Field(description="TestRail Password")

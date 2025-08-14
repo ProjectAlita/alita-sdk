@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, SecretStr
 from ..base.tool import BaseAction
 from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
 name = "figma"
@@ -58,8 +59,9 @@ class FigmaToolkit(BaseToolkit):
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
 
             # embedder settings
-            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
-            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+                                                                             json_schema_extra={'configuration_types': [
+                                                                                 'embedding']})),
             __config__=ConfigDict(
                 json_schema_extra={
                      "metadata": {

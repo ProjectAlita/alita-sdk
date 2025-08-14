@@ -8,6 +8,8 @@ from pydantic import create_model, BaseModel, Field, SecretStr
 from .api_wrapper import XrayApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
+from ...configurations.embedding import EmbeddingConfiguration
+from ...configurations.pgvector import PgVectorConfiguration
 
 name = "xray_cloud"
 
@@ -46,14 +48,13 @@ class XrayToolkit(BaseToolkit):
             client_secret=(SecretStr, Field(description="Client secret", json_schema_extra={'secret': True})),
             limit=(Optional[int], Field(description="Limit", default=100)),
 
-            # indexer settings
-            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                          default=None,
-                                                          json_schema_extra={'secret': True})),
-
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
+                                                                           json_schema_extra={
+                                                                               'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
-            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+                                                                             json_schema_extra={'configuration_types': [
+                                                                                 'embedding']})),
 
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={'json_schema_extra':

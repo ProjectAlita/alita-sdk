@@ -7,6 +7,7 @@ from .api_wrapper import AlitaGitHubAPIWrapper
 from .tool import GitHubAction
 
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.github import GithubConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -66,9 +67,10 @@ class AlitaGitHubToolkit(BaseToolkit):
                                                                                        'max_toolkit_length': AlitaGitHubToolkit.toolkit_max_length})),
             active_branch=(Optional[str], Field(description="Active branch", default="main")),
             base_branch=(Optional[str], Field(description="Github Base branch", default="main")),
-            # indexer settings
-            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
-            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+            # embedder settings
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+                                                                             json_schema_extra={'configuration_types': [
+                                                                                 'embedding']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools}))
         )
