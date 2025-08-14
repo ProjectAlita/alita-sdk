@@ -5,9 +5,9 @@ class EmbeddingConfiguration(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "metadata": {
-                "label": "Embedding Vector Storage",
+                "label": "Embedding",
                 "icon_url": None,
-                "section": "vectorstorage",
+                "section": "embeddings_configuration",
                 "type": "embedding"
             }
         }
