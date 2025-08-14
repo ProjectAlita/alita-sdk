@@ -78,9 +78,9 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
 
     loader_object = loaders_map.get(extension)
     if not loader_object:
-        raise ToolException(
-            f"Not supported type ({extension}) of files entered. "
-            f"Supported types are TXT, DOCX, PDF, PPTX, XLSX and XLS only.")
+        logger.warning(f"No loader found for file extension: {extension}. File: {file_path if file_path else file_name}")
+        return ToolException(
+            "Not supported type of files entered. Supported types are TXT, DOCX, PDF, PPTX, XLSX and XLS only.")
     loader_kwargs = loader_object['kwargs']
     loader_kwargs.update({
         "file_path": file_path,
