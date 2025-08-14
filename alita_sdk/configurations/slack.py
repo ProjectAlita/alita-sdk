@@ -15,11 +15,11 @@ class SlackConfiguration(BaseModel):
                         "subsections": [
                             {
                                 "name": "Bot Token",
-                                "fields": ["bot_token"]
+                                "fields": ["name"]
                             },
                             {
                                 "name": "User Token",
-                                "fields": ["user_token"]
+                                "fields": ["slack_token"]
                             }
                         ]
                     },

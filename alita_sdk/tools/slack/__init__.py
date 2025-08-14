@@ -55,7 +55,14 @@ class SlackToolkit(BaseToolkit):
              channel_id=(Optional[str], Field(default=None, description="Channel ID", json_schema_extra={'configuration': True})),
              selected_tools=(List[Literal[tuple(selected_tools)]],
                              Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-             __config__={'json_schema_extra': {'metadata': {"label": "Slack", "icon_url": "slack-icon.svg"}}}
+             __config__={'json_schema_extra': {
+                'metadata': {
+                    "label": "Slack",
+                    "icon_url": "slack-icon.svg",
+                    "categories": ["communication"],
+                    "extra_categories": ["slack", "chat", "messaging", "collaboration"],
+                }
+            }}
          )
          model.check_connection = check_connection
          return model
