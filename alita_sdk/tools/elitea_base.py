@@ -397,7 +397,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             reranking_config=reranking_config,
             extended_search=extended_search
         )
-        return f"Found {len(found_docs)} documents matching the query\n{json.dumps(found_docs, indent=4)}" if found_docs else "No documents found matching the query."
+        return found_docs if found_docs else f"No documents found by query '{query}' and filter '{filter}'"
 
     def stepback_search_index(self,
                      query: str,

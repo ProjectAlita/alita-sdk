@@ -31,6 +31,7 @@ class ConfluenceConfiguration(BaseModel):
             }
         }
     )
+    base_url: str = Field(description="Confluence URL")
     username: Optional[str] = Field(description="Confluence Username", default=None)
     api_key: Optional[SecretStr] = Field(description="Confluence API Key", default=None)
     token: Optional[SecretStr] = Field(description="Confluence Token", default=None)

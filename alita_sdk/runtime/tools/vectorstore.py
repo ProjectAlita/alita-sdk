@@ -231,13 +231,13 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             tool_name="_clean_collection"
         )
 
-    def _get_indexed_data(self):
+    def _get_indexed_data(self, collection_name: str):
         """ Get all indexed data from vectorstore for non-code content """
-        return self.vector_adapter.get_indexed_data(self)
+        return self.vector_adapter.get_indexed_data(self, collection_name)
 
-    def _get_code_indexed_data(self) -> Dict[str, Dict[str, Any]]:
+    def _get_code_indexed_data(self, collection_suffix: str) -> Dict[str, Dict[str, Any]]:
         """ Get all indexed data from vectorstore for code content """
-        return self.vector_adapter.get_code_indexed_data(self)
+        return self.vector_adapter.get_code_indexed_data(self, collection_suffix)
 
     def _add_to_collection(self, entry_id, new_collection_value):
         """Add a new collection name to the `collection` key in the `metadata` column."""
@@ -255,7 +255,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     ) -> List[Any]:
         """Generic duplicate reduction logic for documents."""
         self._log_data(log_msg, tool_name="index_documents")
-        indexed_data = get_indexed_data()
+        indexed_data = get_indexed_data(collection_suffix)
         indexed_keys = set(indexed_data.keys())
         if not indexed_keys:
             self._log_data("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")

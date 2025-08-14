@@ -39,7 +39,7 @@ class VectorStoreAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_code_indexed_data(self, vectorstore_wrapper) -> Dict[str, Dict[str, Any]]:
+    def get_code_indexed_data(self, vectorstore_wrapper, collection_suffix) -> Dict[str, Dict[str, Any]]:
         """Get all indexed data from vectorstore for code content"""
         pass
 
@@ -124,9 +124,10 @@ class PGVectorAdapter(VectorStoreAdapter):
         """Check if the vectorstore is a PGVector store."""
         return hasattr(vectorstore, 'session_maker') and hasattr(vectorstore, 'EmbeddingStore')
 
-    def get_indexed_data(self, vectorstore_wrapper):
-        """Get all indexed data from PGVector for non-code content"""
+    def get_indexed_data(self, vectorstore_wrapper, collection_suffix: str)-> Dict[str, Dict[str, Any]]:
+        """Get all indexed data from PGVector for non-code content per collection_suffix."""
         from sqlalchemy.orm import Session
+        from sqlalchemy import func
         from ...runtime.utils.utils import IndexerKeywords
 
         result = {}
@@ -139,6 +140,8 @@ class PGVectorAdapter(VectorStoreAdapter):
                     store.EmbeddingStore.id,
                     store.EmbeddingStore.document,
                     store.EmbeddingStore.cmetadata
+                ).filter(
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
                 ).all()
 
             # Process the retrieved data
@@ -171,19 +174,22 @@ class PGVectorAdapter(VectorStoreAdapter):
 
         return result
 
-    def get_code_indexed_data(self, vectorstore_wrapper) -> Dict[str, Dict[str, Any]]:
-        """Get all indexed code data from PGVector."""
+    def get_code_indexed_data(self, vectorstore_wrapper, collection_suffix: str) -> Dict[str, Dict[str, Any]]:
+        """Get all indexed code data from PGVector per collection suffix."""
         from sqlalchemy.orm import Session
+        from sqlalchemy import func
 
         result = {}
         try:
             vectorstore_wrapper._log_data("Retrieving already indexed code data from PGVector vectorstore",
                            tool_name="index_code_data")
             store = vectorstore_wrapper.vectorstore
-            with Session(store.session_maker.bind) as session:
+            with (Session(store.session_maker.bind) as session):
                 docs = session.query(
                     store.EmbeddingStore.id,
                     store.EmbeddingStore.cmetadata
+                ).filter(
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
                 ).all()
 
             for db_id, meta in docs:
@@ -319,7 +325,7 @@ class ChromaAdapter(VectorStoreAdapter):
 
         return result
 
-    def get_code_indexed_data(self, vectorstore_wrapper) -> Dict[str, Dict[str, Any]]:
+    def get_code_indexed_data(self, vectorstore_wrapper, collection_suffix) -> Dict[str, Dict[str, Any]]:
         """Get all indexed code data from Chroma."""
         result = {}
         try:
