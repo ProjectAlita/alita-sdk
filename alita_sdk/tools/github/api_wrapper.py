@@ -37,9 +37,9 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
     Wrapper for GitHub API that integrates both REST and GraphQL functionality.
     """
     # Authentication config
-    github_access_token: Optional[str] = None
-    github_username: Optional[str] = None
-    github_password: Optional[str] = None
+    github_access_token: Optional[SecretStr] = None
+    github_username: Optional[SecretStr] = None
+    github_password: Optional[SecretStr] = None
     github_app_id: Optional[str] = None
     github_app_private_key: Optional[str] = None
     github_base_url: Optional[str] = None
@@ -49,19 +49,9 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
     active_branch: Optional[str] = None
     github_base_branch: Optional[str] = None
 
-    # Add LLM instance
-    llm: Optional[Any] = None
     # Alita instance
     alita: Optional[Any] = None
     
-    # Vector store configuration
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    doctype: Optional[str] = 'code'  # GitHub uses 'code' doctype
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
-
     # Client instances - renamed without leading underscores and marked as exclude=True
     github_client_instance: Optional[GitHubClient] = Field(default=None, exclude=True)
     graphql_client_instance: Optional[GraphQLClientWrapper] = Field(default=None, exclude=True)
@@ -84,12 +74,12 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
         from langchain.utils import get_from_dict_or_env
 
         # Get all authentication values
-        github_access_token = get_from_dict_or_env(values, "github_access_token", "GITHUB_ACCESS_TOKEN", default='')
-        github_username = get_from_dict_or_env(values, "github_username", "GITHUB_USERNAME", default='')
-        github_password = get_from_dict_or_env(values, "github_password", "GITHUB_PASSWORD", default='')
-        github_app_id = get_from_dict_or_env(values, "github_app_id", "GITHUB_APP_ID", default='')
-        github_app_private_key = get_from_dict_or_env(values, "github_app_private_key", "GITHUB_APP_PRIVATE_KEY", default='')
-        github_base_url = get_from_dict_or_env(values, "github_base_url", "GITHUB_BASE_URL", default='https://api.github.com')
+        github_access_token = get_from_dict_or_env(values, "access_token", "GITHUB_ACCESS_TOKEN", default='')
+        github_username = get_from_dict_or_env(values, "username", "GITHUB_USERNAME", default='')
+        github_password = get_from_dict_or_env(values, "password", "GITHUB_PASSWORD", default='')
+        github_app_id = get_from_dict_or_env(values, "app_id", "GITHUB_APP_ID", default='')
+        github_app_private_key = get_from_dict_or_env(values, "app_private_key", "GITHUB_APP_PRIVATE_KEY", default='')
+        github_base_url = get_from_dict_or_env(values, "base_url", "GITHUB_BASE_URL", default='https://api.github.com')
 
         auth_config = GitHubAuthConfig(
             github_access_token=github_access_token,

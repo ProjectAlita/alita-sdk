@@ -366,7 +366,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def list_collections(self):
         """Lists all collections in the vector store."""
         vectorstore_wrapper = self._init_vector_store()
-        return self._adapter.list_collections(vectorstore_wrapper, self.collection_name or "")
+        return vectorstore_wrapper.list_collections()
 
     def search_index(self,
                      query: str,
@@ -497,6 +497,8 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
 
 
 class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
+
+    doctype: Optional[str] = 'code'
 
     def _get_files(self):
         raise NotImplementedError("Subclasses should implement this method")

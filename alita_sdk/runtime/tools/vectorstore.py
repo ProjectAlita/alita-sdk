@@ -8,6 +8,7 @@ from pydantic import BaseModel, model_validator, Field
 from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
+from alita_sdk.tools.vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from logging import getLogger
 
 from ..utils.logging import dispatch_custom_event
@@ -141,11 +142,14 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     dataset: str = None
     embedding: Any = None
     vectorstore: Any = None
+    # Review usage of old adapter
     vectoradapter: Any = None
     pg_helper: Any = None
     embeddings: Any = None
     process_document_func: Optional[Callable] = None
-    
+    # New adapter for vector database operations
+    vector_adapter: Any = None
+
     @model_validator(mode='before')
     @classmethod
     def validate_toolkit(cls, values):
@@ -170,6 +174,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             embeddings=values['embeddings'],
             quota_params=None,
         )
+        # Initialize the new vector adapter
+        values['vector_adapter'] = VectorStoreAdapterFactory.create_adapter(values['vectorstore_type'])
         logger.debug(f"Vectorstore wrapper initialized: {values}")
         return values
 
@@ -196,15 +202,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             f"Remove collection '{self.dataset}'",
             tool_name="_remove_collection"
         )
-        from sqlalchemy import text
-        from sqlalchemy.orm import Session
-
-        schema_name = self.vectorstore.collection_name
-        with Session(self.vectorstore.session_maker.bind) as session:
-            drop_schema_query = text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE;")
-            session.execute(drop_schema_query)
-            session.commit()
-            logger.info(f"Schema '{schema_name}' has been dropped.")
+        self.vector_adapter.remove_collection(self, self.dataset)
         self._log_data(
             f"Collection '{self.dataset}' has been removed. ",
             tool_name="_remove_collection"
@@ -212,44 +210,12 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
     def _get_indexed_ids(self, collection_suffix: Optional[str] = '') -> List[str]:
         """Get all indexed document IDs from vectorstore"""
+        return self.vector_adapter.get_indexed_ids(self, collection_suffix)
 
-        # Check if this is a PGVector store
-        if self._is_pgvector():
-            return self._get_pgvector_indexed_ids(collection_suffix)
-        else:
-            # Fall back to Chroma implementation
-            # TODO: update filter by collection_suffix for Chroma
-            return self._get_chroma_indexed_ids(collection_suffix)
+    def list_collections(self) -> List[str]:
+        """List all collections in the vectorstore."""
 
-    def _get_pgvector_indexed_ids(self, collection_suffix: Optional[str] = ''):
-        """Get all indexed document IDs from PGVector"""
-        from sqlalchemy.orm import Session
-        from sqlalchemy import func
-
-        store = self.vectorstore
-        try:
-            with Session(store.session_maker.bind) as session:
-                # Start building the query
-                query = session.query(store.EmbeddingStore.id)
-                # Apply filter only if collection_suffix is provided
-                if collection_suffix:
-                    query = query.filter(
-                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
-                    )
-                ids = query.all()
-                return [str(id_tuple[0]) for id_tuple in ids]
-        except Exception as e:
-            logger.error(f"Failed to get indexed IDs from PGVector: {str(e)}")
-            return []
-
-    def _get_chroma_indexed_ids(self, collection_suffix: Optional[str] = ''):
-        """Get all indexed document IDs from Chroma"""
-        try:
-            data = self.vectorstore.get(include=[])  # Only get IDs, no metadata
-            return data.get('ids', [])
-        except Exception as e:
-            logger.error(f"Failed to get indexed IDs from Chroma: {str(e)}")
-            return []
+        return self.vector_adapter.list_collections(self)
 
     def _clean_collection(self, collection_suffix: str = ''):
         """
@@ -259,227 +225,23 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
-        # This logic deletes all data from the vectorstore collection without removal of collection.
-        # Collection itself remains available for future indexing.
-        self.vectorstore.delete(ids=self._get_indexed_ids(collection_suffix))
-
+        self.vector_adapter.clean_collection(self, collection_suffix)
         self._log_data(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
 
-    def _is_pgvector(self) -> bool:
-        """Check if the vectorstore is a PGVector store."""
-        return hasattr(self.vectorstore, 'session_maker') and hasattr(self.vectorstore, 'EmbeddingStore')
-
-    # TODO: refactor to use common method for different vectorstores in a separate vectorstore wrappers
     def _get_indexed_data(self):
         """ Get all indexed data from vectorstore for non-code content """
-
-        # Check if this is a PGVector store
-        if self._is_pgvector():
-            return self._get_pgvector_indexed_data()
-        else:
-            # Fall back to original Chroma implementation
-            return self._get_chroma_indexed_data(self.vectorstore)
-
-    def _get_pgvector_indexed_data(self):
-        """ Get all indexed data from PGVector for non-code content """
-        from sqlalchemy.orm import Session
-
-        result = {}
-        try:
-            self._log_data("Retrieving already indexed data from PGVector vectorstore",
-                           tool_name="get_indexed_data")
-            store = self.vectorstore
-            with Session(store.session_maker.bind) as session:
-                docs = session.query(
-                    store.EmbeddingStore.id,
-                    store.EmbeddingStore.document,
-                    store.EmbeddingStore.cmetadata
-                ).all()
-
-            # Process the retrieved data
-            for doc in docs:
-                db_id = doc.id
-                meta = doc.cmetadata or {}
-
-                # Get document id from metadata
-                doc_id = str(meta.get('id', db_id))
-                dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
-                if dependent_docs:
-                    dependent_docs = [d.strip() for d in dependent_docs.split(';') if d.strip()]
-                parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
-
-                chunk_id = meta.get('chunk_id')
-                if doc_id in result and chunk_id:
-                    # If document with the same id already saved, add db_id for current one as chunk
-                    result[doc_id]['all_chunks'].append(db_id)
-                else:
-                    result[doc_id] = {
-                        'metadata': meta,
-                        'id': db_id,
-                        'all_chunks': [db_id],
-                        IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
-                        IndexerKeywords.PARENT.value: parent_id
-                    }
-
-        except Exception as e:
-            logger.error(f"Failed to get indexed data from PGVector: {str(e)}. Continuing with empty index.")
-
-        return result
-
-    def _get_chroma_indexed_data(self, store):
-        """ Get all indexed data from Chroma for non-code content """
-        result = {}
-        try:
-            self._log_data("Retrieving already indexed data from Chroma vectorstore",
-                           tool_name="get_indexed_data")
-            data = store.get(include=['metadatas'])
-
-            # Re-structure data to be more usable
-            for meta, db_id in zip(data['metadatas'], data['ids']):
-                # Get document id from metadata
-                doc_id = str(meta['id'])
-                dependent_docs = meta.get(IndexerKeywords.DEPENDENT_DOCS.value, [])
-                if dependent_docs:
-                    dependent_docs = [d.strip() for d in dependent_docs.split(';') if d.strip()]
-                parent_id = meta.get(IndexerKeywords.PARENT.value, -1)
-
-                chunk_id = meta.get('chunk_id')
-                if doc_id in result and chunk_id:
-                    # If document with the same id already saved, add db_id for current one as chunk
-                    result[doc_id]['all_chunks'].append(db_id)
-                else:
-                    result[doc_id] = {
-                        'metadata': meta,
-                        'id': db_id,
-                        'all_chunks': [db_id],
-                        IndexerKeywords.DEPENDENT_DOCS.value: dependent_docs,
-                        IndexerKeywords.PARENT.value: parent_id
-                    }
-        except Exception as e:
-            logger.error(f"Failed to get indexed data from Chroma: {str(e)}. Continuing with empty index.")
-
-        return result
+        return self.vector_adapter.get_indexed_data(self)
 
     def _get_code_indexed_data(self) -> Dict[str, Dict[str, Any]]:
         """ Get all indexed data from vectorstore for code content """
-
-        # get already indexed data
-        if self._is_pgvector():
-            result = self._get_pgvector_code_indexed_data()
-        else:
-            result = self._get_chroma_code_indexed_data()
-        return result
-
-    def _get_chroma_code_indexed_data(self) -> Dict[str, Dict[str, Any]]:
-        """Get all indexed code data from Chroma."""
-        result = {}
-        try:
-            self._log_data("Retrieving already indexed code data from Chroma vectorstore",
-                           tool_name="index_code_data")
-            data = self.vectorstore.get(include=['metadatas'])
-            for meta, db_id in zip(data['metadatas'], data['ids']):
-                filename = meta.get('filename')
-                commit_hash = meta.get('commit_hash')
-                if not filename:
-                    continue
-                if filename not in result:
-                    result[filename] = {
-                        'commit_hashes': [],
-                        'ids': []
-                    }
-                if commit_hash is not None:
-                    result[filename]['commit_hashes'].append(commit_hash)
-                result[filename]['ids'].append(db_id)
-        except Exception as e:
-            logger.error(f"Failed to get indexed code data from Chroma: {str(e)}. Continuing with empty index.")
-        return result
-
-    def _get_pgvector_code_indexed_data(self) -> Dict[str, Dict[str, Any]]:
-        """Get all indexed code data from PGVector."""
-        from sqlalchemy.orm import Session
-
-        result = {}
-        try:
-            self._log_data("Retrieving already indexed code data from PGVector vectorstore",
-                           tool_name="index_code_data")
-            store = self.vectorstore
-            with Session(store.session_maker.bind) as session:
-                docs = session.query(
-                    store.EmbeddingStore.id,
-                    store.EmbeddingStore.cmetadata
-                ).all()
-
-            for db_id, meta in docs:
-                filename = meta.get('filename')
-                commit_hash = meta.get('commit_hash')
-                if not filename:
-                    continue
-                if filename not in result:
-                    result[filename] = {
-                        'metadata': meta,
-                        'commit_hashes': [],
-                        'ids': []
-                    }
-                if commit_hash is not None:
-                    result[filename]['commit_hashes'].append(commit_hash)
-                result[filename]['ids'].append(db_id)
-        except Exception as e:
-            logger.error(f"Failed to get indexed code data from PGVector: {str(e)}. Continuing with empty index.")
-        return result
-
+        return self.vector_adapter.get_code_indexed_data(self)
 
     def _add_to_collection(self, entry_id, new_collection_value):
         """Add a new collection name to the `collection` key in the `metadata` column."""
-
-        from sqlalchemy import func
-        from sqlalchemy.orm import Session
-
-        store = self.vectorstore
-        try:
-            with Session(store.session_maker.bind) as session:
-                # Query the current value of the `collection` key
-                current_collection_query = session.query(
-                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection')
-                ).filter(store.EmbeddingStore.id == entry_id).scalar()
-
-                # If the `collection` key is NULL or doesn't contain the new value, update it
-                if current_collection_query is None:
-                    # If `collection` is NULL, initialize it with the new value
-                    session.query(store.EmbeddingStore).filter(
-                        store.EmbeddingStore.id == entry_id
-                    ).update(
-                        {
-                            store.EmbeddingStore.cmetadata: func.jsonb_set(
-                                func.coalesce(store.EmbeddingStore.cmetadata, '{}'),
-                                '{collection}',  # Path to the `collection` key
-                                f'"{new_collection_value}"',  # New value for the `collection` key
-                                True  # Create the key if it doesn't exist
-                            )
-                        }
-                    )
-                elif new_collection_value not in current_collection_query.split(";"):
-                    # If `collection` exists but doesn't contain the new value, append it
-                    updated_collection_value = f"{current_collection_query};{new_collection_value}"
-                    session.query(store.EmbeddingStore).filter(
-                        store.EmbeddingStore.id == entry_id
-                    ).update(
-                        {
-                            store.EmbeddingStore.cmetadata: func.jsonb_set(
-                                store.EmbeddingStore.cmetadata,
-                                '{collection}',  # Path to the `collection` key
-                                f'"{updated_collection_value}"',  # Concatenated value as a valid JSON string
-                                True  # Create the key if it doesn't exist
-                            )
-                        }
-                    )
-
-                session.commit()
-                logger.info(f"Successfully updated collection for entry ID {entry_id}.")
-        except Exception as e:
-            logger.error(f"Failed to update collection for entry ID {entry_id}: {str(e)}")
+        self.vector_adapter.add_to_collection(self, entry_id, new_collection_value)
 
     def _reduce_duplicates(
             self,
@@ -984,3 +746,4 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 "args_schema": StepBackSearchDocumentsModel
             }
         ]
+
