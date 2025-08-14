@@ -176,6 +176,7 @@ class AlitaClient:
             base_url=f"{self.base_url}{self.llm_path}",
             model=model_name,
             api_key=self.auth_token,
+            streaming=True,
             stream_usage=model_config.get("stream_usage", True),
             max_tokens=model_config.get("max_tokens", None),
             top_p=model_config.get("top_p"),
