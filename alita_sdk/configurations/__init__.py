@@ -38,6 +38,7 @@ _safe_import_configuration('slack', 'slack', 'SlackConfiguration')
 _safe_import_configuration('azure_search', 'azure_search', 'AzureSearchConfiguration')
 _safe_import_configuration('delta_lake', 'delta_lake', 'DeltaLakeConfiguration')
 _safe_import_configuration('bigquery', 'bigquery', 'BigQueryConfiguration')
+_safe_import_configuration('embedding', 'embedding', 'EmbeddingConfiguration')
 
 # Log import summary
 available_count = len(AVAILABLE_CONFIGURATIONS)
