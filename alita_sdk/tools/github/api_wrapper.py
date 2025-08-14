@@ -74,12 +74,12 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
         from langchain.utils import get_from_dict_or_env
 
         # Get all authentication values
-        github_access_token = get_from_dict_or_env(values, "access_token", "GITHUB_ACCESS_TOKEN", default='')
-        github_username = get_from_dict_or_env(values, "username", "GITHUB_USERNAME", default='')
-        github_password = get_from_dict_or_env(values, "password", "GITHUB_PASSWORD", default='')
-        github_app_id = get_from_dict_or_env(values, "app_id", "GITHUB_APP_ID", default='')
-        github_app_private_key = get_from_dict_or_env(values, "app_private_key", "GITHUB_APP_PRIVATE_KEY", default='')
-        github_base_url = get_from_dict_or_env(values, "base_url", "GITHUB_BASE_URL", default='https://api.github.com')
+        github_access_token = get_from_dict_or_env(values, ["access_token", "github_access_token"], "GITHUB_ACCESS_TOKEN", default='')
+        github_username = get_from_dict_or_env(values, ["username", "github_username"], "GITHUB_USERNAME", default='')
+        github_password = get_from_dict_or_env(values, ["password", "github_password"], "GITHUB_PASSWORD", default='')
+        github_app_id = get_from_dict_or_env(values, ["app_id", "github_app_id"], "GITHUB_APP_ID", default='')
+        github_app_private_key = get_from_dict_or_env(values, ["app_private_key", "github_app_private_key"], "GITHUB_APP_PRIVATE_KEY", default='')
+        github_base_url = get_from_dict_or_env(values, ["base_url", "github_base_url"], "GITHUB_BASE_URL", default='https://api.github.com')
 
         auth_config = GitHubAuthConfig(
             github_access_token=github_access_token,
