@@ -1,4 +1,6 @@
 import logging
+from copy import deepcopy
+
 import requests
 from urllib.parse import quote
 
@@ -18,7 +20,7 @@ from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
-
+from ...tools import get_available_toolkit_models
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +143,7 @@ class AlitaClient:
                 break
 
         return apps
-            
+
     def fetch_available_configurations(self) -> list:
         resp = requests.get(self.configurations_url, headers=self.headers, verify=False)
         if resp.ok:
@@ -157,19 +159,19 @@ class AlitaClient:
     def get_llm(self, model_name: str, model_config: dict) -> ChatOpenAI:
         """
         Get a ChatOpenAI model instance based on the model name and configuration.
-        
+
         Args:
             model_name: Name of the model to retrieve
             model_config: Configuration parameters for the model
-            
+
         Returns:
             An instance of ChatOpenAI configured with the provided parameters.
         """
         if not model_name:
             raise ValueError("Model name must be provided")
-        
+
         logger.info(f"Creating ChatOpenAI model: {model_name} with config: {model_config}")
-        
+
         return ChatOpenAI(
             base_url=f"{self.base_url}{self.llm_path}",
             model=model_name,
@@ -182,8 +184,8 @@ class AlitaClient:
             seed=model_config.get("seed", None),
             openai_organization=str(self.project_id),
         )
-         
-    
+
+
     def get_app_version_details(self, application_id: int, application_version_id: int) -> dict:
         url = f"{self.application_versions}/{application_id}/{application_version_id}"
         if self.configurations:
@@ -401,7 +403,7 @@ class AlitaClient:
     def predict(self, messages: list[BaseMessage], model_settings: dict, variables: list[dict] = None):
         prompt_data = self._prepare_payload(messages, model_settings, variables)
         response = requests.post(self.predict_url, headers=self.headers, json=prompt_data, verify=False)
-        
+
         if response.status_code != 200:
             logger.error(f"Error in response of predict: {response.content}")
             raise requests.exceptions.HTTPError(response.content)
@@ -465,7 +467,7 @@ class AlitaClient:
         content = resp_data["findings"]
         references = resp_data['references']
         return AIMessage(content=content, additional_kwargs={"references": references})
-    
+
     def _get_real_user_id(self):
         try:
             import tasknode_task # pylint: disable=E0401
@@ -512,16 +514,16 @@ class AlitaClient:
         return LangChainAssistant(self, agent_data, llm,
                                   chat_history, "predict", memory=memory, store=store).runnable()
 
-    def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None, 
-                          runtime_config: dict = None, llm_model: str = None, 
+    def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,
+                          runtime_config: dict = None, llm_model: str = None,
                           llm_config: dict = None) -> dict:
         """
         Test a single tool from a toolkit with given parameters and runtime callbacks.
-        
+
         This method initializes a toolkit, calls a specific tool, and supports runtime
         callbacks for event dispatching, enabling tools to send custom events back to
         the platform during execution.
-        
+
         Args:
             toolkit_config: Configuration dictionary for the toolkit containing:
                 - toolkit_name: Name of the toolkit (e.g., 'github', 'jira')
@@ -537,7 +539,7 @@ class AlitaClient:
                 - max_tokens: Maximum tokens for response (default: 1000)
                 - temperature: Temperature for response generation (default: 0.1)
                 - top_p: Top-p value for response generation (default: 1.0)
-            
+
         Returns:
             Dictionary containing:
                 - success: Boolean indicating if the operation was successful
@@ -548,25 +550,25 @@ class AlitaClient:
                 - events_dispatched: List of custom events dispatched during execution
                 - llm_model: LLM model used for the test
                 - execution_time_seconds: Time taken to execute the tool in seconds
-            
+
         Example:
             >>> from langchain_core.callbacks import BaseCallbackHandler
-            >>> 
+            >>>
             >>> class TestCallback(BaseCallbackHandler):
             ...     def __init__(self):
             ...         self.events = []
             ...     def on_custom_event(self, name, data, **kwargs):
             ...         self.events.append({'name': name, 'data': data})
-            >>> 
+            >>>
             >>> callback = TestCallback()
             >>> runtime_config = {'callbacks': [callback]}
-            >>> 
+            >>>
             >>> config = {
             ...     'toolkit_name': 'github',
             ...     'settings': {'github_token': 'your_token'}
             ... }
             >>> result = client.test_toolkit_tool(
-            ...     config, 'get_repository_info', 
+            ...     config, 'get_repository_info',
             ...     {'repo_name': 'alita'}, runtime_config,
             ...     llm_model='gpt-4o-mini',
             ...     llm_config={'temperature': 0.1}
@@ -582,21 +584,44 @@ class AlitaClient:
                 'temperature': 0.1,
                 'top_p': 1.0
             }
-            
+        import logging
+        logger = logging.getLogger(__name__)
+        toolkit_config_parsed_json = None
+        try:
+            toolkit_config_type = toolkit_config.get('type')
+            toolkit_class = get_available_toolkit_models().get(toolkit_config_type)['toolkit_class']
+            toolkit_config_model_class = toolkit_class.toolkit_config_schema()
+            toolkit_config_validated_settings = toolkit_config_model_class(
+                **toolkit_config.get('settings', {})
+            ).model_dump(mode='json')
+
+            toolkit_config_parsed_json = deepcopy(toolkit_config)
+            toolkit_config_parsed_json['settings'] = toolkit_config_validated_settings
+        except Exception as toolkit_config_error:
+            logger.error(f"Failed to validate toolkit configuration: {str(toolkit_config_error)}")
+            return {
+                "success": False,
+                "error": f"Failed to validate toolkit configuration: {str(toolkit_config_error)}",
+                "tool_name": tool_name,
+                "toolkit_config": None,
+                "llm_model": llm_model,
+                "events_dispatched": events_dispatched,
+                "execution_time_seconds": 0.0
+            }
+
         try:
             from ..utils.toolkit_utils import instantiate_toolkit_with_client
             from langchain_core.runnables import RunnableConfig
             import logging
             import time
-            
-            logger = logging.getLogger(__name__)
+
             logger.info(f"Testing tool '{tool_name}' from toolkit '{toolkit_config.get('toolkit_name')}' with LLM '{llm_model}'")
-            
+
             # Create RunnableConfig for callback support
             config = None
             callbacks = []
             events_dispatched = []
-            
+
             if runtime_config:
                 callbacks = runtime_config.get('callbacks', [])
                 if callbacks:
@@ -605,7 +630,7 @@ class AlitaClient:
                         configurable=runtime_config.get('configurable', {}),
                         tags=runtime_config.get('tags', [])
                     )
-            
+
             # Create LLM instance using the client's get_llm method
             try:
                 llm = self.get_llm(llm_model, llm_config)
@@ -616,42 +641,42 @@ class AlitaClient:
                     "success": False,
                     "error": f"Failed to create LLM instance '{llm_model}': {str(llm_error)}",
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": 0.0
                 }
-            
+
             # Instantiate the toolkit with client and LLM support
             tools = instantiate_toolkit_with_client(toolkit_config, llm, self)
-            
+
             if not tools:
                 return {
                     "success": False,
                     "error": f"Failed to instantiate toolkit '{toolkit_config.get('toolkit_name')}' or no tools found",
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": 0.0
                 }
-            
+
             # Find the specific tool with smart name matching
             target_tool = None
             toolkit_name = toolkit_config.get('toolkit_name', '').lower()
-            
+
             # Helper function to extract base tool name from full name
             def extract_base_tool_name(full_name: str) -> str:
                 """Extract base tool name from toolkit___toolname format."""
                 if '___' in full_name:
                     return full_name.split('___', 1)[1]
                 return full_name
-            
+
             # Helper function to create full tool name
             def create_full_tool_name(base_name: str, toolkit_name: str) -> str:
                 """Create full tool name in toolkit___toolname format."""
                 return f"{toolkit_name}___{base_name}"
-            
+
             # Normalize tool_name to handle both formats
             # If user provides toolkit___toolname, extract just the tool name
             # If user provides just toolname, keep as is
@@ -660,7 +685,7 @@ class AlitaClient:
                 logger.info(f"Extracted base tool name '{normalized_tool_name}' from full name '{tool_name}'")
             else:
                 normalized_tool_name = tool_name
-            
+
             # Try multiple matching strategies
             for tool in tools:
                 tool_name_attr = None
@@ -668,61 +693,61 @@ class AlitaClient:
                     tool_name_attr = tool.name
                 elif hasattr(tool, 'func') and hasattr(tool.func, '__name__'):
                     tool_name_attr = tool.func.__name__
-                
+
                 if tool_name_attr:
                     # Strategy 1: Exact match with provided name (handles both formats)
                     if tool_name_attr == tool_name:
                         target_tool = tool
                         logger.info(f"Found tool using exact match: '{tool_name_attr}'")
                         break
-                    
+
                     # Strategy 2: Match normalized name with toolkit prefix
                     expected_full_name = create_full_tool_name(normalized_tool_name, toolkit_name)
                     if tool_name_attr == expected_full_name:
                         target_tool = tool
                         logger.info(f"Found tool using toolkit prefix mapping: '{tool_name_attr}' for normalized name '{normalized_tool_name}'")
                         break
-                    
+
                     # Strategy 3: Match base names (extract from both sides)
                     base_tool_name = extract_base_tool_name(tool_name_attr)
                     if base_tool_name == normalized_tool_name:
                         target_tool = tool
                         logger.info(f"Found tool using base name mapping: '{tool_name_attr}' -> '{base_tool_name}' matches '{normalized_tool_name}'")
                         break
-                    
+
                     # Strategy 4: Match provided name with base tool name (reverse lookup)
                     if tool_name_attr == normalized_tool_name:
                         target_tool = tool
                         logger.info(f"Found tool using direct name match: '{tool_name_attr}' matches normalized '{normalized_tool_name}'")
                         break
-            
+
             if target_tool is None:
                 available_tools = []
                 base_available_tools = []
                 full_available_tools = []
-                
+
                 for tool in tools:
                     tool_name_attr = None
                     if hasattr(tool, 'name'):
                         tool_name_attr = tool.name
                     elif hasattr(tool, 'func') and hasattr(tool.func, '__name__'):
                         tool_name_attr = tool.func.__name__
-                    
+
                     if tool_name_attr:
                         available_tools.append(tool_name_attr)
-                        
+
                         # Extract base name for user-friendly error
                         base_name = extract_base_tool_name(tool_name_attr)
                         if base_name not in base_available_tools:
                             base_available_tools.append(base_name)
-                        
+
                         # Track full names separately
                         if '___' in tool_name_attr:
                             full_available_tools.append(tool_name_attr)
-                
+
                 # Create comprehensive error message
                 error_msg = f"Tool '{tool_name}' not found in toolkit '{toolkit_config.get('toolkit_name')}'."
-                
+
                 if base_available_tools and full_available_tools:
                     error_msg += f" Available tools: {base_available_tools} (base names) or {full_available_tools} (full names)"
                 elif base_available_tools:
@@ -731,29 +756,29 @@ class AlitaClient:
                     error_msg += f" Available tools: {available_tools}"
                 else:
                     error_msg += " No tools found in the toolkit."
-                
+
                 # Add helpful hint about naming conventions
                 if '___' in tool_name:
                     error_msg += f" Note: You provided a full name '{tool_name}'. Try using just the base name '{extract_base_tool_name(tool_name)}'."
                 elif full_available_tools:
                     possible_full_name = create_full_tool_name(tool_name, toolkit_name)
                     error_msg += f" Note: You provided a base name '{tool_name}'. The full name might be '{possible_full_name}'."
-                
+
                 return {
                     "success": False,
                     "error": error_msg,
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": 0.0
                 }
-            
+
             # Execute the tool with callback support
             try:
                 # Log which tool was found and how
                 actual_tool_name = getattr(target_tool, 'name', None) or getattr(target_tool.func, '__name__', 'unknown')
-                
+
                 # Determine which matching strategy was used
                 if actual_tool_name == tool_name:
                     logger.info(f"Found tool '{tool_name}' using exact match")
@@ -765,12 +790,12 @@ class AlitaClient:
                     logger.info(f"Found tool '{tool_name}' using direct normalized name match ('{actual_tool_name}')")
                 else:
                     logger.info(f"Found tool '{tool_name}' using fallback matching ('{actual_tool_name}')")
-                
+
                 logger.info(f"Executing tool '{tool_name}' (internal name: '{actual_tool_name}') with parameters: {tool_params}")
-                
+
                 # Start timing the tool execution
                 start_time = time.time()
-                
+
                 # Different tools might have different invocation patterns
                 if hasattr(target_tool, 'invoke'):
                     # Use config for tools that support RunnableConfig
@@ -788,15 +813,15 @@ class AlitaClient:
                         "success": False,
                         "error": f"Tool '{tool_name}' is not callable",
                         "tool_name": tool_name,
-                        "toolkit_config": toolkit_config,
+                        "toolkit_config": toolkit_config_parsed_json,
                         "llm_model": llm_model,
                         "events_dispatched": events_dispatched,
                         "execution_time_seconds": execution_time
                     }
-                
+
                 # Calculate execution time
                 execution_time = time.time() - start_time
-                
+
                 # Extract events from callbacks if they support it
                 for callback in callbacks:
                     if hasattr(callback, 'events'):
@@ -805,24 +830,24 @@ class AlitaClient:
                         events_dispatched.extend(callback.get_events())
                     elif hasattr(callback, 'dispatched_events'):
                         events_dispatched.extend(callback.dispatched_events)
-                
+
                 logger.info(f"Tool '{tool_name}' executed successfully in {execution_time:.3f} seconds")
-                
+
                 return {
                     "success": True,
                     "result": result,
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": execution_time
                 }
-                
+
             except Exception as tool_error:
                 # Calculate execution time even for failed executions
                 execution_time = time.time() - start_time
                 logger.error(f"Error executing tool '{tool_name}' after {execution_time:.3f} seconds: {str(tool_error)}")
-                
+
                 # Still collect events even if tool execution failed
                 for callback in callbacks:
                     if hasattr(callback, 'events'):
@@ -831,17 +856,17 @@ class AlitaClient:
                         events_dispatched.extend(callback.get_events())
                     elif hasattr(callback, 'dispatched_events'):
                         events_dispatched.extend(callback.dispatched_events)
-                
+
                 return {
                     "success": False,
                     "error": f"Tool execution failed: {str(tool_error)}",
                     "tool_name": tool_name,
-                    "toolkit_config": toolkit_config,
+                    "toolkit_config": toolkit_config_parsed_json,
                     "llm_model": llm_model,
                     "events_dispatched": events_dispatched,
                     "execution_time_seconds": execution_time
                 }
-                
+
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"Error in test_toolkit_tool: {str(e)}")
@@ -849,12 +874,12 @@ class AlitaClient:
                 "success": False,
                 "error": f"Method execution failed: {str(e)}",
                 "tool_name": tool_name,
-                "toolkit_config": toolkit_config,
+                "toolkit_config": toolkit_config_parsed_json,
                 "llm_model": llm_model if 'llm_model' in locals() else None,
                 "events_dispatched": [],
                 "execution_time_seconds": 0.0
             }
-    
+
     def _get_real_user_id(self) -> str:
         """Extract the real user ID from the auth token for MCP tool calls."""
         try:
@@ -874,4 +899,4 @@ class AlitaClient:
         except Exception as e:
             logger.error(f"Error extracting user ID from token: {e}")
         return None
-        
+
