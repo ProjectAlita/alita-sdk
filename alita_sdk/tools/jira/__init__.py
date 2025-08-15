@@ -20,6 +20,7 @@ def get_tools(tool):
         jira_configuration=tool['settings']['jira_configuration'],
         limit=tool['settings'].get('limit', 5),
         labels=parse_list(tool['settings'].get('labels', [])),
+        custom_headers=tool['settings'].get('custom_headers', {}),
         additional_fields=tool['settings'].get('additional_fields', []),
         verify_ssl=tool['settings'].get('verify_ssl', True),
         # indexer settings
@@ -66,12 +67,14 @@ class JiraToolkit(BaseToolkit):
         model = create_model(
             name,
             cloud=(bool, Field(description="Hosting Option", json_schema_extra={'configuration': True})),
-            limit=(int, Field(description="Limit issues")),
+            limit=(int, Field(description="Limit issues. Default is 5", gt=0, default=5)),
             labels=(Optional[str], Field(
                 description="List of comma separated labels used for labeling of agent's created or updated entities",
                 default=None,
                 examples="alita,elitea;another-label"
             )),
+            # optional field for custom headers as dictionary
+            custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default=None)),
             verify_ssl=(bool, Field(description="Verify SSL", default=True)),
             additional_fields=(Optional[str], Field(description="Additional fields", default="")),
             jira_configuration=(Optional[JiraConfiguration], Field(description="Jira Configuration", json_schema_extra={'configuration_types': ['jira']})),
