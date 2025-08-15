@@ -5,7 +5,7 @@ class EmbeddingConfiguration(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "metadata": {
-                "label": "Embedding",
+                "label": "Embedding Configuration",
                 "icon_url": None,
                 "section": "embeddings_configuration",
                 "type": "embedding"
