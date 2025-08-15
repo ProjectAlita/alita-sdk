@@ -22,7 +22,8 @@ from ..tools.log import print_log
 
 class AlitaTableLoader(BaseLoader):
     def __init__(self,
-                 file_path: str,
+                 file_path: str = None,
+                 file_content: bytes = None,
                  json_documents: bool = True,
                  raw_content: bool = False,
                  columns: Optional[List[str]] = None,
@@ -30,6 +31,7 @@ class AlitaTableLoader(BaseLoader):
 
         self.raw_content = raw_content
         self.file_path = file_path
+        self.file_content = file_content
         self.json_documents = json_documents
         self.columns = columns
         self.cleanse = cleanse
@@ -63,6 +65,11 @@ class AlitaTableLoader(BaseLoader):
                 "source": f'{self.file_path}:{idx+1}',
                 "table_source": self.file_path,
             }
+            if len(docs) == 0:
+                header_metadata = metadata.copy()
+                header_metadata["header"] = "true"
+                header = "\t".join([str(value) for value in row.keys()])
+                docs.append(Document(page_content=header, metadata=header_metadata))
             if self.raw_content:
                 docs.append(Document(page_content=row, metadata=metadata))
                 continue

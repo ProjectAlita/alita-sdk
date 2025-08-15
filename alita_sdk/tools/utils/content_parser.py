@@ -90,7 +90,9 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
         "llm": llm,
         "page_number": page_number,
         "sheet_name": sheet_name,
-        "excel_by_sheets": excel_by_sheets
+        "excel_by_sheets": excel_by_sheets,
+        "row_content": True,
+        "json_documents": False
     })
     loader = loader_object['class'](**loader_kwargs)
 
@@ -135,6 +137,8 @@ def load_content(file_path: str, extension: str = None, loader_extra_config: dic
             loader_kwargs.update(loader_extra_config)
         if loader_config['is_multimodal_processing'] and llm:
             loader_kwargs.update({'llm': llm})
+        if "file_path" in loader_kwargs:
+            del loader_kwargs["file_path"]
 
         loader = loader_cls(file_path, **loader_kwargs)
         documents = loader.load()
