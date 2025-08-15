@@ -51,7 +51,6 @@ class AlitaBitbucketToolkit(BaseToolkit):
         AlitaBitbucketToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            url=(str, Field(description="Bitbucket URL", json_schema_extra={'configuration': True, 'configuration_title': True})),
             project=(str, Field(description="Project/Workspace", json_schema_extra={'configuration': True})),
             repository=(str, Field(description="Repository", json_schema_extra={'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length, 'configuration': True})),
             branch=(str, Field(description="Main branch", default="main")),
@@ -59,7 +58,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
             bitbucket_configuration=(Optional[BitbucketConfiguration], Field(description="Bitbucket Configuration", json_schema_extra={'configuration_types': ['bitbucket']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", default={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
@@ -76,11 +75,16 @@ class AlitaBitbucketToolkit(BaseToolkit):
 
         @check_connection_response
         def check_connection(self):
+            bitbucket_config = self.bitbucket_configuration or {}
+            url = bitbucket_config.get('url', '')
+            username = bitbucket_config.get('username', '')
+            password = bitbucket_config.get('password', '')
+
             if self.cloud:
-                request_url = f"{self.url}/2.0/repositories/{self.project}/{self.repository}"
+                request_url = f"{url}/2.0/repositories/{self.project}/{self.repository}"
             else:
-                request_url = f"{self.url}/rest/api/1.0/projects/{self.project}/repos/{self.repository}"
-            response = requests.get(request_url, auth=HTTPBasicAuth(self.username, self.password))
+                request_url = f"{url}/rest/api/1.0/projects/{self.project}/repos/{self.repository}"
+            response = requests.get(request_url, auth=HTTPBasicAuth(username, password))
             return response
 
         m.check_connection = check_connection

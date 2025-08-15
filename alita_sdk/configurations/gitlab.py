@@ -27,5 +27,5 @@ class GitlabConfiguration(BaseModel):
             }
         }
     )
+    url: str = Field(description="GitLab URL")
     private_token: Optional[SecretStr] = Field(description="GitLab private token", default=None)
-

@@ -10,13 +10,15 @@ from ...configurations.pgvector import PgVectorConfiguration
 name = "sharepoint"
 
 def get_tools(tool):
-    return (SharepointToolkit().get_toolkit(
+    return (SharepointToolkit()
+            .get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         site_url=tool['settings'].get('site_url', None),
         client_id=tool['settings'].get('client_id', None),
         client_secret=tool['settings'].get('client_secret', None),
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm'),
+        alita=tool['settings'].get('alita', None),
         # indexer settings
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),

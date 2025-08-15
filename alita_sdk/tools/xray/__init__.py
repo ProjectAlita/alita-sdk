@@ -10,6 +10,7 @@ from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
 from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
+from ...configurations.xray import XrayConfiguration
 
 name = "xray_cloud"
 
@@ -23,6 +24,7 @@ def get_tools(tool):
         limit=tool['settings'].get('limit', 20),
         verify_ssl=tool['settings'].get('verify_ssl', True),
         toolkit_name=tool.get('toolkit_name'),
+        alita=tool['settings'].get('alita', None),
 
         # indexer settings
         connection_string=tool['settings'].get('connection_string', None),
@@ -43,16 +45,13 @@ class XrayToolkit(BaseToolkit):
         XrayToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            base_url=(str, Field(description="Xray URL", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': XrayToolkit.toolkit_max_length})),
-            client_id=(str, Field(description="Client ID")),
-            client_secret=(SecretStr, Field(description="Client secret", json_schema_extra={'secret': True})),
             limit=(Optional[int], Field(description="Limit", default=100)),
-
+            xray_configuration=(Optional[XrayConfiguration], Field(description="Xray Configuration", json_schema_extra={'configuration_types': ['xray']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
 
@@ -72,7 +71,13 @@ class XrayToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        xray_api_wrapper = XrayApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # Use xray_configuration fields
+            **kwargs.get('xray_configuration', {}),
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        xray_api_wrapper = XrayApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = xray_api_wrapper.get_available_tools()
         tools = []

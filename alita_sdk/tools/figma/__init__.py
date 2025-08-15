@@ -23,6 +23,7 @@ def get_tools(tool):
             toolkit_name=tool.get('toolkit_name'),
             # indexer settings
             llm=tool['settings'].get('llm', None),
+            alita=tool['settings'].get('alita', None),
             pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
@@ -59,7 +60,7 @@ class FigmaToolkit(BaseToolkit):
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
 
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
             __config__=ConfigDict(

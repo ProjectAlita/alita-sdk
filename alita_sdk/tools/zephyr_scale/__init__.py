@@ -9,6 +9,7 @@ from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
 from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
+from ...configurations.zephyr import ZephyrConfiguration
 
 name = "zephyr_scale"
 
@@ -21,7 +22,16 @@ def get_tools(tool):
         password=tool['settings'].get('password', None),
         cookies=tool['settings'].get('cookies', None),
         max_results=tool['settings'].get('max_results', 100),
-        toolkit_name=tool.get('toolkit_name')
+        toolkit_name=tool.get('toolkit_name'),
+        llm=tool['settings'].get('llm', None),
+        alita=tool['settings'].get('alita', None),
+
+        # indexer settings
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+        collection_name=str(tool['toolkit_name']),
+        embedding_model="HuggingFaceEmbeddings",
+        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        vectorstore_type="PGVector"
     ).get_tools()
 
 
@@ -35,19 +45,13 @@ class ZephyrScaleToolkit(BaseToolkit):
         ZephyrScaleToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            base_url=(Optional[str], Field(default=None, description="Base URL",
-                                           json_schema_extra={'toolkit_name': True,
-                                                              'max_toolkit_length': ZephyrScaleToolkit.toolkit_max_length})),
-            token=(Optional[SecretStr], Field(default=None, description="Token", json_schema_extra={'secret': True})),
-            username=(Optional[str], Field(default=None, description="Username")),
-            password=(Optional[SecretStr], Field(default=None, description="Password", json_schema_extra={'secret': True})),
-            cookies=(Optional[str], Field(default=None, description="Cookies", json_schema_extra={'secret': True})),
             max_results=(int, Field(default=100, description="Results count to show")),
+            zephyr_configuration=(Optional[ZephyrConfiguration], Field(description="Zephyr Configuration", json_schema_extra={'configuration_types': ['zephyr']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
@@ -87,7 +91,13 @@ class ZephyrScaleToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        zephyr_wrapper = ZephyrScaleApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # Use zephyr_configuration fields
+            **kwargs.get('zephyr_configuration', {}),
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        zephyr_wrapper = ZephyrScaleApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = zephyr_wrapper.get_available_tools()
         tools = []

@@ -16,5 +16,6 @@ class QtestConfiguration(BaseModel):
             }
         }
     )
+    base_url: str = Field(description="QTest base url")
     qtest_api_token: Optional[SecretStr] = Field(description="QTest API token", default=None)
 

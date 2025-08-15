@@ -7,8 +7,8 @@ class EmbeddingConfiguration(BaseModel):
             "metadata": {
                 "label": "Embedding Configuration",
                 "icon_url": None,
-                "section": "embeddings_configuration",
-                "type": "embedding"
+                "section": "embedding",
+                "type": "embedding_model"
             }
         }
     )

@@ -1,0 +1,32 @@
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+
+class XrayConfiguration(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "metadata": {
+                "label": "Xray",
+                "icon_url": "xray.svg",
+                "sections": {
+                    "auth": {
+                        "required": False,
+                        "subsections": [
+                            {
+                                "name": "Client Credentials",
+                                "fields": ["client_id", "client_secret"]
+                            }
+                        ]
+                    },
+                },
+                "section": "credentials",
+                "type": "xray",
+                "categories": ["test management"],
+                "extra_categories": ["xray", "test automation", "test case management", "test planning"],
+            }
+        }
+    )
+    base_url: str = Field(description="Xray URL")
+    client_id: Optional[str] = Field(description="Client ID", default=None)
+    client_secret: Optional[SecretStr] = Field(description="Client secret", default=None)

@@ -27,5 +27,6 @@ class ServiceNowConfiguration(BaseModel):
             }
         }
     )
+    base_url: str = Field(description="ServiceNow URL")
     username: Optional[str] = Field(description="ServiceNow Username", default=None)
     password: Optional[SecretStr] = Field(description="ServiceNow Password", default=None)

@@ -52,7 +52,6 @@ class SlackToolkit(BaseToolkit):
              name,
              slack_configuration=(Optional[SlackConfiguration], Field(default=None, description="Slack configuration",
                                                              json_schema_extra={'configuration_types': ['slack']})),
-             channel_id=(Optional[str], Field(default=None, description="Channel ID", json_schema_extra={'configuration': True})),
              selected_tools=(List[Literal[tuple(selected_tools)]],
                              Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
              __config__={'json_schema_extra': {

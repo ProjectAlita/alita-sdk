@@ -17,6 +17,7 @@ def get_tools(tool):
         token=tool['settings']["token"],
         toolkit_name=tool.get('toolkit_name'),
         llm = tool['settings'].get('llm', None),
+        alita=tool['settings'].get('alita', None),
 
         # indexer settings
         connection_string = tool['settings'].get('connection_string', None),
@@ -43,7 +44,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Essential", "icon_url": "zephyr.svg",

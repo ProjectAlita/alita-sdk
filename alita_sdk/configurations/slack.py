@@ -33,3 +33,4 @@ class SlackConfiguration(BaseModel):
     )
     name: Optional[SecretStr] = Field(description="Slack Bot Token")
     slack_token: Optional[SecretStr] = Field(description="Slack Token like XOXB-*****-*****-*****-*****")
+    channel_id:Optional[str] = Field(default=None, description="Channel ID")
