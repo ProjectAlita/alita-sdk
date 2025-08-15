@@ -156,6 +156,20 @@ class AlitaClient:
             return resp.json()
         return []
 
+    def get_embeddings(self, embedding_model: str) -> OpenAIEmbeddings:
+        """
+        Get an instance of OpenAIEmbeddings configured with the project ID and auth token.
+
+        Returns:
+            An instance of OpenAIEmbeddings configured for the project.
+        """
+        return OpenAIEmbeddings(
+            base_url=f"{self.base_url}{self.llm_path}",
+            model=embedding_model,
+            api_key=self.auth_token,
+            openai_organization=str(self.project_id),
+        )
+
     def get_llm(self, model_name: str, model_config: dict) -> ChatOpenAI:
         """
         Get a ChatOpenAI model instance based on the model name and configuration.
