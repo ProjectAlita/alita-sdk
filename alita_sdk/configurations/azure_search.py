@@ -9,6 +9,7 @@ class AzureSearchConfiguration(BaseModel):
             "metadata": {
                 "label": "Azure Search",
                 "icon_url": "azure-search.svg",
+                "hidden": True,
                 "section": "credentials",
                 "type": "azure_search",
                 "categories": ["search"],

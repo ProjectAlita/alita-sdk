@@ -14,8 +14,8 @@ class AdoConfiguration(BaseModel):
             }
         }
     )
-    organization_url: Optional[str] = Field(description="Base API URL")
-    project: Optional[str] = Field(description="ADO project", default=None)
+    organization_url: str = Field(description="Base API URL")
+    project: str = Field(description="ADO project")
     token: Optional[SecretStr] = Field(description="ADO Token")
 
 

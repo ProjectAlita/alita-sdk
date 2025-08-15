@@ -9,6 +9,7 @@ class BigQueryConfiguration(BaseModel):
             "metadata": {
                 "label": "Google BigQuery",
                 "icon_url": "google.svg",
+                "hidden": True,
                 "section": "credentials",
                 "type": "bigquery",
                 "categories": ["database"],

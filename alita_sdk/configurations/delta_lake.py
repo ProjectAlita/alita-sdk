@@ -9,6 +9,7 @@ class DeltaLakeConfiguration(BaseModel):
             "metadata": {
                 "label": "AWS Delta Lake",
                 "icon_url": "delta-lake.svg",
+                "hidden": True,
                 "section": "credentials",
                 "type": "delta_lake",
                 "categories": ["database"],

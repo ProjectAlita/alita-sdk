@@ -28,5 +28,5 @@ class XrayConfiguration(BaseModel):
         }
     )
     base_url: str = Field(description="Xray URL")
-    client_id: Optional[str] = Field(description="Client ID", default=None)
-    client_secret: Optional[SecretStr] = Field(description="Client secret", default=None)
+    client_id: Optional[str] = Field(description="Client ID")
+    client_secret: Optional[SecretStr] = Field(description="Client secret")
