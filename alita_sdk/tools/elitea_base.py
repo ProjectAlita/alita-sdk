@@ -301,7 +301,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         collection_suffix = kwargs.get("collection_suffix")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
-        vs = self._init_vector_store(embeddings=self._embedding)
+        vs = self._init_vector_store()
         #
         return vs.index_documents(docs, collection_suffix=collection_suffix, progress_step=progress_step, clean_index=clean_index)
 
@@ -337,7 +337,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
 
 
     # TODO: init store once and re-use the instance
-    def _init_vector_store(self, embeddings: Optional[Any] = None):
+    def _init_vector_store(self):
         """Initializes the vector store wrapper with the provided parameters."""
         try:
             from alita_sdk.runtime.tools.vectorstore import VectorStoreWrapper
@@ -353,7 +353,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 embedding_model=self.embedding_model,
                 embedding_model_params=self.embedding_model_params,
                 vectorstore_params=vectorstore_params,
-                embeddings=embeddings,
+                embeddings=self._embedding,
                 process_document_func=self._process_documents,
             )
         return self._vector_store
@@ -411,7 +411,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      extended_search: Optional[List[str]] = None,
                      **kwargs):
         """ Searches indexed documents in the vector store."""
-        vectorstore = self._init_vector_store(collection_suffix)
+        vectorstore = self._init_vector_store()
         found_docs = vectorstore.stepback_search(
             query,
             messages,
@@ -436,7 +436,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      extended_search: Optional[List[str]] = None,
                      **kwargs):
         """ Generates a summary of indexed documents using stepback technique."""
-        vectorstore = self._init_vector_store(collection_suffix)
+        vectorstore = self._init_vector_store()
         return vectorstore.stepback_summary(
             query, 
             messages, 
