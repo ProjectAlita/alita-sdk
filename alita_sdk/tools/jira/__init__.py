@@ -45,10 +45,11 @@ class JiraToolkit(BaseToolkit):
 
         @check_connection_response
         def check_connection(self):
-            url = self.base_url.rstrip('/') + '/rest/api/2/myself'
+            jira_config = self.jira_configuration or {}
+            base_url = jira_config.get('base_url', '')
+            url = base_url.rstrip('/') + '/rest/api/2/myself'
             headers = {'Accept': 'application/json'}
             auth = None
-            jira_config = self.jira_configuration or {}
             token = jira_config.get('token')
             username = jira_config.get('username')
             api_key = jira_config.get('api_key')
@@ -64,17 +65,6 @@ class JiraToolkit(BaseToolkit):
 
         model = create_model(
             name,
-            base_url=(
-                str,
-                Field(
-                    description="Jira URL",
-                    json_schema_extra={
-                        'max_toolkit_length': JiraToolkit.toolkit_max_length,
-                        'configuration': True,
-                        'configuration_title': True
-                    }
-                )
-            ),
             cloud=(bool, Field(description="Hosting Option", json_schema_extra={'configuration': True})),
             limit=(int, Field(description="Limit issues")),
             labels=(Optional[str], Field(
@@ -87,7 +77,7 @@ class JiraToolkit(BaseToolkit):
             jira_configuration=(Optional[JiraConfiguration], Field(description="Jira Configuration", json_schema_extra={'configuration_types': ['jira']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
 
@@ -96,21 +86,6 @@ class JiraToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Jira",
                     "icon_url": "jira-icon.svg",
-                    "sections": {
-                        "auth": {
-                            "required": True,
-                            "subsections": [
-                                {
-                                    "name": "Bearer",
-                                    "fields": ["token"]
-                                },
-                                {
-                                    "name": "Basic",
-                                    "fields": ["username", "api_key"]
-                                }
-                            ]
-                        }
-                    },
                     "categories": ["project management"],
                     "extra_categories": ["jira", "atlassian", "issue tracking", "project management", "task management"],
                 }

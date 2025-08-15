@@ -14,11 +14,11 @@ class JiraConfiguration(BaseModel):
                         "required": False,
                         "subsections": [
                             {
-                                "name": "API Key",
+                                "name": "Basic",
                                 "fields": ["username", "api_key"]
                             },
                             {
-                                "name": "Token",
+                                "name": "Bearer",
                                 "fields": ["token"]
                             }
                         ]
@@ -31,6 +31,7 @@ class JiraConfiguration(BaseModel):
             }
         }
     )
+    base_url: str = Field(description="Jira URL")
     username: Optional[str] = Field(description="Jira Username", default=None)
     api_key: Optional[SecretStr] = Field(description="Jira API Key", default=None)
     token: Optional[SecretStr] = Field(description="Jira Token", default=None)

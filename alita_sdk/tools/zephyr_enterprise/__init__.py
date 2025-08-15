@@ -7,6 +7,7 @@ from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
 from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
+from ...configurations.zephyr import ZephyrConfiguration
 
 name = "zephyr_enterprise"
 
@@ -17,6 +18,7 @@ def get_tools(tool):
         token=tool['settings']['token'],
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm', None),
+        alita=tool['settings'].get('alita', None),
 
         # indexer settings
         connection_string=tool['settings'].get('connection_string', None),
@@ -37,13 +39,12 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
         ZephyrEnterpriseToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            base_url=(str, Field(description="Zephyr Enterprise base URL", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ZephyrEnterpriseToolkit.toolkit_max_length })),
-            token=(SecretStr, Field(description="API token", json_schema_extra={'secret': True})),
+            zephyr_configuration=(Optional[ZephyrConfiguration], Field(description="Zephyr Configuration", json_schema_extra={'configuration_types': ['zephyr']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], []),
@@ -59,7 +60,13 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        zephyr_api_wrapper = ZephyrApiWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # Use zephyr_configuration fields
+            **kwargs.get('zephyr_configuration', {}),
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        zephyr_api_wrapper = ZephyrApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = zephyr_api_wrapper.get_available_tools()
         tools = []

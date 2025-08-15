@@ -83,7 +83,7 @@ class ConfluenceToolkit(BaseToolkit):
             confluence_configuration=(Optional[ConfluenceConfiguration], Field(description="Confluence Configuration", json_schema_extra={'configuration_types': ['confluence']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
                                                                              json_schema_extra={'configuration_types': [
                                                                                  'embedding']})),
 

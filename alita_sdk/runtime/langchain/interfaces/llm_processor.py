@@ -29,6 +29,7 @@ from langchain.prompts import PromptTemplate  # pylint: disable=E0401
 
 from langchain.schema import HumanMessage, SystemMessage
 
+from ...clients import AlitaClient
 from ...llms.preloaded import PreloadedEmbeddings, PreloadedChatModel  # pylint: disable=E0401
 from ..retrievers.AlitaRetriever import AlitaRetriever
 from ..tools.log import print_log
@@ -59,28 +60,29 @@ def get_model(model_type: str, model_params: dict):
     raise RuntimeError(f"Unknown model type: {model_type}")
 
 
-def get_embeddings(embeddings_model: str, embeddings_params: dict):
+def get_embeddings(elitea_client: AlitaClient, embeddings_model: str, embeddings_params: dict):
     """ Get *Embeddings """
-    if embeddings_model is None:
-        return None
-    if "." in embeddings_model:
-        target_pkg, target_name = embeddings_model.rsplit(".", 1)
-        target_cls = getattr(
-            importlib.import_module(target_pkg),
-            target_name
-        )
-        return target_cls(**embeddings_params)
-    if embeddings_model == "PreloadedEmbeddings":
-        return PreloadedEmbeddings(**embeddings_params)
-    if embeddings_model == "Chroma":
-        from langchain_chroma import Chroma
-        return Chroma(**embeddings_params)
-    if embeddings_model in embeddings:
-        model = getattr(
-            __import__("langchain_community.embeddings", fromlist=[embeddings_model]),
-            embeddings_model
-        )
-        return model(**embeddings_params)
+    # if embeddings_model is None:
+    #     return None
+    # if "." in embeddings_model:
+    #     target_pkg, target_name = embeddings_model.rsplit(".", 1)
+    #     target_cls = getattr(
+    #         importlib.import_module(target_pkg),
+    #         target_name
+    #     )
+    #     return target_cls(**embeddings_params)
+    # if embeddings_model == "PreloadedEmbeddings":
+    #     return PreloadedEmbeddings(**embeddings_params)
+    # if embeddings_model == "Chroma":
+    #     from langchain_chroma import Chroma
+    #     return Chroma(**embeddings_params)
+    # if embeddings_model in embeddings:
+    #     model = getattr(
+    #         __import__("langchain_community.embeddings", fromlist=[embeddings_model]),
+    #         embeddings_model
+    #     )
+    #     return model(**embeddings_params)
+    elitea_client.get_llm(embeddings_model, embeddings_params)
     raise RuntimeError(f"Unknown Embedding type: {embeddings_model}")
 
 

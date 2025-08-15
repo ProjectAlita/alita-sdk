@@ -20,6 +20,7 @@ def get_tools(tool):
         testrail_configuration=tool['settings']['testrail_configuration'],
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm', None),
+        alita=tool['settings'].get('alita', None),
 
         # indexer settings
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
@@ -46,7 +47,7 @@ class TestrailToolkit(BaseToolkit):
             testrail_configuration=(Optional[TestRailConfiguration], Field(description="TestRail Configuration", json_schema_extra={'configuration_types': ['testrail']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding']})),
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata':
                                                          {"label": "Testrail", "icon_url": "testrail-icon.svg",

@@ -33,14 +33,14 @@ class ServiceNowToolkit(BaseToolkit):
         ServiceNowToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            base_url=(str, Field(description="ServiceNow URL", json_schema_extra={
-                        'max_toolkit_length': ServiceNowToolkit.toolkit_max_length,
-                        'configuration': True,
-                        'configuration_title': True
-                    })),
+            name=(str, Field(description="Toolkit name",
+                             json_schema_extra={
+                                 'toolkit_name': True, 'max_toolkit_length': ServiceNowToolkit.toolkit_max_length})),
             response_fields=(Optional[str], Field(description="Response fields", default=None)),
             servicenow_configuration=(Optional[ServiceNowConfiguration], Field(description="ServiceNow Configuration",
-                                                                               json_schema_extra={'configuration_types': ['service_now']})),
+                                                                               json_schema_extra={
+                                                                                   'configuration_types': [
+                                                                                       'service_now']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={

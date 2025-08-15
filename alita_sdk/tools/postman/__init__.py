@@ -55,15 +55,8 @@ class PostmanToolkit(BaseToolkit):
             name,
             postman_configuration=(Optional[PostmanConfiguration], Field(description="Postman Configuration",
                                                                          json_schema_extra={'configuration_types': ['postman']})),
-            base_url=(str, Field(description="Postman API base URL",
-                      default="https://api.getpostman.com", json_schema_extra={'configuration': True})),
             collection_id=(str, Field(description="Default collection ID", json_schema_extra={
                            'toolkit_name': True, 'max_toolkit_length': PostmanToolkit.toolkit_max_length})),
-            workspace_id=(str, Field(description="Default workspace ID",
-                                     json_schema_extra={
-                                         'configuration': True,
-                                         'configuration_title': True
-                                     })),
             environment_config=(dict, Field(
                 description="JSON configuration for request execution (auth headers, project IDs, base URLs, etc.)",
                 default={})),

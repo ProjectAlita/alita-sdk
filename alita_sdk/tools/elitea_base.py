@@ -222,6 +222,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
     vectorstore_type: Optional[str] = "PGVector"
     _vector_store: Optional[Any] = None
+    alita: Any = None # Elitea client, if available
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -274,7 +275,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def index_data(self, **kwargs):
         from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
         docs = self._base_loader(**kwargs)
-        embedding = get_embeddings(self.embedding_model, self.embedding_model_params)
+        embedding = get_embeddings(self.alita, self.embedding_model, self.embedding_model_params)
         chunking_tool = kwargs.get("chunking_tool")
         if chunking_tool:
             # Resolve chunker from the provided chunking_tool name
