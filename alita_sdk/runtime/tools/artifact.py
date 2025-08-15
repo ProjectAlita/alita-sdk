@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from typing import Any, Optional, Generator, List
 
 from langchain_core.documents import Document
@@ -82,7 +83,10 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
         return hasher.hexdigest()
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        page_content = self.read_file(document.metadata['name'], is_capture_image=True, excel_by_sheets=True)
+        try:
+            page_content = self.read_file(document.metadata['name'], is_capture_image=True, excel_by_sheets=True)
+        except Exception as e:
+            logging.error(f"Failed while parsing the file 'document.metadata['Path']': {e}")
         if isinstance(page_content, dict):
             for key, value in page_content.items():
                 metadata = document.metadata
