@@ -522,14 +522,14 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
                 'reason': wi.fields.get('System.Reason', ''),
                 'iteration': wi.fields.get('System.IterationPath', ''),
                 'updated_on': wi.fields.get('System.ChangedDate', ''),
-                'attachment_ids': [rel.url.split('/')[-1] for rel in wi.relations or [] if rel.rel == 'AttachedFile']
+                'attachment_ids': {rel.url.split('/')[-1]:rel.attributes.get('name', '') for rel in wi.relations or [] if rel.rel == 'AttachedFile'}
             })
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        for attachment_id in document.metadata.get('attachment_ids', []):
+        for attachment_id, file_name in document.metadata.get('attachment_ids', {}).items():
             content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
-            content = ''.join(str(item) for item in content_generator)
-            yield Document(page_content=content, metadata={'id': attachment_id})
+            content = b"".join(x for x in content_generator)
+            yield Document(page_content="", metadata={'id': attachment_id, 'loader_content_type': file_name, 'loader_content': content})
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""

@@ -13,18 +13,18 @@
 # limitations under the License.
 
 from langchain_community.document_loaders import (
-        UnstructuredMarkdownLoader,
-        AirbyteJSONLoader, UnstructuredHTMLLoader,
-        UnstructuredPowerPointLoader, PythonLoader)
+    UnstructuredMarkdownLoader,
+    AirbyteJSONLoader, JSONLoader, UnstructuredHTMLLoader,
+    PythonLoader)
+from langchain_community.document_loaders.csv_loader import CSVLoader
 
-from .AlitaCSVLoader import AlitaCSVLoader
 from .AlitaDocLoader import AlitaDocLoader
 from .AlitaDocxMammothLoader import AlitaDocxMammothLoader
 from .AlitaExcelLoader import AlitaExcelLoader
 from .AlitaImageLoader import AlitaImageLoader
 from .AlitaPDFLoader import AlitaPDFLoader
-from .AlitaTextLoader import AlitaTextLoader
 from .AlitaPowerPointLoader import AlitaPowerPointLoader
+from .AlitaTextLoader import AlitaTextLoader
 
 loaders_map = {
     '.png': {
@@ -91,13 +91,8 @@ loaders_map = {
         'kwargs': {}
     },
     '.csv': {
-        'class': AlitaCSVLoader,
-        'is_multimodal_processing': False,
-        'kwargs': {
-            'encoding': 'utf-8',
-            'raw_content': False,
-            'cleanse': False
-        }
+        'class': CSVLoader,
+        'kwargs': {}
     },
     '.xlsx': {
         'class': AlitaExcelLoader,
@@ -131,10 +126,11 @@ loaders_map = {
         'kwargs': {}
     },
     '.json': {
-        'class': AlitaTextLoader,
+        'class': JSONLoader,
         'is_multimodal_processing': False,
         'kwargs': {
-            'autodetect_encoding': True
+            'jq_schema': '.[0]',
+            'text_content': False
         }
     },
     '.jsonl': {

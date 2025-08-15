@@ -12,6 +12,7 @@ from pydantic import BaseModel, create_model, Field, SecretStr
 from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 from .chunkers import markdown_chunker
 from .utils import TOOLKIT_SPLITTER
+from .utils.content_parser import process_content_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.utils.utils import IndexerKeywords
 
@@ -281,6 +282,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             base_chunker = chunkers.get(chunking_tool)
             # Resolve chunking configuration
             base_chunking_config = kwargs.get("chunking_config", {})
+            # docs = self._set_chunker(docs, chunking_tool, base_chunking_config)
             config_model = models.get(chunking_tool)
             # Set required fields that should come from the instance (and Fallback for chunkers without models)
             base_chunking_config['embedding'] = embedding
@@ -304,6 +306,12 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         #
         return vs.index_documents(docs, collection_suffix=collection_suffix, progress_step=progress_step, clean_index=clean_index)
 
+    def _set_chunker(self, documents: Generator[Document, None, None], chunking_tool, chunking_config) -> Generator[Document, None, None]:
+        for doc in documents:
+            doc.metadata['loader_chunking_tool'] = chunking_tool
+            doc.metadata['loader_chunking_config'] = chunking_config
+            yield doc 
+
     def _process_documents(self, documents: List[Document]) -> Generator[Document, None, None]:
         """
         Process a list of base documents to extract relevant metadata for full document preparation.
@@ -317,6 +325,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         Returns:
             Generator[Document, None, None]: A generator yielding processed documents with metadata.
         """
+        from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
         for doc in documents:
             # Filter documents to process only those that either:
             # - do not have a 'chunk_id' in their metadata, or
@@ -329,9 +338,21 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                     for processed_doc in processed_docs:
                         # map processed document (child) to the original document (parent)
                         processed_doc.metadata[IndexerKeywords.PARENT.value] = doc.metadata.get('id', None)
-                        if chunker:=self._get_dependencies_chunker(processed_doc):
-                            yield from chunker(file_content_generator=iter([processed_doc]), config=self._get_dependencies_chunker_config())
+
+                        if content_type:=processed_doc.metadata.get('loader_content_type', None):
+                            # apply parsing based on content type and chunk if chunker was applied to parent doc
+                            chunking_config = doc.metadata.get('loader_chunking_config', {})
+                            chunking_config['embedding'] = get_embeddings(self.embedding_model, self.embedding_model_params)
+                            chunking_config['llm'] = self.llm
+                            yield from process_content_by_type(
+                                document=processed_doc,
+                                extension_source=content_type, llm=self.llm, chunking_config=chunking_config)
+                        elif chunking_tool:=doc.metadata.get('loader_chunking_tool', None):
+                            # apply default chunker from toolkit config. No parsing.
+                            chunker = chunkers.get(chunking_tool)
+                            yield from chunker(file_content_generator=processed_doc, config=doc.metadata.get('loader_chunking_config', {}))
                         else:
+                            # return as is if neither chunker or content typa are specified
                             yield processed_doc
 
 
