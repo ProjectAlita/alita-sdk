@@ -26,8 +26,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         doctype='code',
-        embedding_model="HuggingFaceEmbeddings",
-        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
         vectorstore_type="PGVector",
         toolkit_name=tool.get('toolkit_name')
     )
@@ -84,6 +83,7 @@ class AlitaGitHubToolkit(BaseToolkit):
             # TODO use github_configuration fields
             **kwargs['github_configuration'],
             **(kwargs.get('pgvector_configuration') or {}),
+            **(kwargs.get('embedding_configuration') or {}),
         }
         github_api_wrapper = AlitaGitHubAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = github_api_wrapper.get_available_tools()

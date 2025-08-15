@@ -27,8 +27,7 @@ def get_tools(tool):
             pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
-            embedding_model="HuggingFaceEmbeddings",
-            embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+            embedding_configuration=tool['settings'].get('embedding_configuration', {}),
             vectorstore_type="PGVector"
         )
         .get_tools()
@@ -98,6 +97,7 @@ class FigmaToolkit(BaseToolkit):
         wrapper_payload = {
             **kwargs,
             **(kwargs.get('pgvector_configuration') or {}),
+            **(kwargs.get('embedding_configuration') or {}),
         }
         figma_api_wrapper = FigmaApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

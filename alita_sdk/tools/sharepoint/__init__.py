@@ -5,6 +5,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from .api_wrapper import SharepointApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
 name = "sharepoint"
@@ -21,9 +22,8 @@ def get_tools(tool):
         alita=tool['settings'].get('alita', None),
         # indexer settings
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
         collection_name=str(tool['toolkit_name']),
-        embedding_model="HuggingFaceEmbeddings",
-        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
         vectorstore_type="PGVector")
             .get_tools())
 
@@ -44,10 +44,9 @@ class SharepointToolkit(BaseToolkit):
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
-
             # embedder settings
-            embedding_model=(str, Field(description="Embedding model: i.e. 'HuggingFaceEmbeddings', etc.", default="HuggingFaceEmbeddings")),
-            embedding_model_params=(dict, Field(description="Embedding model parameters: i.e. `{'model_name': 'sentence-transformers/all-MiniLM-L6-v2'}", default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"})),
+            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
+                                                                              json_schema_extra={'configuration_types': ['embedding']})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Sharepoint", "icon_url": "sharepoint.svg",
@@ -63,6 +62,7 @@ class SharepointToolkit(BaseToolkit):
         wrapper_payload = {
             **kwargs,
             **(kwargs.get('pgvector_configuration') or {}),
+            **(kwargs.get('embedding_configuration') or {}),
         }
         sharepoint_api_wrapper = SharepointApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

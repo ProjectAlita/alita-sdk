@@ -20,10 +20,9 @@ def get_tools(tool):
         alita=tool['settings'].get('alita', None),
 
         # indexer settings
-        connection_string = tool['settings'].get('connection_string', None),
         collection_name=str(tool['toolkit_name']),
-        embedding_model = "HuggingFaceEmbeddings",
-        embedding_model_params = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
         vectorstore_type = "PGVector"
     ).get_tools()
 
@@ -55,7 +54,14 @@ class ZephyrEssentialToolkit(BaseToolkit):
 
     @classmethod
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
-        zephyr_api_wrapper = ZephyrEssentialApiWrapper(**kwargs)
+        if selected_tools is None:
+            selected_tools = []
+        wrapper_payload = {
+            **kwargs,
+            **(kwargs.get('pgvector_configuration') or {}),
+            **(kwargs.get('embedding_configuration') or {}),
+        }
+        zephyr_api_wrapper = ZephyrEssentialApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = zephyr_api_wrapper.get_available_tools()
         tools = []

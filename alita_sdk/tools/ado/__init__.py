@@ -18,8 +18,7 @@ def get_tools(tool_type, tool):
         "pgvector_configuration": tool['settings'].get('pgvector_configuration', {}),
         "collection_name": tool['toolkit_name'],
         "doctype": 'doc',
-        "embedding_model": "HuggingFaceEmbeddings",
-        "embedding_model_params": {"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
+        "embedding_configuration": tool['settings'].get('embedding_configuration', {}),
         "vectorstore_type": "PGVector"
     }
     if tool_type == 'ado_plans':

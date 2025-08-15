@@ -24,10 +24,9 @@ def _get_toolkit(tool) -> BaseToolkit:
         active_branch=tool['settings'].get('active_branch', ""),
         toolkit_name=tool['settings'].get('toolkit_name', ""),
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
         collection_name=tool['toolkit_name'],
         doctype='code',
-        embedding_model="HuggingFaceEmbeddings",
-        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
         vectorstore_type="PGVector",
     )
 
@@ -110,6 +109,7 @@ class AzureDevOpsReposToolkit(BaseToolkit):
             # TODO use ado_repos_configuration fields
             **kwargs['ado_repos_configuration'],
             **(kwargs.get('pgvector_configuration') or {}),
+            **(kwargs.get('embedding_configuration') or {}),
         }
         azure_devops_repos_wrapper = ReposApiWrapper(**wrapper_payload)
         available_tools = azure_devops_repos_wrapper.get_available_tools()

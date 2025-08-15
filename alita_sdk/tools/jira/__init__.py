@@ -27,9 +27,8 @@ def get_tools(tool):
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
         collection_name=str(tool['toolkit_name']),
-        embedding_model="HuggingFaceEmbeddings",
-        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
         vectorstore_type="PGVector",
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
@@ -106,6 +105,7 @@ class JiraToolkit(BaseToolkit):
             # TODO use jira_configuration fields
             **kwargs['jira_configuration'],
             **(kwargs.get('pgvector_configuration') or {}),
+            **(kwargs.get('embedding_configuration') or {}),
         }
         jira_api_wrapper = JiraApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

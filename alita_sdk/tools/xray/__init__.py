@@ -27,10 +27,9 @@ def get_tools(tool):
         alita=tool['settings'].get('alita', None),
 
         # indexer settings
-        connection_string=tool['settings'].get('connection_string', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
         collection_name=str(tool['toolkit_name']),
-        embedding_model="HuggingFaceEmbeddings",
-        embedding_model_params={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
         vectorstore_type="PGVector"
     ).get_tools()
 
@@ -76,6 +75,7 @@ class XrayToolkit(BaseToolkit):
             # Use xray_configuration fields
             **kwargs.get('xray_configuration', {}),
             **(kwargs.get('pgvector_configuration') or {}),
+            **(kwargs.get('embedding_configuration') or {}),
         }
         xray_api_wrapper = XrayApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
