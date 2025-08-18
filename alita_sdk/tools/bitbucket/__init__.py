@@ -55,7 +55,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
             bitbucket_configuration=(Optional[BitbucketConfiguration], Field(description="Bitbucket Configuration", json_schema_extra={'configuration_types': ['bitbucket']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None, description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
             {

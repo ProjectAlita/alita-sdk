@@ -66,7 +66,7 @@ class AlitaGitHubToolkit(BaseToolkit):
             active_branch=(Optional[str], Field(description="Active branch", default="main")),
             base_branch=(Optional[str], Field(description="Github Base branch", default="main")),
             # embedder settings
-            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools}))
         )

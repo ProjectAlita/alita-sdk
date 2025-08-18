@@ -34,7 +34,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                                                                            description="PgVector Configuration",
                                                                            json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
             __config__={
                 'json_schema_extra': {
                     'metadata': {
