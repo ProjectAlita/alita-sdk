@@ -7,6 +7,7 @@ from pydantic import create_model, Field, SecretStr
 
 # from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 from .chunkers import markdown_chunker
+from .utils.content_parser import process_content_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.tools.vectorstore_base import VectorStoreWrapperBase
 from ..runtime.utils.utils import IndexerKeywords
@@ -111,7 +112,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     embedding_model: Optional[str] = "HuggingFaceEmbeddings"
     embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
     vectorstore_type: Optional[str] = "PGVector"
-    _vector_store: Optional[Any] = None
     _embedding: Optional[Any] = None
     alita: Any = None # Elitea client, if available
 
@@ -128,9 +128,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             kwargs['vectorstore_type'] = 'PGVector'
         vectorstore_type = kwargs.get('vectorstore_type')
         kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(vectorstore_type).get_vectorstore_params(collection_name, connection_string)
-    
-        # if self.alita and self.embedding_model:
-        #     self._embedding = self.alita.get_embeddings(self.embedding_model)
+        kwargs['_embedding'] = kwargs.get('alita').get_embeddings(kwargs.get('embedding_model'))
         super().__init__(**kwargs)
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
@@ -139,12 +137,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         NOTE: override this method in subclasses to provide specific parameters for certain toolkit.
         """
         return {}
-
-    def _get_dependencies_chunker(self, document: Optional[Document] = None):
-        return markdown_chunker
-
-    def _get_dependencies_chunker_config(self, document: Optional[Document] = None):
-        return {'embedding': self._embedding, 'llm': self.llm}
 
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         """ Loads documents from a source, processes them,
@@ -167,25 +159,52 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         collection_suffix = kwargs.get("collection_suffix")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
+        chunking_tool = kwargs.get("chunking_tool")
+        chunking_config = kwargs.get("chunking_config")
         #
         if clean_index:
             self._clean_index()
         #
-        # kwargs["loader"] = self._content_loader
         documents = self._base_loader(**kwargs)
         documents = self._reduce_duplicates(documents, collection_suffix)
-        documents = self._extend_data(documents, self._content_loader) # update content of not-reduced base document if needed (for sharepoint and similar)
+        documents = self._extend_data(documents) # update content of not-reduced base document if needed (for sharepoint and similar)
         documents = self._collect_dependencies(documents) # collect dependencies for base documents
+        documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
+        #
         return self._save_index(list(documents), collection_suffix=collection_suffix, progress_step=progress_step)
     
-    def _extend_data(self, documents: Generator[Document, None, None], content_loader):
+    def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
+        from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
+
+        if chunking_config is None:
+            chunking_config = {}
+        chunking_config['embedding'] = self._embedding
+        chunking_config['llm'] = self.llm
+            
+        for document in documents:
+            if content_type := document.metadata.get('loader_content_type', None):
+                # apply parsing based on content type and chunk if chunker was applied to parent doc
+                yield from process_content_by_type(
+                    document=document,
+                    extension_source=content_type, llm=self.llm, chunking_config=chunking_config)
+            elif chunking_tool:
+                # apply default chunker from toolkit config. No parsing.
+                chunker = chunkers.get(chunking_tool)
+                yield from chunker(file_content_generator=iter([document]), config=chunking_config)
+            else:
+                # return as is if neither chunker or content typa are specified
+                yield document
+    
+    def _extend_data(self, documents: Generator[Document, None, None]):
         yield from documents
 
     def _collect_dependencies(self, documents: Generator[Document, None, None]):
         for document in documents:
             dependencies = self._process_document(document)
             yield document
-            yield from dependencies
+            for dep in dependencies:
+                dep.metadata[IndexerKeywords.PARENT.value] = document.metadata.get('id', None)
+                yield dep
     
     def _content_loader(self):
         pass
