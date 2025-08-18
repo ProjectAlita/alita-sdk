@@ -3,7 +3,6 @@ import logging
 import urllib.parse
 from typing import Dict, List, Generator, Optional
 
-from alita_sdk.tools.elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from azure.devops.connection import Connection
 from azure.devops.v7_1.core import CoreClient
 from azure.devops.v7_1.wiki import WikiClient
@@ -14,6 +13,8 @@ from msrest.authentication import BasicAuthentication
 from pydantic import create_model, PrivateAttr, SecretStr
 from pydantic import model_validator
 from pydantic.fields import Field
+
+from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -94,7 +95,7 @@ ADOUnlinkWorkItemsFromWikiPage = create_model(
     page_name=(str, Field(description="Wiki page path to unlink the work items from", examples=["/TargetPage"]))
 )
 
-class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
+class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     # TODO use ado_configuration instead of organization_url, project and token
     organization_url: str
     project: str
@@ -125,7 +126,7 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             return ImportError(f"Failed to connect to Azure DevOps: {e}")
 
-        return values
+        return super().validate_toolkit(values)
 
     def _parse_work_items(self, work_items, fields=None):
         """Parse work items dynamically based on the fields requested."""
@@ -537,10 +538,9 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
             "wiql": (str, Field(description="WIQL (Work Item Query Language) query string to select and filter Azure DevOps work items."))
         }
 
-    @extend_with_vector_tools
     def get_available_tools(self):
         """Return a list of available tools."""
-        return [
+        return super().get_available_tools() + [
             {
                 "name": "search_work_items",
                 "description": self.search_work_items.__doc__,
