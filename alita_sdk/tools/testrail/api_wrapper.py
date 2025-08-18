@@ -589,7 +589,6 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         try:
             if not self._include_attachments:
                 # If attachments are not included, return the document as is
-                yield document
                 return
 
             # get base data from the document required to extract attachments and other metadata
