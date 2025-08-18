@@ -28,7 +28,7 @@ class ArtifactToolkit(BaseToolkit):
 
             # embedding model settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.",
-                                                  json_schema_extra={'configuration_types': ['embedding_model']})),
+                                                  json_schema_extra={'configuration_model': 'embedding'})),
 
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})
         )

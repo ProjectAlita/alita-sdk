@@ -43,7 +43,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Essential", "icon_url": "zephyr.svg",
                             "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
