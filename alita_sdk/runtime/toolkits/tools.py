@@ -76,7 +76,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 # indexer settings
                 connection_string=tool['settings'].get('connection_string', None),
                 collection_name=tool.get('toolkit_name'),
-                embedding_model=tool['settings'].get('embedding_configuration', {}).get('name', None),
+                embedding_model=tool['settings'].get('embedding_model'),
                 embedding_model_params=tool['settings'].get('embedding_model_params', None),
                 vectorstore_type="PGVector"
             ).get_tools())

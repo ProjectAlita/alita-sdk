@@ -27,7 +27,7 @@ def get_tools(tool):
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         doctype='code',
-        embedding_model=tool['settings'].get('embedding_configuration', {}).get('name', None),
+        embedding_model=tool['settings'].get('embedding_model'),
         vectorstore_type="PGVector",
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()

@@ -23,7 +23,7 @@ def get_tools(tool):
 
         # indexer settings
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-        embedding_model=tool['settings'].get('embedding_configuration', {}).get('name', None),
+        embedding_model=tool['settings'].get('embedding_model'),
         collection_name=f"{tool.get('toolkit_name')}",
         vectorstore_type="PGVector"
     ).get_tools()
