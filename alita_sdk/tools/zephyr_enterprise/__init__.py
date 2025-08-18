@@ -1,11 +1,10 @@
 from langchain_core.tools import BaseToolkit, BaseTool
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 from typing import List, Literal, Optional
 
 from .api_wrapper import ZephyrApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 from ...configurations.zephyr import ZephyrConfiguration
 
@@ -43,9 +42,7 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], []),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {

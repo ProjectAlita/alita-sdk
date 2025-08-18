@@ -1,12 +1,11 @@
 from typing import List, Literal, Optional
 
 from langchain_core.tools import BaseTool, BaseToolkit
-from pydantic import BaseModel, ConfigDict, Field, create_model, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..base.tool import BaseAction
 from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.figma import FigmaConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 

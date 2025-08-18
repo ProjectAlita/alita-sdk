@@ -9,7 +9,6 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict, create_model
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
 from ...configurations.bitbucket import BitbucketConfiguration
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 import requests
 

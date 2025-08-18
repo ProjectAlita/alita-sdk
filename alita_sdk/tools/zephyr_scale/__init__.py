@@ -2,12 +2,11 @@ from typing import Optional, List, Literal
 
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
-from pydantic import create_model, BaseModel, Field, SecretStr
+from pydantic import create_model, BaseModel, Field
 
 from .api_wrapper import ZephyrScaleApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 from ...configurations.zephyr import ZephyrConfiguration
 
@@ -51,9 +50,7 @@ class ZephyrScaleToolkit(BaseToolkit):
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={

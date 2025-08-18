@@ -6,7 +6,6 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
 from ...configurations.confluence import ConfluenceConfiguration
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 import requests
 

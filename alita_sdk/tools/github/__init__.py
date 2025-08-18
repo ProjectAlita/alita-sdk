@@ -1,13 +1,12 @@
 from typing import Dict, List, Optional, Literal
 
 from langchain_core.tools import BaseTool, BaseToolkit
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from .api_wrapper import AlitaGitHubAPIWrapper
 from .tool import GitHubAction
 
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.github import GithubConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -67,9 +66,7 @@ class AlitaGitHubToolkit(BaseToolkit):
             active_branch=(Optional[str], Field(description="Active branch", default="main")),
             base_branch=(Optional[str], Field(description="Github Base branch", default="main")),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools}))
         )

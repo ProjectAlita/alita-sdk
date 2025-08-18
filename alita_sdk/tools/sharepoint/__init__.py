@@ -5,7 +5,6 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from .api_wrapper import SharepointApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
 name = "sharepoint"

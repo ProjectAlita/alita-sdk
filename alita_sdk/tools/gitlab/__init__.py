@@ -8,7 +8,6 @@ from pydantic.fields import Field
 
 from .api_wrapper import GitLabAPIWrapper
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
-from ...configurations.embedding import EmbeddingConfiguration
 from ...configurations.gitlab import GitlabConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -50,9 +49,8 @@ class AlitaGitlabToolkit(BaseToolkit):
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.",
+                                                  json_schema_extra={'configuration_types': ['embedding_model']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {

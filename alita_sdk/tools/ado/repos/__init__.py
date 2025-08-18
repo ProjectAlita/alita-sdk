@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field, create_model
 import requests
 
 from ....configurations.ado import AdoReposConfiguration
-from ....configurations.embedding import EmbeddingConfiguration
 from ....configurations.pgvector import PgVectorConfiguration
 from ...base.tool import BaseAction
 from .repos_wrapper import ReposApiWrapper

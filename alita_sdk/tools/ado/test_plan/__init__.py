@@ -5,7 +5,6 @@ from pydantic import create_model, BaseModel, Field
 
 import requests
 from ....configurations.ado import AdoConfiguration
-from ....configurations.embedding import EmbeddingConfiguration
 from ....configurations.pgvector import PgVectorConfiguration
 from .test_plan_wrapper import TestPlanApiWrapper
 from ...base.tool import BaseAction
