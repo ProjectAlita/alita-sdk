@@ -21,7 +21,7 @@ def get_tools(tool):
         alita=tool['settings'].get('alita', None),
         # indexer settings
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-        embedding_model=tool['settings'].get('embedding_model', None),
+        embedding_model=tool['settings'].get('embedding_configuration', {}).get('name', None),
         collection_name=str(tool['toolkit_name']),
         vectorstore_type="PGVector")
             .get_tools())

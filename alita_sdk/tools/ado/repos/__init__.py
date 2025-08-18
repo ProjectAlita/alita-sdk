@@ -25,7 +25,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=tool['toolkit_name'],
         doctype='code',
-        embedding_model=tool['settings'].get('embedding_model', None),
+        embedding_model=tool['settings'].get('embedding_configuration', {}).get('name', None),
         vectorstore_type="PGVector",
     )
 
