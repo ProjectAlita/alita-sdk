@@ -45,7 +45,8 @@ class XrayToolkit(BaseToolkit):
             name,
             limit=(Optional[int], Field(description="Limit", default=100)),
             xray_configuration=(Optional[XrayConfiguration], Field(description="Xray Configuration", json_schema_extra={'configuration_types': ['xray']})),
-            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
+                                                                           description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings

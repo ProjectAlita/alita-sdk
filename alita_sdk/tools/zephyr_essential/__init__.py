@@ -38,7 +38,8 @@ class ZephyrEssentialToolkit(BaseToolkit):
             token=(str, Field(description="Bearer api token")),
             base_url=(Optional[str], Field(description="Zephyr Essential base url", default=None)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
+                                                                           description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings

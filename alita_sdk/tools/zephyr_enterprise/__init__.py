@@ -6,15 +6,14 @@ from .api_wrapper import ZephyrApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
 from ...configurations.pgvector import PgVectorConfiguration
-from ...configurations.zephyr import ZephyrConfiguration
+from ...configurations.zephyr_enterprise import ZephyrEnterpriseConfiguration
 
 name = "zephyr_enterprise"
 
 def get_tools(tool):
     return ZephyrEnterpriseToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        base_url=tool['settings']['base_url'],
-        token=tool['settings']['token'],
+        zephyr_configuration=tool['settings'].get('zephyr_configuration', {}),
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
@@ -37,10 +36,11 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
         ZephyrEnterpriseToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            zephyr_configuration=(Optional[ZephyrConfiguration], Field(description="Zephyr Configuration", json_schema_extra={'configuration_types': ['zephyr']})),
+            zephyr_configuration=(Optional[ZephyrEnterpriseConfiguration], Field(description="Zephyr Configuration", json_schema_extra={'configuration_types': ['zephyr-enterprise']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
                                                                            json_schema_extra={
-                                                                               'configuration_types': ['pgvector']})),
+                                                                               'configuration_types': ['pgvector']},
+                                                                           default=None)),
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], []),

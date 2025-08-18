@@ -18,7 +18,7 @@ def get_tools(tool_type, tool):
         "pgvector_configuration": tool['settings'].get('pgvector_configuration', {}),
         "collection_name": tool['toolkit_name'],
         "doctype": 'doc',
-        "embedding_model": tool['settings'].get('embedding_model', None),
+        "embedding_model": tool['settings'].get('embedding_configuration', {}).get('name', None),
         "vectorstore_type": "PGVector"
     }
     if tool_type == 'ado_plans':
