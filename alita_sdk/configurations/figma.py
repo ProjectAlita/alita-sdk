@@ -31,8 +31,5 @@ class FigmaConfiguration(BaseModel):
             }
         }
     )
-    url: str = Field(description="Testrail URL")
-    email: str = Field(description="TestRail Email")
-    password: SecretStr = Field(description="TestRail Password")
     token: Optional[SecretStr] = Field(description="Figma Token", json_schema_extra={"secret": True}, default=None)
     oauth2: Optional[SecretStr] = Field(description="OAuth2 Token", json_schema_extra={"secret": True}, default=None)

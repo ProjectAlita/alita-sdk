@@ -60,7 +60,7 @@ class PGVectorAdapter(VectorStoreAdapter):
             "alita_sdk_options": {
                 "target_schema": collection_name,
             },
-            "connection_string": connection_string or 'postgresql+psycopg://postgres:yourpassword@localhost:5435/postgres'
+            "connection_string": connection_string
         }
 
     def list_collections(self, vectorstore_wrapper) -> str:
