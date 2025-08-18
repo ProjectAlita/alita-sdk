@@ -7,7 +7,7 @@ class ZephyrEnterpriseConfiguration(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "metadata": {
-                "label": "Zephyr",
+                "label": "Zephyr Enterprise",
                 "icon_url": "zephyr.svg",
                 "section": "credentials",
                 "type": "zephyr-enterprise",
