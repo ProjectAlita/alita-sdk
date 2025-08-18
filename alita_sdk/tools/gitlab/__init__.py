@@ -58,17 +58,6 @@ class AlitaGitlabToolkit(BaseToolkit):
                 'metadata': {
                     "label": "GitLab",
                     "icon_url": None,
-                    "sections": {
-                        "auth": {
-                            "required": True,
-                            "subsections": [
-                                {
-                                    "name": "GitLab private token",
-                                    "fields": ["private_token"]
-                                }
-                            ]
-                        }
-                    },
                     "categories": ["code repositories"],
                     "extra_categories": ["gitlab", "git", "repository", "code", "version control"],
                 }

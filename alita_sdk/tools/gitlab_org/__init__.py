@@ -5,16 +5,16 @@ from langchain_core.tools import BaseTool
 from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.gitlab import GitlabConfiguration
 
 name = "gitlab_org"
 
 def get_tools(tool):
     return AlitaGitlabSpaceToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        url=tool['settings']['url'],
+        gitlab_configuration=tool['settings']['gitlab_configuration'],
         repositories=tool['settings'].get('repositories', ''),
         branch=tool['settings']['branch'],
-        private_token=tool['settings']['private_token'],
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
 
@@ -28,29 +28,22 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
         AlitaGitlabSpaceToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            url=(str, Field(description="GitLab URL", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaGitlabSpaceToolkit.toolkit_max_length})),
+            name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True,
+                                                                            'max_toolkit_length': AlitaGitlabSpaceToolkit.toolkit_max_length})),
+            gitlab_configuration=(Optional[GitlabConfiguration], Field(description="GitLab configuration",
+                                                                       json_schema_extra={
+                                                                           'configuration_types': ['gitlab']})),
             repositories=(str, Field(
                 description="List of comma separated repositories user plans to interact with. Leave it empty in case you pass it in instruction.",
                 default=''
             )),
-            private_token=(SecretStr, Field(description="GitLab private token", json_schema_extra={'secret': True})),
             branch=(str, Field(description="Main branch", default="main")),
-            selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+            selected_tools=(List[Literal[tuple(selected_tools)]],
+                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "GitLab Org",
                     "icon_url": None,
-                    "sections": {
-                        "auth": {
-                            "required": True,
-                            "subsections": [
-                                {
-                                    "name": "GitLab private token",
-                                    "fields": ["private_token"]
-                                }
-                            ]
-                        }
-                    },
                     "categories": ["code repositories"],
                     "extra_categories": ["gitlab", "git", "repository", "code", "version control"],
                 }
@@ -61,7 +54,12 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
-        gitlab_wrapper = GitLabWorkspaceAPIWrapper(**kwargs)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use gitlab_configuration fields
+            **kwargs['gitlab_configuration'],
+        }
+        gitlab_wrapper = GitLabWorkspaceAPIWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, AlitaGitlabSpaceToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = gitlab_wrapper.get_available_tools()
         tools = []
