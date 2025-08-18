@@ -33,9 +33,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             __config__={
                 'json_schema_extra': {
                     'metadata': {
@@ -90,7 +88,6 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
             # TODO use ado_configuration fields in AzureDevOpsApiWrapper
             **kwargs['ado_configuration'],
             **(kwargs.get('pgvector_configuration') or {}),
-            **(kwargs.get('embedding_configuration') or {}),
         }
         azure_devops_api_wrapper = AzureDevOpsApiWrapper(**wrapper_payload)
         available_tools = azure_devops_api_wrapper.get_available_tools()
@@ -110,4 +107,3 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
 
     def get_tools(self):
         return self.tools
-

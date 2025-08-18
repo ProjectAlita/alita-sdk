@@ -27,7 +27,7 @@ def get_tools(tool):
             pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
-            embedding_configuration=tool['settings'].get('embedding_configuration', {}),
+            embedding_model=tool['settings'].get('embedding_model', None),
             vectorstore_type="PGVector"
         )
         .get_tools()
@@ -60,9 +60,7 @@ class FigmaToolkit(BaseToolkit):
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
 
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             __config__=ConfigDict(
                 json_schema_extra={
                      "metadata": {
@@ -84,7 +82,6 @@ class FigmaToolkit(BaseToolkit):
             **kwargs,
             **kwargs.get('figma_configuration'),
             **(kwargs.get('pgvector_configuration') or {}),
-            **(kwargs.get('embedding_configuration') or {}),
         }
         figma_api_wrapper = FigmaApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

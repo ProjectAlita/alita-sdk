@@ -15,18 +15,17 @@ except ImportError:
     from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
 
 class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
-    client: Any
     bucket: str
     artifact: Optional[Any] = None
     
     @model_validator(mode='before')
     @classmethod
     def validate_toolkit(cls, values):
-        if not values.get('client'):
+        if not values.get('alita'):
             raise ValueError("Client is required.")
         if not values.get('bucket'):
             raise ValueError("Bucket is required.")
-        values["artifact"] = values['client'].artifact(values['bucket'])
+        values["artifact"] = values['alita'].artifact(values['bucket'])
         return values
 
     def list_files(self, bucket_name = None, return_as_string = True):

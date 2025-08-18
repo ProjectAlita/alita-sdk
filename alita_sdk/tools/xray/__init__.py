@@ -28,7 +28,7 @@ def get_tools(tool):
 
         # indexer settings
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
+        embedding_model=tool['settings'].get('embedding_model', None),
         collection_name=str(tool['toolkit_name']),
         vectorstore_type="PGVector"
     ).get_tools()
@@ -50,9 +50,7 @@ class XrayToolkit(BaseToolkit):
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
 
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={'json_schema_extra':
@@ -75,7 +73,6 @@ class XrayToolkit(BaseToolkit):
             # Use xray_configuration fields
             **kwargs.get('xray_configuration', {}),
             **(kwargs.get('pgvector_configuration') or {}),
-            **(kwargs.get('embedding_configuration') or {}),
         }
         xray_api_wrapper = XrayApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

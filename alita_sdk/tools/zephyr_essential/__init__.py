@@ -22,7 +22,7 @@ def get_tools(tool):
         # indexer settings
         collection_name=str(tool['toolkit_name']),
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
+        embedding_model=tool['settings'].get('embedding_model', None),
         vectorstore_type = "PGVector"
     ).get_tools()
 
@@ -43,9 +43,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Essential", "icon_url": "zephyr.svg",
                             "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
@@ -59,7 +57,6 @@ class ZephyrEssentialToolkit(BaseToolkit):
         wrapper_payload = {
             **kwargs,
             **(kwargs.get('pgvector_configuration') or {}),
-            **(kwargs.get('embedding_configuration') or {}),
         }
         zephyr_api_wrapper = ZephyrEssentialApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

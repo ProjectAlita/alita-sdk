@@ -22,7 +22,7 @@ def get_tools(tool):
         alita=tool['settings'].get('alita', None),
         # indexer settings
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
+        embedding_model=tool['settings'].get('embedding_model', None),
         collection_name=str(tool['toolkit_name']),
         vectorstore_type="PGVector")
             .get_tools())
@@ -45,8 +45,7 @@ class SharepointToolkit(BaseToolkit):
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(description="Embedding configuration.",
-                                                                              json_schema_extra={'configuration_types': ['embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Sharepoint", "icon_url": "sharepoint.svg",
@@ -62,7 +61,6 @@ class SharepointToolkit(BaseToolkit):
         wrapper_payload = {
             **kwargs,
             **(kwargs.get('pgvector_configuration') or {}),
-            **(kwargs.get('embedding_configuration') or {}),
         }
         sharepoint_api_wrapper = SharepointApiWrapper(**wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

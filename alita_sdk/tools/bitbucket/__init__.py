@@ -31,8 +31,7 @@ def get_tools(tool):
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         collection_name=str(tool['toolkit_name']),
         doctype='code',
-        embedding_configuration=tool['settings'].get('embedding_configuration', {}),
-        vectorstore_type="PGVector",
+        embedding_model=tool['settings'].get('embedding_model', None),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
 
@@ -57,9 +56,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
             bitbucket_configuration=(Optional[BitbucketConfiguration], Field(description="Bitbucket Configuration", json_schema_extra={'configuration_types': ['bitbucket']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", default={'configuration_types': ['pgvector']})),
             # embedder settings
-            embedding_configuration=(Optional[EmbeddingConfiguration], Field(default=None, description="Embedding configuration.",
-                                                                             json_schema_extra={'configuration_types': [
-                                                                                 'embedding']})),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_types': ['embedding_model']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
             {
@@ -100,7 +97,6 @@ class AlitaBitbucketToolkit(BaseToolkit):
             # TODO use bitbucket_configuration fields
             **kwargs['bitbucket_configuration'],
             **(kwargs.get('pgvector_configuration') or {}),
-            **(kwargs.get('embedding_configuration') or {}),
         }
         bitbucket_api_wrapper = BitbucketAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = __all__

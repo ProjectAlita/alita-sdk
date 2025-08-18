@@ -7,6 +7,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from pydantic.fields import FieldInfo
 from ..tools.artifact import ArtifactWrapper
 from alita_sdk.tools.base.tool import BaseAction
+from ...configurations.pgvector import PgVectorConfiguration
 
 
 class ArtifactToolkit(BaseToolkit):
@@ -23,13 +24,11 @@ class ArtifactToolkit(BaseToolkit):
             bucket = (str, FieldInfo(description="Bucket name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ArtifactToolkit.toolkit_max_length})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
-            connection_string = (Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                            default=None,
-                                                            json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None, description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
+
             # embedding model settings
-            embedding_model=(str, Field(default="HuggingFaceEmbeddings", description="Embedding model to use")),
-            embedding_model_params=(dict, Field(default={"model_name": "sentence-transformers/all-MiniLM-L6-v2"},
-                                                description="Parameters for embedding model")),
+            embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.",
+                                                  json_schema_extra={'configuration_types': ['embedding_model']})),
 
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})
         )
@@ -39,7 +38,11 @@ class ArtifactToolkit(BaseToolkit):
         if selected_tools is None:
             selected_tools = []
         tools = []
-        artifact_wrapper = ArtifactWrapper(client=client, bucket=bucket, **kwargs)
+        wrapper_payload = {
+            **kwargs,
+            **(kwargs.get('pgvector_configuration') or {}),
+        }
+        artifact_wrapper = ArtifactWrapper(alita=client, bucket=bucket, **wrapper_payload)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = artifact_wrapper.get_available_tools()
         for tool in available_tools:
