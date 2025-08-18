@@ -585,7 +585,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         
         # Apply cutoff filter
         if cut_off:
-            combined_items = [item for item in combined_items if abs(item[1]) >= cut_off]
+            # Filter out items above the cutoff score (since the lower the score, the better)
+            combined_items = [item for item in combined_items if abs(item[1]) <= cut_off]
         
         # Sort by score and limit results
         # DISABLED: for chroma we want ascending order (lower score is better), for others descending

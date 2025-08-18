@@ -40,6 +40,7 @@ _safe_import_configuration('delta_lake', 'delta_lake', 'DeltaLakeConfiguration')
 _safe_import_configuration('bigquery', 'bigquery', 'BigQueryConfiguration')
 _safe_import_configuration('xray', 'xray', 'XrayConfiguration')
 _safe_import_configuration('zephyr', 'zephyr', 'ZephyrConfiguration')
+_safe_import_configuration('zephyr_enterprise', 'zephyr_enterprise', 'ZephyrEnterpriseConfiguration')
 _safe_import_configuration('figma', 'figma', 'FigmaConfiguration')
 _safe_import_configuration('rally', 'rally', 'RallyConfiguration')
 
