@@ -177,7 +177,11 @@ def process_content_by_type(document: Document, extension_source: str, llm = Non
 
         with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
             temp_file_path = temp_file.name
-            content = document.metadata.pop('loader_content')
+            content = document.metadata.pop('loader_content', None)
+            if content is None:
+                logger.warning("'loader_content' ie expected but not found in document metadata.")
+                return
+            
             temp_file.write(content)
             temp_file.flush()
 

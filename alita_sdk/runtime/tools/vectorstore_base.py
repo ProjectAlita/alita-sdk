@@ -1,18 +1,16 @@
 import json
 import math
-import types
-from typing import Any, Optional, List, Dict, Callable, Generator
+from logging import getLogger
+from typing import Any, Optional, List, Dict, Generator
 
 from langchain_core.documents import Document
-from pydantic import BaseModel, model_validator, Field
-from ..langchain.tools.vector import VectorAdapter
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel, model_validator, Field
+
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from alita_sdk.tools.vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
-from logging import getLogger
-
+from ..langchain.tools.vector import VectorAdapter
 from ..utils.logging import dispatch_custom_event
-from ..utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
 
@@ -211,10 +209,6 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
-
-    def _add_to_collection(self, entry_id, new_collection_value):
-        """Add a new collection name to the `collection` key in the `metadata` column."""
-        self.vector_adapter.add_to_collection(self, entry_id, new_collection_value)
 
     def index_documents(self, documents: Generator[Document, None, None], collection_suffix: str, progress_step: int = 20, clean_index: bool = True):
         """ Index documents in the vectorstore.

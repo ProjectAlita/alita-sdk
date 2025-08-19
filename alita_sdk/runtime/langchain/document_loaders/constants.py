@@ -13,17 +13,18 @@
 # limitations under the License.
 
 from langchain_community.document_loaders import (
-        UnstructuredMarkdownLoader,
-        AirbyteJSONLoader, UnstructuredHTMLLoader,
-        UnstructuredPowerPointLoader, PythonLoader)
+    UnstructuredMarkdownLoader,
+    AirbyteJSONLoader, UnstructuredHTMLLoader,
+    PythonLoader)
 
 from .AlitaCSVLoader import AlitaCSVLoader
 from .AlitaDocxMammothLoader import AlitaDocxMammothLoader
 from .AlitaExcelLoader import AlitaExcelLoader
 from .AlitaImageLoader import AlitaImageLoader
+from .AlitaJSONLoader import AlitaJSONLoader
 from .AlitaPDFLoader import AlitaPDFLoader
-from .AlitaTextLoader import AlitaTextLoader
 from .AlitaPowerPointLoader import AlitaPowerPointLoader
+from .AlitaTextLoader import AlitaTextLoader
 
 loaders_map = {
     '.png': {
@@ -130,11 +131,9 @@ loaders_map = {
         'kwargs': {}
     },
     '.json': {
-        'class': AlitaTextLoader,
+        'class': AlitaJSONLoader,
         'is_multimodal_processing': False,
-        'kwargs': {
-            'autodetect_encoding': True
-        }
+        'kwargs': {}
     },
     '.jsonl': {
         'class': AirbyteJSONLoader,
