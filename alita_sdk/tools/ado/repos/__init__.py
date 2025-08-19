@@ -60,17 +60,6 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                 {
                     "label": "ADO repos",
                     "icon_url": "ado-repos-icon.svg",
-                    "sections": {
-                        "auth": {
-                            "required": True,
-                            "subsections": [
-                                {
-                                    "name": "Token",
-                                    "fields": ["token"]
-                                }
-                            ]
-                        }
-                    },
                     "categories": ["code repositories"],
                     "extra_categories": ["code", "repository", "version control"],
                     # "configuration_group": {
