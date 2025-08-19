@@ -52,7 +52,7 @@ BaseSearchParams = create_model(
     collection_suffix=(Optional[str], Field(
         description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
         default="", max_length=7)),
-    filter=(Optional[dict | str], Field(
+    filter=(Optional[dict], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
         default={},
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
@@ -82,7 +82,7 @@ BaseStepbackSearchParams = create_model(
     query=(str, Field(description="Query text to search in the index")),
     collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
     messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
-    filter=(Optional[dict | str], Field(
+    filter=(Optional[dict], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
         default={},
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
