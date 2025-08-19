@@ -31,13 +31,11 @@ LoaderSchema = create_model(
 BaseIndexParams = create_model(
     "BaseIndexParams",
     collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
 )
 
 BaseCodeIndexParams = create_model(
     "BaseCodeIndexParams",
     collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
     branch=(Optional[str], Field(description="Branch to index files from. Defaults to active branch if None.", default=None)),
     whitelist=(Optional[List[str]], Field(description="File extensions or paths to include. Defaults to all files if None.", default=None)),
     blacklist=(Optional[List[str]], Field(description="File extensions or paths to exclude. Defaults to no exclusions if None.", default=None)),
@@ -54,7 +52,6 @@ BaseSearchParams = create_model(
     collection_suffix=(Optional[str], Field(
         description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
         default="", max_length=7)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
         default={},
@@ -84,7 +81,6 @@ BaseStepbackSearchParams = create_model(
     "BaseStepbackSearchParams",
     query=(str, Field(description="Query text to search in the index")),
     collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
     messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -572,12 +568,14 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
 
         def is_whitelisted(file_path: str) -> bool:
             if whitelist:
-                return any(fnmatch.fnmatch(file_path, pattern) for pattern in whitelist)
+                return (any(fnmatch.fnmatch(file_path, pattern) for pattern in whitelist)
+                        or any(file_path.endswith(f'.{pattern}') for pattern in whitelist))
             return True
 
         def is_blacklisted(file_path: str) -> bool:
             if blacklist:
-                return any(fnmatch.fnmatch(file_path, pattern) for pattern in blacklist)
+                return (any(fnmatch.fnmatch(file_path, pattern) for pattern in blacklist)
+                        or any(file_path.endswith(f'.{pattern}') for pattern in blacklist))
             return False
 
         def file_content_generator():
