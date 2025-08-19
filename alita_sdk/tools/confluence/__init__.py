@@ -91,22 +91,7 @@ class ConfluenceToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Confluence",
                     "icon_url": None,
-                    "sections": {
-                        "auth": {
-                            "required": True,
-                            "subsections": [
-                                {
-                                    "name": "Bearer",
-                                    "fields": ["token"]
-                                },
-                                {
-                                    "name": "Basic",
-                                    "fields": ["username", "api_key"]
-                                }
-                            ]
-                        }
-                    },
-                         "categories": ["documentation"],
+                    "categories": ["documentation"],
                     "extra_categories": ["confluence", "wiki", "knowledge base", "documentation", "atlassian"]
                 }
             })

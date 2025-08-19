@@ -14,11 +14,11 @@ class ConfluenceConfiguration(BaseModel):
                         "required": False,
                         "subsections": [
                             {
-                                "name": "API Key",
+                                "name": "Basic",
                                 "fields": ["username", "api_key"]
                             },
                             {
-                                "name": "Token",
+                                "name": "Bearer",
                                 "fields": ["token"]
                             }
                         ]
