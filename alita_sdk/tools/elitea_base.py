@@ -37,8 +37,8 @@ BaseCodeIndexParams = create_model(
     "BaseCodeIndexParams",
     collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
     branch=(Optional[str], Field(description="Branch to index files from. Defaults to active branch if None.", default=None)),
-    whitelist=(Optional[List[str]], Field(description="File extensions or paths to include. Defaults to all files if None.", default=None)),
-    blacklist=(Optional[List[str]], Field(description="File extensions or paths to exclude. Defaults to no exclusions if None.", default=None)),
+    whitelist=(Optional[List[str]], Field(description='File extensions or paths to include. Defaults to all files if None. Example: ["*.md", "*.java"]', default=None)),
+    blacklist=(Optional[List[str]], Field(description='File extensions or paths to exclude. Defaults to no exclusions if None. Example: ["*.md", "*.java"]', default=None)),
 )
 
 RemoveIndexParams = create_model(
