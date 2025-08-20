@@ -26,7 +26,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                                  'toolkit_name': True,
                                  'max_toolkit_length': AzureDevOpsWorkItemsToolkit.toolkit_max_length})
                   ),
-            ado_configuration=(AdoConfiguration, Field(description="Ado Work Item configuration", json_schema_extra={'configuration_types': ['ado_work_item']})),
+            ado_configuration=(AdoConfiguration, Field(description="Ado Work Item configuration", json_schema_extra={'configuration_types': ['ado']})),
             limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
