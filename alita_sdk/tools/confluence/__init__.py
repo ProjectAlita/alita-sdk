@@ -20,6 +20,7 @@ def get_tools(tool):
         confluence_configuration=tool['settings']['confluence_configuration'],
         limit=tool['settings'].get('limit', 5),
         labels=parse_list(tool['settings'].get('labels', None)),
+        custom_headers=tool['settings'].get('custom_headers', {}),
         additional_fields=tool['settings'].get('additional_fields', []),
         verify_ssl=tool['settings'].get('verify_ssl', True),
         alita=tool['settings'].get('alita'),
@@ -78,6 +79,8 @@ class ConfluenceToolkit(BaseToolkit):
             number_of_retries=(int, Field(description="Number of retries", default=2)),
             min_retry_seconds=(int, Field(description="Min retry, sec", default=10)),
             max_retry_seconds=(int, Field(description="Max retry, sec", default=60)),
+            # optional field for custom headers as dictionary
+            custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default=None)),
             confluence_configuration=(Optional[ConfluenceConfiguration], Field(description="Confluence Configuration", json_schema_extra={'configuration_types': ['confluence']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,
                                                                            description="PgVector Configuration",

@@ -124,6 +124,26 @@ class BaseToolApiWrapper(BaseModel):
     def get_available_tools(self):
         raise NotImplementedError("Subclasses should implement this method")
 
+    def _log_tool_event(self, message: str, tool_name: str = None):
+        """Log data and dispatch custom event for the tool"""
+
+        try:
+            from langchain_core.callbacks import dispatch_custom_event
+
+            if tool_name is None:
+                tool_name = 'tool_progress'
+            dispatch_custom_event(
+                name="tool_execution_step",
+                data={
+                    "message": message,
+                    "tool_name": tool_name,
+                    "toolkit": self.__class__.__name__,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to dispatch progress event: {str(e)}")
+
+
     def run(self, mode: str, *args: Any, **kwargs: Any):
         if TOOLKIT_SPLITTER in mode:
             mode = mode.rsplit(TOOLKIT_SPLITTER, maxsplit=1)[1]

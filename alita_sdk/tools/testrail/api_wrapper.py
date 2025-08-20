@@ -466,11 +466,11 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 return ToolException(
                     "json_case_arguments must be a JSON string or dictionary."
                 )
-
+            self._log_tool_event(message=f"Extract test cases per filter {params}", tool_name='get_cases_by_filter')
             extracted_cases = self._client.cases.get_cases(
                 project_id=project_id, **params
             )
-
+            self._log_tool_event(message=f"Test cases were extracted", tool_name='get_cases_by_filter')
             # support old versions of testrail_api
             cases = extracted_cases.get("cases") if isinstance(extracted_cases, dict) else extracted_cases
 

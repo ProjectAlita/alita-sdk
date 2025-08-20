@@ -223,16 +223,21 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         username = values.get('username')
         token = values.get('token')
         cloud = values.get('cloud')
-        # if values.get('collection_name'):
-        #     values['collection_name'] = shortuuid.encode(values['collection_name'])
         if token and is_cookie_token(token):
             session = requests.Session()
             session.cookies.update(parse_cookie_string(token))
-            values['client'] = Confluence(url=url, session=session, cloud=cloud)
+            client_instance = Confluence(url=url, session=session, cloud=cloud)
         elif token:
-            values['client'] = Confluence(url=url, token=token, cloud=cloud)
+            client_instance = Confluence(url=url, token=token, cloud=cloud)
         else:
-            values['client'] = Confluence(url=url, username=username, password=api_key, cloud=cloud)
+            client_instance = Confluence(url=url, username=username, password=api_key, cloud=cloud)
+
+        custom_headers = values.get('custom_headers', {})
+        logger.info(f"Jira tool: custom headers length: {len(custom_headers)}")
+        for header, value in custom_headers.items():
+            client_instance._update_header(header, value)
+
+        values['client'] = client_instance
         return values
 
     def __unquote_confluence_space(self) -> str | None:
