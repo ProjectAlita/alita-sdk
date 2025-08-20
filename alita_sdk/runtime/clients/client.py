@@ -602,16 +602,22 @@ class AlitaClient:
         import logging
         logger = logging.getLogger(__name__)
         toolkit_config_parsed_json = None
+        events_dispatched = []
+
         try:
             toolkit_config_type = toolkit_config.get('type')
-            toolkit_class = get_available_toolkit_models().get(toolkit_config_type)['toolkit_class']
-            toolkit_config_model_class = toolkit_class.toolkit_config_schema()
-            toolkit_config_validated_settings = toolkit_config_model_class(
-                **toolkit_config.get('settings', {})
-            ).model_dump(mode='json')
-
+            available_toolkit_models = get_available_toolkit_models().get(toolkit_config_type)
             toolkit_config_parsed_json = deepcopy(toolkit_config)
-            toolkit_config_parsed_json['settings'] = toolkit_config_validated_settings
+            if available_toolkit_models:
+                toolkit_class = available_toolkit_models['toolkit_class']
+                toolkit_config_model_class = toolkit_class.toolkit_config_schema()
+                toolkit_config_validated_settings = toolkit_config_model_class(
+                    **toolkit_config.get('settings', {})
+                ).model_dump(mode='json')
+                toolkit_config_parsed_json['settings'] = toolkit_config_validated_settings
+            else:
+                logger.warning(f"Toolkit type '{toolkit_config_type}' is skipping model validation")
+                toolkit_config_parsed_json['settings'] = None
         except Exception as toolkit_config_error:
             logger.error(f"Failed to validate toolkit configuration: {str(toolkit_config_error)}")
             return {
@@ -635,7 +641,6 @@ class AlitaClient:
             # Create RunnableConfig for callback support
             config = None
             callbacks = []
-            events_dispatched = []
 
             if runtime_config:
                 callbacks = runtime_config.get('callbacks', [])
