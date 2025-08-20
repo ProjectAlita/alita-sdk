@@ -123,7 +123,9 @@ loaders_map = {
     '.docx': {
         'class': AlitaDocxMammothLoader,
         'is_multimodal_processing': True,
-        'kwargs': {}
+        'kwargs': {
+            'extract_images': True
+        }
     },
     '.doc': {
         'class': AlitaTextLoader,

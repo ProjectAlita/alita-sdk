@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from mammoth import convert_to_html
 from markdownify import markdownify
 
+from alita_sdk.tools.chunkers.sematic.markdown_chunker import markdown_by_headers_chunker
 from .utils import perform_llm_prediction_for_image_bytes
 
 
@@ -35,6 +36,7 @@ class AlitaDocxMammothLoader(BaseLoader):
         self.extract_images = kwargs.get('extract_images')
         self.llm = kwargs.get("llm")
         self.prompt = kwargs.get("prompt")
+        self.max_tokens = kwargs.get('max_tokens', 512)
 
     def __handle_image(self, image) -> dict:
         """
@@ -100,11 +102,11 @@ class AlitaDocxMammothLoader(BaseLoader):
         Loads and converts the Docx file to markdown format.
 
         Returns:
-            List[Document]: A list containing a single Document with the markdown content
+            List[Document]: A list containing a Documents with the markdown content
                           and metadata including the source file path.
         """
         result_content = self.get_content()
-        return [Document(page_content=result_content, metadata={'source': str(self.path)})]
+        return list(markdown_by_headers_chunker(iter([Document(page_content=result_content, metadata={'source': str(self.path)})]), config={'max_tokens':self.max_tokens}))
 
     def get_content(self):
         """

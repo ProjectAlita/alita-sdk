@@ -1,16 +1,13 @@
 import os
 import tempfile
-from copy import deepcopy as copy
 from logging import getLogger
 from pathlib import Path
 from typing import Generator
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
-from langchain_text_splitters import TokenTextSplitter
 
 from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map
-from alita_sdk.tools.chunkers.utils import tiktoken_length
 
 logger = getLogger(__name__)
 
@@ -193,37 +190,11 @@ def process_content_by_type(document: Document, content, extension_source: str, 
             loader_kwargs = loader_config['kwargs']
 
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
-            docs_iterator = loader.load()
-            max_tokens = chunking_config.get('max_tokens', 512)
-            tokens_overlapping = chunking_config.get('tokens_overlapping', 10)
-            chunk_id = 0
-            for chunk in docs_iterator:
-                if tiktoken_length(chunk.page_content) > max_tokens:
-                    for subchunk in TokenTextSplitter(encoding_name="cl100k_base", 
-                                                      chunk_size=max_tokens, 
-                                                      chunk_overlap=tokens_overlapping
-                                                      ).split_text(chunk.page_content):
-                        chunk_id += 1
-                        headers_meta = list(chunk.metadata.values())
-                        docmeta = copy(document.metadata)
-                        docmeta.update({"headers": "; ".join(str(headers_meta))})
-                        docmeta['chunk_id'] = chunk_id
-                        docmeta['chunk_type'] = "document"
-                        yield Document(
-                            page_content=sanitize_for_postgres(subchunk),
-                            metadata=docmeta
-                        )
-                else:
-                    chunk_id += 1
-                    headers_meta = list(chunk.metadata.values())
-                    docmeta = copy(document.metadata)
-                    docmeta.update({"headers": "; ".join(str(headers_meta))})
-                    docmeta['chunk_id'] = chunk_id
-                    docmeta['chunk_type'] = "document"
-                    yield Document(
-                        page_content=sanitize_for_postgres(chunk.page_content),
-                        metadata=docmeta
-                    )
+            for chunk in loader.load():
+                yield Document(
+                    page_content=sanitize_for_postgres(chunk.page_content),
+                    metadata={**document.metadata, **chunk.metadata}
+                )
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
