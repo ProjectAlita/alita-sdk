@@ -1,9 +1,9 @@
 import uuid
 from logging import getLogger
-from typing import Any, Type, Literal, Optional
+from typing import Any, Type, Literal, Optional, Union, List
 
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, create_model, EmailStr, constr
 
 logger = getLogger(__name__)
 
@@ -19,45 +19,73 @@ class McpServerTool(BaseTool):
 
 
     @staticmethod
-    def create_pydantic_model_from_schema(schema: dict):
-        fields = {}
-        for field_name, field_info in schema['properties'].items():
-            field_type = field_info['type']
-            field_description = field_info.get('description', '')
-            if field_type == 'string':
-                if 'enum' in field_info:
-                    field_type = Literal[tuple(field_info['enum'])]
-                else:
-                    field_type = str
-            elif field_type == 'integer':
-                field_type = int
-            elif field_type == 'number':
-                field_type = float
-            elif field_type == 'boolean':
-                field_type = bool
-            elif field_type == 'object':#Dict[str, Any]
-                nested_model = McpServerTool.create_pydantic_model_from_schema(field_info)
-                field_type = nested_model
-            elif field_type == 'array':
-                item_schema = field_info['items']
-                item_type = McpServerTool.create_pydantic_model_from_schema(item_schema) if item_schema['type'] == 'object' else (
-                    str if item_schema['type'] == 'string' else
-                    int if item_schema['type'] == 'integer' else
-                    float if item_schema['type'] == 'number' else
-                    bool if item_schema['type'] == 'boolean' else
-                    None
-                )
-                if item_type is None:
-                    raise ValueError(f"Unsupported array item type: {item_schema['type']}")
-                field_type = list[item_type]
-            else:
-                raise ValueError(f"Unsupported field type: {field_type}")
+    def create_pydantic_model_from_schema(schema: dict, model_name: str = "ArgsSchema"):
+        def parse_type(field: dict, name: str = "Field") -> Any:
+            if "allOf" in field:
+                merged = {}
+                required = set()
+                for idx, subschema in enumerate(field["allOf"]):
+                    sub_type = parse_type(subschema, f"{name}AllOf{idx}")
+                    if hasattr(sub_type, "__fields__"):
+                        merged.update({k: (v.outer_type_, v.default) for k, v in sub_type.__fields__.items()})
+                        required.update({k for k, v in sub_type.__fields__.items() if v.required})
+                if merged:
+                    return create_model(f"{name}AllOf", **merged)
+                return Any
+            if "anyOf" in field or "oneOf" in field:
+                key = "anyOf" if "anyOf" in field else "oneOf"
+                types = [parse_type(sub, f"{name}{key.capitalize()}{i}") for i, sub in enumerate(field[key])]
+                # Check for null type
+                if any(sub.get("type") == "null" for sub in field[key]):
+                    non_null_types = [parse_type(sub, f"{name}{key.capitalize()}{i}")
+                                      for i, sub in enumerate(field[key]) if sub.get("type") != "null"]
+                    if len(non_null_types) == 1:
+                        return Optional[non_null_types[0]]
+                return Union[tuple(types)]
+            t = field.get("type")
+            if isinstance(t, list):
+                if "null" in t:
+                    non_null = [x for x in t if x != "null"]
+                    if len(non_null) == 1:
+                        field = dict(field)
+                        field["type"] = non_null[0]
+                        return Optional[parse_type(field, name)]
+                    return Any
+                return Any
+            if t == "string":
+                if "enum" in field:
+                    return Literal[tuple(field["enum"])]
+                if field.get("format") == "email":
+                    return EmailStr
+                if "pattern" in field:
+                    return constr(regex=field["pattern"])
+                return str
+            if t == "integer":
+                return int
+            if t == "number":
+                return float
+            if t == "boolean":
+                return bool
+            if t == "object":
+                return McpServerTool.create_pydantic_model_from_schema(field, name.capitalize())
+            if t == "array":
+                items = field.get("items", {})
+                return List[parse_type(items, name + "Item")]
+            return Any
 
-            if field_name in schema.get('required', []):
-                fields[field_name] = (field_type, Field(..., description=field_description))
-            else:
-                fields[field_name] = (Optional[field_type], Field(None, description=field_description))
-        return create_model('DynamicModel', **fields)
+        properties = schema.get("properties", {})
+        required = set(schema.get("required", []))
+        fields = {}
+        for name, prop in properties.items():
+            typ = parse_type(prop, name.capitalize())
+            default = prop.get("default", ... if name in required else None)
+            field_args = {}
+            if "description" in prop:
+                field_args["description"] = prop["description"]
+            if "format" in prop:
+                field_args["format"] = prop["format"]
+            fields[name] = (typ, Field(default, **field_args))
+        return create_model(model_name, **fields)
 
     def _run(self, *args, **kwargs):
         call_data = {
