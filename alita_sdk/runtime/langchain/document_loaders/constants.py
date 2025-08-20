@@ -153,12 +153,16 @@ loaders_map = {
     '.ppt': {
         'class': AlitaPowerPointLoader,
         'is_multimodal_processing': False,
-        'kwargs': {}
+        'kwargs': {
+            'mode': 'paged'
+        }
     },
     '.pptx': {
         'class': AlitaPowerPointLoader,
         'is_multimodal_processing': False,
-        'kwargs': {}
+        'kwargs': {
+            'mode': 'paged'
+        }
     },
     '.py': {
         'class': PythonLoader,
