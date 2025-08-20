@@ -11,7 +11,7 @@ class PostmanConfiguration(BaseModel):
                 "icon_url": "postman.svg",
                 "sections": {
                     "auth": {
-                        "required": False,
+                        "required": True,
                         "subsections": [
                             {
                                 "name": "API Key",

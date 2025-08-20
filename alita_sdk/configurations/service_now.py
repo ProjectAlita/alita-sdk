@@ -11,7 +11,7 @@ class ServiceNowConfiguration(BaseModel):
                 "icon_url": "servicenow.svg",
                 "sections": {
                     "auth": {
-                        "required": False,
+                        "required": True,
                         "subsections": [
                             {
                                 "name": "Username & Password",

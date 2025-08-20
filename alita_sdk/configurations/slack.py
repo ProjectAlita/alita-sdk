@@ -11,14 +11,10 @@ class SlackConfiguration(BaseModel):
                 "icon_url": "slack.svg",
                 "sections": {
                     "auth": {
-                        "required": False,
+                        "required": True,
                         "subsections": [
                             {
-                                "name": "Bot Token",
-                                "fields": ["name"]
-                            },
-                            {
-                                "name": "User Token",
+                                "name": "Slack Token",
                                 "fields": ["slack_token"]
                             }
                         ]

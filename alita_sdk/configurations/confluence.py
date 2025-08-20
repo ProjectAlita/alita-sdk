@@ -11,7 +11,7 @@ class ConfluenceConfiguration(BaseModel):
                 "icon_url": "confluence.svg",
                 "sections": {
                     "auth": {
-                        "required": False,
+                        "required": True,
                         "subsections": [
                             {
                                 "name": "Basic",

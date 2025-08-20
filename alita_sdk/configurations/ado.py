@@ -30,7 +30,7 @@ class AdoReposConfiguration(BaseModel):
             }
         }
     )
-    repository_id: Optional[str] = Field(description="ADO repository ID", default=None)
+    repository_id: str = Field(description="ADO repository ID")
 
     ado_configuration: AdoConfiguration = Field(
         default_factory=AdoConfiguration,

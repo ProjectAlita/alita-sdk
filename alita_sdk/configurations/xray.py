@@ -11,7 +11,7 @@ class XrayConfiguration(BaseModel):
                 "icon_url": "xray.svg",
                 "sections": {
                     "auth": {
-                        "required": False,
+                        "required": True,
                         "subsections": [
                             {
                                 "name": "Client Credentials",

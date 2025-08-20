@@ -11,7 +11,7 @@ class JiraConfiguration(BaseModel):
                 "icon_url": "jira.svg",
                 "sections": {
                     "auth": {
-                        "required": False,
+                        "required": True,
                         "subsections": [
                             {
                                 "name": "Basic",

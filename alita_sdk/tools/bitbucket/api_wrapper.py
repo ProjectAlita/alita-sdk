@@ -65,8 +65,10 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
                 "atlassian-python-api is not installed. "
                 "Please install it with `pip install atlassian-python-api`"
             )
+        from langchain_core.utils import get_from_dict_or_env
+        url_value = get_from_dict_or_env(values, ["url"], "BITBUCKET_BASE_URL", default='https://api.bitbucket.org/')
         cls._bitbucket = BitbucketCloudApi(
-            url=values['url'],
+            url=url_value,
             username=values['username'],
             password=values['password'],
             workspace=values['project'],

@@ -11,7 +11,7 @@ class ZephyrConfiguration(BaseModel):
                 "icon_url": "zephyr.svg",
                 "sections": {
                     "auth": {
-                        "required": False,
+                        "required": True,
                         "subsections": [
                             {
                                 "name": "Token",
