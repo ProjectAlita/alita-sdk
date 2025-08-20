@@ -170,14 +170,17 @@ def load_content_from_bytes(file_content: bytes, extension: str = None, loader_e
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-def process_content_by_type(document: Document, extension_source: str, llm = None, chunking_config={}) -> Generator[Document, None, None]:
+def process_content_by_type(document: Document, content, extension_source: str, llm = None, chunking_config={}) -> Generator[Document, None, None]:
     temp_file_path = None
     try:
         extension = "." + extension_source.split('.')[-1].lower()
 
         with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
             temp_file_path = temp_file.name
-            content = document.metadata.pop('loader_content')
+            if content is None:
+                logger.warning("'loader_content' ie expected but not found in document metadata.")
+                return
+            
             temp_file.write(content)
             temp_file.flush()
 
@@ -207,7 +210,7 @@ def process_content_by_type(document: Document, extension_source: str, llm = Non
                         docmeta['chunk_id'] = chunk_id
                         docmeta['chunk_type'] = "document"
                         yield Document(
-                            page_content=subchunk,
+                            page_content=sanitize_for_postgres(subchunk),
                             metadata=docmeta
                         )
                 else:
@@ -218,9 +221,30 @@ def process_content_by_type(document: Document, extension_source: str, llm = Non
                     docmeta['chunk_id'] = chunk_id
                     docmeta['chunk_type'] = "document"
                     yield Document(
-                        page_content=chunk.page_content,
+                        page_content=sanitize_for_postgres(chunk.page_content),
                         metadata=docmeta
                     )
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+# FIXME copied from langchain_core/utils/strings.py of 0.3.74 version
+# https://github.com/langchain-ai/langchain/pull/32157
+# should be used from langchain_core.utils import sanitize_for_postgres once updated to newer version
+def sanitize_for_postgres(text: str, replacement: str = "") -> str:
+    r"""Sanitize text by removing NUL bytes that are incompatible with PostgreSQL.
+    PostgreSQL text fields cannot contain NUL (0x00) bytes, which can cause
+    psycopg.DataError when inserting documents. This function removes or replaces
+    such characters to ensure compatibility.
+    Args:
+        text: The text to sanitize.
+        replacement: String to replace NUL bytes with. Defaults to empty string.
+    Returns:
+        str: The sanitized text with NUL bytes removed or replaced.
+    Example:
+        >>> sanitize_for_postgres("Hello\\x00world")
+        'Helloworld'
+        >>> sanitize_for_postgres("Hello\\x00world", " ")
+        'Hello world'
+    """
+    return text.replace("\x00", replacement)

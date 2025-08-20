@@ -6,7 +6,6 @@ from langchain_core.documents import Document
 from pydantic import create_model, Field, SecretStr
 
 # from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-from .chunkers import markdown_chunker
 from .utils.content_parser import process_content_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.tools.vectorstore_base import VectorStoreWrapperBase
@@ -141,7 +140,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         """ Loads documents from a source, processes them,
         and returns a list of Document objects with base metadata: id and created_on."""
-        pass
+        yield from ()
 
     def _process_document(self, base_document: Document) -> Generator[Document, None, None]:
         """ Process an existing base document to extract relevant metadata for full document preparation.
@@ -153,7 +152,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
         Returns:
             Document: The processed document with metadata."""
-        pass
+        yield from ()
 
     def index_data(self, **kwargs):
         collection_suffix = kwargs.get("collection_suffix")
@@ -174,18 +173,20 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         return self._save_index(list(documents), collection_suffix=collection_suffix, progress_step=progress_step)
     
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
-        from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers, __confluence_models__ as models
+        from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers
 
         if chunking_config is None:
             chunking_config = {}
         chunking_config['embedding'] = self._embedding
         chunking_config['llm'] = self.llm
-            
+        
         for document in documents:
             if content_type := document.metadata.get('loader_content_type', None):
                 # apply parsing based on content type and chunk if chunker was applied to parent doc
+                content = document.metadata.pop('loader_content', None)
                 yield from process_content_by_type(
                     document=document,
+                    content=content,
                     extension_source=content_type, llm=self.llm, chunking_config=chunking_config)
             elif chunking_tool:
                 # apply default chunker from toolkit config. No parsing.
@@ -205,9 +206,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             for dep in dependencies:
                 dep.metadata[IndexerKeywords.PARENT.value] = document.metadata.get('id', None)
                 yield dep
-    
-    def _content_loader(self):
-        pass
 
     def _reduce_duplicates(
             self,
@@ -254,36 +252,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     
     def remove_ids_fn(self, idx_data, key: str):
         raise NotImplementedError("Subclasses must implement this method")
-
-    def _process_documents(self, documents: List[Document]) -> Generator[Document, None, None]:
-        """
-        Process a list of base documents to extract relevant metadata for full document preparation.
-        Used for late processing of documents after we ensure that the documents have to be indexed to avoid
-        time-consuming operations for documents which might be useless.
-        This function passed to index_documents method of vector store and called after _reduce_duplicates method.
-
-        Args:
-            documents (List[Document]): The base documents to process.
-
-        Returns:
-            Generator[Document, None, None]: A generator yielding processed documents with metadata.
-        """
-        for doc in documents:
-            # Filter documents to process only those that either:
-            # - do not have a 'chunk_id' in their metadata, or
-            # - have 'chunk_id' explicitly set to 1.
-            # This prevents processing of irrelevant or duplicate chunks, improving efficiency.
-            chunk_id = doc.metadata.get("chunk_id")
-            if chunk_id is None or chunk_id == 1:
-                processed_docs = self._process_document(doc)
-                if processed_docs:  # Only proceed if the list is not empty
-                    for processed_doc in processed_docs:
-                        # map processed document (child) to the original document (parent)
-                        processed_doc.metadata[IndexerKeywords.PARENT.value] = doc.metadata.get('id', None)
-                        if chunker:=self._get_dependencies_chunker(processed_doc):
-                            yield from chunker(file_content_generator=iter([processed_doc]), config=self._get_dependencies_chunker_config())
-                        else:
-                            yield processed_doc
 
     def remove_index(self, collection_suffix: str = ""):
         """Cleans the indexed data in the collection."""

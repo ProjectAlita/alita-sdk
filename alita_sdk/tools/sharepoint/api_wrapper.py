@@ -1,6 +1,5 @@
-import json
 import logging
-from typing import Optional, List, Generator, Any
+from typing import Optional, Generator
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
@@ -8,7 +7,7 @@ from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.content_parser import parse_file_content
 
 NoInput = create_model(
@@ -38,7 +37,7 @@ ReadDocument = create_model(
 )
 
 
-class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
+class SharepointApiWrapper(NonCodeIndexerToolkit):
     site_url: str
     client_id: str = None
     client_secret: SecretStr = None
@@ -77,9 +76,8 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
                 raise ToolException("You have to define token or client id&secret.")
             logging.info("Successfully authenticated to SharePoint.")
         except Exception as e:
-                logging.error(f"Failed to authenticate with SharePoint: {str(e)}")
-        return values
-
+            logging.error(f"Failed to authenticate with SharePoint: {str(e)}")
+        return super().validate_toolkit(values)
 
     def read_list(self, list_title, limit: int = 1000):
         """ Reads a specified List in sharepoint site. Number of list items is limited by limit (default is 1000). """
@@ -161,25 +159,26 @@ class SharepointApiWrapper(BaseVectorStoreToolApiWrapper):
             }
             yield Document(page_content="", metadata=metadata)
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        doc_content = ""
-        try:
-            doc_content = self.read_file(document.metadata['Path'],
-                                      is_capture_image=True,
-                                      excel_by_sheets=True)
-        except Exception as e:
-            logging.error(f"Failed while parsing the file '{document.metadata['Path']}': {e}")
-        if isinstance(doc_content, dict):
-            for page, content in doc_content.items():
-                new_metadata = document.metadata
-                new_metadata['page'] = page
-                yield Document(page_content=str(content), metadata=new_metadata)
-        else:
-            document.page_content = str(doc_content)
+    def _extend_data(self, documents: Generator[Document, None, None]):
+        for document in documents:
+            try:
+                document.metadata['loader_content'] = self._load_file_content_in_bytes(document.metadata['Path'])
+                document.metadata['loader_content_type'] = document.metadata['Name']
+                yield document
+            except Exception as e:
+                logging.error(f"Failed while parsing the file '{document.metadata['Path']}': {e}")
+                yield document
 
-    @extend_with_vector_tools
+    def _load_file_content_in_bytes(self, path):
+        file = self._client.web.get_file_by_server_relative_path(path)
+        self._client.load(file).execute_query()
+        file_content = file.read()
+        self._client.execute_query()
+        #
+        return file_content
+
     def get_available_tools(self):
-        return [
+        return super().get_available_tools() + [
             {
                 "name": "read_list",
                 "description": self.read_list.__doc__,
