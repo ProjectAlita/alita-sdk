@@ -1,5 +1,6 @@
 import json
-from typing import Optional, Generator
+import logging
+from typing import Optional, Generator, Literal
 from pydantic import model_validator, create_model, Field, SecretStr, PrivateAttr
 
 from .client import ZephyrEssentialAPI
@@ -7,7 +8,10 @@ from ..elitea_base import extend_with_vector_tools, BaseVectorStoreToolApiWrappe
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 
-class ZephyrEssentialApiWrapper(BaseVectorStoreToolApiWrapper):
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+
+
+class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
     token: SecretStr
     _client: ZephyrEssentialAPI = PrivateAttr()
 
@@ -22,7 +26,7 @@ class ZephyrEssentialApiWrapper(BaseVectorStoreToolApiWrapper):
             base_url=base_url,
             token=token
         )
-        return values
+        return super().validate_toolkit(values)
 
     def list_test_cases(self, project_key: Optional[str] = None, folder_id: Optional[str] = None, max_results: int = None, start_at: int = None):
         """List test cases with optional filters."""
@@ -229,6 +233,12 @@ class ZephyrEssentialApiWrapper(BaseVectorStoreToolApiWrapper):
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON string: {str(e)}")
 
+    def _index_tool_params(self):
+        return {
+            'chunking_tool':(Literal[None, 'json'],
+                           Field(description="Name of chunking tool", default='json'))
+        }
+
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         try:
             test_cases = self.list_test_cases()
@@ -236,29 +246,27 @@ class ZephyrEssentialApiWrapper(BaseVectorStoreToolApiWrapper):
             raise ToolException(f"Unable to extract test cases: {e}")
 
         for case in test_cases:
-            case['type'] = "TEST_CASE"
             metadata = {
                 k: v for k, v in case.items()
                 if isinstance(v, (str, int, float, bool, list, dict))
             }
+            metadata['type'] = "TEST_CASE"
 
-            yield Document(page_content=json.dumps(case), metadata=metadata)
+            yield Document(page_content="", metadata=metadata)
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        try:
-            base_data = json.loads(document.page_content)
+    def _extend_data(self, documents: Generator[Document, None, None]) -> Generator[Document, None, None]:
+        for document in documents:
+            try:
+                if document.metadata['type'] and document.metadata['type'] == "TEST_CASE":
+                    additional_content = self._process_test_case(document.metadata['key'])
+                    document.page_content = json.dumps(additional_content)
+            except json.JSONDecodeError as e:
+                logging.error(f"Failed to decode JSON from document: {e}")
+            yield document
 
-            if base_data['type'] and base_data['type'] == "TEST_CASE":
-                additional_content = self._process_test_case(base_data)
-                base_data['test_case_content'] = additional_content
-
-            document.page_content = json.dumps(base_data)
-        except json.JSONDecodeError as e:
-            raise ToolException(f"Failed to decode JSON from document: {e}")
-
-    def _process_test_case(self, case):
-        steps = self.get_test_case_test_steps(case['key'])
-        script = self.get_test_case_test_script(case['key'])
+    def _process_test_case(self, key):
+        steps = self.get_test_case_test_steps(key)
+        script = self.get_test_case_test_script(key)
         additional_content = {
             "steps": "" if isinstance(steps, ToolException) else steps,
             "script": "" if isinstance(script, ToolException) else script,

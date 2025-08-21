@@ -162,7 +162,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         chunking_config = kwargs.get("chunking_config")
         #
         if clean_index:
-            self._clean_index()
+            self._clean_index(collection_suffix)
         #
         documents = self._base_loader(**kwargs)
         documents = self._reduce_duplicates(documents, collection_suffix)
@@ -173,7 +173,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         return self._save_index(list(documents), collection_suffix=collection_suffix, progress_step=progress_step)
     
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
-        from alita_sdk.tools.chunkers import __confluence_chunkers__ as chunkers
+        from alita_sdk.tools.chunkers import __all__ as chunkers
 
         if chunking_config is None:
             chunking_config = {}
