@@ -134,7 +134,7 @@ class ListBranchesTool(BaseTool):
     name: str = "list_branches_in_repo"
     description: str = """This tool is a wrapper for the Bitbucket API to fetch a list of all branches in the repository. 
     It will return the name of each branch. No input parameters are required."""
-    args_schema: Type[BaseModel] = None
+    args_schema: Type[BaseModel] = create_model("NoInput")
 
     def _run(self):
         try:
