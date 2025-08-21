@@ -95,7 +95,6 @@ BaseIndexDataParams = create_model(
                          description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
-    chunking_tool=(Literal[None,'markdown', 'statistical', 'proposal'], Field(description="Name of chunking tool", default=None)),
     chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 

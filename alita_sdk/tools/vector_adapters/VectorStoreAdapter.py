@@ -34,7 +34,7 @@ class VectorStoreAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_indexed_data(self, vectorstore_wrapper, collection_suffix: str = ''):
+    def get_indexed_data(self, vectorstore_wrapper):
         """Get all indexed data from vectorstore for non-code content"""
         pass
 
@@ -289,7 +289,7 @@ class ChromaAdapter(VectorStoreAdapter):
         """Clean the vectorstore collection by deleting all indexed data."""
         vectorstore_wrapper.vectorstore.delete(ids=self.get_indexed_ids(vectorstore_wrapper, collection_suffix))
 
-    def get_indexed_data(self, vectorstore_wrapper, collection_suffix: str = ''):
+    def get_indexed_data(self, vectorstore_wrapper):
         """Get all indexed data from Chroma for non-code content"""
         from ...runtime.utils.utils import IndexerKeywords
 
