@@ -16,11 +16,6 @@ from pydantic.fields import Field
 
 from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 
-try:
-    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-except ImportError:
-    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
-
 logger = logging.getLogger(__name__)
 
 create_wi_field = """JSON of the work item fields to create in Azure DevOps, i.e.

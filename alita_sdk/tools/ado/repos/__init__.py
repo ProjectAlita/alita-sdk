@@ -95,6 +95,7 @@ class AzureDevOpsReposToolkit(BaseToolkit):
             **kwargs,
             # TODO use ado_repos_configuration fields
             **kwargs['ado_repos_configuration'],
+            **kwargs['ado_repos_configuration']['ado_configuration'],
             **(kwargs.get('pgvector_configuration') or {}),
         }
         azure_devops_repos_wrapper = ReposApiWrapper(**wrapper_payload)

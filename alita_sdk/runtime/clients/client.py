@@ -364,8 +364,8 @@ class AlitaClient:
         return data.content
 
     def delete_artifact(self, bucket_name, artifact_name):
-        url = f'{self.artifact_url}/{bucket_name}/{quote(artifact_name)}'
-        data = requests.delete(url, headers=self.headers, verify=False)
+        url = f'{self.artifact_url}/{bucket_name}'
+        data = requests.delete(url, headers=self.headers, verify=False, params={'filename': quote(artifact_name)})
         return self._process_requst(data)
 
     def _prepare_messages(self, messages: list[BaseMessage]):
