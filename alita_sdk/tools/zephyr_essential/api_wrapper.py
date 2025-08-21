@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 
 
 class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
@@ -273,7 +274,7 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
         }
         return additional_content
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {
