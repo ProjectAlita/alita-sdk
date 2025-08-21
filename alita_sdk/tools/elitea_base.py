@@ -110,7 +110,7 @@ BaseStepbackSearchParams = create_model(
 BaseIndexDataParams = create_model(
     "indexData",
     __base__=BaseIndexParams,
-    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
+    progress_step=(Optional[int], Field(default=5, ge=0, le=100,
                          description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
@@ -132,6 +132,8 @@ class BaseToolApiWrapper(BaseModel):
 
             if tool_name is None:
                 tool_name = 'tool_progress'
+
+            logger.info(message)
             dispatch_custom_event(
                 name="tool_execution_step",
                 data={
@@ -334,7 +336,13 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         Returns:
             Generator[Document, None, None]: A generator yielding processed documents with metadata.
         """
-        for doc in documents:
+        total_docs = len(documents)
+        self._log_tool_event(
+            message=f"Preparing a base documents for indexing. Total documents: {total_docs}",
+            tool_name="_process_documents"
+        )
+        processed_count = 0
+        for idx, doc in enumerate(documents, 1):
             # Filter documents to process only those that either:
             # - do not have a 'chunk_id' in their metadata, or
             # - have 'chunk_id' explicitly set to 1.
@@ -346,10 +354,19 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                     for processed_doc in processed_docs:
                         # map processed document (child) to the original document (parent)
                         processed_doc.metadata[IndexerKeywords.PARENT.value] = doc.metadata.get('id', None)
-                        if chunker:=self._get_dependencies_chunker(processed_doc):
-                            yield from chunker(file_content_generator=iter([processed_doc]), config=self._get_dependencies_chunker_config())
+                        if chunker := self._get_dependencies_chunker(processed_doc):
+                            yield from chunker(
+                                file_content_generator=iter([processed_doc]),
+                                config=self._get_dependencies_chunker_config()
+                            )
                         else:
                             yield processed_doc
+                processed_count += 1
+                if processed_count % 5 == 0 or processed_count == total_docs:
+                    self._log_tool_event(
+                        message=f"Prepared {processed_count} out of {total_docs} documents for indexing.",
+                        tool_name="_process_documents"
+                    )
 
 
     # TODO: init store once and re-use the instance
@@ -583,7 +600,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         from .chunkers.code.codeparser import parse_code_files_for_db
 
         _files = self.__handle_get_files("", branch or self.active_branch or self._active_branch)
-
+        self._log_tool_event(message="Listing files in branch", tool_name="loader")
         logger.info(f"Files in branch: {_files}")
 
         def is_whitelisted(file_path: str) -> bool:
@@ -599,11 +616,22 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             return False
 
         def file_content_generator():
-            for file in _files:
+            self._log_tool_event(message="Reading the files", tool_name="loader")
+            # log the progress of file reading
+            total_files = len(_files)
+            for idx, file in enumerate(_files, 1):
                 if is_whitelisted(file) and not is_blacklisted(file):
+                    # read file ONLY if it matches whitelist and does not match blacklist
+                    file_content = self._read_file(file, branch=branch or self.active_branch or self._active_branch)
+                    # hash the file content to ensure uniqueness
+                    import hashlib
+                    file_hash = hashlib.sha256(file_content.encode("utf-8")).hexdigest()
                     yield {"file_name": file,
-                           "file_content": self._read_file(file, branch=branch or self.active_branch or self._active_branch),
-                           "commit_hash": self._file_commit_hash(file, branch=branch or self.active_branch or self._active_branch)}
+                           "file_content": file_content,
+                           "commit_hash": file_hash}
+                if idx % 10 == 0 or idx == total_files:
+                    self._log_tool_event(message=f"{idx} out of {total_files} files have been read", tool_name="loader")
+            self._log_tool_event(message=f"{len(_files)} have been read", tool_name="loader")
 
         return parse_code_files_for_db(file_content_generator())
     
@@ -621,7 +649,9 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             blacklist=blacklist
         )
         vectorstore = self._init_vector_store()
-        return vectorstore.index_documents(documents, collection_suffix=collection_suffix, clean_index=False, is_code=True)
+        clean_index = kwargs.get('clean_index', False)
+        return vectorstore.index_documents(documents, collection_suffix=collection_suffix,
+                                           clean_index=clean_index, is_code=True)
 
     def _get_vector_search_tools(self):
         """

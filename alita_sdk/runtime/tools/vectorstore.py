@@ -336,6 +336,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         from ..langchain.interfaces.llm_processor import add_documents
 
+        self._log_tool_event(message=f"Starting the indexing... Parameters: {collection_suffix=}, {clean_index=}, {is_code}", tool_name="index_documents")
         # pre-process documents if needed (find duplicates, etc.)
         if clean_index:
             logger.info("Cleaning index before re-indexing all documents.")
@@ -351,9 +352,15 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             if isinstance(documents, types.GeneratorType):
                 documents = list(documents)
         else:
+            self._log_tool_event(
+                message="Filter for duplicates",
+                tool_name="index_documents")
             # remove duplicates based on metadata 'id' and 'updated_on' or 'commit_hash' fields
             documents = self._reduce_code_duplicates(documents, collection_suffix) if is_code \
                 else self._reduce_non_code_duplicates(documents, collection_suffix)
+            self._log_tool_event(
+                message="All the duplicates were filtered out. Proceeding with indexing.",
+                tool_name="index_documents")
 
         if not documents or len(documents) == 0:
             logger.info("No new documents to index after duplicate check.")
@@ -362,8 +369,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         # if func is provided, apply it to documents
         # used for processing of documents before indexing,
         # e.g. to avoid time-consuming operations for documents that are already indexed
+        self._log_tool_event(message=f"Processing the dependent documents (attachments, etc.)", tool_name="index_documents")
         dependent_docs_generator = self.process_document_func(documents) if self.process_document_func else []
-
         # notify user about missed required metadata fields: id, updated_on
         # it is not required to have them, but it is recommended to have them for proper re-indexing and duplicate detection
         for doc in documents:
@@ -374,6 +381,9 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         logger.debug(self.vectoradapter)
 
         documents = documents + list(dependent_docs_generator)
+
+        self._log_tool_event(message=f"Documents for indexing were processed. Total documents: {len(documents)}",
+                             tool_name="index_documents")
 
         # if collection_suffix is provided, add it to metadata of each document
         if collection_suffix:
@@ -386,7 +396,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         total_docs = len(documents)
         documents_count = 0
         _documents = []
-
+        self._log_tool_event(message=f"Starting the indexing of processed documents. Total documents: {len(documents)}",
+                             tool_name="index_documents")
         # set default progress step to 20 if out of 0...100 or None
         progress_step = 20 if progress_step not in range(0, 100) else progress_step
         next_progress_point = progress_step
