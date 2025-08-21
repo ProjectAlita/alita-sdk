@@ -1237,11 +1237,11 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
         jql = kwargs.get('jql')
         fields_to_extract = kwargs.get('fields_to_extract')
         fields_to_index = kwargs.get('fields_to_index')
-        include_attachments = kwargs.get('include_attachments', False)
         max_total_issues = kwargs.get('max_total_issues', 1000)
 
-        # set values for skipped attachment extensions
+        # set values for skipped attachment extension
         self._skipped_attachment_extensions = kwargs.get('skip_attachment_extensions', [])
+        self._include_attachments = kwargs.get('include_attachments', False)
         self._included_fields = fields_to_extract.copy() if fields_to_extract else []
 
         try:
@@ -1252,7 +1252,7 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             if fields_to_extract:
                 fields.extend(fields_to_extract)
 
-            if include_attachments:
+            if self._include_attachments:
                 fields.append('attachment')
 
             # Use provided JQL query or default to all issues
@@ -1292,36 +1292,36 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
 
         issue_key = base_document.metadata.get('issue_key')
         # get attachments content
-
-        issue = self._client.issue(issue_key, fields="attachment")
-        attachments = issue.get('fields', {}).get('attachment', [])
-        for attachment in attachments:
-            # get extension
-            ext = f".{attachment['filename'].split('.')[-1].lower()}"
-            if ext not in self._skipped_attachment_extensions:
-                attachment_id = f"attach_{attachment['id']}"
-                base_document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
-                try:
-                    attachment_content = self._client.get_attachment_content(attachment['id'])
-                except Exception as e:
-                    logger.error(f"Failed to download attachment {attachment['filename']} for issue {issue_key}: {str(e)}")
-                    attachment_content = self._client.get(path=f"secure/attachment/{attachment['id']}/{attachment['filename']}", not_json_response=True)
-                content = load_content_from_bytes(attachment_content, ext, llm=self.llm) if ext not in '.pdf' \
-                    else parse_file_content(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True)
-                if not content:
-                    continue
-                yield Document(page_content=content,
-                               metadata={
-                                   'id': attachment_id,
-                                   'issue_key': issue_key,
-                                   'source': f"{self.base_url}/browse/{issue_key}",
-                                   'filename': attachment['filename'],
-                                   'created': attachment['created'],
-                                   'mimeType': attachment['mimeType'],
-                                   'author': attachment.get('author', {}).get('name'),
-                                   IndexerKeywords.PARENT.value: base_document.metadata.get('id', None),
-                                   'type': 'attachment',
-                               })
+        if self._include_attachments:
+            issue = self._client.issue(issue_key, fields="attachment")
+            attachments = issue.get('fields', {}).get('attachment', [])
+            for attachment in attachments:
+                # get extension
+                ext = f".{attachment['filename'].split('.')[-1].lower()}"
+                if ext not in self._skipped_attachment_extensions:
+                    attachment_id = f"attach_{attachment['id']}"
+                    base_document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
+                    try:
+                        attachment_content = self._client.get_attachment_content(attachment['id'])
+                    except Exception as e:
+                        logger.error(f"Failed to download attachment {attachment['filename']} for issue {issue_key}: {str(e)}")
+                        attachment_content = self._client.get(path=f"secure/attachment/{attachment['id']}/{attachment['filename']}", not_json_response=True)
+                    content = load_content_from_bytes(attachment_content, ext, llm=self.llm) if ext not in '.pdf' \
+                        else parse_file_content(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True)
+                    if not content:
+                        continue
+                    yield Document(page_content=content,
+                                   metadata={
+                                       'id': attachment_id,
+                                       'issue_key': issue_key,
+                                       'source': f"{self.base_url}/browse/{issue_key}",
+                                       'filename': attachment['filename'],
+                                       'created': attachment['created'],
+                                       'mimeType': attachment['mimeType'],
+                                       'author': attachment.get('author', {}).get('name'),
+                                       IndexerKeywords.PARENT.value: base_document.metadata.get('id', None),
+                                       'type': 'attachment',
+                                   })
 
     def _jql_get_tickets(self, jql, fields="*all", start=0, limit=None, expand=None, validate_query=None):
         """
@@ -1430,9 +1430,9 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
                                     Field(description="Whether to include attachment content in indexing",
                                           default=False)),
             'max_total_issues': (Optional[int], Field(description="Maximum number of issues to index", default=1000)),
-            'skip_attachment_extensions': (Optional[str], Field(
-                description="Comma-separated list of file extensions to skip when processing attachments",
-                default=None)),
+            'skip_attachment_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to skip when processing attachments: i.e. ['.png', '.jpg']",
+                default=[])),
         }
 
     # def index_data(self,
