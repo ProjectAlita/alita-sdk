@@ -27,6 +27,6 @@ class BitbucketConfiguration(BaseModel):
             }
         }
     )
-    url: Optional[str] = Field(description="Bitbucket URL", default="https://api.bitbucket.org/")
-    username: Optional[str] = Field(description="Bitbucket Username", default=None)
-    password: Optional[SecretStr] = Field(description="Bitbucket Password/App Password", default=None)
+    url: str = Field(description="Bitbucket URL")
+    username: str = Field(description="Bitbucket Username")
+    password: SecretStr = Field(description="Bitbucket Password/App Password")

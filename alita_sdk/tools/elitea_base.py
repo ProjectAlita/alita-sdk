@@ -39,6 +39,7 @@ BaseCodeIndexParams = create_model(
     branch=(Optional[str], Field(description="Branch to index files from. Defaults to active branch if None.", default=None)),
     whitelist=(Optional[List[str]], Field(description='File extensions or paths to include. Defaults to all files if None. Example: ["*.md", "*.java"]', default=None)),
     blacklist=(Optional[List[str]], Field(description='File extensions or paths to exclude. Defaults to no exclusions if None. Example: ["*.md", "*.java"]', default=None)),
+    clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
 )
 
 RemoveIndexParams = create_model(
@@ -135,7 +136,7 @@ class BaseToolApiWrapper(BaseModel):
 
             logger.info(message)
             dispatch_custom_event(
-                name="tool_execution_step",
+                name="thinking_step",
                 data={
                     "message": message,
                     "tool_name": tool_name,
