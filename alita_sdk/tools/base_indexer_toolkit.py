@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 BaseIndexParams = create_model(
     "BaseIndexParams",
     collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
 )
 
 RemoveIndexParams = create_model(
@@ -30,7 +29,6 @@ BaseSearchParams = create_model(
     collection_suffix=(Optional[str], Field(
         description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
         default="", max_length=7)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
         default={},
@@ -60,7 +58,6 @@ BaseStepbackSearchParams = create_model(
     "BaseStepbackSearchParams",
     query=(str, Field(description="Query text to search in the index")),
     collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
-    vectorstore_type=(Optional[str], Field(description="Vectorstore type (Chroma, PGVector, Elastic, etc.)", default="PGVector")),
     messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -107,7 +104,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     connection_string: Optional[SecretStr] = None
     collection_name: Optional[str] = None
     embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
     vectorstore_type: Optional[str] = "PGVector"
     _embedding: Optional[Any] = None
     alita: Any = None # Elitea client, if available
@@ -117,10 +113,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         connection_string = conn.get_secret_value() if isinstance(conn, SecretStr) else conn
         collection_name = kwargs.get('collection_name')
         
-        # if 'embedding_model' not in kwargs:
-        kwargs['embedding_model'] = 'HuggingFaceEmbeddings'
-        if 'embedding_model_params' not in kwargs:
-            kwargs['embedding_model_params'] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
+        if 'embedding_model' not in kwargs:
+            kwargs['embedding_model'] = 'HuggingFaceEmbeddings'
         if 'vectorstore_type' not in kwargs:
             kwargs['vectorstore_type'] = 'PGVector'
         vectorstore_type = kwargs.get('vectorstore_type')
@@ -257,6 +251,16 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         return (f"Collection '{collection_suffix}' has been removed from the vector store.\n"
                 f"Available collections: {self.list_collections()}")
 
+    def _build_collection_filter(self, filter: dict | str, collection_suffix: str = "") -> dict:
+        """Builds a filter for the collection based on the provided suffix."""
+
+        filter = filter if isinstance(filter, dict) else json.loads(filter)
+        if collection_suffix:
+            filter.update({"collection": {
+                "$eq": collection_suffix.strip()
+            }})
+        return filter
+
     def search_index(self,
                      query: str,
                      collection_suffix: str = "",
@@ -268,12 +272,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      **kwargs):
         """ Searches indexed documents in the vector store."""
         # build filter on top of collection_suffix
-        filter = filter if isinstance(filter, dict) else json.loads(filter)
-        if collection_suffix:
-            filter.update({"collection": {
-                "$eq": collection_suffix.strip()
-            }})
-
+        filter = self._build_collection_filter(filter, collection_suffix)
         found_docs = super().search_documents(
             query,
             doctype=self.doctype,
@@ -298,6 +297,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      extended_search: Optional[List[str]] = None,
                      **kwargs):
         """ Searches indexed documents in the vector store."""
+        filter = self._build_collection_filter(filter, collection_suffix)
         found_docs = super().stepback_search(
             query,
             messages,
@@ -322,6 +322,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      extended_search: Optional[List[str]] = None,
                      **kwargs):
         """ Generates a summary of indexed documents using stepback technique."""
+
+        filter = self._build_collection_filter(filter, collection_suffix)
         return super().stepback_summary(
             query, 
             messages, 
