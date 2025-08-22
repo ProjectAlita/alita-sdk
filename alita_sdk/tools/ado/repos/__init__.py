@@ -23,10 +23,8 @@ def _get_toolkit(tool) -> BaseToolkit:
         active_branch=tool['settings'].get('active_branch', ""),
         toolkit_name=tool['settings'].get('toolkit_name', ""),
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-        collection_name=tool['toolkit_name'],
-        doctype='code',
         embedding_model=tool['settings'].get('embedding_model'),
-        vectorstore_type="PGVector",
+        collection_name=tool['toolkit_name'],
     )
 
 def get_toolkit():
@@ -62,11 +60,6 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                     "icon_url": "ado-repos-icon.svg",
                     "categories": ["code repositories"],
                     "extra_categories": ["code", "repository", "version control"],
-                    # "configuration_group": {
-                    #     "name": "ado_repos",
-                    #     "label": "Azure DevOps Repositories",
-                    #     "icon_url": "ado-repos-icon.svg",
-                    # }
                 }}}
         )
 

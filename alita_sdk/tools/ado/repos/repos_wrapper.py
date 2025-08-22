@@ -251,15 +251,6 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
     token: Optional[SecretStr]
     _client: Optional[GitClient] = PrivateAttr()
 
-    llm: Optional[Any] = None
-    # Vector store configuration
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    doctype: Optional[str] = 'code'
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[dict] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
-
     class Config:
         arbitrary_types_allowed = True
 
