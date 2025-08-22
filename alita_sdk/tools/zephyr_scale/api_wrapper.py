@@ -1,15 +1,18 @@
 import json
 import logging
 import re
-from typing import Any, Optional, List, Dict, Tuple, Union, Generator
+from typing import Any, Optional, List, Dict, Tuple, Union, Generator, Literal
 
 from pydantic import model_validator, BaseModel, SecretStr
 from langchain_core.tools import ToolException
 from pydantic import create_model, PrivateAttr
 from pydantic.fields import Field
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper, BaseIndexParams, extend_with_vector_tools
 from langchain_core.documents import Document
+
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
+
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 except ImportError:
@@ -249,7 +252,7 @@ ZephyrUpdateTestSteps = create_model(
 )
 
 
-class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
+class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
     # url for a Zephyr server
     base_url: Optional[str] = ""
     # auth with Jira token (cloud & server)
@@ -296,7 +299,7 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
         # else:
         # Cloud version is enabled for now
         cls._api = ZephyrScale(token=values['token']).api
-        return values
+        return super().validate_toolkit(values)
 
     def get_tests(self, project_key: str = None, folder_id: str = None, maxResults: Optional[int] = 10, startAt: Optional[int] = 0):
         """Retrieves all test cases. Query parameters can be used to filter the results.
@@ -1210,7 +1213,9 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
         
             Example:
                 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login" AND orderBy = "name" AND orderDirection = "ASC"'
-            """))
+            """)),
+            'chunking_tool': (Literal["", 'json'],
+                              Field(description="Name of chunking tool", default='json'))
         }
 
     def _base_loader(self, project_key: str, jql: str, **kwargs) -> Generator[Document, None, None]:
@@ -1250,8 +1255,8 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
             for key, value in folder.items():
                 if value is not None:
                     metadata[key] = value
-            page_content['type'] = "FOLDER"
-            yield Document(page_content=json.dumps(page_content), metadata=metadata)
+            metadata['type'] = "FOLDER"
+            yield Document(page_content="", metadata=metadata)
 
     def _get_test_cases_docs(self, project_key: str, jql: str) -> Generator[Document, None, None]:
         try:
@@ -1269,31 +1274,31 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
                 metadata['updated_on'] = last_version['createdOn']
             else:
                 metadata['updated_on'] = case['createdOn']
+            metadata['type'] = "TEST_CASE"
 
-            case['type'] = "TEST_CASE"
+            yield Document(page_content="", metadata=metadata)
 
-            yield Document(page_content=json.dumps(case), metadata=metadata)
+    def _extend_data(self, documents: Generator[Document, None, None]) -> Generator[Document, None, None]:
+        for document in documents:
+            try:
+                if 'type' in document.metadata and document.metadata['type'] == "TEST_CASE":
+                    additional_content = self._process_test_case(document.metadata['key'])
+                    for steps_type, content in additional_content.items():
+                        if content:
+                            document.page_content = json.dumps(content)
+                            document.metadata["steps_type"] = steps_type
+            except json.JSONDecodeError as e:
+                raise ToolException(f"Failed to decode JSON from document: {e}")
+            yield document
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        try:
-            base_data = json.loads(document.page_content)
-
-            if base_data['type'] and base_data['type'] == "TEST_CASE":
-                additional_content = self._process_test_case(base_data)
-                base_data['test_case_content'] = additional_content
-
-            document.page_content = json.dumps(base_data)
-        except json.JSONDecodeError as e:
-            raise ToolException(f"Failed to decode JSON from document: {e}")
-
-    def _process_test_case(self, case):
-        steps = self.get_test_steps(case['key'], return_list=True)
-        script = self.get_test_script(case['key'], return_only_script=True)
-        additional_content = {
-            "steps": "" if isinstance(steps, ToolException) else steps,
-            "script": "" if isinstance(script, ToolException) else script,
-        }
-        return additional_content
+    def _process_test_case(self, key):
+        steps = self.get_test_steps(key, return_list=True)
+        if steps and not isinstance(steps, ToolException):
+            return {"steps": steps}
+        script = self.get_test_script(key, return_only_script=True)
+        if script and not isinstance(script, ToolException):
+            return {"script": script}
+        return {"empty": ""}
 
     def get_tests_recursive(self, project_key: str = None, folder_id: str = None, maxResults: Optional[int] = 100, startAt: Optional[int] = 0):
         """Retrieves all test cases recursively from a folder and all its subfolders.
@@ -1552,7 +1557,7 @@ class ZephyrScaleApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             return ToolException(f"Error updating test steps for test case {test_case_key}: {str(e)}")
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {

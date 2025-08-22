@@ -9,7 +9,7 @@ def json_chunker(file_content_generator: Generator[Document, None, None], config
     for doc in file_content_generator:
         try:
             data_dict = json.loads(doc.page_content)
-            chunks = RecursiveJsonSplitter(max_chunk_size=max_tokens).split_json(json_data=data_dict)
+            chunks = RecursiveJsonSplitter(max_chunk_size=max_tokens).split_json(json_data=data_dict, convert_lists=True)
             if len(chunks) == 1:
                 yield doc
                 continue

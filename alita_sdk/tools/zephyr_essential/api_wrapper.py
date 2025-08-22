@@ -4,7 +4,6 @@ from typing import Optional, Generator, Literal
 from pydantic import model_validator, create_model, Field, SecretStr, PrivateAttr
 
 from .client import ZephyrEssentialAPI
-from ..elitea_base import extend_with_vector_tools, BaseVectorStoreToolApiWrapper
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 
@@ -236,7 +235,7 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
 
     def _index_tool_params(self):
         return {
-            'chunking_tool':(Literal[None, 'json'],
+            'chunking_tool':(Literal["", 'json'],
                            Field(description="Name of chunking tool", default='json'))
         }
 
@@ -258,21 +257,24 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
     def _extend_data(self, documents: Generator[Document, None, None]) -> Generator[Document, None, None]:
         for document in documents:
             try:
-                if document.metadata['type'] and document.metadata['type'] == "TEST_CASE":
+                if 'type' in document.metadata and document.metadata['type'] == "TEST_CASE":
                     additional_content = self._process_test_case(document.metadata['key'])
-                    document.page_content = json.dumps(additional_content)
+                    for steps_type, content in additional_content.items():
+                        if content:
+                            document.page_content = json.dumps(content)
+                            document.metadata["steps_type"] = steps_type
             except json.JSONDecodeError as e:
                 logging.error(f"Failed to decode JSON from document: {e}")
             yield document
 
-    def _process_test_case(self, key):
+    def _process_test_case(self, key) -> dict:
         steps = self.get_test_case_test_steps(key)
+        if steps and not isinstance(steps, ToolException):
+            return {"steps": steps}
         script = self.get_test_case_test_script(key)
-        additional_content = {
-            "steps": "" if isinstance(steps, ToolException) else steps,
-            "script": "" if isinstance(script, ToolException) else script,
-        }
-        return additional_content
+        if script and not isinstance(script, ToolException):
+            return {"script": script}
+        return {"empty": ""}
 
     @extend_with_parent_available_tools
     def get_available_tools(self):
