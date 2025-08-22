@@ -9,11 +9,6 @@ from pydantic import create_model, Field, model_validator
 
 from alita_sdk.tools.elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 
-try:
-    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-except ImportError:
-    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
-
 class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
     bucket: str
     artifact: Optional[Any] = None

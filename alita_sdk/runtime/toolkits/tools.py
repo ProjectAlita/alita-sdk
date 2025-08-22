@@ -72,7 +72,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 bucket=tool['settings']['bucket'],
                 toolkit_name=tool.get('toolkit_name', ''),
                 selected_tools=tool['settings'].get('selected_tools', []),
-                llm=tool['settings'].get('llm'),
+                llm=llm,
                 # indexer settings
                 connection_string=tool['settings'].get('connection_string', None),
                 collection_name=tool.get('toolkit_name'),
