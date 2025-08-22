@@ -142,7 +142,7 @@ def load_content(file_path: str, extension: str = None, loader_extra_config: dic
         if "file_path" in loader_kwargs:
             del loader_kwargs["file_path"]
 
-        loader = loader_cls(file_path, **loader_kwargs)
+        loader = loader_cls(file_path=file_path, **loader_kwargs)
         documents = loader.load()
 
         page_contents = [doc.page_content for doc in documents]
