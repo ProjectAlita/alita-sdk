@@ -3,7 +3,6 @@ from typing import Dict, List, Literal, Optional
 from requests.auth import HTTPBasicAuth
 
 from .api_wrapper import BitbucketAPIWrapper
-from .tools import __all__
 from langchain_core.tools import BaseToolkit
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict, create_model
@@ -41,10 +40,8 @@ class AlitaBitbucketToolkit(BaseToolkit):
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
-        selected_tools = {}
-        for t in __all__:
-            default = t['tool'].__pydantic_fields__['args_schema'].default
-            selected_tools[t['name']] = default.schema() if default else default
+        selected_tools = {x['name']: x['args_schema'].schema() for x in
+                          BitbucketAPIWrapper.model_construct().get_available_tools()}
         AlitaBitbucketToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
@@ -98,7 +95,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
             **(kwargs.get('pgvector_configuration') or {}),
         }
         bitbucket_api_wrapper = BitbucketAPIWrapper(**wrapper_payload)
-        available_tools: List[Dict] = __all__
+        available_tools: List[Dict] = bitbucket_api_wrapper.get_available_tools()
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         tools = []
         for tool in available_tools:

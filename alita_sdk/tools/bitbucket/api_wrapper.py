@@ -2,21 +2,119 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional
+import fnmatch
 
 from langchain_core.tools import ToolException
-from pydantic import model_validator, SecretStr
+from pydantic import model_validator, SecretStr, create_model, Field
 from .bitbucket_constants import create_pr_data
 from .cloud_api_wrapper import BitbucketCloudApi, BitbucketServerApi
 from pydantic.fields import PrivateAttr
 
-from ..elitea_base import BaseCodeToolApiWrapper
+from ..elitea_base import BaseCodeToolApiWrapper, extend_with_vector_tools
 
 logger = logging.getLogger(__name__)
 
+# Pydantic model definitions for tool arguments
+CreateBranchModel = create_model(
+    "CreateBranchModel",
+    branch_name=(str, Field(description="The name of the branch, e.g. `my_branch`.")),
+)
 
-if TYPE_CHECKING:
-    pass
+CreatePullRequestModel = create_model(
+    "CreatePullRequestModel",
+    pr_json_data=(str, Field(description=create_pr_data)),
+)
+
+CreateFileModel = create_model(
+    "CreateFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    file_contents=(str, Field(description="The contents of the file")),
+    branch=(str, Field(description="The branch to create the file in")),
+)
+
+UpdateFileModel = create_model(
+    "UpdateFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    update_query=(str, Field(description="Contains the file contents required to be updated. "
+                                       "The old file contents is wrapped in OLD <<<< and >>>> OLD. "
+                                       "The new file contents is wrapped in NEW <<<< and >>>> NEW")),
+    branch=(str, Field(description="The branch to update the file in")),
+)
+
+ReadFileModel = create_model(
+    "ReadFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    branch=(str, Field(description="The branch to read the file from")),
+)
+
+SetActiveBranchModel = create_model(
+    "SetActiveBranchModel",
+    branch_name=(str, Field(description="The name of the branch, e.g. `my_branch`.")),
+)
+
+ListBranchesInRepoModel = create_model(
+    "ListBranchesInRepoModel",
+    limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.")),
+    branch_wildcard=(Optional[str], Field(default=None, description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned."))
+)
+
+ListFilesModel = create_model(
+    "ListFilesModel",
+    path=(Optional[str], Field(description="The path to list files from")),
+    recursive=(bool, Field(description="Whether to list files recursively", default=True)),
+    branch=(Optional[str], Field(description="The branch to list files from")),
+)
+
+GetPullRequestsCommitsModel = create_model(
+    "GetPullRequestsCommitsModel",
+    pr_id=(str, Field(description="The ID of the pull request to get commits from")),
+)
+
+GetPullRequestModel = create_model(
+    "GetPullRequestModel",
+    pr_id=(str, Field(description="The ID of the pull request to get details from")),
+)
+
+GetPullRequestsChangesModel = create_model(
+    "GetPullRequestsChangesModel",
+    pr_id=(str, Field(description="The ID of the pull request to get changes from")),
+)
+
+AddPullRequestCommentModel = create_model(
+    "AddPullRequestCommentModel",
+    pr_id=(str, Field(description="The ID of the pull request to add a comment to")),
+    content=(str, Field(description="The comment content")),
+    inline=(Optional[dict], Field(default=None, description="Inline comment details. Example: {'from': 57, 'to': 122, 'path': '<string>'}"))
+)
+
+DeleteFileModel = create_model(
+    "DeleteFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    branch=(str, Field(description="The branch to delete the file from")),
+    commit_message=(str, Field(default=None, description="Commit message for deleting the file. Optional.")),
+)
+
+AppendFileModel = create_model(
+    "AppendFileModel",
+    file_path=(str, Field(description="The path of the file")),
+    content=(str, Field(description="The content to append to the file")),
+    branch=(str, Field(description="The branch to append the file in")),
+)
+
+GetIssuesModel = create_model(
+    "GetIssuesModel",
+)
+
+GetIssueModel = create_model(
+    "GetIssueModel",
+    issue_number=(int, Field(description="The number of the issue")),
+)
+
+CommentOnIssueModel = create_model(
+    "CommentOnIssueModel",
+    comment_query=(str, Field(description="The comment query string")),
+)
 
 
 class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
@@ -40,18 +138,6 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
     cloud: Optional[bool] = False
     """Bitbucket installation type: true for cloud, false for server.
     """
-
-    llm: Optional[Any] = None
-    # Alita instance
-    alita: Optional[Any] = None
-
-    # Vector store configuration
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    doctype: Optional[str] = 'code'
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
 
     @model_validator(mode='before')
     @classmethod
@@ -83,14 +169,34 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
         cls._active_branch = values.get('branch')
         return values
 
-    def set_active_branch(self, branch: str) -> None:
+    def set_active_branch(self, branch_name: str) -> str:
         """Set the active branch for the bot."""
-        self._active_branch = branch
-        return f"Active branch set to `{branch}`"
+        self._active_branch = branch_name
+        return f"Active branch set to `{branch_name}`"
 
-    def list_branches_in_repo(self) -> List[str]:
-        """List all branches in the repository."""
-        return self._bitbucket.list_branches()
+    def list_branches_in_repo(self, limit: Optional[int] = 20, branch_wildcard: Optional[str] = None) -> List[str]:
+        """
+        Lists branches in the repository with optional limit and wildcard filtering.
+
+        Parameters:
+            limit (Optional[int]): Maximum number of branches to return
+            branch_wildcard (Optional[str]): Wildcard pattern to filter branches (e.g., '*dev')
+
+        Returns:
+            List[str]: List containing names of branches
+        """
+        try:
+            branches = self._bitbucket.list_branches()
+
+            if branch_wildcard:
+                branches = [branch for branch in branches if fnmatch.fnmatch(branch, branch_wildcard)]
+
+            if limit is not None:
+                branches = branches[:limit]
+
+            return branches
+        except Exception as e:
+            return f"Failed to list branches: {str(e)}"
 
     def create_branch(self, branch_name: str) -> None:
         """Create a new branch in the repository."""
@@ -266,3 +372,106 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             return self._bitbucket.get_file(file_path=file_path, branch=branch)
         except Exception as e:
             raise ToolException(f"Can't extract file content (`{file_path}`) due to error:\n{str(e)}")
+
+    def list_files(self, path: str = None, recursive: bool = True, branch: str = None) -> List[str]:
+        """List files in the repository with optional path, recursive search, and branch."""
+        branch = branch if branch else self._active_branch
+        try:
+            files_str = self._get_files(path, branch)
+            # Parse the string response to extract file paths
+            # This is a simplified implementation - might need adjustment based on actual response format
+            import ast
+            try:
+                files_list = ast.literal_eval(files_str)
+                if isinstance(files_list, list):
+                    return files_list
+                else:
+                    return [str(files_list)]
+            except:
+                return [files_str] if files_str else []
+        except Exception as e:
+            return f"Failed to list files: {str(e)}"
+
+    def read_file(self, file_path: str, branch: str) -> str:
+        """Read the contents of a file in the repository."""
+        try:
+            return self._read_file(file_path, branch)
+        except Exception as e:
+            return f"Failed to read file {file_path}: {str(e)}"
+
+    @extend_with_vector_tools
+    def get_available_tools(self):
+        return [
+            {
+                "name": "create_branch",
+                "ref": self.create_branch,
+                "description": self.create_branch.__doc__ or "Create a new branch in the repository.",
+                "args_schema": CreateBranchModel,
+            },
+            {
+                "name": "list_branches_in_repo",
+                "ref": self.list_branches_in_repo,
+                "description": self.list_branches_in_repo.__doc__ or "List branches in the repository with optional limit and wildcard filtering.",
+                "args_schema": ListBranchesInRepoModel,
+            },
+            {
+                "name": "list_files",
+                "ref": self.list_files,
+                "description": self.list_files.__doc__ or "List files in the repository with optional path, recursive search, and branch.",
+                "args_schema": ListFilesModel,
+            },
+            {
+                "name": "create_pull_request",
+                "ref": self.create_pull_request,
+                "description": self.create_pull_request.__doc__ or "Create a pull request in the repository.",
+                "args_schema": CreatePullRequestModel,
+            },
+            {
+                "name": "create_file",
+                "ref": self.create_file,
+                "description": self.create_file.__doc__ or "Create a new file in the repository.",
+                "args_schema": CreateFileModel,
+            },
+            {
+                "name": "read_file",
+                "ref": self.read_file,
+                "description": self.read_file.__doc__ or "Read the contents of a file in the repository.",
+                "args_schema": ReadFileModel,
+            },
+            {
+                "name": "update_file",
+                "ref": self.update_file,
+                "description": self.update_file.__doc__ or "Update the contents of a file in the repository.",
+                "args_schema": UpdateFileModel,
+            },
+            {
+                "name": "set_active_branch",
+                "ref": self.set_active_branch,
+                "description": self.set_active_branch.__doc__ or "Set the active branch in the repository.",
+                "args_schema": SetActiveBranchModel,
+            },
+            {
+                "name": "get_pull_requests_commits",
+                "ref": self.get_pull_requests_commits,
+                "description": self.get_pull_requests_commits.__doc__ or "Get commits from a pull request in the repository.",
+                "args_schema": GetPullRequestsCommitsModel,
+            },
+            {
+                "name": "get_pull_request",
+                "ref": self.get_pull_request,
+                "description": self.get_pull_request.__doc__ or "Get details of a pull request in the repository.",
+                "args_schema": GetPullRequestModel,
+            },
+            {
+                "name": "get_pull_requests_changes",
+                "ref": self.get_pull_requests_changes,
+                "description": self.get_pull_requests_changes.__doc__ or "Get changes from a pull request in the repository.",
+                "args_schema": GetPullRequestsChangesModel,
+            },
+            {
+                "name": "add_pull_request_comment",
+                "ref": self.add_pull_request_comment,
+                "description": self.add_pull_request_comment.__doc__ or "Add a comment to a pull request in the repository.",
+                "args_schema": AddPullRequestCommentModel,
+            },
+        ]
