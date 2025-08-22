@@ -17,9 +17,7 @@ name = "xray_cloud"
 def get_tools(tool):
     return XrayToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        base_url=tool['settings'].get('base_url', None),
-        client_id=tool['settings'].get('client_id', None),
-        client_secret=tool['settings'].get('client_secret', None),
+        xray_configuration=tool['settings'].get('xray_configuration', {}),
         limit=tool['settings'].get('limit', 20),
         verify_ssl=tool['settings'].get('verify_ssl', True),
         toolkit_name=tool.get('toolkit_name'),
@@ -29,7 +27,6 @@ def get_tools(tool):
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         embedding_model=tool['settings'].get('embedding_model'),
         collection_name=str(tool['toolkit_name']),
-        vectorstore_type="PGVector"
     ).get_tools()
 
 
@@ -44,7 +41,7 @@ class XrayToolkit(BaseToolkit):
         return create_model(
             name,
             limit=(Optional[int], Field(description="Limit", default=100)),
-            xray_configuration=(Optional[XrayConfiguration], Field(description="Xray Configuration", json_schema_extra={'configuration_types': ['xray']})),
+            xray_configuration=(XrayConfiguration, Field(description="Xray Configuration", json_schema_extra={'configuration_types': ['xray']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",
                                                                            json_schema_extra={
@@ -71,7 +68,7 @@ class XrayToolkit(BaseToolkit):
         wrapper_payload = {
             **kwargs,
             # Use xray_configuration fields
-            **kwargs.get('xray_configuration', {}),
+            **(kwargs.get('xray_configuration') or {}),
             **(kwargs.get('pgvector_configuration') or {}),
         }
         xray_api_wrapper = XrayApiWrapper(**wrapper_payload)
