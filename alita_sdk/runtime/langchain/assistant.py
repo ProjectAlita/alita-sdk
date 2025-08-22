@@ -5,6 +5,7 @@ from typing import Any, Optional
 from langchain.agents import (
     AgentExecutor, create_openai_tools_agent,
     create_json_chat_agent)
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.base import BaseStore
 from .agents.xml_chat import create_xml_chat_agent
 from .langraph_agent import create_graph
@@ -61,11 +62,11 @@ class Assistant:
         #     )
         #     self.client = target_cls(**model_params)
         # validate agents compatibility: non-pipeline agents cannot have pipelines as toolkits
-        if app_type not in ["pipeline", "predict"]:
-            tools_to_check = data.get('tools', [])
-            if any(tool['agent_type'] == 'pipeline' for tool in tools_to_check):
-                raise ToolException("Non-pipeline agents cannot have pipelines as a toolkits. "
-                                    "Review toolkits configuration or use pipeline as master agent.")
+        # if app_type not in ["pipeline", "predict"]:
+        #     tools_to_check = data.get('tools', [])
+        #     if any(tool['agent_type'] == 'pipeline' for tool in tools_to_check):
+        #         raise ToolException("Non-pipeline agents cannot have pipelines as a toolkits. "
+        #                             "Review toolkits configuration or use pipeline as master agent.")
 
         # configure memory store if memory tool is defined (not needed for predict agents)
         if app_type != "predict":
@@ -148,20 +149,20 @@ class Assistant:
 
     def getAgentExecutor(self):
         # Exclude compiled graph runnables from simple tool agents
-        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
         agent = create_json_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
 
 
     def getXMLAgentExecutor(self):
         # Exclude compiled graph runnables from simple tool agents
-        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
         agent = create_xml_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
 
     def getOpenAIToolsAgentExecutor(self):
         # Exclude compiled graph runnables from simple tool agents
-        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
         agent = create_openai_tools_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
 
@@ -171,7 +172,7 @@ class Assistant:
         This creates a proper LangGraphAgentRunnable with modern tool support.
         """
         # Exclude compiled graph runnables from simple tool agents
-        simple_tools = [t for t in self.tools if isinstance(t, BaseTool)]
+        simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
         
         # Set up memory/checkpointer if available
         checkpointer = None
