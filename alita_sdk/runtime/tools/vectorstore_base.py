@@ -421,7 +421,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                         for result in text_results:
                             doc_id = result['id']
                             text_score = result['text_score']
-                            
+
                             if doc_id in doc_map:
                                 # Document exists in vector results, combine scores
                                 doc, vector_score = doc_map[doc_id]
@@ -452,7 +452,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         
         # Apply cutoff filter
         if cut_off:
-            combined_items = [item for item in combined_items if abs(item[1]) >= cut_off]
+            combined_items = [item for item in combined_items if abs(item[1]) <= cut_off]
         
         # Sort by score and limit results
         # DISABLED: for chroma we want ascending order (lower score is better), for others descending

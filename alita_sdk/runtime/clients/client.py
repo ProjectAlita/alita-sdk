@@ -20,6 +20,7 @@ from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
+from ..utils.utils import TOOLKIT_SPLITTER
 from ...tools import get_available_toolkit_models
 
 logger = logging.getLogger(__name__)
@@ -762,7 +763,7 @@ class AlitaClient:
                             base_available_tools.append(base_name)
 
                         # Track full names separately
-                        if '___' in tool_name_attr:
+                        if TOOLKIT_SPLITTER in tool_name_attr:
                             full_available_tools.append(tool_name_attr)
 
                 # Create comprehensive error message
