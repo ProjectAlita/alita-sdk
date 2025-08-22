@@ -1,15 +1,17 @@
 import hashlib
 import json
 import logging
-from typing import Any, Optional, Generator, List
+from typing import Any, Optional, Generator
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import create_model, Field, model_validator
 
-from alita_sdk.tools.elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
+from alita_sdk.tools.utils.available_tools_decorator import extend_with_parent_available_tools
 
-class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
+
+class ArtifactWrapper(NonCodeIndexerToolkit):
     bucket: str
     artifact: Optional[Any] = None
     
@@ -21,7 +23,7 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
         if not values.get('bucket'):
             raise ValueError("Bucket is required.")
         values["artifact"] = values['alita'].artifact(values['bucket'])
-        return values
+        return super().validate_toolkit(values)
 
     def list_files(self, bucket_name = None, return_as_string = True):
         return self.artifact.list(bucket_name, return_as_string)
@@ -76,20 +78,18 @@ class ArtifactWrapper(BaseVectorStoreToolApiWrapper):
         hasher.update(file_name.encode('utf-8'))
         return hasher.hexdigest()
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        try:
-            page_content = self.read_file(document.metadata['name'], is_capture_image=True, excel_by_sheets=True)
-        except Exception as e:
-            logging.error(f"Failed while parsing the file 'document.metadata['Path']': {e}")
-        if isinstance(page_content, dict):
-            for key, value in page_content.items():
-                metadata = document.metadata
-                metadata['page'] = key
-                yield Document(page_content=str(value), metadata=metadata)
-        else:
-            document.page_content = json.dumps(str(page_content))
+    def _extend_data(self, documents: Generator[Document, None, None]):
+        for document in documents:
+            try:
+                page_content = self.artifact.get_content_bytes(artifact_name=document.metadata['name'])
+                document.metadata['loader_content'] = page_content
+                document.metadata['loader_content_type'] = document.metadata['name']
+                yield document
+            except Exception as e:
+                logging.error(f"Failed while parsing the file '{document.metadata['name']}': {e}")
+                yield document
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         bucket_name = (Optional[str], Field(description="Name of the bucket to work with."
                                                         "If bucket is not specified by user directly, the name should be taken from chat history."
