@@ -1,14 +1,13 @@
 import logging
-from importlib.metadata import metadata
-from operator import ifloordiv
-from typing import Optional, List, Generator
+from typing import Optional, List, Generator, Literal
 
 from langchain_core.tools import ToolException
 from pydantic import create_model, model_validator, PrivateAttr, Field, SecretStr
 
 from langchain_core.documents import Document
 from .zephyr_enterprise import ZephyrClient
-from ..elitea_base import BaseToolApiWrapper, BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ zql_description = """
                     "folder=\"TestToolkit\"", "name~\"TestToolkit5\"
                     """
 
-class ZephyrApiWrapper(BaseVectorStoreToolApiWrapper):
+class ZephyrApiWrapper(NonCodeIndexerToolkit):
     base_url: str
     token: SecretStr
     _client: Optional[ZephyrClient] = PrivateAttr()
@@ -34,7 +33,7 @@ class ZephyrApiWrapper(BaseVectorStoreToolApiWrapper):
         base_url = values.get('base_url')
         token = values.get('token')
         cls._client = ZephyrClient(base_url=base_url, token=token)
-        return values
+        return super().validate_toolkit(values)
 
     def get_test_case(self, testcase_id: str):
 
@@ -153,7 +152,8 @@ class ZephyrApiWrapper(BaseVectorStoreToolApiWrapper):
         Returns a list of fields for index_data args schema.
         """
         return {
-            "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""]))
+            "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""])),
+            'chunking_tool': (Literal['json'], Field(description="Name of chunking tool", default='json'))
         }
 
     def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:
@@ -166,12 +166,17 @@ class ZephyrApiWrapper(BaseVectorStoreToolApiWrapper):
             }
             yield Document(page_content='', metadata=metadata)
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        id = document.metadata['id']
-        test_case_content = self.get_test_case_steps(id)
-        document.page_content = test_case_content
+    def _extend_data(self, documents: Generator[Document, None, None]) -> Generator[Document, None, None]:
+        for document in documents:
+            try:
+                id = document.metadata['id']
+                test_case_content = self.get_test_case_steps(id)
+                document.page_content = test_case_content
+            except Exception as e:
+                logging.error(f"Failed to process document: {e}")
+            yield document
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {

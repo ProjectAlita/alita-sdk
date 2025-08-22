@@ -1214,8 +1214,7 @@ class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
             Example:
                 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login" AND orderBy = "name" AND orderDirection = "ASC"'
             """)),
-            'chunking_tool': (Literal["", 'json'],
-                              Field(description="Name of chunking tool", default='json'))
+            'chunking_tool': (Literal['json'], Field(description="Name of chunking tool", default='json'))
         }
 
     def _base_loader(self, project_key: str, jql: str, **kwargs) -> Generator[Document, None, None]:
@@ -1287,8 +1286,8 @@ class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
                         if content:
                             document.page_content = json.dumps(content)
                             document.metadata["steps_type"] = steps_type
-            except json.JSONDecodeError as e:
-                raise ToolException(f"Failed to decode JSON from document: {e}")
+            except Exception as e:
+                logging.error(f"Failed to process document: {e}")
             yield document
 
     def _process_test_case(self, key):
