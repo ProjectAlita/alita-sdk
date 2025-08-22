@@ -17,11 +17,6 @@ from pydantic.fields import Field
 
 from ...elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 
-try:
-    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-except ImportError:
-    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
-
 logger = logging.getLogger(__name__)
 
 GetWikiInput = create_model(
@@ -67,13 +62,6 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
     token: SecretStr
     _client: Optional[WikiClient] = PrivateAttr()  # Private attribute for the wiki client
     _core_client: Optional[CoreClient] = PrivateAttr()  # Private attribute for the CoreClient client
-
-    llm: Any = None
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
 
     class Config:
         arbitrary_types_allowed = True  # Allow arbitrary types (e.g., WorkItemTrackingClient)

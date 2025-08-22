@@ -5,7 +5,6 @@ from typing import Any, Optional, List, Literal, Dict, Generator
 from langchain_core.documents import Document
 from pydantic import create_model, Field, SecretStr
 
-# from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 from .utils.content_parser import process_content_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.tools.vectorstore_base import VectorStoreWrapperBase

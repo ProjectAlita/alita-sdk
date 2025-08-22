@@ -25,6 +25,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         embedding_model=tool['settings'].get('embedding_model'),
         collection_name=tool['toolkit_name'],
+        alita=tool['settings'].get('alita', None),
     )
 
 def get_toolkit():

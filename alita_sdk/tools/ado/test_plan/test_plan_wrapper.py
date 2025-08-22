@@ -16,11 +16,6 @@ from pydantic.fields import FieldInfo as Field
 from ..work_item import AzureDevOpsApiWrapper
 from ...elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 
-try:
-    from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
-except ImportError:
-    from alita_sdk.langchain.interfaces.llm_processor import get_embeddings
-
 logger = logging.getLogger(__name__)
 
 # Input models for Test Plan operations

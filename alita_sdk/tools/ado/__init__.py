@@ -14,11 +14,12 @@ def get_tools(tool_type, tool):
         "limit": tool['settings'].get('limit', 5),
         "toolkit_name": tool.get('toolkit_name', ''),
         # indexer settings
+        "alita": tool['settings'].get('alita', None),
         "llm": tool['settings'].get('llm', None),
         "pgvector_configuration": tool['settings'].get('pgvector_configuration', {}),
         "collection_name": tool['toolkit_name'],
         "doctype": 'doc',
-        "embedding_model": tool['settings'].get('embedding_configuration', {}).get('name', None),
+        "embedding_model": tool['settings'].get('embedding_model'),
         "vectorstore_type": "PGVector"
     }
     if tool_type == 'ado_plans':
