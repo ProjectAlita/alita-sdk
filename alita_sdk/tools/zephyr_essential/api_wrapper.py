@@ -235,8 +235,7 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
 
     def _index_tool_params(self):
         return {
-            'chunking_tool':(Literal["", 'json'],
-                           Field(description="Name of chunking tool", default='json'))
+            'chunking_tool':(Literal['json'], Field(description="Name of chunking tool", default='json'))
         }
 
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
@@ -263,8 +262,8 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
                         if content:
                             document.page_content = json.dumps(content)
                             document.metadata["steps_type"] = steps_type
-            except json.JSONDecodeError as e:
-                logging.error(f"Failed to decode JSON from document: {e}")
+            except Exception as e:
+                logging.error(f"Failed to process document: {e}")
             yield document
 
     def _process_test_case(self, key) -> dict:
