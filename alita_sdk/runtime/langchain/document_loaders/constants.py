@@ -127,11 +127,6 @@ loaders_map = {
             'extract_images': True
         }
     },
-    '.doc': {
-        'class': AlitaTextLoader,
-        'is_multimodal_processing': True,
-        'kwargs': {}
-    },
     '.json': {
         'class': AlitaJSONLoader,
         'is_multimodal_processing': False,
