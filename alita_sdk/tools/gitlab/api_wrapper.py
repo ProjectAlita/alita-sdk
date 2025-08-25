@@ -106,18 +106,6 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
     _repo_instance: Any = PrivateAttr()
     _active_branch: Any = PrivateAttr()
 
-    llm: Optional[Any] = None
-    # Alita instance
-    alita: Optional[Any] = None
-
-    # Vector store configuration
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    doctype: Optional[str] = 'code'
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
-
     @model_validator(mode='before')
     @classmethod
     def validate_toolkit(cls, values: Dict) -> Dict:
