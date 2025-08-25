@@ -112,7 +112,10 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         
         if 'embedding_model' not in kwargs:
             kwargs['embedding_model'] = 'HuggingFaceEmbeddings'
-        kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(self.vectorstore_type).get_vectorstore_params(collection_name, connection_string)
+        if 'vectorstore_type' not in kwargs:
+            kwargs['vectorstore_type'] = 'PGVector'
+        vectorstore_type = kwargs.get('vectorstore_type')
+        kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(vectorstore_type).get_vectorstore_params(collection_name, connection_string)
         kwargs['_embedding'] = kwargs.get('alita').get_embeddings(kwargs.get('embedding_model'))
         super().__init__(**kwargs)
 
