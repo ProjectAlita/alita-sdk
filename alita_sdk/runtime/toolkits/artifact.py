@@ -3,7 +3,7 @@ from typing import List, Any, Literal, Optional
 from alita_sdk.tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 from ..tools.artifact import ArtifactWrapper
 from alita_sdk.tools.base.tool import BaseAction
