@@ -110,8 +110,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         connection_string = conn.get_secret_value() if isinstance(conn, SecretStr) else conn
         collection_name = kwargs.get('collection_name')
         
-        if 'embedding_model' not in kwargs:
-            kwargs['embedding_model'] = 'HuggingFaceEmbeddings'
+        if not kwargs.get('embedding_model'):
+            kwargs['embedding_model'] = 'text-embedding-ada-002'
         if 'vectorstore_type' not in kwargs:
             kwargs['vectorstore_type'] = 'PGVector'
         vectorstore_type = kwargs.get('vectorstore_type')
