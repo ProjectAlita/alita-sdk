@@ -297,7 +297,7 @@ class FigmaApiWrapper(BaseVectorStoreToolApiWrapper):
                 description="ID of the project to list files from: i.e. '55391681'",
                 default=None)),
             'file_keys': (Optional[List[str]], Field(
-                description="List of file keys to index: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
+                description='List of file keys to index: i.e. ["Fp24FuzPwH0L74ODSrCnQo", "jmhAr6q78dJoMRqt48zisY"]',
                 default=None))
         }
 
