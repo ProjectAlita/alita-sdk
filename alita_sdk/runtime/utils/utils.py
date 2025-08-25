@@ -9,6 +9,8 @@ class IndexerKeywords(Enum):
     PARENT = 'parent_id'
     # DEPENDENCY_ID = 'dependency_id'
     UPDATED_ON = 'updated_on'
+    CONTENT_IN_BYTES = 'loader_content'
+    CONTENT_FILE_NAME = 'loader_content_type'
 
 # This pattern matches characters that are NOT alphanumeric, underscores, or hyphens
 clean_string_pattern = re.compile(r'[^a-zA-Z0-9_.-]')

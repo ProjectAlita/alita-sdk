@@ -9,6 +9,7 @@ from pydantic import create_model, Field, model_validator
 
 from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 from alita_sdk.tools.utils.available_tools_decorator import extend_with_parent_available_tools
+from ...runtime.utils.utils import IndexerKeywords
 
 
 class ArtifactWrapper(NonCodeIndexerToolkit):
@@ -82,8 +83,8 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         for document in documents:
             try:
                 page_content = self.artifact.get_content_bytes(artifact_name=document.metadata['name'])
-                document.metadata['loader_content'] = page_content
-                document.metadata['loader_content_type'] = document.metadata['name']
+                document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content
+                document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = document.metadata['name']
                 yield document
             except Exception as e:
                 logging.error(f"Failed while parsing the file '{document.metadata['name']}': {e}")
