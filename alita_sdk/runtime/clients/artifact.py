@@ -78,3 +78,10 @@ class Artifact:
             bucket_name = self.bucket_name
         return self.create(artifact_name, new_data, bucket_name)
     
+    def get_content_bytes(self,
+            artifact_name: str,
+            bucket_name: str = None):
+        if not bucket_name:
+            bucket_name = self.bucket_name
+        return self.client.download_artifact(bucket_name, artifact_name)
+    
