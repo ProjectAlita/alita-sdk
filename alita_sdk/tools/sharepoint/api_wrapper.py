@@ -1,5 +1,6 @@
 import logging
-from typing import Optional, Generator
+import re
+from typing import Optional, Generator, List
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
@@ -23,7 +24,11 @@ ReadList = create_model(
 GetFiles = create_model(
     "GetFiles",
     folder_name=(Optional[str], Field(description="Folder name to get list of the files.", default=None)),
-    limit_files=(Optional[int], Field(description="Limit (maximum number) of files to be returned. Can be called with synonyms, such as First, Top, etc., or can be reflected just by a number for example 'Top 10 files'. Use default value if not specified in a query WITH NO EXTRA CONFIRMATION FROM A USER", default=100)),
+    limit_files=(Optional[int], Field(description="Limit (maximum number) of files to be returned."
+                                                  "Can be called with synonyms, such as First, Top, etc., "
+                                                  "or can be reflected just by a number for example 'Top 10 files'. "
+                                                  "Use default value if not specified in a query WITH NO EXTRA "
+                                                  "CONFIRMATION FROM A USER", default=100)),
 )
 
 ReadDocument = create_model(
@@ -100,7 +105,8 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         """ If folder name is specified, lists all files in this folder under Shared Documents path. If folder name is empty, lists all files under root catalog (Shared Documents). Number of files is limited by limit_files (default is 100)."""
         try:
             result = []
-
+            if not limit_files:
+                limit_files = 100
             target_folder_url = f"Shared Documents/{folder_name}" if folder_name else "Shared Documents"
             files = (self._client.web.get_folder_by_server_relative_path(target_folder_url)
                      .get_files(True)
@@ -146,13 +152,45 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                                   excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
 
+    def _index_tool_params(self):
+        return {
+            'limit_files': (Optional[int], Field(
+                description="Limit (maximum number) of files to be returned. Can be called with synonyms, "
+                            "such as First, Top, etc., or can be reflected just by a number for example 'Top 10 files'. "
+                            "Use default value if not specified in a query WITH NO EXTRA CONFIRMATION FROM A USER",
+                default=1000, ge=0)),
+            'include_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to include when processing: i.e. ['*.png', '*.jpg']. "
+                            "If empty, all files will be processed (except skip_extensions).",
+                default=[])),
+            'skip_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to skip when processing: i.e. ['*.png', '*.jpg']",
+                default=[])),
+        }
+
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         try:
-            all_files = self.get_files_list()
+            all_files = self.get_files_list(kwargs.get('limit_files', 10000))
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
+        include_extensions = kwargs.get('include_extensions', [])
+        skip_extensions = kwargs.get('skip_extensions', [])
+
         for file in all_files:
+            file_name = file.get('Name', '')
+
+            # Check if file should be skipped based on skip_extensions
+            if any(re.match(pattern.replace('*', '.*') + '$', file_name, re.IGNORECASE)
+                   for pattern in skip_extensions):
+                continue
+
+            # Check if file should be included based on include_extensions
+            # If include_extensions is empty, process all files (that weren't skipped)
+            if not (any(re.match(pattern.replace('*', '.*') + '$', file_name, re.IGNORECASE)
+                        for pattern in include_extensions)):
+                continue
+
             metadata = {
                 ("updated_on" if k == "Modified" else k): str(v)
                 for k, v in file.items()

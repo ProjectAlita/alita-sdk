@@ -34,7 +34,7 @@ BaseSearchParams = create_model(
         default={},
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
+    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5, ge=0, le=1)),
     search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
@@ -64,7 +64,7 @@ BaseStepbackSearchParams = create_model(
         default={},
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5)),
+    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5, ge=0, le=1)),
     search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
     reranker=(Optional[dict], Field(
         description="Reranker configuration. Can be a dictionary with reranking parameters.",
@@ -100,11 +100,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     doctype: str = "document"
 
-    llm: Any = None
     connection_string: Optional[SecretStr] = None
     collection_name: Optional[str] = None
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    vectorstore_type: Optional[str] = "PGVector"
     _embedding: Optional[Any] = None
     alita: Any = None # Elitea client, if available
 
@@ -115,10 +112,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         
         if 'embedding_model' not in kwargs:
             kwargs['embedding_model'] = 'HuggingFaceEmbeddings'
-        if 'vectorstore_type' not in kwargs:
-            kwargs['vectorstore_type'] = 'PGVector'
-        vectorstore_type = kwargs.get('vectorstore_type')
-        kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(vectorstore_type).get_vectorstore_params(collection_name, connection_string)
+        kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(self.vectorstore_type).get_vectorstore_params(collection_name, connection_string)
         kwargs['_embedding'] = kwargs.get('alita').get_embeddings(kwargs.get('embedding_model'))
         super().__init__(**kwargs)
 
