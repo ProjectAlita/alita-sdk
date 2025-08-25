@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from typing import Any, Dict, Generator, Optional
+from typing import Generator, Literal, Optional
 
 from azure.devops.connection import Connection
 from azure.devops.exceptions import AzureDevOpsServiceError
@@ -15,7 +15,9 @@ from pydantic import create_model, PrivateAttr, SecretStr
 from pydantic import model_validator
 from pydantic.fields import Field
 
-from ...elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from ...non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ...utils.available_tools_decorator import extend_with_parent_available_tools
+from ....runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,7 @@ RenamePageInput = create_model(
 )
 
 
-class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
+class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     # TODO use ado_configuration instead of organization_url, project and token
     organization_url: str
     project: str
@@ -82,7 +84,7 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
         except Exception as e:
             return ImportError(f"Failed to connect to Azure DevOps: {e}")
 
-        return values
+        return super().validate_toolkit(values)
 
     def get_wiki(self, wiki_identified: str):
         """Extract ADO wiki information."""
@@ -219,7 +221,7 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Unable to modify wiki page: {str(e)}")
             return ToolException(f"Unable to modify wiki page: {str(e)}")
 
-    def _base_loader(self, wiki_identifier: str, title_contains: Optional[str] = None, **kwargs) -> Generator[Document, None, None]:
+    def _base_loader(self, wiki_identifier: str, chunking_tool: str = None, title_contains: Optional[str] = None, **kwargs) -> Generator[Document, None, None]:
         pages = self._client.get_pages_batch(pages_batch_request={}, project=self.project, wiki_identifier=wiki_identifier)
         #
         for page in pages:
@@ -227,21 +229,31 @@ class AzureDevOpsApiWrapper(BaseVectorStoreToolApiWrapper):
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             title = page.path.rsplit("/", 1)[-1]
             if not title_contains or (title_contains and title_contains.lower() in title.lower()):
-                yield Document(page_content=content, metadata={
-                    'id': str(page.id),
-                    'path': page.path,
-                    'title': title,
-                    'updated_on': content_hash
-                })
+                if chunking_tool:
+                    yield Document(page_content='', metadata={
+                        'id': str(page.id),
+                        'path': page.path,
+                        'title': title,
+                        'updated_on': content_hash,
+                        IndexerKeywords.CONTENT_IN_BYTES.value: content.encode("utf-8")
+                    })
+                else:
+                    yield Document(page_content=content, metadata={
+                        'id': str(page.id),
+                        'path': page.path,
+                        'title': title,
+                        'updated_on': content_hash
+                    })
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
             "wiki_identifier": (str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
-            'title_contains': (Optional[str], Field(default=None, description="Optional filter to include only pages with titles containing exact this string"))
+            'title_contains': (Optional[str], Field(default=None, description="Optional filter to include only pages with titles containing exact this string")),
+            'chunking_tool':(Literal['markdown'], Field(description="Name of chunking tool", default='markdown'))
         }
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         """Return a list of available tools."""
         return [

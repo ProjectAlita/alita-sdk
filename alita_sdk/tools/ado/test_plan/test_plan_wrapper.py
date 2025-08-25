@@ -1,7 +1,7 @@
 import json
 import logging
 import xml.etree.ElementTree as ET
-from typing import Generator, Optional
+from typing import Generator, Literal, Optional
 
 from azure.devops.connection import Connection
 from azure.devops.v7_0.test_plan.models import TestPlanCreateParams, TestSuiteCreateParams, \
@@ -14,7 +14,9 @@ from pydantic import create_model, PrivateAttr, model_validator, SecretStr
 from pydantic.fields import FieldInfo as Field
 
 from ..work_item import AzureDevOpsApiWrapper
-from ...elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from ...non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ...utils.available_tools_decorator import extend_with_parent_available_tools
+from ....runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +160,7 @@ TestCasesGetModel = create_model(
     suite_id=(int, Field(description="ID of the test suite for which test cases are requested"))
 )
 
-class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
+class TestPlanApiWrapper(NonCodeIndexerToolkit):
     # TODO use ado_configuration instead of organization_url, project and token
     __test__ = False
     organization_url: str
@@ -178,7 +180,7 @@ class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
             cls._client = connection.clients.get_test_plan_client()
         except Exception as e:
             raise ImportError(f"Failed to connect to Azure DevOps: {e}")
-        return values
+        return super().validate_toolkit(values)
 
     def create_test_plan(self, test_plan_create_params: str):
         """Create a test plan in Azure DevOps."""
@@ -360,7 +362,7 @@ class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error getting test cases: {e}")
             return ToolException(f"Error getting test cases: {e}")
 
-    def _base_loader(self, plan_id: str, suite_ids: Optional[list[str]] = [], **kwargs) -> Generator[Document, None, None]:
+    def _base_loader(self, plan_id: str, suite_ids: Optional[list[str]] = [], chunking_tool: str = None, **kwargs) -> Generator[Document, None, None]:
         cases = []
         for sid in suite_ids:
             cases.extend(self.get_test_cases(plan_id, sid))
@@ -368,29 +370,39 @@ class TestPlanApiWrapper(BaseVectorStoreToolApiWrapper):
         for case in cases:
             field_dicts = case.get('work_item', {}).get('work_item_fields', [])
             data = {k: v for d in field_dicts for k, v in d.items()}
-            yield Document(
-                page_content=data.get('Microsoft.VSTS.TCM.Steps', ''),
-                metadata={
-                    'id': case.get('work_item', {}).get('id', ''),
-                    'title': case.get('work_item', {}).get('name', ''),
-                    'plan_id': case.get('test_plan', {}).get('id', ''),
-                    'suite_id': case.get('test_suite', {}).get('id', ''),
-                    'description': data.get('System.Description', ''),
-                    'updated_on': data.get('System.Rev', ''),
-                })
-
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        if False:
-            yield  # Unreachable, but keeps the function a generator
+            if chunking_tool:
+                yield Document(
+                    page_content='',
+                    metadata={
+                        'id': case.get('work_item', {}).get('id', ''),
+                        'title': case.get('work_item', {}).get('name', ''),
+                        'plan_id': case.get('test_plan', {}).get('id', ''),
+                        'suite_id': case.get('test_suite', {}).get('id', ''),
+                        'description': data.get('System.Description', ''),
+                        'updated_on': data.get('System.Rev', ''),
+                        IndexerKeywords.CONTENT_IN_BYTES.value: data.get('Microsoft.VSTS.TCM.Steps', '').encode("utf-8")
+                    })
+            else:
+                yield Document(
+                    page_content=data.get('Microsoft.VSTS.TCM.Steps', ''),
+                    metadata={
+                        'id': case.get('work_item', {}).get('id', ''),
+                        'title': case.get('work_item', {}).get('name', ''),
+                        'plan_id': case.get('test_plan', {}).get('id', ''),
+                        'suite_id': case.get('test_suite', {}).get('id', ''),
+                        'description': data.get('System.Description', ''),
+                        'updated_on': data.get('System.Rev', ''),
+                    })
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
             "plan_id": (str, Field(description="ID of the test plan for which test cases are requested")),
-            "suite_ids": (str, Field(description="List of test suite IDs for which test cases are requested (can be empty)"))
+            "suite_ids": (str, Field(description="List of test suite IDs for which test cases are requested (can be empty)")),
+            'chunking_tool':(Literal['html'], Field(description="Name of chunking tool", default='html'))
         }
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         """Return a list of available tools."""
         return [

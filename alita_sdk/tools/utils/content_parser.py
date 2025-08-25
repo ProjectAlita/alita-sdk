@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 
 from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map
+from ...runtime.utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
 
@@ -175,7 +176,7 @@ def process_content_by_type(document: Document, content, extension_source: str, 
         with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
             temp_file_path = temp_file.name
             if content is None:
-                logger.warning("'loader_content' ie expected but not found in document metadata.")
+                logger.warning(f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
                 return
             
             temp_file.write(content)
@@ -219,3 +220,18 @@ def sanitize_for_postgres(text: str, replacement: str = "") -> str:
         'Hello world'
     """
     return text.replace("\x00", replacement)
+
+
+def file_extension_by_chunker(chunker_name: str) -> str:
+    name = chunker_name.lower()
+    if name == "markdown":
+        return ".md"
+    if name == "json":
+        return ".json"
+    if name == "text" or name == "txt":
+        return ".txt"
+    if name == "html":
+        return ".html"
+    if name == "csv":
+        return ".csv"
+    return None

@@ -10,6 +10,7 @@ from pydantic import Field, PrivateAttr, create_model, model_validator, SecretSt
 
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.content_parser import parse_file_content
+from ...runtime.utils.utils import IndexerKeywords
 
 NoInput = create_model(
     "NoInput"
@@ -200,8 +201,8 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
     def _extend_data(self, documents: Generator[Document, None, None]):
         for document in documents:
             try:
-                document.metadata['loader_content'] = self._load_file_content_in_bytes(document.metadata['Path'])
-                document.metadata['loader_content_type'] = document.metadata['Name']
+                document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = self._load_file_content_in_bytes(document.metadata['Path'])
+                document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = document.metadata['Name']
                 yield document
             except Exception as e:
                 logging.error(f"Failed while parsing the file '{document.metadata['Path']}': {e}")

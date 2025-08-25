@@ -15,6 +15,7 @@ from pydantic import model_validator
 from pydantic.fields import Field
 
 from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ....runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
@@ -525,7 +526,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         for attachment_id, file_name in document.metadata.get('attachment_ids', {}).items():
             content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
             content = b"".join(x for x in content_generator)
-            yield Document(page_content="", metadata={'id': attachment_id, 'loader_content_type': file_name, 'loader_content': content})
+            yield Document(page_content="", metadata={'id': attachment_id, IndexerKeywords.CONTENT_FILE_NAME.value: file_name, IndexerKeywords.CONTENT_IN_BYTES.value: content})
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
