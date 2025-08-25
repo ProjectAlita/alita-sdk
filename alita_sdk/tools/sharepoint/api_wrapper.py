@@ -170,7 +170,7 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
 
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         try:
-            all_files = self.get_files_list(kwargs.get('limit_files', 10000))
+            all_files = self.get_files_list(limit_files=kwargs.get('limit_files', 10000))
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
