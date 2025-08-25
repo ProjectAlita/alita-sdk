@@ -422,7 +422,7 @@ def create_graph(
                             if not pipeline_name:
                                 raise ValueError("Subgraph must have a 'tool' node: add required tool to the subgraph node")
                             node_fn = SubgraphRunnable(
-                                inner=tool,
+                                inner=tool.graph,
                                 name=pipeline_name,
                                 input_mapping=node.get('input_mapping', {}),
                                 output_mapping=node.get('output_mapping', {}),
@@ -666,7 +666,9 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                config: Optional[RunnableConfig] = None,
                *args, **kwargs):
         logger.info(f"Incomming Input: {input}")
-        if not config.get("configurable", {}).get("thread_id"):
+        if config is None:
+            config = RunnableConfig()
+        if not config.get("configurable", {}).get("thread_id", ""):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")
         # Handle chat history and current input properly
