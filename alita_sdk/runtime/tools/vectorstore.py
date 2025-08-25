@@ -1,7 +1,7 @@
 import json
 import math
 import types
-from typing import Any, Optional, List, Dict, Callable, Generator
+from typing import Any, Optional, List, Dict, Callable, Generator, OrderedDict
 
 from langchain_core.documents import Document
 from pydantic import BaseModel, model_validator, Field
@@ -542,11 +542,18 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             
         # Initialize document map for tracking by ID
         doc_map = {
-            f"{doc.metadata.get('id', f'idx_{i}')}_{doc.metadata['chunk_id']}"
-            if 'chunk_id' in doc.metadata
-            else doc.metadata.get('id', f"idx_{i}"): (doc, score)
+            (
+                f"{doc.metadata.get('id', f'idx_{i}')}_{doc.metadata['chunk_id']}"
+                if 'chunk_id' in doc.metadata
+                else doc.metadata.get('id', f"idx_{i}")
+            ): (doc, 1 - score)
             for i, (doc, score) in enumerate(vector_items)
         }
+
+        # Sort the items by the new score in descending order
+        doc_map = OrderedDict(
+            sorted(doc_map.items(), key=lambda x: x[1][1], reverse=True)
+        )
         
         # Process full-text search if configured
         if full_text_search and full_text_search.get('enabled') and full_text_search.get('fields'):
@@ -597,7 +604,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         # Apply cutoff filter
         if cut_off:
             # Filter out items above the cutoff score (since the lower the score, the better)
-            combined_items = [item for item in combined_items if abs(item[1]) <= cut_off]
+            combined_items = [item for item in combined_items if abs(item[1]) >= cut_off]
         
         # Sort by score and limit results
         # DISABLED: for chroma we want ascending order (lower score is better), for others descending
