@@ -1,7 +1,7 @@
 from typing import List, Literal, Optional
 
 from langchain_core.tools import BaseToolkit, BaseTool
-from pydantic import create_model, BaseModel, Field
+from pydantic import create_model, BaseModel, Field, SecretStr
 
 from .api_wrapper import ZephyrEssentialApiWrapper
 from ..base.tool import BaseAction
@@ -35,7 +35,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
         ZephyrEssentialToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            token=(str, Field(description="Bearer api token")),
+            token=(SecretStr, Field(description="Bearer api token")),
             base_url=(Optional[str], Field(description="Zephyr Essential base url", default=None)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
