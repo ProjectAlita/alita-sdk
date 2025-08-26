@@ -73,6 +73,10 @@ class StepBackSearchDocumentsModel(BaseModel):
         }""",
         default=None
     )
+    extended_search: Optional[List[str]] = Field(
+        description="List of chunk types to search for (title, summary, propositions, keywords, documents)",
+        default=None
+    )
     reranking_config: Optional[Dict[str, Dict[str, Any]]] = Field(
         description="""Reranking configuration. Example:
         {
@@ -85,10 +89,6 @@ class StepBackSearchDocumentsModel(BaseModel):
                 }
             }
         }""",
-        default=None
-    )
-    extended_search: Optional[List[str]] = Field(
-        description="List of chunk types to search for (title, summary, propositions, keywords, documents)",
         default=None
     )
 
