@@ -190,9 +190,18 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
     def list_collections(self) -> List[str]:
-        """List all collections in the vectorstore."""
-
-        return self.vector_adapter.list_collections(self)
+        """List all collections in the vectorstore. Returns an empty list if none exist."""
+        raw = self.vector_adapter.list_collections(self)
+        # Normalize adapter output to a list of strings
+        if isinstance(raw, str):
+            raw = raw.strip()
+            if not raw:
+                return []
+            return [col for col in raw.split(',') if col]
+        if isinstance(raw, list):
+            return raw
+        # Fallback to empty list for unexpected types or None
+        return []
 
     def _clean_collection(self, collection_suffix: str = ''):
         """
