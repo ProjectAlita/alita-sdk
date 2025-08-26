@@ -848,10 +848,12 @@ CreateFolder = create_model(
     json=(str, Field(description=("""
         JSON body to create a folder. Example:
         {
-          "name": "Folder Name",
-          "description": "Folder Description",
-          "projectKey": "PROJECT_KEY"
+            "parentId": 24389289,
+            "name": "ZephyrEssential_test",
+            "projectKey": "EL",
+            "folderType": "TEST_CASE"
         }
+        Possible folder types: "TEST_CASE", "TEST_PLAN", "TEST_CYCLE"
         """
     )))
 )
