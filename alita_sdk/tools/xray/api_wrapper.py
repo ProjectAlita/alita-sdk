@@ -1,7 +1,7 @@
 import json
 import logging
 import hashlib
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Literal
 
 import requests
 from langchain_core.documents import Document
@@ -13,8 +13,9 @@ from ..elitea_base import (
     BaseVectorStoreToolApiWrapper,
     extend_with_vector_tools,
 )
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...runtime.utils.utils import IndexerKeywords
-from ..utils.content_parser import parse_file_content, load_content_from_bytes
+from ..utils.content_parser import load_file_docs
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -31,7 +32,7 @@ _get_tests_query = """query GetTests($jql: String!, $limit:Int!, $start: Int)
         limit
         results {
             issueId
-            jira(fields: ["key", "summary", "created", "updated", "assignee.displayName", "reporter.displayName"])
+            jira(fields: ["key", "summary", "description", "created", "updated", "assignee.displayName", "reporter.displayName"])
             projectId
             testType {
                 name
@@ -120,7 +121,7 @@ def _parse_tests(test_results) -> List[Any]:
     return test_results
 
 
-class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
+class XrayApiWrapper(NonCodeIndexerToolkit):
     _default_base_url: str = 'https://xray.cloud.getxray.app'
     base_url: str = ""
     client_id: str = None
@@ -147,7 +148,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         client_id = values['client_id']
         client_secret = values['client_secret']
         # Authenticate to get the token
-        values['base_url'] = values.get('base_url', '') or cls._default_base_url
+        values['base_url'] = values.get('base_url', '') or cls._default_base_url.default
         auth_url = f"{values['base_url']}/api/v1/authenticate"
         auth_data = {
             "client_id": client_id,
@@ -168,7 +169,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 return ToolException(f"Please, check you credentials ({values['client_id']} / {masked_secret}). Unable")
             else:
                 return ToolException(f"Authentication failed: {str(e)}")
-        return values
+        return super().validate_toolkit(values)
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -333,6 +334,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
             for test in tests_data:
                 page_content = ""
+                content_structure = {}
                 test_type_name = test.get("testType", {}).get("name", "").lower()
 
                 attachment_ids = []
@@ -359,19 +361,16 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                     content_structure = {"steps": steps_content}
                     if attachment_ids:
                         content_structure["attachment_ids"] = sorted(attachment_ids)
-                    page_content = json.dumps(content_structure, indent=2)
 
                 elif test_type_name == "cucumber" and test.get("gherkin"):
                     content_structure = {"gherkin": test["gherkin"]}
                     if attachment_ids:
                         content_structure["attachment_ids"] = sorted(attachment_ids)
-                    page_content = json.dumps(content_structure, indent=2)
 
                 elif test.get("unstructured"):
                     content_structure = {"unstructured": test["unstructured"]}
                     if attachment_ids:
                         content_structure["attachment_ids"] = sorted(attachment_ids)
-                    page_content = json.dumps(content_structure, indent=2)
 
                 metadata = {"doctype": self.doctype}
 
@@ -382,7 +381,12 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
 
                     if "created" in jira_data:
                         metadata["created_on"] = jira_data["created"]
-                    
+
+                    if jira_data.get("description"):
+                        content_structure["description"] = jira_data.get("description")
+
+                    page_content = json.dumps(content_structure if content_structure.items() else "", indent=2)
+
                     content_hash = hashlib.sha256(page_content.encode('utf-8')).hexdigest()[:16]
                     metadata["updated_on"] = content_hash
 
@@ -407,6 +411,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                         if "attachments" in step and step["attachments"]:
                             for attachment in step["attachments"]:
                                 if attachment and "id" in attachment and "filename" in attachment:
+                                    attachment['step_id'] = step['id']
                                     attachments_data.append(attachment)
                     if attachments_data:
                         metadata["_attachments_data"] = attachments_data
@@ -430,14 +435,7 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             Generator[Document, None, None]: A generator yielding processed Document objects with metadata.
         """
         try:
-            if not getattr(self, '_include_attachments', False):
-                yield document
-                return
-                
             attachments_data = document.metadata.get("_attachments_data", [])
-            if not attachments_data:
-                yield document
-                return
                 
             issue_id = document.metadata.get("id")
             
@@ -458,44 +456,33 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                 ).append(attachment_id)
 
                 try:
-                    content = self._process_attachment(attachment)
-                    if not content or content.startswith("Attachment processing failed"):
-                        logger.warning(f"Skipping attachment {filename} due to processing failure")
-                        continue
+                    attachment_metadata = {
+                        'id': str(attachment_id),
+                        'issue_key': document.metadata.get('key', ''),
+                        'issueId': str(issue_id),
+                        'projectId': document.metadata.get('projectId', ''),
+                        'source': f"xray_test_{issue_id}",
+                        'filename': filename,
+                        'download_link': attachment.get('downloadLink', ''),
+                        'entity_type': 'test_case_attachment',
+                        'step_id': attachment.get('step_id', ''),
+                        'key': document.metadata.get('key', ''),
+                        IndexerKeywords.PARENT.value: document.metadata.get('id', str(issue_id)),
+                        'type': 'attachment',
+                        'doctype': self.doctype,
+                    }
+                    yield from self._process_attachment(attachment, attachment_metadata)
                 except Exception as e:
                     logger.error(f"Failed to process attachment {filename}: {str(e)}")
                     continue
-
-                attachment_metadata = {
-                    'id': str(attachment_id),
-                    'issue_key': document.metadata.get('key', ''),
-                    'issueId': str(issue_id),
-                    'projectId': document.metadata.get('projectId', ''),
-                    'source': f"xray_test_{issue_id}",
-                    'filename': filename,
-                    'download_link': attachment.get('downloadLink', ''),
-                    'entity_type': 'test_case_attachment',
-                    'key': document.metadata.get('key', ''),
-                    IndexerKeywords.PARENT.value: document.metadata.get('id', str(issue_id)),
-                    'type': 'attachment',
-                    'doctype': self.doctype,
-                }
-
-                yield Document(
-                    page_content=content,
-                    metadata=attachment_metadata
-                )
             
             if "_attachments_data" in document.metadata:
                 del document.metadata["_attachments_data"]
             
-            yield document
-            
         except Exception as e:
             logger.error(f"Error processing document for attachments: {e}")
-            yield document
 
-    def _process_attachment(self, attachment: Dict[str, Any]) -> str:
+    def _process_attachment(self, attachment: Dict[str, Any], attachment_metadata) -> Generator[Document, None, None]:
         """
         Processes an attachment to extract its content.
 
@@ -508,38 +495,17 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
         try:
             download_link = attachment.get('downloadLink')
             filename = attachment.get('filename', '')
-            
-            if not download_link:
-                return f"Attachment: {filename} (no download link available)"
 
             try:
                 auth_token = self._ensure_auth_token()
                 headers = {'Authorization': f'Bearer {auth_token}'}
                 response = requests.get(download_link, headers=headers, timeout=30)
                 response.raise_for_status()
-                
-                ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
-                
-                if ext == '.pdf':
-                    content = parse_file_content(
-                        file_content=response.content,
-                        file_name=filename,
-                        llm=self.llm,
-                        is_capture_image=True
-                    )
-                else:
-                    content = load_content_from_bytes(
-                        response.content,
-                        ext,
-                        llm=self.llm
-                    )
 
-                if content:
-                    return f"filename: {filename}\ncontent: {content}"
-                else:
-                    logger.warning(f"No content extracted from attachment {filename}")
-                    return f"filename: {filename}\ncontent: [No extractable content]"
-                
+                yield from self._load_attachment(content=response.content,
+                                                 file_name=filename,
+                                                 attachment_metadata=attachment_metadata)
+
             except requests.RequestException as req_e:
                 logger.error(f"Unable to download attachment {filename} with existing token: {req_e}")
                 
@@ -560,23 +526,13 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                         fresh_headers = {'Authorization': f'Bearer {fresh_token}'}
                         response = requests.get(download_link, headers=fresh_headers, timeout=60)
                         response.raise_for_status()
-                        
-                        ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
-                        content = parse_file_content(
-                            file_content=response.content,
-                            file_name=filename,
-                            llm=self.llm,
-                            is_capture_image=True
-                        ) if ext == '.pdf' else load_content_from_bytes(response.content, ext, llm=self.llm)
-                        
-                        if content:
-                            return f"filename: {filename}\ncontent: {content}"
-                        else:
-                            return f"filename: {filename}\ncontent: [Content extraction failed after re-auth]"
+
+                        yield from self._load_attachment(content=response.content,
+                                                         file_name=filename,
+                                                         attachment_metadata=attachment_metadata)
                             
                     except Exception as reauth_e:
                         logger.error(f"Re-authentication and retry failed for {filename}: {reauth_e}")
-                        return f"Attachment: {filename} (download failed: {str(req_e)}, re-auth failed: {str(reauth_e)})"
                 else:
                     try:
                         auth_token = self._ensure_auth_token()
@@ -587,31 +543,32 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
                         }
                         response = requests.get(download_link, headers=fallback_headers, timeout=60)
                         response.raise_for_status()
-                        
-                        ext = f".{filename.split('.')[-1].lower()}" if filename and '.' in filename else ""
-                        content = parse_file_content(
-                            file_content=response.content,
-                            file_name=filename,
-                            llm=self.llm,
-                            is_capture_image=True
-                        ) if ext == '.pdf' else load_content_from_bytes(response.content, ext, llm=self.llm)
-                        
-                        if content:
-                            return f"filename: {filename}\ncontent: {content}"
-                        else:
-                            return f"filename: {filename}\ncontent: [Content extraction failed after fallback]"
+
+                        yield from self._load_attachment(content=response.content,
+                                                         file_name=filename,
+                                                         attachment_metadata=attachment_metadata)
                             
                     except Exception as fallback_e:
                         logger.error(f"Fallback download also failed for {filename}: {fallback_e}")
-                        return f"Attachment: {filename} (download failed: {str(req_e)}, fallback failed: {str(fallback_e)})"
                     
             except Exception as parse_e:
                 logger.error(f"Unable to parse attachment {filename}: {parse_e}")
-                return f"Attachment: {filename} (parsing failed: {str(parse_e)})"
                 
         except Exception as e:
             logger.error(f"Error processing attachment: {e}")
-            return f"Attachment processing failed: {str(e)}"
+
+    def _load_attachment(self, content, file_name, attachment_metadata) -> Generator[Document, None, None]:
+        content_docs = load_file_docs(file_content=content, file_name=file_name,
+                                      llm=self.llm, is_capture_image=True, excel_by_sheets=True)
+
+        if not content_docs or isinstance(content_docs, ToolException):
+            return
+        for doc in content_docs:
+            yield Document(page_content=doc.page_content,
+                           metadata={
+                               **doc.metadata,
+                               **attachment_metadata
+                           })
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
         return {
@@ -649,6 +606,8 @@ class XrayApiWrapper(BaseVectorStoreToolApiWrapper):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments (e.g., ['.exe', '.zip', '.bin'])",
                 default=None)),
+            'chunking_tool': (Literal['json'],
+                              Field(description="Name of chunking tool for base document", default='json')),
         }
 
     def _get_tests_direct(self, jql: str) -> List[Dict]:
