@@ -82,7 +82,7 @@ class ConfluenceToolkit(BaseToolkit):
             # optional field for custom headers as dictionary
             custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default=None)),
             confluence_configuration=(ConfluenceConfiguration, Field(description="Confluence Configuration", json_schema_extra={'configuration_types': ['confluence']})),
-            pgvector_configuration=(PgVectorConfiguration, Field(default = None,
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,
                                                                            description="PgVector Configuration",
                                                                            json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings

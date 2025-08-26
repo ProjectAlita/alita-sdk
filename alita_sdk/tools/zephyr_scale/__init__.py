@@ -42,7 +42,7 @@ class ZephyrScaleToolkit(BaseToolkit):
             max_results=(int, Field(default=100, description="Results count to show")),
             zephyr_configuration=(ZephyrConfiguration, Field(description="Zephyr Configuration",
                                                                        json_schema_extra={'configuration_types': ['zephyr']})),
-            pgvector_configuration=(PgVectorConfiguration, Field(default=None, description="PgVector Configuration",
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None, description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             # embedder settings

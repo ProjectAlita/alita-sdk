@@ -39,7 +39,7 @@ class SharepointToolkit(BaseToolkit):
             sharepoint_configuration=(SharepointConfiguration, Field(description="SharePoint Configuration", json_schema_extra={'configuration_types': ['sharepoint']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
-            pgvector_configuration=(PgVectorConfiguration, Field(default=None,
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",
                                                                            json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings

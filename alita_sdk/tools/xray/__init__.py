@@ -42,7 +42,7 @@ class XrayToolkit(BaseToolkit):
             name,
             limit=(Optional[int], Field(description="Limit", default=100)),
             xray_configuration=(XrayConfiguration, Field(description="Xray Configuration", json_schema_extra={'configuration_types': ['xray']})),
-            pgvector_configuration=(PgVectorConfiguration, Field(default=None,
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),

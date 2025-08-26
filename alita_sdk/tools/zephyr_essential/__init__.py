@@ -38,7 +38,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
             name,
             zephyr_essential_configuration=(ZephyrEssentialConfiguration, Field(description="Zephyr Essential Configuration", json_schema_extra={'configuration_types': ['zephyr-essential']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            pgvector_configuration=(PgVectorConfiguration, Field(default=None,
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),

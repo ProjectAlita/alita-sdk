@@ -37,7 +37,7 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
         return create_model(
             name,
             zephyr_configuration=(ZephyrEnterpriseConfiguration, Field(description="Zephyr Configuration", json_schema_extra={'configuration_types': ['zephyr-enterprise']})),
-            pgvector_configuration=(PgVectorConfiguration, Field(description="PgVector Configuration",
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']},
                                                                            default=None)),

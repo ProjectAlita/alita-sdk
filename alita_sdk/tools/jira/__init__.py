@@ -76,7 +76,7 @@ class JiraToolkit(BaseToolkit):
             verify_ssl=(bool, Field(description="Verify SSL", default=True)),
             additional_fields=(Optional[str], Field(description="Additional fields", default="")),
             jira_configuration=(JiraConfiguration, Field(description="Jira Configuration", json_schema_extra={'configuration_types': ['jira']})),
-            pgvector_configuration=(PgVectorConfiguration, Field(default=None,
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),

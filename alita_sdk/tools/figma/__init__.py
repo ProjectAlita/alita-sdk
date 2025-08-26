@@ -56,7 +56,7 @@ class FigmaToolkit(BaseToolkit):
             figma_configuration=(FigmaConfiguration, Field(description="Figma configuration", json_schema_extra={'configuration_types': ['figma']})),
 
             # indexer settings
-            pgvector_configuration=(PgVectorConfiguration, Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
 
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
