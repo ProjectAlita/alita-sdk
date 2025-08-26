@@ -11,7 +11,7 @@ from .bitbucket_constants import create_pr_data
 from .cloud_api_wrapper import BitbucketCloudApi, BitbucketServerApi
 from pydantic.fields import PrivateAttr
 
-from ..elitea_base import BaseCodeToolApiWrapper, extend_with_vector_tools
+from ..elitea_base import BaseCodeToolApiWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +399,6 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
         except Exception as e:
             return f"Failed to read file {file_path}: {str(e)}"
 
-    @extend_with_vector_tools
     def get_available_tools(self):
         return [
             {
@@ -473,5 +472,5 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
                 "ref": self.add_pull_request_comment,
                 "description": self.add_pull_request_comment.__doc__ or "Add a comment to a pull request in the repository.",
                 "args_schema": AddPullRequestCommentModel,
-            },
-        ]
+            }
+        ] + self._get_vector_search_tools()
