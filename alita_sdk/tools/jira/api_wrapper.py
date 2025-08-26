@@ -4,7 +4,7 @@ import re
 import traceback
 from json import JSONDecodeError
 from traceback import format_exc
-from typing import List, Optional, Any, Dict, Generator
+from typing import List, Optional, Any, Dict, Generator, Literal
 import os
 
 from atlassian import Jira
@@ -15,8 +15,9 @@ import requests
 
 from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from ..llm.img_utils import ImageDescriptionCache
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils import is_cookie_token, parse_cookie_string
-from ..utils.content_parser import parse_file_content, load_content_from_bytes
+from ..utils.content_parser import parse_file_content, load_content_from_bytes, load_content, load_file_docs
 from ...runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
@@ -391,7 +392,7 @@ def process_search_response(jira_url, response, payload_params: Dict[str, Any] =
 
     return str(processed_issues)
 
-class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
+class JiraApiWrapper(NonCodeIndexerToolkit):
     base_url: str
     api_version: Optional[str] = "2",
     api_key: Optional[SecretStr] = None,
@@ -442,7 +443,7 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             cls._client._update_header(header, value)
 
         cls.llm=values.get('llm')
-        return values
+        return super().validate_toolkit(values)
 
     def _parse_issues(self, issues: Dict) -> List[dict]:
         parsed = []
@@ -721,8 +722,8 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             return parsed_projects_str
         except Exception:
             stacktrace = format_exc()
-            logger.error(f"Error creating Jira issue: {stacktrace}")
-            return ToolException(f"Error creating Jira issue: {stacktrace}")
+            logger.error(f"Error listing Jira projects: {stacktrace}")
+            return ToolException(f"Error listing Jira projects: {stacktrace}")
 
     def get_attachments_content(self, jira_issue_key: str):
         """ Extract content of all attachments related to specified Jira issue key.
@@ -1118,6 +1119,95 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error processing field with images: {stacktrace}")
             return f"Error processing field with images: {str(e)}"
 
+    def process_image_match(self, match, body, attachment_resolver, context_radius=500, prompt=None):
+        """Process each image reference and get its contextual description"""
+        image_ref = match.group(1)
+        full_match = match.group(0)  # The complete image reference with markers
+
+        logger.info(f"Processing image reference: {image_ref} (full match: {full_match})")
+
+        try:
+            # Use the AttachmentResolver to find the attachment
+            attachment = attachment_resolver.find_attachment(image_ref)
+
+            if not attachment:
+                logger.warning(f"Could not find attachment for reference: {image_ref}")
+                if image_ref.startswith("http://") or image_ref.startswith("https://"):
+                    content_url = image_ref
+                    image_name = image_ref.split("/")[-1]  # Extract the name from the URL
+                    response = requests.get(content_url, timeout=10)
+                    response.raise_for_status()
+                    image_data = response.content
+                else:
+                    logger.error(f"Invalid image reference: {image_ref}")
+                    return f"[Image: {image_ref} - attachment not found]"
+            else:
+                # Get the content URL and download the image
+                content_url = attachment.get('content')
+                if not content_url:
+                    logger.error(f"No content URL found in attachment: {attachment}")
+                    return f"[Image: {image_ref} - no content URL]"
+
+                image_name = attachment.get('filename', image_ref)
+
+                # Download the image data
+                logger.info(f"Downloading image from URL: {content_url}")
+                image_data = self._download_attachment(content_url)
+
+                if not image_data:
+                    logger.error(f"Failed to download image from URL: {content_url}")
+                    return f"[Image: {image_ref} - download failed]"
+
+            # Collect surrounding content
+            context_text = self._collect_context_for_image(body, full_match, context_radius)
+
+            # Process with LLM (will use cache if available)
+            description = self._process_image_with_llm(image_data, image_name, context_text, prompt)
+            return f"[Image {image_name} Description: {description}]"
+
+        except Exception as e:
+            logger.error(f"Error retrieving attachment {image_ref}: {str(e)}")
+            return f"[Image: {image_ref} - Error: {str(e)}]"
+
+    def get_processed_comments_list_with_image_description(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500):
+        # Retrieve all comments for the issue
+        comments = self._client.issue_get_comments(jira_issue_key)
+
+        if not comments or not comments.get('comments'):
+             return []
+
+        processed_comments = []
+
+        # Create an AttachmentResolver to efficiently handle attachment lookups
+        attachment_resolver = AttachmentResolver(self._client, jira_issue_key)
+
+        # Regular expression to find image references in Jira markup
+        image_pattern = r'!([^!|]+)(?:\|[^!]*)?!'
+
+        # Process each comment
+        for comment in comments['comments']:
+            comment_body = comment.get('body', '')
+            if not comment_body:
+                continue
+
+            comment_author = comment.get('author', {}).get('displayName', 'Unknown')
+            comment_created = comment.get('created', 'Unknown date')
+
+            # Process the comment body by replacing image references with descriptions
+            processed_body = re.sub(image_pattern,
+                                    lambda match: self.process_image_match(match, comment_body, attachment_resolver, context_radius, prompt),
+                                    comment_body)
+
+            # Add the processed comment to our results
+            processed_comments.append({
+                "author": comment_author,
+                "created": comment_created,
+                "id": comment.get('id'),
+                "original_content": comment_body,
+                "processed_content": processed_body
+            })
+        return processed_comments
+
     def get_comments_with_image_descriptions(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500):
         """
         Get all comments from Jira issue and augment any images in them with textual descriptions.
@@ -1137,84 +1227,11 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             The comments with image references replaced with contextual descriptions
         """
         try:
-            # Retrieve all comments for the issue
-            comments = self._client.issue_get_comments(jira_issue_key)
-
-            if not comments or not comments.get('comments'):
+            processed_comments = self.get_processed_comments_list_with_image_description(jira_issue_key=jira_issue_key,
+                                                                                         prompt=prompt,
+                                                                                         context_radius=context_radius)
+            if not processed_comments:
                 return f"No comments found for issue '{jira_issue_key}'"
-
-            processed_comments = []
-
-            # Create an AttachmentResolver to efficiently handle attachment lookups
-            attachment_resolver = AttachmentResolver(self._client, jira_issue_key)
-
-            # Regular expression to find image references in Jira markup
-            image_pattern = r'!([^!|]+)(?:\|[^!]*)?!'
-
-            # Process each comment
-            for comment in comments['comments']:
-                comment_body = comment.get('body', '')
-                if not comment_body:
-                    continue
-
-                comment_author = comment.get('author', {}).get('displayName', 'Unknown')
-                comment_created = comment.get('created', 'Unknown date')
-
-                # Function to process images in comment text
-                def process_image_match(match):
-                    """Process each image reference and get its contextual description"""
-                    image_ref = match.group(1)
-                    full_match = match.group(0)  # The complete image reference with markers
-
-                    logger.info(f"Processing image reference: {image_ref} (full match: {full_match})")
-
-                    try:
-                        # Use the AttachmentResolver to find the attachment
-                        attachment = attachment_resolver.find_attachment(image_ref)
-
-                        if not attachment:
-                            logger.warning(f"Could not find attachment for reference: {image_ref}")
-                            return f"[Image: {image_ref} - attachment not found]"
-
-                        # Get the content URL and download the image
-                        content_url = attachment.get('content')
-                        if not content_url:
-                            logger.error(f"No content URL found in attachment: {attachment}")
-                            return f"[Image: {image_ref} - no content URL]"
-
-                        image_name = attachment.get('filename', image_ref)
-
-                        # Collect surrounding content
-                        context_text = self._collect_context_for_image(comment_body, full_match, context_radius)
-
-                        # Download the image data
-                        logger.info(f"Downloading image from URL: {content_url}")
-                        image_data = self._download_attachment(content_url)
-
-                        if not image_data:
-                            logger.error(f"Failed to download image from URL: {content_url}")
-                            return f"[Image: {image_ref} - download failed]"
-
-                        # Process with LLM (will use cache if available)
-                        description = self._process_image_with_llm(image_data, image_name, context_text, prompt)
-                        return f"[Image {image_name} Description: {description}]"
-
-                    except Exception as e:
-                        logger.error(f"Error retrieving attachment {image_ref}: {str(e)}")
-                        return f"[Image: {image_ref} - Error: {str(e)}]"
-
-                # Process the comment body by replacing image references with descriptions
-                processed_body = re.sub(image_pattern, process_image_match, comment_body)
-
-                # Add the processed comment to our results
-                processed_comments.append({
-                    "author": comment_author,
-                    "created": comment_created,
-                    "id": comment.get('id'),
-                    "original_content": comment_body,
-                    "processed_content": processed_body
-                })
-
             # Format the output
             result = f"Comments from issue '{jira_issue_key}' with image descriptions:\n\n"
             for idx, comment in enumerate(processed_comments, 1):
@@ -1243,6 +1260,7 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
         self._skipped_attachment_extensions = kwargs.get('skip_attachment_extensions', [])
         self._include_attachments = kwargs.get('include_attachments', False)
         self._included_fields = fields_to_extract.copy() if fields_to_extract else []
+        self._include_comments = kwargs.get('include_comments', True)
 
         try:
             # Prepare fields to extract
@@ -1285,6 +1303,18 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             logger.error(f"Error loading Jira issues: {str(e)}")
             raise ToolException(f"Unable to load Jira issues: {str(e)}")
 
+    def _extend_data(self, documents: Generator[Document, None, None]):
+        image_pattern = r'!([^!|]+)(?:\|[^!]*)?!'
+        for doc in documents:
+            attachment_resolver = AttachmentResolver(self._client, doc.metadata['issue_key'])
+            processed_content = re.sub(image_pattern,
+                                    lambda match: self.process_image_match(match,
+                                                                           doc.page_content,
+                                                                           attachment_resolver),
+                                    doc.page_content)
+            doc.page_content = processed_content
+            yield doc
+
     def _process_document(self, base_document: Document) -> Generator[Document, None, None]:
         """
         Process a base document to extract and index Jira issues extra fields: comments, attachments, etc..
@@ -1306,21 +1336,36 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
                     except Exception as e:
                         logger.error(f"Failed to download attachment {attachment['filename']} for issue {issue_key}: {str(e)}")
                         attachment_content = self._client.get(path=f"secure/attachment/{attachment['id']}/{attachment['filename']}", not_json_response=True)
-                    content = load_content_from_bytes(attachment_content, ext, llm=self.llm) if ext not in '.pdf' \
-                        else parse_file_content(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True)
-                    if not content:
+                    content_docs = load_file_docs(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True, excel_by_sheets=True)
+                    if not content_docs or isinstance(content_docs, ToolException):
                         continue
-                    yield Document(page_content=content,
+                    for doc in content_docs:
+                        yield Document(page_content=doc.page_content,
+                                       metadata={
+                                           **doc.metadata,
+                                           'id': attachment_id,
+                                           'issue_key': issue_key,
+                                           'source': f"{self.base_url}/browse/{issue_key}",
+                                           'filename': attachment['filename'],
+                                           'created': attachment['created'],
+                                           'mimeType': attachment['mimeType'],
+                                           'author': attachment.get('author', {}).get('name'),
+                                           IndexerKeywords.PARENT.value: base_document.metadata.get('id', None),
+                                           'type': 'attachment',
+                                       })
+        if self._include_comments:
+            comments = self.get_processed_comments_list_with_image_description(issue_key)
+            if comments:
+                for comment in comments:
+                    yield Document(page_content=comment.get('processed_content'),
                                    metadata={
-                                       'id': attachment_id,
+                                       'id': comment.get('id'),
                                        'issue_key': issue_key,
                                        'source': f"{self.base_url}/browse/{issue_key}",
-                                       'filename': attachment['filename'],
-                                       'created': attachment['created'],
-                                       'mimeType': attachment['mimeType'],
-                                       'author': attachment.get('author', {}).get('name'),
+                                       'created': comment.get('created'),
+                                       'author': comment.get('author'),
                                        IndexerKeywords.PARENT.value: base_document.metadata.get('id', None),
-                                       'type': 'attachment',
+                                       'type': 'comment',
                                    })
 
     def _jql_get_tickets(self, jql, fields="*all", start=0, limit=None, expand=None, validate_query=None):
@@ -1370,20 +1415,15 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
         """
         try:
             # Build content starting with summary
-            content = f"{issue['fields']['summary']}\n"
+            content = f"# Summary\n{issue['fields']['summary']}\n\n"
 
             # Add description if present
             description = issue['fields'].get('description', '')
             if description:
-                content += f"{description}\n"
+                content += f"# Description\n{description}\n\n"
             else:
                 # If no description, still create document but with minimal content
                 logger.debug(f"Issue {issue.get('key', 'unknown')} has no description")
-
-            # Add comments if present
-            if 'comment' in issue['fields'] and issue['fields']['comment'].get('comments'):
-                for comment in issue['fields']['comment']['comments']:
-                    content += f"{comment['body']}\n"
 
             # Add additional fields to index
             if fields_to_index:
@@ -1395,7 +1435,7 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
                             field_value = str(field_value)
                         elif isinstance(field_value, list):
                             field_value = ', '.join(str(item) for item in field_value)
-                        content += f"{field_value}\n"
+                        content += f"# {field}\n{field_value}\n\n"
 
             # Create metadata
             metadata = {
@@ -1433,6 +1473,7 @@ class JiraApiWrapper(BaseVectorStoreToolApiWrapper):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments: i.e. ['.png', '.jpg']",
                 default=[])),
+            'chunking_tool': (Literal['markdown'], Field(description="Name of chunking tool for base document", default='markdown')),
         }
 
     # def index_data(self,

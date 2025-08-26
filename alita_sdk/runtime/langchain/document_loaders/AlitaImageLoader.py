@@ -151,5 +151,5 @@ class AlitaImageLoader(BaseLoader):
         """Load text from image using OCR or LLM if llm is provided, supports SVG."""
         text_content = self.get_content()
 
-        metadata = {"source": str(self.file_path)}  # Ensure source is always a string for metadata
+        metadata = {"source": str(self.file_path if hasattr(self, 'file_path') else self.file_name)}  # Ensure source is always a string for metadata
         return [Document(page_content=text_content, metadata=metadata)]

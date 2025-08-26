@@ -657,13 +657,43 @@ CreateTestCaseTestSteps = create_model(
     test_case_key=(str, Field(description="Key of the test case to create test steps for.")),
     json=(str, Field(description=("""
         JSON body to create test steps. Example:
-        [
-          {
-            "step": "Step 1",
-            "data": "Test Data",
-            "result": "Expected Result"
-          }
-        ]
+        {
+          "mode": "APPEND",
+          "items": [
+            {
+              "inline": {
+                "description": "Attempt to login to the application",
+                "testData": "Username = SmartBear Password = weLoveAtlassian",
+                "expectedResult": "Login succeeds, web-app redirects to the dashboard view",
+                "customFields": {
+                  "Build Number": 20,
+                  "Release Date": "2020-01-01",
+                  "Pre-Condition(s)": "User should have logged in. <br> User should have navigated to the administration panel.",
+                  "Implemented": false,
+                  "Category": [
+                    "Performance",
+                    "Regression"
+                  ],
+                  "Tester": "fa2e582e-5e15-521e-92e3-47e6ca2e7256"
+                }
+              },
+              "testCase": {
+                "self": "string",
+                "testCaseKey": "PROJ-T123",
+                "parameters": [
+                  {
+                    "name": "username",
+                    "type": "DEFAULT_VALUE",
+                    "value": "admin"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        Where:
+        mode: str - required - Valid values: "APPEND", "OVERWRITE",
+        items - The list of test steps. Each step should be an object containing inline or testCase. They should only include one of these fields at a time.
         """
     )))
 )
@@ -848,10 +878,12 @@ CreateFolder = create_model(
     json=(str, Field(description=("""
         JSON body to create a folder. Example:
         {
-          "name": "Folder Name",
-          "description": "Folder Description",
-          "projectKey": "PROJECT_KEY"
+            "parentId": 24389289,
+            "name": "ZephyrEssential_test",
+            "projectKey": "EL",
+            "folderType": "TEST_CASE"
         }
+        Possible folder types: "TEST_CASE", "TEST_PLAN", "TEST_CYCLE"
         """
     )))
 )
