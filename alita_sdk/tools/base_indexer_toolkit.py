@@ -126,6 +126,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """
         return {}
 
+    def _remove_metadata_keys(self) -> List[str]:
+        """ Returns a list of metadata keys to be removed from documents before indexing.
+        Override this method in subclasses to provide specific keys to remove."""
+        return [IndexerKeywords.CONTENT_IN_BYTES.value, IndexerKeywords.CONTENT_FILE_NAME.value]
+
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         """ Loads documents from a source, processes them,
         and returns a list of Document objects with base metadata: id and created_on."""
@@ -158,8 +163,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         documents = self._extend_data(documents) # update content of not-reduced base document if needed (for sharepoint and similar)
         documents = self._collect_dependencies(documents) # collect dependencies for base documents
         documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
+        list_documents = list(documents)
+        self._clean_metadata(list_documents)
+
         #
-        return self._save_index(list(documents), collection_suffix=collection_suffix, progress_step=progress_step)
+        return self._save_index(list_documents, collection_suffix=collection_suffix, progress_step=progress_step)
     
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
         from alita_sdk.tools.chunkers import __all__ as chunkers
@@ -202,6 +210,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             for dep in dependencies:
                 dep.metadata[IndexerKeywords.PARENT.value] = document.metadata.get('id', None)
                 yield dep
+
+    def _clean_metadata(self, documents: list[Document]):
+        for document in documents:
+            remove_keys = self._remove_metadata_keys()
+            for key in remove_keys:
+                document.metadata.pop(key, None)
 
     def _reduce_duplicates(
             self,
