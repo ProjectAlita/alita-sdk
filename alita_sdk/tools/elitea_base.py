@@ -625,6 +625,9 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
                 if is_whitelisted(file) and not is_blacklisted(file):
                     # read file ONLY if it matches whitelist and does not match blacklist
                     file_content = self._read_file(file, branch=branch or self.active_branch or self._active_branch)
+                    if not file_content:
+                        # empty file, skip
+                        continue
                     # hash the file content to ensure uniqueness
                     import hashlib
                     file_hash = hashlib.sha256(file_content.encode("utf-8")).hexdigest()
