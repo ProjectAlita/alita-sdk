@@ -1,12 +1,13 @@
 import logging
 from typing import Dict, List, Optional, Literal
 from langchain_core.tools import BaseToolkit, BaseTool
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import create_model, BaseModel, ConfigDict, Field
 from functools import lru_cache
 
 from .api_wrapper import CarrierAPIWrapper
 from .tools import __all__
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...configurations.carrier import CarrierConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +28,8 @@ class AlitaCarrierToolkit(BaseToolkit):
         cls.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            url=(str, Field(description="Carrier Platform Base URL")),
-            organization=(str, Field(description="Carrier Organization Name", json_schema_extra={'toolkit_name': True,
-                                                                                                 'max_toolkit_length': cls.toolkit_max_length})),
-            private_token=(
-                SecretStr, Field(description="Carrier Platform Authentication Token", json_schema_extra={'secret': True})),
             project_id=(Optional[str], Field(None, description="Optional project ID for scoped operations")),
+            carrier_configuration=(CarrierConfiguration, Field(description="Carrier Configuration", json_schema_extra={'configuration_types': ['carrier']})),
             selected_tools=(
                 List[Literal[tuple(selected_tools)]],
                 Field(default=[], json_schema_extra={"args_schemas": selected_tools}),
@@ -58,10 +55,15 @@ class AlitaCarrierToolkit(BaseToolkit):
         selected_tools = selected_tools or []
         logger.info(f"[AlitaCarrierToolkit] Initializing toolkit with selected tools: {selected_tools}")
 
+        wrapper_payload = {
+            **kwargs,
+            **kwargs.get('carrier_configuration', {}),
+        }
+
         try:
-            carrier_api_wrapper = CarrierAPIWrapper(**kwargs)
+            carrier_api_wrapper = CarrierAPIWrapper(**wrapper_payload)
             logger.info(
-                f"[AlitaCarrierToolkit] CarrierAPIWrapper initialized successfully with URL: {kwargs.get('url')}")
+                f"[AlitaCarrierToolkit] CarrierAPIWrapper initialized successfully with URL: {wrapper_payload.get('url')}")
         except Exception as e:
             logger.exception(f"[AlitaCarrierToolkit] Error initializing CarrierAPIWrapper: {e}")
             raise ValueError(f"CarrierAPIWrapper initialization error: {e}")
@@ -92,9 +94,7 @@ class AlitaCarrierToolkit(BaseToolkit):
 def get_tools(tool_config: Dict) -> List[BaseTool]:
     return AlitaCarrierToolkit.get_toolkit(
         selected_tools=tool_config.get('selected_tools', []),
-        url=tool_config['settings']['url'],
         project_id=tool_config['settings'].get('project_id'),
-        organization=tool_config['settings']['organization'],
-        private_token=tool_config['settings']['private_token'],
+        carrier_configuration=tool_config['settings']['carrier_configuration'],
         toolkit_name=tool_config.get('toolkit_name')
     ).get_tools()

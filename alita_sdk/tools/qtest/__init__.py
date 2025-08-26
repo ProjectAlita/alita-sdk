@@ -33,7 +33,7 @@ class QtestToolkit(BaseToolkit):
         QtestToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            qtest_configuration=(Optional[QtestConfiguration], Field(description="QTest API token", json_schema_extra={
+            qtest_configuration=(QtestConfiguration, Field(description="QTest API token", json_schema_extra={
                 'configuration_types': ['qtest']})),
             qtest_project_id=(int, Field(default=None, description="QTest project id", json_schema_extra={'toolkit_name': True,
                                                                                             'max_toolkit_length': QtestToolkit.toolkit_max_length})),

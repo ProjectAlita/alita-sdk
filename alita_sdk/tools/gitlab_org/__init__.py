@@ -30,7 +30,7 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
             name,
             name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True,
                                                                             'max_toolkit_length': AlitaGitlabSpaceToolkit.toolkit_max_length})),
-            gitlab_configuration=(Optional[GitlabConfiguration], Field(description="GitLab configuration",
+            gitlab_configuration=(GitlabConfiguration, Field(description="GitLab configuration",
                                                                        json_schema_extra={
                                                                            'configuration_types': ['gitlab']})),
             repositories=(str, Field(

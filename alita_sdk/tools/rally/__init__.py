@@ -30,7 +30,7 @@ class RallyToolkit(BaseToolkit):
             name,
             name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True,
                                                                             'max_toolkit_length': RallyToolkit.toolkit_max_length})),
-            rally_configuration=(Optional[RallyConfiguration], Field(description="Rally configuration", json_schema_extra={'configuration_types': ['rally']})),
+            rally_configuration=(RallyConfiguration, Field(description="Rally configuration", json_schema_extra={'configuration_types': ['rally']})),
             workspace=(Optional[str], Field(default=None, description="Rally workspace")),
             project=(Optional[str], Field(default=None, description="Rally project")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),

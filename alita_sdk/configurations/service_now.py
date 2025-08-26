@@ -9,20 +9,9 @@ class ServiceNowConfiguration(BaseModel):
             "metadata": {
                 "label": "ServiceNow",
                 "icon_url": "servicenow.svg",
-                "sections": {
-                    "auth": {
-                        "required": True,
-                        "subsections": [
-                            {
-                                "name": "Username & Password",
-                                "fields": ["username", "password"]
-                            }
-                        ]
-                    },
-                },
                 "section": "credentials",
                 "type": "service_now",
-                "categories": ["service management"],
+                "categories": ["other"],
                 "extra_categories": ["servicenow", "itsm", "service management", "incident"],
             }
         }

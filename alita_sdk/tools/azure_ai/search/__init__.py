@@ -39,7 +39,7 @@ class AzureSearchToolkit(BaseToolkit):
             name,
             index_name=(str, Field(description="Azure Search index name")),
             azure_search_configuration=(
-                Optional[AzureSearchConfiguration],
+                AzureSearchConfiguration,
                 Field(description="Azure Search Configuration", json_schema_extra={'configuration_types': ['azure_search']})
             ),
             api_version=(Optional[str], Field(description="API version", default=None)),

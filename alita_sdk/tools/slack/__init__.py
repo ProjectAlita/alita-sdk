@@ -50,7 +50,7 @@ class SlackToolkit(BaseToolkit):
 
          model = create_model(
              name,
-             slack_configuration=(Optional[SlackConfiguration], Field(default=None, description="Slack configuration",
+             slack_configuration=(SlackConfiguration, Field(default=None, description="Slack configuration",
                                                              json_schema_extra={'configuration_types': ['slack']})),
              selected_tools=(List[Literal[tuple(selected_tools)]],
                              Field(default=[], json_schema_extra={'args_schemas': selected_tools})),

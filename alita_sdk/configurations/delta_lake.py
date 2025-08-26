@@ -12,7 +12,7 @@ class DeltaLakeConfiguration(BaseModel):
                 "hidden": True,
                 "section": "credentials",
                 "type": "delta_lake",
-                "categories": ["database"],
+                "categories": ["other"],
                 "extra_categories": ["aws", "data lake", "analytics", "storage"],
             }
         }

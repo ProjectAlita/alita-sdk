@@ -51,7 +51,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
             repository=(str, Field(description="Repository", json_schema_extra={'max_toolkit_length': AlitaBitbucketToolkit.toolkit_max_length, 'configuration': True})),
             branch=(str, Field(description="Main branch", default="main")),
             cloud=(Optional[bool], Field(description="Hosting Option", default=None)),
-            bitbucket_configuration=(Optional[BitbucketConfiguration], Field(description="Bitbucket Configuration", json_schema_extra={'configuration_types': ['bitbucket']})),
+            bitbucket_configuration=(BitbucketConfiguration, Field(description="Bitbucket Configuration", json_schema_extra={'configuration_types': ['bitbucket']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None, description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),

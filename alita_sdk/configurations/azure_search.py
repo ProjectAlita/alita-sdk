@@ -12,7 +12,7 @@ class AzureSearchConfiguration(BaseModel):
                 "hidden": True,
                 "section": "credentials",
                 "type": "azure_search",
-                "categories": ["search"],
+                "categories": ["other"],
                 "extra_categories": ["azure", "cognitive search", "vector database", "knowledge base"],
             }
         }
