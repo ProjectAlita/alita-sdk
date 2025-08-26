@@ -9,7 +9,7 @@ class SharepointConfiguration(BaseModel):
                 "icon_url": "sharepoint.svg",
                 "section": "credentials",
                 "type": "sharepoint",
-                "categories": ["collaboration"],
+                "categories": ["office"],
                 "extra_categories": ["sharepoint", "microsoft", "documents", "collaboration"],
             }
         }

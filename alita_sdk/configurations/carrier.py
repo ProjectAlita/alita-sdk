@@ -9,7 +9,7 @@ class CarrierConfiguration(BaseModel):
                 "icon_url": "carrier.svg",
                 "section": "credentials",
                 "type": "carrier",
-                "categories": ["security"],
+                "categories": ["testing"],
                 "extra_categories": ["carrier", "security", "testing", "vulnerability"],
             }
         }

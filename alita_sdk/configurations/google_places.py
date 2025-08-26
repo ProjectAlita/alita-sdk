@@ -9,7 +9,7 @@ class GooglePlacesConfiguration(BaseModel):
                 "icon_url": "google.svg",
                 "section": "credentials",
                 "type": "google_places",
-                "categories": ["maps"],
+                "categories": ["other"],
                 "extra_categories": ["google", "places", "maps", "location", "geocoding"],
             }
         }

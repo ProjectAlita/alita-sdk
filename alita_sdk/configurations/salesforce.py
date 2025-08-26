@@ -9,7 +9,7 @@ class SalesforceConfiguration(BaseModel):
                 "icon_url": "salesforce.svg",
                 "section": "credentials",
                 "type": "salesforce",
-                "categories": ["crm"],
+                "categories": ["other"],
                 "extra_categories": ["salesforce", "crm", "sales", "customer"],
             }
         }

@@ -9,7 +9,7 @@ class BrowserConfiguration(BaseModel):
                 "icon_url": "browser.svg",
                 "section": "credentials",
                 "type": "browser",
-                "categories": ["search"],
+                "categories": ["testing"],
                 "extra_categories": ["browser", "google", "search", "web"],
             }
         }

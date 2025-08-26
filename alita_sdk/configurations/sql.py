@@ -9,7 +9,7 @@ class SqlConfiguration(BaseModel):
                 "icon_url": "sql.svg",
                 "section": "credentials",
                 "type": "sql",
-                "categories": ["database"],
+                "categories": ["development"],
                 "extra_categories": ["sql", "database", "data", "query"],
             }
         }
