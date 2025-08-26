@@ -37,7 +37,7 @@ class ServiceNowToolkit(BaseToolkit):
                              json_schema_extra={
                                  'toolkit_name': True, 'max_toolkit_length': ServiceNowToolkit.toolkit_max_length})),
             response_fields=(Optional[str], Field(description="Response fields", default=None)),
-            servicenow_configuration=(Optional[ServiceNowConfiguration], Field(description="ServiceNow Configuration",
+            servicenow_configuration=(ServiceNowConfiguration, Field(description="ServiceNow Configuration",
                                                                                json_schema_extra={
                                                                                    'configuration_types': [
                                                                                        'service_now']})),

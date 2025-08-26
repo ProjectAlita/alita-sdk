@@ -57,9 +57,9 @@ class AlitaGitHubToolkit(BaseToolkit):
                     },
                 }
             ),
-            github_configuration=(Optional[GithubConfiguration], Field(description="Github configuration", default=None,
+            github_configuration=(GithubConfiguration, Field(description="Github configuration", default=None,
                                                                      json_schema_extra={'configuration_types': ['github']})),
-            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector configuration", default=None,
+            pgvector_configuration=(PgVectorConfiguration, Field(description="PgVector configuration", default=None,
                                                                      json_schema_extra={'configuration_types': ['pgvector']})),
             repository=(str, Field(description="Github repository", json_schema_extra={'toolkit_name': True,
                                                                                        'max_toolkit_length': AlitaGitHubToolkit.toolkit_max_length})),

@@ -53,10 +53,10 @@ class FigmaToolkit(BaseToolkit):
                 Field(default=[], json_schema_extra={"args_schemas": selected_tools}),
             ),
             # Figma configuration
-            figma_configuration=(Optional[FigmaConfiguration], Field(description="Figma configuration", json_schema_extra={'configuration_types': ['figma']})),
+            figma_configuration=(FigmaConfiguration, Field(description="Figma configuration", json_schema_extra={'configuration_types': ['figma']})),
 
             # indexer settings
-            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
+            pgvector_configuration=(PgVectorConfiguration, Field(description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
 
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
