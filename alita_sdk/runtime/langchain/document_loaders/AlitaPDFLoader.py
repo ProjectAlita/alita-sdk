@@ -1,5 +1,7 @@
 import pymupdf
 from langchain_community.document_loaders import PyPDFLoader
+
+from .ImageParser import ImageParser
 from .utils import perform_llm_prediction_for_image_bytes, create_temp_file
 from langchain_core.tools import ToolException
 
@@ -54,10 +56,21 @@ class AlitaPDFLoader:
 
     def load(self):
         if not hasattr(self, 'file_path'):
-            self.file_path = create_temp_file(self.file_content)
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(mode='w+b', delete=True, suffix=".pdf") as temp_file:
+                temp_file.write(self.file_content)
+                temp_file.flush()
+                self.file_path = temp_file.name
+                return self._load_docs()
+        else:
+            return self._load_docs()
+
+    def _load_docs(self):
         return PyPDFLoader(file_path=self.file_path,
-                           password=self.password,
-                           headers=self.headers,
-                           extract_images=self.extract_images,
-                           extraction_mode=self.extraction_mode,
-                           extraction_kwargs=self.extraction_kwargs).load()
+                        password=self.password,
+                        headers=self.headers,
+                        extract_images=self.extract_images,
+                        extraction_mode=self.extraction_mode,
+                        images_parser=ImageParser(llm=self.llm, prompt=self.prompt),
+                        extraction_kwargs=self.extraction_kwargs).load()
