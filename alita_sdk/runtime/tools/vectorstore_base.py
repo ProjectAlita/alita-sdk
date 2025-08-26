@@ -192,7 +192,10 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
     def list_collections(self) -> List[str]:
         """List all collections in the vectorstore."""
 
-        return self.vector_adapter.list_collections(self)
+        collections = self.vector_adapter.list_collections(self)
+        if not collections:
+            return "No indexed collections"
+        return collections
 
     def _clean_collection(self, collection_suffix: str = ''):
         """
