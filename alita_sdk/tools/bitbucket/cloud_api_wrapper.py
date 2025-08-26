@@ -35,7 +35,7 @@ def normalize_response(response) -> Dict[str, Any]:
 class BitbucketApiAbstract(ABC):
 
     @abstractmethod
-    def list_branches(self) -> str:
+    def list_branches(self) -> List[str]:
         pass
 
     @abstractmethod
@@ -86,9 +86,9 @@ class BitbucketServerApi(BitbucketApiAbstract):
         self.password = password
         self.api_client = Bitbucket(url=url, username=username, password=password)
 
-    def list_branches(self) -> str:
+    def list_branches(self) -> List[str]:
         branches = self.api_client.get_branches(project_key=self.project, repository_slug=self.repository)
-        return json.dumps([branch['displayId'] for branch in branches])
+        return [branch['displayId'] for branch in branches]
 
     def create_branch(self, branch_name: str, branch_from: str) -> Response:
         return self.api_client.create_branch(
@@ -257,10 +257,10 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         except Exception as e:
             raise ToolException(f"Unable to connect to the repository '{self.repository_name}' due to error:\n{str(e)}")
 
-    def list_branches(self) -> str:
+    def list_branches(self) -> List[str]:
         branches = self.repository.branches.each()
         branch_names = [branch.name for branch in branches]
-        return ', '.join(branch_names)
+        return branch_names
 
     def _get_branch(self, branch_name: str) -> Response:
         return self.repository.branches.get(branch_name)

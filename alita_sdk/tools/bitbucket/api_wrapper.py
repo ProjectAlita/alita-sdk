@@ -194,7 +194,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             if limit is not None:
                 branches = branches[:limit]
 
-            return branches
+            return "Found branches: " + ", ".join(branches)
         except Exception as e:
             return f"Failed to list branches: {str(e)}"
 

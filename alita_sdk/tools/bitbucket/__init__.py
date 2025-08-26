@@ -6,6 +6,8 @@ from .api_wrapper import BitbucketAPIWrapper
 from langchain_core.tools import BaseToolkit
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict, create_model
+
+from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
 from ...configurations.bitbucket import BitbucketConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
@@ -102,9 +104,12 @@ class AlitaBitbucketToolkit(BaseToolkit):
             if selected_tools:
                 if tool['name'] not in selected_tools:
                     continue
-            initiated_tool = tool['tool'](api_wrapper=bitbucket_api_wrapper)
-            initiated_tool.name = prefix + tool['name']
-            tools.append(initiated_tool)
+            tools.append(BaseAction(
+                api_wrapper=bitbucket_api_wrapper,
+                name=prefix + tool["name"],
+                description=tool["description"] + f"\nrepo: {bitbucket_api_wrapper.repository}",
+                args_schema=tool["args_schema"]
+            ))
         return cls(tools=tools)
 
     def get_tools(self):
