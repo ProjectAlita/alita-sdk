@@ -1,7 +1,7 @@
 from typing import List, Optional, Literal
 from langchain_core.tools import BaseTool, BaseToolkit
 
-from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import create_model, BaseModel, ConfigDict, Field, model_validator
 
 from langchain_community.utilities.google_search import GoogleSearchAPIWrapper
 from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
@@ -9,6 +9,7 @@ from .google_search_rag import GoogleSearchResults
 from .crawler import SingleURLCrawler, MultiURLCrawler, GetHTMLContent, GetPDFContent
 from .wiki import WikipediaQueryRun
 from ..utils import get_max_toolkit_length, clean_string, TOOLKIT_SPLITTER
+from ...configurations.browser import BrowserConfiguration
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -19,8 +20,7 @@ name = "browser"
 def get_tools(tool):
     return BrowserToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        google_api_key=tool['settings'].get('google_api_key'),
-        google_cse_id=tool['settings'].get("google_cse_id"),
+        browser_configuration=tool['settings']['browser_configuration'],
         toolkit_name=tool.get('toolkit_name', '')
     ).get_tools()
 
@@ -42,8 +42,9 @@ class BrowserToolkit(BaseToolkit):
 
         def validate_google_fields(cls, values):
             if 'google' in values.get('selected_tools', []):
-                google_cse_id = values.get('google_cse_id') is not None
-                google_api_key = values.get('google_api_key') is not None
+                browser_config = values.get('browser_configuration', {})
+                google_cse_id = browser_config.get('google_cse_id') is not None if browser_config else False
+                google_api_key = browser_config.get('google_api_key') is not None if browser_config else False
                 if not (google_cse_id and google_api_key):
                     raise ValueError("google_cse_id and google_api_key are required when 'google' is in selected_tools")
             return values
@@ -51,9 +52,7 @@ class BrowserToolkit(BaseToolkit):
         return create_model(
             name,
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Browser", "icon_url": None, "categories": ["testing"], "extra_categories": ["web scraping", "search", "crawler"]}}),
-            google_cse_id=(Optional[str], Field(description="Google CSE id", default=None)),
-            google_api_key=(Optional[SecretStr],
-                            Field(description="Google API key", default=None, json_schema_extra={'secret': True})),
+            browser_configuration=(BrowserConfiguration, Field(description="Browser Configuration", json_schema_extra={'configuration_types': ['browser']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __validators__={
@@ -65,6 +64,12 @@ class BrowserToolkit(BaseToolkit):
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
+
+        wrapper_payload = {
+            **kwargs,
+            **kwargs.get('browser_configuration', {}),
+        }
+
         tools = []
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         if not selected_tools:
@@ -88,8 +93,7 @@ class BrowserToolkit(BaseToolkit):
             elif tool == 'google':
                 try:
                     google_api_wrapper = GoogleSearchAPIWrapper(
-                        google_api_key=kwargs.get("google_api_key"),
-                        google_cse_id=kwargs.get("google_cse_id"),
+                        **wrapper_payload
                     )
                     tool_entry = GoogleSearchResults(api_wrapper=google_api_wrapper)
                     # rename the tool to avoid conflicts

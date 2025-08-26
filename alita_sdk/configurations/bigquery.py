@@ -12,7 +12,7 @@ class BigQueryConfiguration(BaseModel):
                 "hidden": True,
                 "section": "credentials",
                 "type": "bigquery",
-                "categories": ["database"],
+                "categories": ["other"],
                 "extra_categories": ["google", "gcp", "data warehouse", "analytics"],
             }
         }

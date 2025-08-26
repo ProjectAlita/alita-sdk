@@ -10,7 +10,8 @@ class AdoConfiguration(BaseModel):
                 "label": "Ado",
                 "icon_url": None,
                 "section": "credentials",
-                "type": "ado"
+                "type": "ado",
+                "categories": ["project management"],
             }
         }
     )
@@ -26,7 +27,8 @@ class AdoReposConfiguration(BaseModel):
                 "label": "ADO repos",
                 "icon_url": "ado-repos-icon.svg",
                 "section": "credentials",
-                "type": "ado_repos"
+                "type": "ado_repos",
+                "categories": ["code repositories"],
             }
         }
     )

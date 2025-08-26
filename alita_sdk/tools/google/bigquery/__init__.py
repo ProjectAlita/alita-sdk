@@ -46,7 +46,7 @@ class BigQueryToolkitConfig(BaseModel):
             }
         }
 
-    bigquery_configuration: Optional[BigQueryConfiguration] = Field(
+    bigquery_configuration: BigQueryConfiguration = Field(
         description="BigQuery configuration", json_schema_extra={"configuration_types": ["bigquery"]}
     )
     selected_tools: List[str] = Field(

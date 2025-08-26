@@ -22,7 +22,7 @@ class PostmanConfiguration(BaseModel):
                 },
                 "section": "credentials",
                 "type": "postman",
-                "categories": ["api testing"],
+                "categories": ["other"],
                 "extra_categories": ["postman", "api", "testing", "collection"],
             }
         }

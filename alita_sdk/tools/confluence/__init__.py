@@ -81,7 +81,7 @@ class ConfluenceToolkit(BaseToolkit):
             max_retry_seconds=(int, Field(description="Max retry, sec", default=60)),
             # optional field for custom headers as dictionary
             custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default=None)),
-            confluence_configuration=(Optional[ConfluenceConfiguration], Field(description="Confluence Configuration", json_schema_extra={'configuration_types': ['confluence']})),
+            confluence_configuration=(ConfluenceConfiguration, Field(description="Confluence Configuration", json_schema_extra={'configuration_types': ['confluence']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,
                                                                            description="PgVector Configuration",
                                                                            json_schema_extra={'configuration_types': ['pgvector']})),

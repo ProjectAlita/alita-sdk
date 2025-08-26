@@ -3,7 +3,7 @@ from functools import lru_cache
 from typing import List, Optional, Type
 
 from langchain_core.tools import BaseTool, BaseToolkit
-from pydantic import BaseModel, Field, SecretStr, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 from alita_sdk.configurations.delta_lake import DeltaLakeConfiguration
 from ...utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length
@@ -54,7 +54,7 @@ class DeltaLakeToolkitConfig(BaseModel):
             }
         }
 
-    delta_lake_configuration: Optional[DeltaLakeConfiguration] = Field(description="Delta Lake Configuration", json_schema_extra={"configuration_types": ["delta_lake"]})
+    delta_lake_configuration: DeltaLakeConfiguration = Field(description="Delta Lake Configuration", json_schema_extra={"configuration_types": ["delta_lake"]})
     selected_tools: List[str] = Field(default=[], description="Selected tools", json_schema_extra={"args_schemas": get_available_tools()})
 
     @field_validator("selected_tools", mode="before", check_fields=False)

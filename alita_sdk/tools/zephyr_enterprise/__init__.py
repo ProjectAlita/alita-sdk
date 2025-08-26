@@ -36,7 +36,7 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
         ZephyrEnterpriseToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            zephyr_configuration=(Optional[ZephyrEnterpriseConfiguration], Field(description="Zephyr Configuration", json_schema_extra={'configuration_types': ['zephyr-enterprise']})),
+            zephyr_configuration=(ZephyrEnterpriseConfiguration, Field(description="Zephyr Configuration", json_schema_extra={'configuration_types': ['zephyr-enterprise']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']},

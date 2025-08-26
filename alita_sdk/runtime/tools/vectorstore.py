@@ -73,6 +73,10 @@ class StepBackSearchDocumentsModel(BaseModel):
         }""",
         default=None
     )
+    extended_search: Optional[List[str]] = Field(
+        description="List of chunk types to search for (title, summary, propositions, keywords, documents)",
+        default=None
+    )
     reranking_config: Optional[Dict[str, Dict[str, Any]]] = Field(
         description="""Reranking configuration. Example:
         {
@@ -85,10 +89,6 @@ class StepBackSearchDocumentsModel(BaseModel):
                 }
             }
         }""",
-        default=None
-    )
-    extended_search: Optional[List[str]] = Field(
-        description="List of chunk types to search for (title, summary, propositions, keywords, documents)",
         default=None
     )
 
@@ -212,10 +212,27 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         """Get all indexed document IDs from vectorstore"""
         return self.vector_adapter.get_indexed_ids(self, collection_suffix)
 
-    def list_collections(self) -> List[str]:
-        """List all collections in the vectorstore."""
-
-        return self.vector_adapter.list_collections(self)
+    def list_collections(self) -> Any:
+        """List all collections in the vectorstore.
+        Returns a list of collection names, or if no collections exist,
+        returns a dict with an empty list and a message."""
+        raw = self.vector_adapter.list_collections(self)
+        # Normalize raw result to a list of names
+        if not raw:
+            # No collections found
+            return {"collections": [], "message": "No indexed collections"}
+        if isinstance(raw, str):
+            # e.g., Chroma adapter returns comma-separated string
+            cols = [c for c in raw.split(',') if c]
+        else:
+            try:
+                cols = list(raw)
+            except Exception:
+                # Unexpected type, return raw directly
+                return raw
+        if not cols:
+            return {"collections": [], "message": "No indexed collections"}
+        return cols
 
     def _clean_collection(self, collection_suffix: str = ''):
         """
@@ -765,4 +782,3 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 "args_schema": StepBackSearchDocumentsModel
             }
         ]
-

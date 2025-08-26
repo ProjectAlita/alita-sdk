@@ -7,13 +7,14 @@ from .api_wrapper import ZephyrEssentialApiWrapper
 from ..base.tool import BaseAction
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from ...configurations.pgvector import PgVectorConfiguration
+from ...configurations.zephyr_essential import ZephyrEssentialConfiguration
 
 name = "zephyr_essential"
 
 def get_tools(tool):
     return ZephyrEssentialToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        token=tool['settings']["token"],
+        zephyr_essential_configuration=tool['settings']['zephyr_essential_configuration'],
         toolkit_name=tool.get('toolkit_name'),
         llm = tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
@@ -35,8 +36,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
         ZephyrEssentialToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            token=(str, Field(description="Bearer api token")),
-            base_url=(Optional[str], Field(description="Zephyr Essential base url", default=None)),
+            zephyr_essential_configuration=(ZephyrEssentialConfiguration, Field(description="Zephyr Essential Configuration", json_schema_extra={'configuration_types': ['zephyr-essential']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",
@@ -56,6 +56,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
             selected_tools = []
         wrapper_payload = {
             **kwargs,
+            **kwargs.get('zephyr_essential_configuration', {}),
             **(kwargs.get('pgvector_configuration') or {}),
         }
         zephyr_api_wrapper = ZephyrEssentialApiWrapper(**wrapper_payload)
