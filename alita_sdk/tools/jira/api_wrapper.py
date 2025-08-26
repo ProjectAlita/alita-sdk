@@ -17,7 +17,7 @@ from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tool
 from ..llm.img_utils import ImageDescriptionCache
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils import is_cookie_token, parse_cookie_string
-from ..utils.content_parser import parse_file_content, load_content_from_bytes, load_content, load_file_docs
+from ..utils.content_parser import load_file_docs
 from ...runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
