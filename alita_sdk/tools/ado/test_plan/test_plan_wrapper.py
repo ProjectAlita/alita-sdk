@@ -1,7 +1,7 @@
 import json
 import logging
 import xml.etree.ElementTree as ET
-from typing import Generator, Literal, Optional
+from typing import Generator, Literal, Optional, List
 
 from azure.devops.connection import Connection
 from azure.devops.v7_0.test_plan.models import TestPlanCreateParams, TestSuiteCreateParams, \
@@ -359,6 +359,7 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             test_cases = self._client.get_test_case_list(self.project, plan_id, suite_id)
             return [test_case.as_dict() for test_case in test_cases]
         except Exception as e:
+            self._log_tool_event(f"Error getting test cases: {e}", 'get_test_cases')
             logger.error(f"Error getting test cases: {e}")
             return ToolException(f"Error getting test cases: {e}")
 
@@ -398,7 +399,7 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
         """Return the parameters for indexing data."""
         return {
             "plan_id": (str, Field(description="ID of the test plan for which test cases are requested")),
-            "suite_ids": (str, Field(description="List of test suite IDs for which test cases are requested (can be empty)")),
+            "suite_ids": (Optional[List[str]], Field(description='List of test suite IDs for which test cases are requested (can be empty). Example: ["2", "23"]', default=[])),
             'chunking_tool':(Literal['html'], Field(description="Name of chunking tool", default='html'))
         }
 

@@ -162,7 +162,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         return self._save_index(list(documents), collection_suffix=collection_suffix, progress_step=progress_step)
     
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
-        from alita_sdk.tools.chunkers import __all__ as chunkers
+        from ..tools.chunkers import __all__ as chunkers
 
         if chunking_config is None:
             chunking_config = {}
