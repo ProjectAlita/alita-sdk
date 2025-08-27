@@ -17,6 +17,7 @@ from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tool
 from ..llm.img_utils import ImageDescriptionCache
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils import is_cookie_token, parse_cookie_string
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..utils.content_parser import load_file_docs
 from ...runtime.utils.utils import IndexerKeywords
 
@@ -1546,7 +1547,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
     #         logger.error(f"Error indexing Jira issues: {str(e)}")
     #         raise ToolException(f"Error indexing Jira issues: {str(e)}")
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {

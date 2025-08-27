@@ -14,6 +14,7 @@ from ..elitea_base import (
     extend_with_vector_tools,
 )
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
 from ..utils.content_parser import load_file_docs
 
@@ -643,9 +644,9 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         except Exception as e:
             raise ToolException(f"Unable to execute GraphQL due to error: {str(e)}")
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
-        tools = [
+        return [
             {
                 "name": "get_tests",
                 "description": self.get_tests.__doc__,
@@ -671,6 +672,3 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                 "ref": self.execute_graphql,
             }
         ]
-
-        tools.extend(self._get_vector_search_tools())
-        return tools
