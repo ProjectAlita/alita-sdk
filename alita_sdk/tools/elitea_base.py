@@ -576,6 +576,10 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             raise ValueError("Expected a list of strings")
         return _files
 
+    def __get_branch(self, branch):
+       return (branch or getattr(self, 'active_branch', None)
+               or getattr(self, '_active_branch', None) or getattr(self, 'branch', None))
+
     def loader(self,
                branch: Optional[str] = None,
                whitelist: Optional[List[str]] = None,
@@ -601,7 +605,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         """
         from .chunkers.code.codeparser import parse_code_files_for_db
 
-        _files = self.__handle_get_files("", branch or self.active_branch or self._active_branch)
+        _files = self.__handle_get_files("", self.__get_branch(branch))
         self._log_tool_event(message="Listing files in branch", tool_name="loader")
         logger.info(f"Files in branch: {_files}")
 
@@ -624,7 +628,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             for idx, file in enumerate(_files, 1):
                 if is_whitelisted(file) and not is_blacklisted(file):
                     # read file ONLY if it matches whitelist and does not match blacklist
-                    file_content = self._read_file(file, branch=branch or self.active_branch or self._active_branch)
+                    file_content = self._read_file(file, self.__get_branch(branch))
                     if not file_content:
                         # empty file, skip
                         continue
