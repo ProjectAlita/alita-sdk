@@ -158,15 +158,22 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         if clean_index:
             self._clean_index(collection_suffix)
         #
+        self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
+        self._log_tool_event(f"Loading the documents to index...{kwargs}")
         documents = self._base_loader(**kwargs)
+        self._log_tool_event(f"Base documents were loaded. "
+                             f"Search for possible document duplicates and remove them from the indexing list...")
         documents = self._reduce_duplicates(documents, collection_suffix)
+        self._log_tool_event(f"Duplicates were removed. "
+                             f"Processing documents to collect dependencies and prepare them for indexing...")
         documents = self._extend_data(documents) # update content of not-reduced base document if needed (for sharepoint and similar)
         documents = self._collect_dependencies(documents) # collect dependencies for base documents
+        self._log_tool_event(f"Documents were processed. "
+                             f"Applying chunking tool '{chunking_tool}' if specified and preparing documents for indexing...")
         documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
         list_documents = list(documents)
         self._clean_metadata(list_documents)
-
-        #
+        self._log_tool_event(f"Documents are ready for indexing. Total documents to index: {len(list_documents)}")
         return self._save_index(list_documents, collection_suffix=collection_suffix, progress_step=progress_step)
     
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
