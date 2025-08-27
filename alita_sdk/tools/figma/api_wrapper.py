@@ -325,7 +325,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     yield Document(
                                     page_content=page_content,
                                     metadata={
-                                        'id': file_key,
+                                        'id': node_id,
                                         'updated_on': document.metadata.get('updated_on', ''),
                                         'file_key': file_key,
                                         'node_id': node_id,
