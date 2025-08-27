@@ -21,6 +21,7 @@ def get_tools(tool):
         limit=tool['settings'].get('limit', 20),
         verify_ssl=tool['settings'].get('verify_ssl', True),
         toolkit_name=tool.get('toolkit_name'),
+        llm=tool['settings'].get('llm', None),
         alita=tool['settings'].get('alita', None),
 
         # indexer settings
