@@ -249,7 +249,9 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     ) -> Generator[Document, None, None]:
         # If both include and exclude are provided, use only include
         if file_keys_include:
+            self._log_tool_event(f"Loading files: {file_keys_include}")
             for file_key in file_keys_include:
+                self._log_tool_event(f"Loading file `{file_key}`")
                 file = self._client.get_file(file_key)
                 if not file:
                     raise ToolException(f"Unexpected error while retrieving file {file_key}. Probably file is under editing. Try again later.")
@@ -265,6 +267,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 }
                 yield Document(page_content=json.dumps(metadata), metadata=metadata)
         elif project_id:
+            self._log_tool_event(f"Loading project files from project `{project_id}`")
             files = json.loads(self.get_project_files(project_id)).get('files', [])
             for file in files:
                 if file_keys_exclude and file.get('key', '') in file_keys_exclude:
@@ -286,12 +289,14 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         file_key = document.metadata.get('id', '')
+        self._log_tool_event(f"Loading details (images) for `{file_key}`")
         #
         figma_pages = self._client.get_file(file_key).document.get('children', [])
         node_ids_include = document.metadata.pop('figma_pages_include', [])
         node_ids_exclude = document.metadata.pop('figma_pages_exclude', [])
         node_types_include = [t.lower() for t in document.metadata.pop('figma_nodes_include', [])]
         node_types_exclude = [t.lower() for t in document.metadata.pop('figma_nodes_exclude', [])]
+        self._log_tool_event(f"Included pages: {node_ids_include}. Excluded pages: {node_ids_exclude}.")
         if node_ids_include:
             figma_pages = [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') in node_ids_include)]
         elif node_ids_exclude:
@@ -310,7 +315,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         ]
 
         images = self._client.get_file_images(file_key, node_ids).images or {}
-        for node_id, image_url in images.items():
+        total_images = len(images)
+        if total_images == 0:
+            logging.info(f"No images found for file {file_key}.")
+            return
+        progress_step = max(1, total_images // 10)
+        for idx, (node_id, image_url) in enumerate(images.items(), 1):
             if not image_url:
                 logging.warning(f"Image URL not found for node_id {node_id} in file {file_key}. Skipping.")
                 continue
@@ -321,17 +331,22 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     extension = f".{content_type.split('/')[-1]}" if content_type.startswith('image') else '.txt'
                     page_content = load_content_from_bytes(
                         file_content=response.content,
-                        extension=extension, llm = self.llm)
+                        extension=extension, llm=self.llm)
                     yield Document(
-                                    page_content=page_content,
-                                    metadata={
-                                        'id': node_id,
-                                        'updated_on': document.metadata.get('updated_on', ''),
-                                        'file_key': file_key,
-                                        'node_id': node_id,
-                                        'image_url': image_url
-                                    }
-                                )
+                        page_content=page_content,
+                        metadata={
+                            'id': node_id,
+                            'updated_on': document.metadata.get('updated_on', ''),
+                            'file_key': file_key,
+                            'node_id': node_id,
+                            'image_url': image_url
+                        }
+                    )
+            if idx % progress_step == 0 or idx == total_images:
+                percent = int((idx / total_images) * 100)
+                msg = f"Processed {idx}/{total_images} images ({percent}%) for file {file_key}."
+                logging.info(msg)
+                self._log_tool_event(msg)
 
     def _remove_metadata_keys(self):
         return super()._remove_metadata_keys() + ['figma_pages_include', 'figma_pages_exclude', 'figma_nodes_include', 'figma_nodes_exclude']
