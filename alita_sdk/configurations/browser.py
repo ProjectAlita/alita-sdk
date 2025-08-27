@@ -15,4 +15,4 @@ class BrowserConfiguration(BaseModel):
         }
     )
     google_cse_id: str = Field(description="Google CSE id", default=None)
-    google_api_key: SecretStr = Field(description="Google API key", default=None, json_schema_extra={'secret': True})
+    google_api_key: SecretStr = Field(description="Google API key", json_schema_extra={'secret': True})
