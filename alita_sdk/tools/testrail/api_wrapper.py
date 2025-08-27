@@ -1,8 +1,9 @@
 import json
 import logging
-from typing import Dict, List, Optional, Union, Any, Generator
+from typing import Dict, List, Literal, Optional, Union, Any, Generator
 
 import pandas as pd
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from openai import BadRequestError
 from pydantic import SecretStr, create_model, model_validator
@@ -10,11 +11,9 @@ from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
 
 from ..chunkers.code.constants import get_file_extension
-from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
-from langchain_core.documents import Document
-
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
-from ..utils.content_parser import parse_file_content
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -301,7 +300,7 @@ SUPPORTED_KEYS = {
 }
 
 
-class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
+class TestrailAPIWrapper(NonCodeIndexerToolkit):
     url: str
     password: Optional[SecretStr] = None,
     email: Optional[str] = None,
@@ -322,7 +321,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         password = values.get("password")
         email = values.get("email")
         cls._client = TestRailAPI(url, email, password)
-        return values
+        return super().validate_toolkit(values)
 
     def add_cases(self, add_test_cases_data: str):
         """Adds new test cases into Testrail per defined parameters.
@@ -537,6 +536,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                      suite_id: Optional[str] = None,
                      section_id: Optional[int] = None,
                      title_keyword: Optional[str] = None,
+                     chunking_tool: str = None,
                      **kwargs: Any
                      ) -> Generator[Document, None, None]:
         self._include_attachments = kwargs.get('include_attachments', False)
@@ -558,7 +558,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             cases = [case for case in cases if title_keyword.lower() in case.get('title', '').lower()]
 
         for case in cases:
-            yield Document(page_content=json.dumps(case), metadata={
+            metadata = {
                 'project_id': project_id,
                 'title': case.get('title', ''),
                 'suite_id': suite_id or case.get('suite_id', ''),
@@ -572,7 +572,14 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                 'automation_type': case.get('custom_automation_type') or -1,
                 'section_id': case.get('section_id') or -1,
                 'entity_type': 'test_case',
-            })
+            }
+            if chunking_tool:
+                # content is in metadata for chunking tool post-processing
+                metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = json.dumps(case).encode("utf-8")
+                page_content = ""
+            else:
+                page_content = json.dumps(case)
+            yield Document(page_content=page_content, metadata=metadata)
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         """
@@ -605,24 +612,23 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
                     continue
 
                 attachment_id = f"attach_{attachment['id']}"
-                # add attachment id to metadata of parent
-                document.metadata.setdefault(IndexerKeywords.DEPENDENT_DOCS.value, []).append(attachment_id)
-                # TODO: pass it to chunkers
-                yield Document(page_content=self._process_attachment(attachment),
+                file_name, content_bytes = self._process_attachment(attachment)
+                yield Document(page_content="",
                                                      metadata={
                                                          'project_id': base_data.get('project_id', ''),
                                                          'id': str(attachment_id),
-                                                         IndexerKeywords.PARENT.value: str(case_id),
                                                          'filename': attachment['filename'],
                                                          'filetype': attachment['filetype'],
                                                          'created_on': attachment['created_on'],
                                                          'entity_type': 'test_case_attachment',
                                                          'is_image': attachment['is_image'],
+                                                         IndexerKeywords.CONTENT_FILE_NAME.value: file_name,
+                                                         IndexerKeywords.CONTENT_IN_BYTES.value: content_bytes
                                                      })
         except json.JSONDecodeError as e:
             raise ToolException(f"Failed to decode JSON from document: {e}")
 
-    def _process_attachment(self, attachment: Dict[str, Any]) -> str:
+    def _process_attachment(self, attachment: Dict[str, Any]) -> tuple[Any, bytes]:
         """
         Processes an attachment to extract its content.
 
@@ -639,12 +645,11 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         else:
             try:
                 attachment_path = self._client.attachments.get_attachment(attachment_id=attachment['id'], path=f"./{attachment['filename']}")
-                page_content = parse_file_content(file_name=attachment['filename'], file_content=attachment_path.read_bytes(), llm=self.llm, is_capture_image=True)
             except BadRequestError as ai_e:
                 logger.error(f"Unable to parse page's content with type: {attachment['filetype']} due to AI service issues: {ai_e}")
             except Exception as e:
                 logger.error(f"Unable to parse page's content with type: {attachment['filetype']}: {e}")
-        return page_content
+        return (attachment['filename'], attachment_path.read_bytes())
 
     def _index_tool_params(self):
         return {
@@ -658,6 +663,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments: i.e. ['.png', '.jpg']",
                 default=[])),
+            'chunking_tool':(Literal['json'], Field(description="Name of chunking tool", default='json'))
         }
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
@@ -687,7 +693,7 @@ class TestrailAPIWrapper(BaseVectorStoreToolApiWrapper):
         if output_format == "markdown":
             return df.to_markdown(index=False)
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         tools = [
             {
