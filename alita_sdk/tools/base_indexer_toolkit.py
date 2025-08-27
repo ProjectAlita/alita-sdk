@@ -185,7 +185,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                     document=document,
                     content=content,
                     extension_source=content_type, llm=self.llm, chunking_config=chunking_config)
-            elif chunking_tool and (content_in_bytes := document.metadata.pop(IndexerKeywords.CONTENT_IN_BYTES.value, None)):
+            elif chunking_tool and (content_in_bytes := document.metadata.pop(IndexerKeywords.CONTENT_IN_BYTES.value, None)) is not None:
+                if not content_in_bytes:
+                    # content is empty, yield as is
+                    yield document
+                    continue
                 # apply parsing based on content type resolved from chunking_tool
                 content_type = file_extension_by_chunker(chunking_tool)
                 yield from process_content_by_type(
