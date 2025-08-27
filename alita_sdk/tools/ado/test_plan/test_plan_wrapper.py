@@ -363,8 +363,20 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error getting test cases: {e}")
             return ToolException(f"Error getting test cases: {e}")
 
-    def _base_loader(self, plan_id: str, suite_ids: Optional[list[str]] = [], chunking_tool: str = None, **kwargs) -> Generator[Document, None, None]:
+    def get_suites_in_plan(self, plan_id: int) -> List[dict]:
+        """Get all test suites in a test plan."""
+        try:
+            test_suites = self._client.get_test_suites_for_plan(self.project, plan_id)
+            return [suite.as_dict() for suite in test_suites]
+        except Exception as e:
+            logger.error(f"Error getting test suites: {e}")
+            return ToolException(f"Error getting test suites: {e}")
+
+    def _base_loader(self, plan_id: int, suite_ids: Optional[List[int]] = [], chunking_tool: str = None, **kwargs) -> Generator[Document, None, None]:
         cases = []
+        if not suite_ids:
+            suites = self.get_suites_in_plan(plan_id)
+            suite_ids = [suite['id'] for suite in suites if 'id' in suite]
         for sid in suite_ids:
             cases.extend(self.get_test_cases(plan_id, sid))
         #
@@ -381,6 +393,7 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
                         'suite_id': case.get('test_suite', {}).get('id', ''),
                         'description': data.get('System.Description', ''),
                         'updated_on': data.get('System.Rev', ''),
+                        # content is in metadata for chunking tool post-processing
                         IndexerKeywords.CONTENT_IN_BYTES.value: data.get('Microsoft.VSTS.TCM.Steps', '').encode("utf-8")
                     })
             else:
@@ -398,8 +411,10 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
-            "plan_id": (str, Field(description="ID of the test plan for which test cases are requested")),
-            "suite_ids": (Optional[List[str]], Field(description='List of test suite IDs for which test cases are requested (can be empty). Example: ["2", "23"]', default=[])),
+            "plan_id": (int, Field(description="ID of the test plan for which test cases are requested")),
+            "suite_ids": (Optional[List[int]], Field(description='List of test suite IDs for which test cases are requested '
+                                                                 '(can be empty for all suites indexing from the plan). '
+                                                                 'Example: [2, 23]', default=[])),
             'chunking_tool':(Literal['html'], Field(description="Name of chunking tool", default='html'))
         }
 
