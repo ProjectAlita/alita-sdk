@@ -900,24 +900,3 @@ class AlitaClient:
                 "events_dispatched": [],
                 "execution_time_seconds": 0.0
             }
-
-    def _get_real_user_id(self) -> str:
-        """Extract the real user ID from the auth token for MCP tool calls."""
-        try:
-            import base64
-            import json
-            # Assuming JWT token, extract user ID from payload
-            # This is a basic implementation - adjust based on your token format
-            token_parts = self.auth_token.split('.')
-            if len(token_parts) >= 2:
-                payload_part = token_parts[1]
-                # Add padding if needed
-                padding = len(payload_part) % 4
-                if padding:
-                    payload_part += '=' * (4 - padding)
-                payload = json.loads(base64.b64decode(payload_part))
-                return payload.get('user_id') or payload.get('sub') or payload.get('uid')
-        except Exception as e:
-            logger.error(f"Error extracting user ID from token: {e}")
-        return None
-
