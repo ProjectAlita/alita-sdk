@@ -283,6 +283,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         for document in documents:
             key = key_fn(document)
+            key = key if isinstance(key, str) else str(key)
             if key in indexed_keys and collection_suffix == indexed_data[key]['metadata'].get('collection'):
                 if compare_fn(document, indexed_data[key]):
                     # Disabled addition of new collection to already indexed documents

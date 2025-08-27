@@ -240,6 +240,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
         for document in documents:
             key = self.key_fn(document)
+            key = key if isinstance(key, str) else str(key)
             if key in indexed_keys and collection_suffix == indexed_data[key]['metadata'].get('collection'):
                 if self.compare_fn(document, indexed_data[key]):
                     continue
