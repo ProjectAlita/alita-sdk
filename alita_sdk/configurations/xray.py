@@ -7,7 +7,7 @@ class XrayConfiguration(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "metadata": {
-                "label": "Xray",
+                "label": "Xray Cloud",
                 "icon_url": "xray.svg",
                 "sections": {
                     "auth": {
