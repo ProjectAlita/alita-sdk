@@ -10,7 +10,7 @@ class ZephyrEnterpriseConfiguration(BaseModel):
                 "label": "Zephyr Enterprise",
                 "icon_url": "zephyr.svg",
                 "section": "credentials",
-                "type": "zephyr-enterprise",
+                "type": "zephyr_enterprise",
                 "categories": ["test management"],
                 "extra_categories": ["zephyr", "test automation", "test case management", "test planning"],
             }

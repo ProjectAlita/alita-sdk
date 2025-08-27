@@ -8,7 +8,7 @@ class ZephyrEssentialConfiguration(BaseModel):
                 "label": "Zephyr Essential",
                 "icon_url": "zephyr.svg",
                 "section": "credentials",
-                "type": "zephyr-essential",
+                "type": "zephyr_essential",
                 "categories": ["test management"],
                 "extra_categories": ["zephyr", "test automation", "test case management", "test planning"],
             }
