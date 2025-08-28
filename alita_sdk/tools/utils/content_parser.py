@@ -203,7 +203,7 @@ def load_content_from_bytes(file_content: bytes, extension: str = None, loader_e
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-def process_content_by_type(document: Document, content, extension_source: str, llm = None, chunking_config={}) -> Generator[Document, None, None]:
+def process_content_by_type(document: Document, content, extension_source: str, llm = None, chunking_config=None) -> Generator[Document, None, None]:
     temp_file_path = None
     try:
         extension = "." + extension_source.split('.')[-1].lower()
@@ -224,6 +224,16 @@ def process_content_by_type(document: Document, content, extension_source: str, 
 
             loader_cls = loader_config['class']
             loader_kwargs = loader_config['kwargs']
+            # Determine which loader configuration keys are allowed to be overridden by user input.
+            # If 'allowed_to_override' is specified in the loader configuration, use it; otherwise, allow all keys in loader_kwargs.
+            allowed_to_override = loader_config.get('allowed_to_override', list(loader_kwargs.keys()))
+            # If a chunking_config is provided and contains custom configuration for the current file extension,
+            # update loader_kwargs with user-supplied values, but only for keys explicitly permitted in allowed_to_override.
+            # This ensures that only safe and intended parameters can be customized, preventing accidental or unauthorized changes
+            # to critical loader settings.
+            if chunking_config and (users_config_for_extension := chunking_config.get(extension, {})):
+                for key in set(users_config_for_extension.keys()) & set(allowed_to_override):
+                    loader_kwargs[key] = users_config_for_extension[key]
 
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
             for chunk in loader.load():
