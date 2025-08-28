@@ -44,7 +44,7 @@ class AlitaGitlabToolkit(BaseToolkit):
         return create_model(
             name,
             repository=(str, Field(description="GitLab repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AlitaGitlabToolkit.toolkit_max_length})),
-            gitlab_configuration=(Optional[GitlabConfiguration], Field(description="GitLab configuration", json_schema_extra={'configuration_types': ['gitlab']})),
+            gitlab_configuration=(GitlabConfiguration, Field(description="GitLab configuration", json_schema_extra={'configuration_types': ['gitlab']})),
             branch=(str, Field(description="Main branch", default="main")),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,
