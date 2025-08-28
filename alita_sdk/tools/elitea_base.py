@@ -402,7 +402,17 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def list_collections(self):
         """Lists all collections in the vector store."""
         vectorstore_wrapper = self._init_vector_store()
-        return vectorstore_wrapper.list_collections()
+        # Retrieve collections from the vector store wrapper
+        collections = vectorstore_wrapper.list_collections()
+        # If a plain string is returned (e.g., error or message), return as-is
+        if isinstance(collections, str):
+            return collections
+        # Return structured data as JSON string for clients to parse
+        try:
+            return json.dumps(collections)
+        except Exception:
+            # Fallback to string representation
+            return str(collections)
 
     def _build_collection_filter(self, filter: dict | str, collection_suffix: str = "") -> dict:
         """Builds a filter for the collection based on the provided suffix."""
@@ -693,5 +703,3 @@ def extend_with_vector_tools(method):
             tools.append(self.get_index_data_tool())
         #
         return tools
-
-    return wrapper
