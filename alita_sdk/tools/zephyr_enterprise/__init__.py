@@ -43,7 +43,8 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
                                                                            default=None)),
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
-            selected_tools=(List[Literal[tuple(selected_tools)]], []),
+            selected_tools=(List[Literal[tuple(selected_tools)]],
+                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Zephyr Enterprise", "icon_url": "zephyr.svg",
