@@ -179,11 +179,42 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
     def create_folder(self, json: str):
         """Create a new folder."""
         folder_data = self._parse_json(json)
+        if 'parentId' not in folder_data:
+            if 'parentName' in folder_data:
+                parent_folder_name = folder_data['parentName']
+
+                parent_folder = self.find_folder_by_name(parent_folder_name)
+
+                if isinstance(parent_folder, ToolException):
+                    return ToolException(f"Folder with name '{parent_folder_name}' not found.")
+                else:
+                    folder_data['parentId'] = parent_folder['id']
+
         return self._client.create_folder(folder_data)
 
     def get_folder(self, folder_id: str):
         """Retrieve details of a specific folder."""
         return self._client.get_folder(folder_id)
+
+    def find_folder_by_name(self, name: str, project_key: Optional[str] = None, folder_type: Optional[str] = None):
+        """
+        Find a folder by its name, ignoring case.
+
+        :param name: The name of the folder to search for.
+        :param project_key: Optional filter by project key.
+        :param folder_type: Optional filter by folder type.
+        :return: The folder details if found, otherwise None.
+        """
+        # Fetch all folders with optional filters
+        folders = self.list_folders(project_key=project_key, folder_type=folder_type)
+
+        # Iterate through the folders and search for the matching name
+        for folder in folders['values']:
+            if folder.get('name', '').lower() == name.lower():
+                return folder
+
+        # Return None if no folder is found
+        return ToolException(f"Folder with name {name} was not found")
 
     def delete_link(self, link_id: str):
         """Delete a specific link."""
@@ -481,6 +512,12 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
                 "description": self.get_folder.__doc__,
                 "args_schema": GetFolder,
                 "ref": self.get_folder,
+            },
+            {
+                "name": "find_folder_by_name",
+                "description": self.find_folder_by_name.__doc__,
+                "args_schema": FindFolderByName,
+                "ref": self.find_folder_by_name,
             },
             {
                 "name": "delete_link",
@@ -879,11 +916,12 @@ CreateFolder = create_model(
         JSON body to create a folder. Example:
         {
             "parentId": 123456,
+            "parentName": "parentFolder",
             "name": "ZephyrEssential_test",
             "projectKey": "PRJ",
             "folderType": "TEST_CASE"
         }
-        Possible folder types: "TEST_CASE", "TEST_PLAN", "TEST_CYCLE"
+        Possible folder types: "TEST_CASE", "TEST_PLAN", "TEST_CYCLE",
         """
     )))
 )
@@ -891,6 +929,14 @@ CreateFolder = create_model(
 GetFolder = create_model(
     "GetFolder",
     folder_id=(str, Field(description="ID of the folder to retrieve."))
+)
+
+FindFolderByName = create_model(
+    "GetFolder",
+    name=(str, Field(description="Name of the folder to retrieve.")),
+    project_key=(Optional[str], Field(description="Project key", default=None)),
+    folder_type=(Optional[str], Field(description="""Folder type. Possible values: "TEST_CASE", "TEST_PLAN", "TEST_CYCLE" """,
+                                      default=None)),
 )
 
 DeleteLink = create_model(
