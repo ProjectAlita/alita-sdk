@@ -599,7 +599,7 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                 return
 
             # get base data from the document required to extract attachments and other metadata
-            base_data = json.loads(document.page_content)
+            base_data = document.metadata
             case_id = base_data.get("id")
 
             # get a list of attachments for the case
@@ -616,6 +616,7 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                 yield Document(page_content="",
                                                      metadata={
                                                          'project_id': base_data.get('project_id', ''),
+                                                         'updated_on': base_data.get('updated_on', ''),
                                                          'id': str(attachment_id),
                                                          'filename': attachment['filename'],
                                                          'filetype': attachment['filetype'],
@@ -639,17 +640,21 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             str: string description of the attachment.
         """
 
-        page_content = "This filetype is not supported."
         if attachment['filetype'] == 'txt' :
-            page_content =  self._client.get(endpoint=f"get_attachment/{attachment['id']}")
+            response = self._client.get(endpoint=f"get_attachment/{attachment['id']}")
+            if hasattr(response, "content"):
+                return attachment['filename'], response.content
+            elif isinstance(response, str):
+                return attachment['filename'], response.encode("utf-8")
         else:
             try:
                 attachment_path = self._client.attachments.get_attachment(attachment_id=attachment['id'], path=f"./{attachment['filename']}")
+                return attachment['filename'], attachment_path.read_bytes()
             except BadRequestError as ai_e:
                 logger.error(f"Unable to parse page's content with type: {attachment['filetype']} due to AI service issues: {ai_e}")
             except Exception as e:
                 logger.error(f"Unable to parse page's content with type: {attachment['filetype']}: {e}")
-        return (attachment['filename'], attachment_path.read_bytes())
+        return attachment['filename'], b"This filetype is not supported."
 
     def _index_tool_params(self):
         return {
