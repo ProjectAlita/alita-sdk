@@ -157,12 +157,16 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
         }
 
     def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:
-        test_cases = self.get_testcases_by_zql(zql)
+        test_cases = self.get_testcases_by_zql(zql=zql, return_as_list=True)
         for test_case in test_cases:
             metadata = {
-                ("updated_on" if k == "lastModifiedOn" else "id" if k == "testcaseId" else k): str(v)
-                for k, v in test_case
-                if k != "id"
+                "updated_on": str(test_case.get("lastModifiedOn")),
+                "id": str(test_case.get("id")),
+                "name": test_case.get("name"),
+                "testcaseId": str(test_case.get("testcaseId")),
+                "projectId": test_case.get("projectId"),
+                "projectName": test_case.get("projectName"),
+                "testcaseType": test_case.get("testcaseType"),
             }
             yield Document(page_content='', metadata=metadata)
 
@@ -171,7 +175,7 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
             try:
                 id = document.metadata['id']
                 test_case_content = self.get_test_case_steps(id)
-                document.page_content = test_case_content
+                document.page_content = f"Test case: {document.metadata['name']}\nTest_case_content: {test_case_content}"
             except Exception as e:
                 logging.error(f"Failed to process document: {e}")
             yield document
