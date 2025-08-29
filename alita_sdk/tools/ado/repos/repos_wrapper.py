@@ -159,6 +159,7 @@ class ArgsSchema(Enum):
             Field(
                 description="""List of comments, where each comment is a dictionary specifying details about the comment,
                 e.g. [{'file_path': 'src/main.py', 'comment_text': 'Logic needs improvement', 'right_line': 20}]""",
+                default=None,
                 examples=[
                     {
                         "file_path": "src/main.py",

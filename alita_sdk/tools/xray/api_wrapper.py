@@ -109,7 +109,7 @@ XrayCreateTest = create_model(
 
 XrayCreateTests = create_model(
     "XrayCreateTests",
-    graphql_mutations=(list[str], Field(description="list of GraphQL mutations:\n" + _graphql_mutation_description))
+    graphql_mutations=(List[str], Field(description="list of GraphQL mutations:\n" + _graphql_mutation_description))
 )
 
 def _parse_tests(test_results) -> List[Any]:
