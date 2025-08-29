@@ -234,12 +234,19 @@ def process_content_by_type(document: Document, content, extension_source: str, 
             if chunking_config and (users_config_for_extension := chunking_config.get(extension, {})):
                 for key in set(users_config_for_extension.keys()) & set(allowed_to_override):
                     loader_kwargs[key] = users_config_for_extension[key]
-
+            loader_kwargs['llm'] = llm
+            loader_kwargs['prompt'] = image_processing_prompt
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
+            counter = 1
             for chunk in loader.load():
+                if 'chunk_id' not in chunk.metadata:
+                    chunk.metadata['chunk_id'] = counter
+                document_metadata = document.metadata.copy()
+                document_metadata['id'] = f"{document.metadata['id']}_{chunk.metadata['chunk_id']}"
+                counter+=1
                 yield Document(
                     page_content=sanitize_for_postgres(chunk.page_content),
-                    metadata={**document.metadata, **chunk.metadata}
+                    metadata={**document_metadata, **chunk.metadata}
                 )
     finally:
         if temp_file_path and os.path.exists(temp_file_path):

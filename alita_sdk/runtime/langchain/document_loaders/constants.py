@@ -25,6 +25,7 @@ from .AlitaJSONLoader import AlitaJSONLoader
 from .AlitaPDFLoader import AlitaPDFLoader
 from .AlitaPowerPointLoader import AlitaPowerPointLoader
 from .AlitaTextLoader import AlitaTextLoader
+from .AlitaMarkdownLoader import AlitaMarkdownLoader
 
 loaders_map = {
     '.png': {
@@ -96,7 +97,7 @@ loaders_map = {
         'allowed_to_override': ['max_tokens']
     },
     '.md': {
-        'class': UnstructuredMarkdownLoader,
+        'class': AlitaMarkdownLoader,
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': ['max_tokens']

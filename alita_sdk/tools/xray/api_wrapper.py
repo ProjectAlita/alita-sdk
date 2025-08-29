@@ -16,7 +16,7 @@ from ..elitea_base import (
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
-from ..utils.content_parser import load_file_docs
+from ..utils.content_parser import file_extension_by_chunker
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -417,7 +417,9 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                     if attachments_data:
                         metadata["_attachments_data"] = attachments_data
 
-                yield Document(page_content=page_content, metadata=metadata)
+                metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
+                metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = f"base_doc{file_extension_by_chunker(kwargs['chunking_tool'])}"
+                yield Document(page_content='', metadata=metadata)
                 
         except Exception as e:
             logger.error(f"Error processing test data: {e}")
@@ -559,17 +561,9 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error processing attachment: {e}")
 
     def _load_attachment(self, content, file_name, attachment_metadata) -> Generator[Document, None, None]:
-        content_docs = load_file_docs(file_content=content, file_name=file_name,
-                                      llm=self.llm, is_capture_image=True, excel_by_sheets=True)
-
-        if not content_docs or isinstance(content_docs, ToolException):
-            return
-        for doc in content_docs:
-            yield Document(page_content=doc.page_content,
-                           metadata={
-                               **doc.metadata,
-                               **attachment_metadata
-                           })
+        attachment_metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = content
+        attachment_metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = file_name
+        yield Document(page_content='', metadata=attachment_metadata)
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
         return {

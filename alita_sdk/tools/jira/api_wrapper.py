@@ -18,7 +18,7 @@ from ..llm.img_utils import ImageDescriptionCache
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils import is_cookie_token, parse_cookie_string
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
-from ..utils.content_parser import load_file_docs
+from ..utils.content_parser import file_extension_by_chunker
 from ...runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
@@ -1262,6 +1262,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         self._include_attachments = kwargs.get('include_attachments', False)
         self._included_fields = fields_to_extract.copy() if fields_to_extract else []
         self._include_comments = kwargs.get('include_comments', True)
+        self._chunking_tool = kwargs.get('chunking_tool', None)
 
         try:
             # Prepare fields to extract
@@ -1313,7 +1314,8 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                                                                            doc.page_content,
                                                                            attachment_resolver),
                                     doc.page_content)
-            doc.page_content = processed_content
+            doc.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = processed_content.encode('utf-8')
+            doc.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = f"base_doc{file_extension_by_chunker(self._chunking_tool)}"
             yield doc
 
     def _process_document(self, base_document: Document) -> Generator[Document, None, None]:
@@ -1337,13 +1339,11 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                     except Exception as e:
                         logger.error(f"Failed to download attachment {attachment['filename']} for issue {issue_key}: {str(e)}")
                         attachment_content = self._client.get(path=f"secure/attachment/{attachment['id']}/{attachment['filename']}", not_json_response=True)
-                    content_docs = load_file_docs(file_content=attachment_content, file_name=attachment['filename'], llm=self.llm, is_capture_image=True, excel_by_sheets=True)
-                    if not content_docs or isinstance(content_docs, ToolException):
-                        continue
-                    for doc in content_docs:
-                        yield Document(page_content=doc.page_content,
-                                       metadata={
-                                           **doc.metadata,
+
+                    yield Document(page_content='',
+                                   metadata={
+                                           IndexerKeywords.CONTENT_IN_BYTES.value: attachment_content,
+                                           IndexerKeywords.CONTENT_FILE_NAME.value: attachment['filename'],
                                            'id': attachment_id,
                                            'issue_key': issue_key,
                                            'source': f"{self.base_url}/browse/{issue_key}",
@@ -1358,8 +1358,10 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             comments = self.get_processed_comments_list_with_image_description(issue_key)
             if comments:
                 for comment in comments:
-                    yield Document(page_content=comment.get('processed_content'),
+                    yield Document(page_content='',
                                    metadata={
+                                       IndexerKeywords.CONTENT_IN_BYTES.value: comment.get('processed_content').encode('utf-8'),
+                                       IndexerKeywords.CONTENT_FILE_NAME.value: "comment.md",
                                        'id': comment.get('id'),
                                        'issue_key': issue_key,
                                        'source': f"{self.base_url}/browse/{issue_key}",

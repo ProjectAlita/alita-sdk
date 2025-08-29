@@ -12,6 +12,8 @@ from langchain_core.documents import Document
 
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..utils.content_parser import file_extension_by_chunker
+from ...runtime.utils.utils import IndexerKeywords
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
@@ -1218,6 +1220,7 @@ class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
         }
 
     def _base_loader(self, project_key: str, jql: str, **kwargs) -> Generator[Document, None, None]:
+        self._chunking_tool = kwargs.get('chunking_tool', None)
         for test_case_doc in self._get_test_cases_docs(project_key, jql):
             yield test_case_doc
         for folder_doc in self._get_folders_docs(project_key):
@@ -1284,7 +1287,10 @@ class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
                     additional_content = self._process_test_case(document.metadata['key'])
                     for steps_type, content in additional_content.items():
                         if content:
-                            document.page_content = json.dumps(content)
+                            page_content = json.dumps(content)
+                            document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
+                            document.metadata[
+                                IndexerKeywords.CONTENT_FILE_NAME.value] = f"base_doc{file_extension_by_chunker(self._chunking_tool)}"
                             document.metadata["steps_type"] = steps_type
             except Exception as e:
                 logging.error(f"Failed to process document: {e}")

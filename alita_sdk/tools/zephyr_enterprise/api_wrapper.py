@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional, List, Generator, Literal
 
@@ -8,6 +9,8 @@ from langchain_core.documents import Document
 from .zephyr_enterprise import ZephyrClient
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..utils.content_parser import file_extension_by_chunker
+from ...runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +160,7 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
         }
 
     def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:
+        self._chunking_tool = kwargs.get('chunking_tool', None)
         test_cases = self.get_testcases_by_zql(zql=zql, return_as_list=True)
         for test_case in test_cases:
             metadata = {
@@ -175,7 +179,10 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
             try:
                 id = document.metadata['id']
                 test_case_content = self.get_test_case_steps(id)
-                document.page_content = f"Test case: {document.metadata['name']}\nTest_case_content: {test_case_content}"
+                page_content = json.dumps(test_case_content)
+                document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
+                document.metadata[
+                    IndexerKeywords.CONTENT_FILE_NAME.value] = f"base_doc{file_extension_by_chunker(self._chunking_tool)}"
             except Exception as e:
                 logging.error(f"Failed to process document: {e}")
             yield document
