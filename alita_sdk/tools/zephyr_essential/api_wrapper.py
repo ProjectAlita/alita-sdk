@@ -620,8 +620,74 @@ UpdateTestCase = create_model(
     json=(str, Field(description=("""
         JSON body to update a test case. Example:
         {
-          "name": "Updated Test Case Name",
-          "description": "Updated Test Case Description"
+          "id": 1,
+          "key": "SA-T10",
+          "name": "Check axial pump",
+          "project": {
+            "id": 10005,
+            "self": "https://<api-base-url>/projects/10005"
+          },
+          "createdOn": "2018-05-15T13:15:13Z",
+          "objective": "To ensure the axial pump can be enabled",
+          "precondition": "Latest version of the axial pump available",
+          "estimatedTime": 138000,
+          "labels": [
+            "Regression",
+            "Performance",
+            "Automated"
+          ],
+          "component": {
+            "id": 10001,
+            "self": "https://<jira-instance>.atlassian.net/rest/api/2/component/10001"
+          },
+          "priority": {
+            "id": 10002,
+            "self": "https://<api-base-url>/priorities/10002"
+          },
+          "status": {
+            "id": 10000,
+            "self": "https://<api-base-url>/statuses/10000"
+          },
+          "folder": {
+            "id": 100006,
+            "self": "https://<api-base-url>/folders/10006"
+          },
+          "owner": {
+            "self": "https://<jira-instance>.atlassian.net/rest/api/2/user?accountId=5b10a2844c20165700ede21g",
+            "accountId": "5b10a2844c20165700ede21g"
+          },
+          "testScript": {
+            "self": "https://<api-base-url>/testCases/PROJ-T1/testscript"
+          },
+          "customFields": {
+            "Build Number": 20,
+            "Release Date": "2020-01-01",
+            "Pre-Condition(s)": "User should have logged in. <br> User should have navigated to the administration panel.",
+            "Implemented": false,
+            "Category": [
+              "Performance",
+              "Regression"
+            ],
+            "Tester": "fa2e582e-5e15-521e-92e3-47e6ca2e7256"
+          },
+          "links": {
+            "self": "string",
+            "issues": [
+              {
+                "self": "string",
+                "issueId": 10100,
+                "id": 1,
+                "target": "https://<jira-instance>.atlassian.net/rest/api/2/issue/10000",
+                "type": "COVERAGE"
+              }
+            ],
+            "webLinks": [
+              {
+                "self": "string",
+                "description": "A link to atlassian.com",
+                "url": "https://atlassian.com",
+                "id": 1,
+                "type": "COVERAGE"
         }
         """
     )))
@@ -638,9 +704,9 @@ CreateTestCaseIssueLink = create_model(
     json=(str, Field(description=("""
         JSON body to create an issue link. Example:
         {
-          "issueKey": "ISSUE_KEY",
-          "description": "Link Description"
+          "issueId": 10100
         }
+        where issueId - Jira issue id
         """
     )))
 )
@@ -682,8 +748,10 @@ CreateTestCaseTestScript = create_model(
     json=(str, Field(description=("""
         JSON body to create a test script. Example:
         {
-          "script": "Test Script Content"
+          "type": "bdd",
+          "text": "Attempt to login to the application"
         }
+        Where type - Test script type. Allowed: plain, bdd
         """
     )))
 )
@@ -774,9 +842,71 @@ UpdateTestCycle = create_model(
     json=(str, Field(description=("""
         JSON body to update a test cycle. Example:
         {
-          "name": "Updated Test Cycle Name",
-          "description": "Updated Test Cycle Description"
-        }
+          "id": 1,
+          "key": "SA-R40",
+          "name": "Sprint 1 Regression Test Cycle",
+          "project": {
+            "id": 10005,
+            "self": "https://<api-base-url>/projects/10005"
+          },
+          "jiraProjectVersion": {
+            "id": 10000,
+            "self": "https://<jira-instance>.atlassian.net/rest/api/2/version/10000"
+          },
+          "status": {
+            "id": 10000,
+            "self": "https://<api-base-url>/statuses/10000"
+          },
+          "folder": {
+            "id": 100006,
+            "self": "https://<api-base-url>/folders/10006"
+          },
+          "description": "Regression test cycle 1 to ensure no breaking changes",
+          "plannedStartDate": "2018-05-19T13:15:13Z",
+          "plannedEndDate": "2018-05-20T13:15:13Z",
+          "owner": {
+            "self": "https://<jira-instance>.atlassian.net/rest/api/2/user?accountId=5b10a2844c20165700ede21g",
+            "accountId": "5b10a2844c20165700ede21g"
+          },
+          "customFields": {
+            "Build Number": 20,
+            "Release Date": "2020-01-01",
+            "Pre-Condition(s)": "User should have logged in. <br> User should have navigated to the administration panel.",
+            "Implemented": false,
+            "Category": [
+              "Performance",
+              "Regression"
+            ],
+            "Tester": "fa2e582e-5e15-521e-92e3-47e6ca2e7256"
+          },
+          "links": {
+            "self": "string",
+            "issues": [
+              {
+                "self": "string",
+                "issueId": 10100,
+                "id": 1,
+                "target": "https://<jira-instance>.atlassian.net/rest/api/2/issue/10000",
+                "type": "COVERAGE"
+              }
+            ],
+            "webLinks": [
+              {
+                "self": "string",
+                "description": "A link to atlassian.com",
+                "url": "https://atlassian.com",
+                "id": 1,
+                "type": "COVERAGE"
+              }
+            ],
+            "testPlans": [
+              {
+                "id": 1,
+                "self": "https://<api-base-url>/links/1",
+                "type": "RELATED",
+                "testPlanId": 2,
+                "target": "https://<jira-instance>.atlassian.net/rest/api/2/testplan/123"
+              }
         """
     )))
 )
@@ -792,9 +922,9 @@ CreateTestCycleIssueLink = create_model(
     json=(str, Field(description=("""
         JSON body to create an issue link. Example:
         {
-          "issueKey": "ISSUE_KEY",
-          "description": "Link Description"
+          "issueId": 10100
         }
+        where issueId - Jira issue id
         """
     )))
 )
@@ -826,10 +956,34 @@ CreateTestExecution = create_model(
     json=(str, Field(description=("""
         JSON body to create a test execution. Example:
         {
-          "testCaseKey": "TEST_CASE_KEY",
-          "testCycleKey": "TEST_CYCLE_KEY",
-          "status": "PASS"
-        }
+          "projectKey": "TIS",
+          "testCaseKey": "SA-T10",
+          "testCycleKey": "SA-R10",
+          "statusName": "In Progress",
+          "testScriptResults": [
+            {
+              "statusName": "In Progress",
+              "actualEndDate": "2018-05-20T13:15:13Z",
+              "actualResult": "User logged in successfully"
+            }
+          ],
+          "environmentName": "Chrome Latest Version",
+          "actualEndDate": "2018-05-20T13:15:13Z",
+          "executionTime": 120000,
+          "executedById": "5b10a2844c20165700ede21g",
+          "assignedToId": "5b10a2844c20165700ede21g",
+          "comment": "Test failed user could not login",
+          "customFields": {
+            "Build Number": 20,
+            "Release Date": "2020-01-01",
+            "Pre-Condition(s)": "User should have logged in. <br> User should have navigated to the administration panel.",
+            "Implemented": false,
+            "Category": [
+              "Performance",
+              "Regression"
+            ],
+            "Tester": "fa2e582e-5e15-521e-92e3-47e6ca2e7256"
+          }
         """
     )))
 )
@@ -845,8 +999,13 @@ UpdateTestExecution = create_model(
     json=(str, Field(description=("""
         JSON body to update a test execution. Example:
         {
-          "status": "FAIL",
-          "comment": "Updated comment"
+          "statusName": "In Progress",
+          "environmentName": "Chrome Latest Version",
+          "actualEndDate": "2018-05-20T13:15:13Z",
+          "executionTime": 120000,
+          "executedById": "5b10a2844c20165700ede21g",
+          "assignedToId": "5b10a2844c20165700ede21g",
+          "comment": "Test failed user could not login"
         }
         """
     )))
@@ -864,12 +1023,14 @@ UpdateTestExecutionTestSteps = create_model(
     test_execution_id_or_key=(str, Field(description="ID or key of the test execution to update test steps for.")),
     json=(str, Field(description=("""
         "JSON body to update test steps. Example:
-        ["
-          {"
-            "step": "Step 1",
-            "status": "PASS"
-          }
-        ]
+        {
+          "steps": [
+            {
+              "actualResult": "User logged in successfully",
+              "statusName": "In Progress"
+            }
+          ]
+        }
         """
     )))
 )
@@ -890,9 +1051,9 @@ CreateTestExecutionIssueLink = create_model(
     json=(str, Field(description=("""
         JSON body to create an issue link. Example:
         {
-          "issueKey": "ISSUE_KEY",
-          "description": "Link Description"
+          "issueId": 10100
         }
+        where issueId - Jira issue id
         """
     )))
 )

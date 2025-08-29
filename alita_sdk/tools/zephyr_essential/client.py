@@ -1,4 +1,5 @@
 import requests
+from langchain_core.tools import ToolException
 
 class ZephyrEssentialAPI:
     def __init__(self, base_url: str, token: str):
@@ -14,10 +15,11 @@ class ZephyrEssentialAPI:
         })
         try:
             resp = requests.request(method=method, url=url, headers=headers, json=json, params=params, files=files)
-            resp.raise_for_status()
-            if resp.headers.get("Content-Type", "").startswith("application/json"):
-                return resp.json()
-            return resp.text
+            if resp.status_code < 300:
+                if resp.headers.get("Content-Type", "").startswith("application/json"):
+                    return resp.json()
+                return resp.text
+            return ToolException(f"Error performing request {method} {api_path}: {resp.content}")
         except requests.RequestException as e:
             raise Exception(f"Error performing request {method} {api_path}: {str(e)}")
 
