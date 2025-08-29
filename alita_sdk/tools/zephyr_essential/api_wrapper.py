@@ -9,6 +9,8 @@ from langchain_core.tools import ToolException
 
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..utils.content_parser import file_extension_by_chunker
+from ...runtime.utils.utils import IndexerKeywords
 
 
 class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
@@ -270,6 +272,7 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
         }
 
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
+        self._chunking_tool = kwargs.get('chunking_tool', None)
         try:
             test_cases = self.list_test_cases()
         except Exception as e:
@@ -291,7 +294,10 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
                     additional_content = self._process_test_case(document.metadata['key'])
                     for steps_type, content in additional_content.items():
                         if content:
-                            document.page_content = json.dumps(content)
+                            page_content = json.dumps(content)
+                            document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
+                            document.metadata[
+                                IndexerKeywords.CONTENT_FILE_NAME.value] = f"base_doc{file_extension_by_chunker(self._chunking_tool)}"
                             document.metadata["steps_type"] = steps_type
             except Exception as e:
                 logging.error(f"Failed to process document: {e}")

@@ -67,10 +67,13 @@ class AlitaPDFLoader:
             return self._load_docs()
 
     def _load_docs(self):
-        return PyPDFLoader(file_path=self.file_path,
+        docs = PyPDFLoader(file_path=self.file_path,
                         password=self.password,
                         headers=self.headers,
                         extract_images=self.extract_images,
                         extraction_mode=self.extraction_mode,
                         images_parser=ImageParser(llm=self.llm, prompt=self.prompt),
                         extraction_kwargs=self.extraction_kwargs).load()
+        for doc in docs:
+            doc.metadata['chunk_id'] = doc.metadata['page']
+        return docs
