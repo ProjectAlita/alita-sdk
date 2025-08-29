@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
@@ -14,5 +16,5 @@ class ZephyrEssentialConfiguration(BaseModel):
             }
         }
     )
-    base_url: str = Field(description="Zephyr Essential Base URL")
+    base_url: Optional[str] = Field(description="Zephyr Essential API Base URL", default=None)
     token: SecretStr = Field(description="Zephyr Essential API Token")
