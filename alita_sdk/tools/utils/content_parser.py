@@ -238,7 +238,17 @@ def process_content_by_type(document: Document, content, extension_source: str, 
             loader_kwargs['prompt'] = image_processing_prompt
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
             counter = 1
-            for chunk in loader.load():
+            try:
+                chunks = loader.load()
+            except Exception as e:
+                msg = f"Error during content for file {temp_file_path}:\n{e}"
+                logger.warning(msg)
+                yield Document(
+                    page_content=msg,
+                    metadata={**document.metadata, 'chunk_id':1}
+                )
+                return
+            for chunk in chunks:
                 if 'chunk_id' not in chunk.metadata:
                     chunk.metadata['chunk_id'] = counter
                 document_metadata = document.metadata.copy()
