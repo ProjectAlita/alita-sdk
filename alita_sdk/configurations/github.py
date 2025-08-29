@@ -85,3 +85,67 @@ class GithubConfiguration(BaseModel):
             "Password (username + password), App private key (app_id + app_private_key), "
             "or leave all blank for anonymous access."
         )
+
+    @staticmethod
+    def check_connection(settings: dict) -> str | None:
+        """
+        Check GitHub connection using provided settings.
+        Returns None if connection is successful, error message otherwise.
+        """
+        import requests
+        from requests.auth import HTTPBasicAuth
+        import jwt
+        import time
+
+        base_url = settings.get('base_url', 'https://api.github.com')
+        access_token = settings.get('access_token')
+        username = settings.get('username')
+        password = settings.get('password')
+        app_id = settings.get('app_id')
+        app_private_key = settings.get('app_private_key')
+
+        # if all auth methods are None or empty, allow anonymous access
+        if not any([access_token, (username and password), (app_id and app_private_key)]):
+            return None
+
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+        auth = None
+
+        try:
+            # Determine authentication method
+            if access_token:
+                headers['Authorization'] = f'token {access_token}'
+            elif username and password:
+                auth = HTTPBasicAuth(username, password)
+            elif app_id and app_private_key:
+                # Generate JWT for GitHub App authentication
+                payload = {
+                    'iat': int(time.time()),
+                    'exp': int(time.time()) + 600,  # 10 minutes
+                    'iss': app_id
+                }
+                jwt_token = jwt.encode(payload, app_private_key, algorithm='RS256')
+                headers['Authorization'] = f'Bearer {jwt_token}'
+
+            # Test connection with user endpoint
+            response = requests.get(f'{base_url}/user', headers=headers, auth=auth, timeout=10)
+
+            if response.status_code == 200:
+                return None
+            elif response.status_code == 401:
+                return "Authentication failed: Invalid credentials"
+            elif response.status_code == 403:
+                return "Access forbidden: Check your permissions"
+            elif response.status_code == 404:
+                return "GitHub API endpoint not found"
+            else:
+                return f"Connection failed with status {response.status_code}: {response.text}"
+
+        except requests.exceptions.ConnectionError:
+            return "Connection error: Unable to reach GitHub API"
+        except requests.exceptions.Timeout:
+            return "Connection timeout: GitHub API did not respond in time"
+        except jwt.InvalidKeyError:
+            return "Invalid private key format for GitHub App authentication"
+        except Exception as e:
+            return f"Unexpected error: {str(e)}"
