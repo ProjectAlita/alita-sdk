@@ -628,7 +628,11 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             for idx, file in enumerate(_files, 1):
                 if is_whitelisted(file) and not is_blacklisted(file):
                     # read file ONLY if it matches whitelist and does not match blacklist
-                    file_content = self._read_file(file, self.__get_branch(branch))
+                    try:
+                        file_content = self._read_file(file, self.__get_branch(branch))
+                    except Exception as e:
+                        logger.error(f"Failed to read file {file}: {e}")
+                        file_content = ""
                     if not file_content:
                         # empty file, skip
                         continue

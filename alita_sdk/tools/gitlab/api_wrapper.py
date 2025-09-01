@@ -1,7 +1,7 @@
 # api_wrapper.py
 from typing import Any, Dict, List, Optional
 import fnmatch
-from alita_sdk.tools.elitea_base import BaseCodeToolApiWrapper
+from ...tools.elitea_base import BaseCodeToolApiWrapper
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
 AppendFileModel = create_model(
@@ -110,7 +110,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
     @classmethod
     def validate_toolkit(cls, values: Dict) -> Dict:
         try:
-            import gitlab
+           import gitlab
         except ImportError:
             raise ImportError(
                 "python-gitlab is not installed. "

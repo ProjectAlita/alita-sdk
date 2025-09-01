@@ -79,7 +79,7 @@ def parse_code_files_for_db(file_content_generator: Generator[str, None, None], 
                     for splitted_document in splitted_documents:
                         metadata = {
                             "filename": file_name,
-                            "method_name": node.name,
+                            "method_name": node.name if node.name else 'unknown',
                             "language": programming_language.value,
                         }
                         commit_hash = data.get("commit_hash")
