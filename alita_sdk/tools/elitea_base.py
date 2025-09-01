@@ -40,6 +40,8 @@ BaseCodeIndexParams = create_model(
     whitelist=(Optional[List[str]], Field(description='File extensions or paths to include. Defaults to all files if None. Example: ["*.md", "*.java"]', default=None)),
     blacklist=(Optional[List[str]], Field(description='File extensions or paths to exclude. Defaults to no exclusions if None. Example: ["*.md", "*.java"]', default=None)),
     clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
+    chunking_tool=(Optional[str], Field(description="Name of chunking tool to apply during indexing", default=None)),
+    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 
 RemoveIndexParams = create_model(
@@ -644,23 +646,55 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
 
         return parse_code_files_for_db(file_content_generator())
     
-    def index_data(self,
-                   collection_suffix: str,
-                   branch: Optional[str] = None,
-                   whitelist: Optional[List[str]] = None,
-                   blacklist: Optional[List[str]] = None,
-                   **kwargs) -> str:
-        """Index repository files in the vector store using code parsing."""
-        
+    def index_data(
+        self,
+        collection_suffix: str,
+        branch: Optional[str] = None,
+        whitelist: Optional[List[str]] = None,
+        blacklist: Optional[List[str]] = None,
+        clean_index: Optional[bool] = False,
+        chunking_tool: Optional[str] = None,
+        chunking_config: Optional[dict] = None
+    ) -> dict:
+        """
+        Index repository files in the vector store using code parsing,
+        with optional chunking.
+        """
+        # Load documents from repository
         documents = self.loader(
             branch=branch,
             whitelist=whitelist,
             blacklist=blacklist
         )
+        # Apply chunking if specified
+        if chunking_tool:
+            from alita_sdk.tools.chunkers import __all__ as chunkers
+
+            config = chunking_config or {}
+            # include llm and embedding in config if available
+            if hasattr(self, 'llm'):
+                config.setdefault('llm', self.llm)
+            if hasattr(self, '_embedding'):
+                config.setdefault('embedding', self._embedding)
+
+            def _chunked_docs(docs):
+                for doc in docs:
+                    chunker = chunkers.get(chunking_tool)
+                    if not chunker:
+                        raise ValueError(f"Unknown chunking tool: {chunking_tool}")
+                    yield from chunker(file_content_generator=iter([doc]), config=config)
+            documents_to_index = _chunked_docs(documents)
+        else:
+            documents_to_index = documents
+
+        # Initialize vector store and index documents
         vectorstore = self._init_vector_store()
-        clean_index = kwargs.get('clean_index', False)
-        return vectorstore.index_documents(documents, collection_suffix=collection_suffix,
-                                           clean_index=clean_index, is_code=True)
+        return vectorstore.index_documents(
+            documents_to_index,
+            collection_suffix=collection_suffix,
+            clean_index=clean_index,
+            is_code=True
+        )
 
     def _get_vector_search_tools(self):
         """
@@ -693,5 +727,3 @@ def extend_with_vector_tools(method):
             tools.append(self.get_index_data_tool())
         #
         return tools
-
-    return wrapper
