@@ -53,10 +53,16 @@ class PGVectorAdapter(VectorStoreAdapter):
     """Adapter for PGVector database operations."""
 
     def get_vectorstore_params(self, collection_name: str, connection_string: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            from tools import this  # pylint: disable=E0401,C0415
+            worker_config = this.for_module("indexer_worker").descriptor.config
+        except:  # pylint: disable=W0702
+            worker_config = {}
+        #
         return {
             "use_jsonb": True,
             "collection_name": collection_name,
-            "create_extension": True,
+            "create_extension": worker_config.get("pgvector_create_extension", True),
             "alita_sdk_options": {
                 "target_schema": collection_name,
             },
