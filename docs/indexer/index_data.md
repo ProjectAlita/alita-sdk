@@ -72,8 +72,11 @@ Corner case: Handles empty document lists and ensures atomicity of the save oper
 - `clean_index` (`Optional[bool]`):  
   Optional flag to enforce cleaning the existing index before indexing new data (default: `False`).
 
-- `chunking_config` (`Optional[dict]`):  
-  Chunking tool configuration (default: empty dict).   
++ `chunking_tool` (`Optional[str]`):  
+  Name of the chunking tool to use for splitting documents before indexing (default: `None`).  
+  Example: `"recursive_text_splitter"`, `"pdf_parser"`, or `"markdown_chunker"`.
++ `chunking_config` (`Optional[dict]`):  
+  Configuration settings for the chunking tool, keyed by file extension (default: empty dict).   
   Example: {".pdf": {"mode": "page", "chunk_size": 1000}, ".docx": {"mode": "paragraph"}, ".md": {"chunk_size": 333}}
 
 ---
