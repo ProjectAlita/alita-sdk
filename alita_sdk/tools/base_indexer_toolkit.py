@@ -87,11 +87,24 @@ BaseStepbackSearchParams = create_model(
 BaseIndexDataParams = create_model(
     "indexData",
     __base__=BaseIndexParams,
-    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
-                         description="Optional step size for progress reporting during indexing")),
-    clean_index=(Optional[bool], Field(default=False,
-                       description="Optional flag to enforce clean existing index before indexing new data")),
-    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
+    # Progress reporting and index cleaning options
+    progress_step=(Optional[int], Field(
+        default=10, ge=0, le=100,
+        description="Optional step size for progress reporting during indexing"
+    )),
+    clean_index=(Optional[bool], Field(
+        default=False,
+        description="Optional flag to enforce clean existing index before indexing new data"
+    )),
+    # Chunking options
+    chunking_tool=(Optional[str], Field(
+        default=None,
+        description="Name of the chunking tool to apply when splitting documents"
+    )),
+    chunking_config=(Optional[dict], Field(
+        description="Configuration for the chunking tool (per file extension settings)",
+        default_factory=dict
+    )),
 )
 
 
@@ -421,4 +434,3 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "description": self.list_collections.__doc__,
                 "args_schema": create_model("ListCollectionsParams")  # No parameters
             },
-        ]
