@@ -19,10 +19,10 @@ class GithubConfiguration(BaseModel):
                             },
                             {
                                 "name": "Password",
+    chunking_tool: Optional[str] = Field(description="Chunking Tool")
                                 "fields": ["username", "password"]
                             },
                             {
-                                "name": "App private key",
                                 "fields": ["app_id", "app_private_key"]
                             }
                         ]
