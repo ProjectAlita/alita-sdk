@@ -10,7 +10,7 @@ class GitlabConfiguration(BaseModel):
                 "label": "GitLab",
                 "icon_url": None,
                 "sections": {
-                    "auth": {
+    chunking_tool: Optional[str] = Field(description="Chunking Tool")
                         "required": True,
                         "subsections": [
                             {
