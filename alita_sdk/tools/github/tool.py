@@ -15,6 +15,8 @@ class GitHubAction(BaseTool):
     mode: str = ""
     description: str = ""
     args_schema: Optional[Type[BaseModel]] = None
+    chunking_tool: Optional[str] = Field(default=None, description="Chunking tool for data processing")
+    chunking_config: Optional[dict] = Field(default=None, description="Configuration for chunking tool")
     
     @field_validator('name', mode='before')
     @classmethod
