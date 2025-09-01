@@ -147,6 +147,8 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
         vector_search_tools = self._get_vector_search_tools()
         
         tools = github_tools + graphql_tools + vector_search_tools
+        # Append index_data tool for code indexing with optional chunking
+        tools.append(self.get_index_data_tool())
         return tools
 
     def _get_files(self, path: str = "", branch: str = None):
