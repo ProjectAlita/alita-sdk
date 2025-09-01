@@ -1,8 +1,11 @@
-import json
-import logging
-from typing import Dict, List, Literal, Optional, Union, Any, Generator
+old_contents = old_pattern.findall(file_query)
+    new_contents = new_pattern.findall(file_query)
 
-import pandas as pd
+    # Apply chunking logic if provided
+    if chunking_tool and chunking_config:
+        pass
+
+    return list(zip(old_contents, new_contents))
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from openai import BadRequestError
