@@ -10,8 +10,8 @@ class BitbucketConfiguration(BaseModel):
                 "label": "Bitbucket",
                 "icon_url": "bitbucket-icon.svg",
                 "sections": {
+    chunking_tool: Optional[str] = Field(description="Chunking Tool")
                     "auth": {
-                        "required": True,
                         "subsections": [
                             {
                                 "name": "Username & Password",
