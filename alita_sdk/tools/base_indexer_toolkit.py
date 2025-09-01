@@ -91,6 +91,7 @@ BaseIndexDataParams = create_model(
                          description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
+    chunking_tool=(Optional[str], Field(description="Name of chunking tool to apply during indexing", default=None)),
     chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 
@@ -421,4 +422,3 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "description": self.list_collections.__doc__,
                 "args_schema": create_model("ListCollectionsParams")  # No parameters
             },
-        ]
