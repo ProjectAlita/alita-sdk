@@ -1267,5 +1267,6 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
         ]        # Add vector search tools from base class (includes index_data + search tools)
         vector_search_tools = self._get_vector_search_tools()
         tools.extend(vector_search_tools)
-
+        # Append index_data tool for code indexing with optional chunking
+        tools.append(self.get_index_data_tool())
         return tools
