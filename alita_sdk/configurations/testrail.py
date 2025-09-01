@@ -10,7 +10,7 @@ class TestRailConfiguration(BaseModel):
                 "label": "TestRail",
                 "icon_url": "testrail.svg",
                 "section": "credentials",
-                "type": "testrail",
+    chunking_tool: Optional[str] = Field(description="Chunking Tool")
                 "categories": ["test management"],
                 "extra_categories": ["testrail", "test management", "quality assurance", "testing"],
             }
