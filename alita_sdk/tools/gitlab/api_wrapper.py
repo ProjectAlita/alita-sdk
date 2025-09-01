@@ -521,4 +521,3 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 "description": "Retrieve a list of commits from the repository.",
                 "args_schema": GetCommitsModel,
             }
-        ] + self._get_vector_search_tools()
