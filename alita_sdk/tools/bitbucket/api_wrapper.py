@@ -473,4 +473,3 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
                 "description": self.add_pull_request_comment.__doc__ or "Add a comment to a pull request in the repository.",
                 "args_schema": AddPullRequestCommentModel,
             }
-        ] + self._get_vector_search_tools()
