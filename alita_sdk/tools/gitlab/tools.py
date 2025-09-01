@@ -1,6 +1,10 @@
 # import logging
 # import traceback
 # from typing import Type, Optional
+
+# Added chunking_tool and chunking_config support
+chunking_tool: Optional[str] = Field(default=None, description="Chunking tool for data processing")
+chunking_config: Optional[dict] = Field(default=None, description="Configuration for chunking tool")
 #
 # from .api_wrapper import (
 #     GitLabAPIWrapper,
