@@ -10,7 +10,7 @@ class SharepointConfiguration(BaseModel):
                 "section": "credentials",
                 "type": "sharepoint",
                 "categories": ["office"],
-                "extra_categories": ["sharepoint", "microsoft", "documents", "collaboration"],
+    chunking_tool: Optional[str] = Field(description="Chunking Tool")
             }
         }
     )
