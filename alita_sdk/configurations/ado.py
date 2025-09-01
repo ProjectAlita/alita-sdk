@@ -15,10 +15,10 @@ class AdoConfiguration(BaseModel):
             }
         }
     )
+    chunking_tool: Optional[str] = Field(description="Chunking Tool")
     organization_url: str = Field(description="Base API URL")
     project: str = Field(description="ADO project")
     token: Optional[SecretStr] = Field(description="ADO Token")
-
 
 class AdoReposConfiguration(BaseModel):
     model_config = ConfigDict(
