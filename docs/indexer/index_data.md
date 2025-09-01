@@ -74,10 +74,23 @@ Corner case: Handles empty document lists and ensures atomicity of the save oper
 
 - `chunking_config` (`Optional[dict]`):  
   Chunking tool configuration (default: empty dict).   
-  Example: {".pdf": {"mode": "page", "chunk_size": 1000}, ".docx": {"mode": "paragraph"}, ".md": {"chunk_size": 333}}
+  **Example:** `{".pdf": {"mode": "page", "chunk_size": 1000}, ".docx": {"mode": "paragraph"}, ".md": {"chunk_size": 333}}`
 
 ---
 
 ## Toolkit Specific Parameters for `index_data`
 
 Other extra parameters (for particular toolkit needs) can be provided by the implementation of `_index_tool_params()`.
+
+---
+
+## _chunking_config_ Parameter for `index_data`
+
+It is intended to provide unified settings for content parsers handling both base and dependent documents.  
+Some parsers support LLM capabilities for advanced content processing (for example, a PDF parser that analyzes images).  
+To enable LLM processing for such parsers, include _llm_ key in chunking_config with any value (e.g., 'True').  
+The optional _prompt_ parameter can be used to guide the LLM in processing the document content.  
+Use _prompt_default_ parameter with any value (e.g., 'True') to use built-in detailed prompt to process images.  
+Note: the complexity of a prompt may affect processing time and token usage.  
+**Example:** `{".pdf": {"llm": true, "prompt": "Provide only information regarding colors and wrap output with image tag."}}`
+
