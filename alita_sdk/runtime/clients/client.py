@@ -81,7 +81,19 @@ class AlitaClient:
     def mcp_tool_call(self, params: dict[str, Any]):
         if user_id := self._get_real_user_id():
             url = f"{self.mcp_tools_call}/{user_id}"
-            data = requests.post(url, headers=self.headers, json=params, verify=False).json()
+
+            if 'args' in params.get('params', {}).get('arguments', {}):
+                args_obj = params['params']['arguments']['args']
+                if hasattr(args_obj, "__dict__"):
+                    params['params']['arguments'] = vars(args_obj)
+                else:
+                    params['params']['arguments'] = args_obj
+
+            response = requests.post(url, headers=self.headers, json=params, verify=False)
+            try:
+                data = response.json()
+            except (ValueError, TypeError):
+                data = response.text
             return data
         else:
             return f"Error: Could not determine user ID for MCP tool call"
