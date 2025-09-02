@@ -75,10 +75,20 @@ class AlitaClient:
     def mcp_tool_call(self, params: dict[str, Any]):
         if user_id := self._get_real_user_id():
             url = f"{self.mcp_tools_call}/{user_id}"
-            data = requests.post(url, headers=self.headers, json=params, verify=False).json()
-            return data
+            #
+            # This loop iterates over each key-value pair in the arguments dictionary,
+            # and if a value is a Pydantic object, it replaces it with its dictionary representation using .dict().
+            for arg_name, arg_value in params.get('params', {}).get('arguments', {}).items():
+                if hasattr(arg_value, "dict") and callable(arg_value.dict):
+                    params['params']['arguments'][arg_name] = arg_value.dict()
+            #
+            response = requests.post(url, headers=self.headers, json=params, verify=False)
+            try:
+                return response.json()
+            except (ValueError, TypeError):
+                return response.text
         else:
-            return f"Error: Could not determine user ID for MCP tool call: {e}"
+            return f"Error: Could not determine user ID for MCP tool call"
 
     def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
         url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
