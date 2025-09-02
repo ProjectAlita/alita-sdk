@@ -139,7 +139,7 @@ loaders_map = {
     '.pdf': {
         'class': AlitaPDFLoader,
         'is_multimodal_processing': False,
-        'kwargs': {},
+        'kwargs': {LoaderProperties.LLM.value: None},
         'allowed_to_override': ['max_tokens', LoaderProperties.LLM.value, LoaderProperties.PROMPT.value, LoaderProperties.PROMPT_DEFAULT.value]
     },
     '.docx': {

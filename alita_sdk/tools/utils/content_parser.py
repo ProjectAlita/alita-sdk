@@ -238,7 +238,6 @@ def process_content_by_type(document: Document, content, extension_source: str, 
                 loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value)
                 loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
-            counter = 1
             try:
                 chunks = loader.load()
             except Exception as e:
@@ -250,14 +249,9 @@ def process_content_by_type(document: Document, content, extension_source: str, 
                 )
                 return
             for chunk in chunks:
-                if 'chunk_id' not in chunk.metadata:
-                    chunk.metadata['chunk_id'] = counter
-                document_metadata = document.metadata.copy()
-                document_metadata['id'] = f"{document.metadata['id']}_{chunk.metadata['chunk_id']}"
-                counter+=1
                 yield Document(
                     page_content=sanitize_for_postgres(chunk.page_content),
-                    metadata={**document_metadata, **chunk.metadata}
+                    metadata={**document.metadata, **chunk.metadata}
                 )
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
