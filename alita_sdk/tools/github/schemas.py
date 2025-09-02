@@ -119,7 +119,8 @@ LoaderSchema = create_model(
     "LoaderSchema",
     branch=(Optional[str], Field(description="The branch to set as active. If None, the current active branch is used.", default=None)),
     whitelist=(Optional[List[str]], Field(description="A list of file extensions or paths to include. If None, all files are included.", default=None)),
-    blacklist=(Optional[List[str]], Field(description="A list of file extensions or paths to exclude. If None, no files are excluded.", default=None))
+    blacklist=(Optional[List[str]], Field(description="A list of file extensions or paths to exclude. If None, no files are excluded.", default=None)),
+    progress_step=(Optional[int], Field(default=5, ge=0, le=100, description="Optional step size for progress reporting during indexing (0-100)"))
 )
 
 CreateIssueOnProject = create_model(

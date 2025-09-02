@@ -664,7 +664,8 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         vectorstore = self._init_vector_store()
         clean_index = kwargs.get('clean_index', False)
         return vectorstore.index_documents(documents, collection_suffix=collection_suffix,
-                                           clean_index=clean_index, is_code=True)
+                                           clean_index=clean_index, is_code=True,
+                                           progress_step=kwargs.get('progress_step', 5))
 
     def _get_vector_search_tools(self):
         """
