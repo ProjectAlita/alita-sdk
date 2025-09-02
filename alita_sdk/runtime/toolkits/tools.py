@@ -64,7 +64,6 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
             tools += MemoryToolkit.get_toolkit(
                 namespace=tool['settings'].get('namespace', str(tool['id'])),
                 store=memory_store,
-                toolkit_name=tool.get('toolkit_name', '')
             ).get_tools()
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(

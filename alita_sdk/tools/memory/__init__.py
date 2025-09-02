@@ -1,6 +1,8 @@
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from langchain_core.tools import BaseToolkit, BaseTool
+
+from alita_sdk.configurations.pgvector import PgVectorConfiguration
 
 try:
     from langmem import create_manage_memory_tool, create_search_memory_tool
@@ -15,7 +17,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 
 name = "memory"
 
-def get_tools(tools_list: list, alita_client, llm, memory_store=None):
+def get_tools(tools_list: list, memory_store=None):
     """
     Get memory tools for the provided tool configurations.
     
@@ -53,13 +55,18 @@ class MemoryToolkit(BaseToolkit):
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
+        memory_tools = [create_manage_memory_tool('test'), create_search_memory_tool('test')]
+        selected_tools = {x.name: x.args_schema.schema() for x in memory_tools}
+
         return create_model(
-            'MemoryConfig',
+            'memory',
             namespace=(str, Field(description="Memory namespace", json_schema_extra={'toolkit_name': True})),
-            # username=(Optional[str], Field(description="Username", default='Tester', json_schema_extra={'hidden': True})),
-            # connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-            #                                               default=None,
-            #                                               json_schema_extra={'secret': True})),
+            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
+                                                                           json_schema_extra={
+                                                                               'configuration_types': ['pgvector']})),
+            selected_tools=(List[Literal[tuple(selected_tools)]],
+                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Memory",
@@ -72,7 +79,7 @@ class MemoryToolkit(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, namespace: str, store=None, **kwargs):
+    def get_toolkit(cls, namespace: str, store=None):
         """
         Get toolkit with memory tools.
         

@@ -125,7 +125,7 @@ class Assistant:
         if not memory_tool or self.store is not None:
             return
         from .store_manager import get_manager
-        conn_str = memory_tool.get('settings', {}).get('connection_string', '')
+        conn_str = memory_tool['settings'].get('pgvector_configuration', {}).get('connection_string', '')
         store = get_manager().get_store(conn_str)
         self.store = store
 
