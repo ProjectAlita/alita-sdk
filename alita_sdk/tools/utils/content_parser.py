@@ -7,7 +7,7 @@ from typing import Generator, List
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 
-from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map
+from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map, LoaderProperties
 from ...runtime.utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
@@ -51,8 +51,6 @@ Provide a detailed description of what is shown in the image.
 Highlight any visible details that could help in understanding the image.
 Be as precise and thorough as possible in your responses. If something is unclear or illegible, state that explicitly.
 '''
-
-IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'svg']
 
 
 def parse_file_content(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
@@ -234,8 +232,11 @@ def process_content_by_type(document: Document, content, extension_source: str, 
             if chunking_config and (users_config_for_extension := chunking_config.get(extension, {})):
                 for key in set(users_config_for_extension.keys()) & set(allowed_to_override):
                     loader_kwargs[key] = users_config_for_extension[key]
-            loader_kwargs['llm'] = llm
-            loader_kwargs['prompt'] = image_processing_prompt
+            if LoaderProperties.LLM.value in loader_kwargs:
+                loader_kwargs[LoaderProperties.LLM.value] = llm
+            if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs:
+                loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value)
+                loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
             counter = 1
             try:
