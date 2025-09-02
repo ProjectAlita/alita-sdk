@@ -35,7 +35,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store=None):
             try:
                 toolkit_instance = MemoryToolkit().get_toolkit(
                     namespace=tool['settings'].get('namespace', str(tool['id'])),
-                    username=tool['settings'].get('username', ''),
+                    # username=tool['settings'].get('username', ''),
                     store=tool['settings'].get('store', memory_store),
                     toolkit_name=tool.get('toolkit_name', '')
                 )
@@ -56,15 +56,15 @@ class MemoryToolkit(BaseToolkit):
         return create_model(
             'MemoryConfig',
             namespace=(str, Field(description="Memory namespace", json_schema_extra={'toolkit_name': True})),
-            username=(Optional[str], Field(description="Username", default='Tester', json_schema_extra={'hidden': True})),
-            connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
-                                                          default=None,
-                                                          json_schema_extra={'secret': True})),
+            # username=(Optional[str], Field(description="Username", default='Tester', json_schema_extra={'hidden': True})),
+            # connection_string=(Optional[SecretStr], Field(description="Connection string for vectorstore",
+            #                                               default=None,
+            #                                               json_schema_extra={'secret': True})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "Memory",
                     "icon_url": "memory.svg",
-                    "hidden": True,
+                    "hidden": False,
                     "categories": ["other"],
                     "extra_categories": ["long-term memory", "langmem"],
                 }
