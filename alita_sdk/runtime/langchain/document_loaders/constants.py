@@ -25,6 +25,7 @@ from .AlitaPDFLoader import AlitaPDFLoader
 from .AlitaPowerPointLoader import AlitaPowerPointLoader
 from .AlitaTextLoader import AlitaTextLoader
 from .AlitaMarkdownLoader import AlitaMarkdownLoader
+from .AlitaPythonLoader import AlitaPythonLoader
 from enum import Enum
 
 class LoaderProperties(Enum):
@@ -190,7 +191,7 @@ loaders_map = {
         'allowed_to_override': ['max_tokens', 'mode', LoaderProperties.LLM.value, LoaderProperties.PROMPT.value, LoaderProperties.PROMPT_DEFAULT.value]
     },
     '.py': {
-        'class': PythonLoader,
+        'class': AlitaPythonLoader,
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': ['max_tokens']
