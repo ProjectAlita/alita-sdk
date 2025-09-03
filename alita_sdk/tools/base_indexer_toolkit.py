@@ -175,7 +175,10 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         self._clean_metadata(list_documents)
         self._log_tool_event(f"Documents are ready for indexing. Total documents to index: {len(list_documents)}")
         return self._save_index(list_documents, collection_suffix=collection_suffix, progress_step=progress_step)
-    
+
+    def _default_chunking_tool(self):
+        return None
+
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
         from ..tools.chunkers import __all__ as chunkers
 
@@ -183,16 +186,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             chunking_config = {}
         chunking_config['embedding'] = self._embedding
         chunking_config['llm'] = self.llm
-        
+        if not chunking_tool:
+            chunking_tool = self._default_chunking_tool()
+
         for document in documents:
-            if content_type := document.metadata.get(IndexerKeywords.CONTENT_FILE_NAME.value, None):
-                # apply parsing based on content type and chunk if chunker was applied to parent doc
-                content = document.metadata.pop(IndexerKeywords.CONTENT_IN_BYTES.value, None)
-                yield from process_content_by_type(
-                    document=document,
-                    content=content,
-                    extension_source=content_type, llm=self.llm, chunking_config=chunking_config)
-            elif chunking_tool and (content_in_bytes := document.metadata.pop(IndexerKeywords.CONTENT_IN_BYTES.value, None)) is not None:
+            if chunking_tool and (content_in_bytes := document.metadata.pop(IndexerKeywords.CONTENT_IN_BYTES.value, None)) is not None:
                 if not content_in_bytes:
                     # content is empty, yield as is
                     yield document
@@ -207,6 +205,13 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 # apply default chunker from toolkit config. No parsing.
                 chunker = chunkers.get(chunking_tool)
                 yield from chunker(file_content_generator=iter([document]), config=chunking_config)
+            elif content_type := document.metadata.get(IndexerKeywords.CONTENT_FILE_NAME.value, None):
+                # apply parsing based on content type and chunk if chunker was applied to parent doc
+                content = document.metadata.pop(IndexerKeywords.CONTENT_IN_BYTES.value, None)
+                yield from process_content_by_type(
+                    document=document,
+                    content=content,
+                    extension_source=content_type, llm=self.llm, chunking_config=chunking_config)
             else:
                 # return as is if neither chunker nor content type are specified
                 yield document

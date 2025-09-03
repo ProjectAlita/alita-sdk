@@ -601,9 +601,12 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments (e.g., ['.exe', '.zip', '.bin'])",
                 default=None)),
-            'chunking_tool': (Literal['json'],
+            'chunking_tool': (Literal['json', ''],
                               Field(description="Name of chunking tool for base document", default='json')),
         }
+
+    def _default_chunking_tool(self):
+        return 'json'
 
     def _get_tests_direct(self, jql: str) -> List[Dict]:
         """Direct method to get test data without string formatting"""

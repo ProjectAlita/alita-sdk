@@ -268,8 +268,11 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
 
     def _index_tool_params(self):
         return {
-            'chunking_tool':(Literal['json'], Field(description="Name of chunking tool", default='json'))
+            'chunking_tool':(Literal['json', ''], Field(description="Name of chunking tool", default='json'))
         }
+
+    def _default_chunking_tool(self):
+        return 'json'
 
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         self._chunking_tool = kwargs.get('chunking_tool', None)

@@ -415,8 +415,11 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             "suite_ids": (Optional[List[int]], Field(description='List of test suite IDs for which test cases are requested '
                                                                  '(can be empty for all suites indexing from the plan). '
                                                                  'Example: [2, 23]', default=[])),
-            'chunking_tool':(Literal['html'], Field(description="Name of chunking tool", default='html'))
+            'chunking_tool':(Literal['html', ''], Field(description="Name of chunking tool", default='html'))
         }
+
+    def _default_chunking_tool(self):
+        return 'html'
 
     @extend_with_parent_available_tools
     def get_available_tools(self):

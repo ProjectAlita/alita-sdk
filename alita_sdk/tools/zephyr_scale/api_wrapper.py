@@ -1216,8 +1216,11 @@ class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
             Example:
                 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login" AND orderBy = "name" AND orderDirection = "ASC"'
             """)),
-            'chunking_tool': (Literal['json'], Field(description="Name of chunking tool", default='json'))
+            'chunking_tool': (Literal['json', ''], Field(description="Name of chunking tool", default='json'))
         }
+
+    def _default_chunking_tool(self):
+        return 'json'
 
     def _base_loader(self, project_key: str, jql: str, **kwargs) -> Generator[Document, None, None]:
         self._chunking_tool = kwargs.get('chunking_tool', None)

@@ -156,8 +156,11 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
         """
         return {
             "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""])),
-            'chunking_tool': (Literal['json'], Field(description="Name of chunking tool", default='json'))
+            'chunking_tool': (Literal['json', ''], Field(description="Name of chunking tool", default='json'))
         }
+
+    def _default_chunking_tool(self):
+        return 'json'
 
     def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:
         self._chunking_tool = kwargs.get('chunking_tool', None)

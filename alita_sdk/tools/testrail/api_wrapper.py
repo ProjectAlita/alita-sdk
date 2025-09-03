@@ -668,8 +668,11 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments: i.e. ['.png', '.jpg']",
                 default=[])),
-            'chunking_tool':(Literal['json'], Field(description="Name of chunking tool", default='json'))
+            'chunking_tool':(Literal['json', ''], Field(description="Name of chunking tool", default='json'))
         }
+
+    def _default_chunking_tool(self):
+        return 'json'
 
     def _to_markup(self, data: List[Dict], output_format: str) -> str:
         """
