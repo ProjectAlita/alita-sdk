@@ -81,20 +81,18 @@ class AlitaClient:
     def mcp_tool_call(self, params: dict[str, Any]):
         if user_id := self._get_real_user_id():
             url = f"{self.mcp_tools_call}/{user_id}"
-
-            if 'args' in params.get('params', {}).get('arguments', {}):
-                args_obj = params['params']['arguments']['args']
-                if hasattr(args_obj, "__dict__"):
-                    params['params']['arguments'] = vars(args_obj)
-                else:
-                    params['params']['arguments'] = args_obj
-
+            #
+            # This loop iterates over each key-value pair in the arguments dictionary,
+            # and if a value is a Pydantic object, it replaces it with its dictionary representation using .dict().
+            for arg_name, arg_value in params.get('params', {}).get('arguments', {}).items():
+                if hasattr(arg_value, "dict") and callable(arg_value.dict):
+                    params['params']['arguments'][arg_name] = arg_value.dict()
+            #
             response = requests.post(url, headers=self.headers, json=params, verify=False)
             try:
-                data = response.json()
+                return response.json()
             except (ValueError, TypeError):
-                data = response.text
-            return data
+                return response.text
         else:
             return f"Error: Could not determine user ID for MCP tool call"
 
