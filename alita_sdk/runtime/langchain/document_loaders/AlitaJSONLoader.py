@@ -68,6 +68,9 @@ class AlitaJSONLoader(BaseLoader):
         else:
             data_dict = content_json
         chunks = RecursiveJsonSplitter(max_chunk_size=self.max_tokens).split_json(json_data=data_dict)
+        chunk_id = 1
         for chunk in chunks:
-            metadata = {"source": str(self.file_path) if hasattr(self, 'file_path') else self.file_name}
+            metadata = {"source": str(self.file_path) if hasattr(self, 'file_path') else self.file_name,
+                        "chunk_id": chunk_id}
+            chunk_id+=1
             yield Document(page_content=json.dumps(chunk), metadata=metadata)
