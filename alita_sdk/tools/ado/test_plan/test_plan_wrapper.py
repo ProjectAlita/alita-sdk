@@ -418,9 +418,6 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             'chunking_tool':(Literal['html', ''], Field(description="Name of chunking tool", default='html'))
         }
 
-    def _default_chunking_tool(self):
-        return 'html'
-
     @extend_with_parent_available_tools
     def get_available_tools(self):
         """Return a list of available tools."""

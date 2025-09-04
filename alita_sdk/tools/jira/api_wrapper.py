@@ -1479,9 +1479,6 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             'chunking_tool': (Literal['markdown', ''], Field(description="Name of chunking tool for base document", default='markdown')),
         }
 
-    def _default_chunking_tool(self):
-        return 'markdown'
-
     # def index_data(self,
     #                jql: Optional[str] = None,
     #                fields_to_extract: Optional[List[str]] = None,

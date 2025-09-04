@@ -253,9 +253,6 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             'chunking_tool':(Literal['markdown', ''], Field(description="Name of chunking tool", default='markdown'))
         }
 
-    def _default_chunking_tool(self):
-        return 'markdown'
-
     @extend_with_parent_available_tools
     def get_available_tools(self):
         """Return a list of available tools."""
