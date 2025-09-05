@@ -26,6 +26,7 @@ def _get_toolkit(tool) -> BaseToolkit:
         embedding_model=tool['settings'].get('embedding_model'),
         collection_name=tool['toolkit_name'],
         alita=tool['settings'].get('alita', None),
+        llm=tool['settings'].get('llm', None),
     )
 
 def get_toolkit():
