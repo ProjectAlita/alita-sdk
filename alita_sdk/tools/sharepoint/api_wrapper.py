@@ -170,15 +170,25 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         }
 
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
+
+        self._log_tool_event(message="Starting SharePoint files extraction", tool_name="loader")
         try:
             all_files = self.get_files_list(limit_files=kwargs.get('limit_files', 10000))
+            self._log_tool_event(message="List of the files has been extracted", tool_name="loader")
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
         include_extensions = kwargs.get('include_extensions', [])
         skip_extensions = kwargs.get('skip_extensions', [])
-
+        self._log_tool_event(message=f"Files filtering started. Include extensions: {include_extensions}. "
+                                     f"Skip extensions: {skip_extensions}", tool_name="loader")
+        # show the progress of filtering
+        total_files = len(all_files) if isinstance(all_files, list) else 0
+        filtered_files_count = 0
         for file in all_files:
+            filtered_files_count += 1
+            if filtered_files_count % 10 == 0 or filtered_files_count == total_files:
+                self._log_tool_event(message=f"Files filtering progress: {filtered_files_count}/{total_files}", tool_name="loader")
             file_name = file.get('Name', '')
 
             # Check if file should be skipped based on skip_extensions
