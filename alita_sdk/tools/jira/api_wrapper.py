@@ -1476,7 +1476,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments: i.e. ['.png', '.jpg']",
                 default=[])),
-            'chunking_tool': (Literal['markdown'], Field(description="Name of chunking tool for base document", default='markdown')),
+            'chunking_tool': (Literal['markdown', ''], Field(description="Name of chunking tool for base document", default='markdown')),
         }
 
     # def index_data(self,

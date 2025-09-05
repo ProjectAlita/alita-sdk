@@ -250,7 +250,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         return {
             "wiki_identifier": (str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
             'title_contains': (Optional[str], Field(default=None, description="Optional filter to include only pages with titles containing exact this string")),
-            'chunking_tool':(Literal['markdown'], Field(description="Name of chunking tool", default='markdown'))
+            'chunking_tool':(Literal['markdown', ''], Field(description="Name of chunking tool", default='markdown'))
         }
 
     @extend_with_parent_available_tools

@@ -418,7 +418,6 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                         metadata["_attachments_data"] = attachments_data
 
                 metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
-                metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = f"base_doc{file_extension_by_chunker(kwargs['chunking_tool'])}"
                 yield Document(page_content='', metadata=metadata)
                 
         except Exception as e:
@@ -601,7 +600,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments (e.g., ['.exe', '.zip', '.bin'])",
                 default=None)),
-            'chunking_tool': (Literal['json'],
+            'chunking_tool': (Literal['json', ''],
                               Field(description="Name of chunking tool for base document", default='json')),
         }
 

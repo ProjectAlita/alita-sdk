@@ -156,7 +156,7 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
         """
         return {
             "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""])),
-            'chunking_tool': (Literal['json'], Field(description="Name of chunking tool", default='json'))
+            'chunking_tool': (Literal['json', ''], Field(description="Name of chunking tool", default='json'))
         }
 
     def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:
@@ -181,8 +181,6 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
                 test_case_content = self.get_test_case_steps(id)
                 page_content = json.dumps(test_case_content)
                 document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
-                document.metadata[
-                    IndexerKeywords.CONTENT_FILE_NAME.value] = f"base_doc{file_extension_by_chunker(self._chunking_tool)}"
             except Exception as e:
                 logging.error(f"Failed to process document: {e}")
             yield document
