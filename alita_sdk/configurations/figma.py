@@ -16,10 +16,6 @@ class FigmaConfiguration(BaseModel):
                             {
                                 "name": "Token",
                                 "fields": ["token"]
-                            },
-                            {
-                                "name": "Oath2",
-                                "fields": ["oauth2"]
                             }
                         ]
                     }
