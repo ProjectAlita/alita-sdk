@@ -154,15 +154,6 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         logger.debug(f"Validating toolkit: {values}")
         if 'vectorstore_params' in values:
             values["dataset"] = values.get('vectorstore_params').get('collection_name')
-        # if not values.get('vectorstore_type'):
-        #     raise ValueError("Vectorstore type is required.")
-        # if not values.get('embedding_model'):
-        #     raise ValueError("Embedding model is required.")
-        # if not values.get('vectorstore_params'):
-        #     raise ValueError("Vectorstore parameters are required.")
-        # values["dataset"] = values.get('vectorstore_params').get('collection_name')
-        # if not values["dataset"]:
-        #     raise ValueError("Collection name is required.")
         if values.get('embedding_model'):
             values['embeddings'] = values['alita'].get_embeddings(values['embedding_model'])
         if values.get('vectorstore_type') and values.get('vectorstore_params') and values.get('embedding_model'):
