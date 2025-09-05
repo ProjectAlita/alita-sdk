@@ -4,6 +4,7 @@ from typing import List, Literal, Optional
 
 from .api_wrapper import ZephyrApiWrapper
 from ..base.tool import BaseAction
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER
 from ...configurations.pgvector import PgVectorConfiguration
 from ...configurations.zephyr_enterprise import ZephyrEnterpriseConfiguration
@@ -54,6 +55,7 @@ class ZephyrEnterpriseToolkit(BaseToolkit):
         )
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []

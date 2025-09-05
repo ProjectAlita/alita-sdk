@@ -4,6 +4,8 @@ from langchain_core.tools import BaseToolkit
 from langchain_core.tools import BaseTool
 from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
+
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from ...configurations.gitlab import GitlabConfiguration
 
@@ -51,6 +53,7 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
         )
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []

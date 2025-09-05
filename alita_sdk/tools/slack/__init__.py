@@ -2,6 +2,7 @@ from typing import List, Optional, Literal
 
 import logging
 
+from ..elitea_base import filter_missconfigured_index_tools
 from ...configurations.slack import SlackConfiguration
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class SlackToolkit(BaseToolkit):
          return model
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: Optional[List[str]] = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []

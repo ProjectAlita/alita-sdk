@@ -5,6 +5,7 @@ from pydantic import create_model, BaseModel, Field, SecretStr
 
 from .api_wrapper import ZephyrSquadApiWrapper
 from ..base.tool import BaseAction
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 
 name = "zephyr_squad"
@@ -39,6 +40,7 @@ class ZephyrSquadToolkit(BaseToolkit):
         )
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         zephyr_api_wrapper = ZephyrSquadApiWrapper(**kwargs)
         prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''

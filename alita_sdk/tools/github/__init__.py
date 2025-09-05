@@ -5,6 +5,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from .api_wrapper import AlitaGitHubAPIWrapper
 from .tool import GitHubAction
+from ..elitea_base import filter_missconfigured_index_tools
 
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from ...configurations.github import GithubConfiguration
@@ -72,6 +73,7 @@ class AlitaGitHubToolkit(BaseToolkit):
         )
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
@@ -85,7 +87,8 @@ class AlitaGitHubToolkit(BaseToolkit):
         github_api_wrapper = AlitaGitHubAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = github_api_wrapper.get_available_tools()
         tools = []
-        prefix = clean_string(toolkit_name, AlitaGitHubToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
+        prefix = clean_string(toolkit_name) + TOOLKIT_SPLITTER if toolkit_name else ''
+        # prefix = clean_string(toolkit_name, AlitaGitHubToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:

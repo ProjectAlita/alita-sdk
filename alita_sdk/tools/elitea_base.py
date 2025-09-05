@@ -17,6 +17,9 @@ from ..runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
+INDEX_TOOL_NAMES = ['index_data', 'remove_index', 'list_collections', 'search_index', 'stepback_search_index',
+                            'stepback_summary_index']
+
 LoaderSchema = create_model(
     "LoaderSchema",
     branch=(Optional[str], Field(
@@ -698,5 +701,25 @@ def extend_with_vector_tools(method):
             tools.append(self.get_index_data_tool())
         #
         return tools
+
+    return wrapper
+
+
+def filter_missconfigured_index_tools(method):
+    def wrapper(self, *args, **kwargs):
+        toolkit = method(self, *args, **kwargs)
+
+        # Validate index tools misconfiguration and exclude them if necessary
+        is_index_toolkit = any(tool.name.rsplit(TOOLKIT_SPLITTER)[1]
+                               if TOOLKIT_SPLITTER in tool.name else tool.name
+                                                                     in INDEX_TOOL_NAMES for tool in toolkit.tools)
+        is_index_configuration_missing = not (kwargs.get('embedding_model')
+                                              and kwargs.get('pgvector_configuration'))
+
+        if is_index_toolkit and is_index_configuration_missing:
+            toolkit.tools = [tool for tool in toolkit.tools if (tool.name.rsplit(TOOLKIT_SPLITTER, 1)[
+                                                                    1] if TOOLKIT_SPLITTER in tool.name else tool.name) not in INDEX_TOOL_NAMES]
+
+        return toolkit
 
     return wrapper

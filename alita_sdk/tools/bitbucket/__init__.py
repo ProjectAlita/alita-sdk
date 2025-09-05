@@ -8,6 +8,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict, create_model
 
 from ..base.tool import BaseAction
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
 from ...configurations.bitbucket import BitbucketConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
@@ -85,6 +86,7 @@ class AlitaBitbucketToolkit(BaseToolkit):
         return m
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []

@@ -110,13 +110,13 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         connection_string = conn.get_secret_value() if isinstance(conn, SecretStr) else conn
         collection_name = kwargs.get('collection_name')
         
-        if not kwargs.get('embedding_model'):
-            kwargs['embedding_model'] = 'text-embedding-ada-002'
         if 'vectorstore_type' not in kwargs:
             kwargs['vectorstore_type'] = 'PGVector'
         vectorstore_type = kwargs.get('vectorstore_type')
-        kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(vectorstore_type).get_vectorstore_params(collection_name, connection_string)
-        kwargs['_embedding'] = kwargs.get('alita').get_embeddings(kwargs.get('embedding_model'))
+        if connection_string:
+            # Initialize vectorstore params only if connection string is provided
+            kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(vectorstore_type).get_vectorstore_params(collection_name, connection_string)
+            kwargs['_embedding'] = kwargs.get('alita').get_embeddings(kwargs.get('embedding_model'))
         super().__init__(**kwargs)
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:

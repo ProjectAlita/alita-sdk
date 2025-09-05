@@ -133,9 +133,9 @@ How did you come up with the answer?
 
 class VectorStoreWrapperBase(BaseToolApiWrapper):
     llm: Any
-    embedding_model: str
-    vectorstore_type: str
-    vectorstore_params: dict
+    embedding_model: Optional[str] = None
+    vectorstore_type: Optional[str]  = None
+    vectorstore_params: Optional[dict]  = None
     max_docs_per_add: int = 100
     dataset: str = None
     embedding: Any = None
@@ -150,28 +150,31 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
     @model_validator(mode='before')
     @classmethod
     def validate_toolkit(cls, values):
-        from ..langchain.interfaces.llm_processor import get_embeddings, get_vectorstore
+        from ..langchain.interfaces.llm_processor import get_vectorstore
         logger.debug(f"Validating toolkit: {values}")
-        if not values.get('vectorstore_type'):
-            raise ValueError("Vectorstore type is required.")
-        if not values.get('embedding_model'):
-            raise ValueError("Embedding model is required.")
-        if not values.get('vectorstore_params'):
-            raise ValueError("Vectorstore parameters are required.")
-        values["dataset"] = values.get('vectorstore_params').get('collection_name')
-        if not values["dataset"]:
-            raise ValueError("Collection name is required.")
-        if not values.get('embeddings'):
+        if 'vectorstore_params' in values:
+            values["dataset"] = values.get('vectorstore_params').get('collection_name')
+        # if not values.get('vectorstore_type'):
+        #     raise ValueError("Vectorstore type is required.")
+        # if not values.get('embedding_model'):
+        #     raise ValueError("Embedding model is required.")
+        # if not values.get('vectorstore_params'):
+        #     raise ValueError("Vectorstore parameters are required.")
+        # values["dataset"] = values.get('vectorstore_params').get('collection_name')
+        # if not values["dataset"]:
+        #     raise ValueError("Collection name is required.")
+        if values.get('embedding_model'):
             values['embeddings'] = values['alita'].get_embeddings(values['embedding_model'])
-        values['vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['embeddings'])
-        values['vectoradapter'] = VectorAdapter(
-            vectorstore=values['vectorstore'],
-            embeddings=values['embeddings'],
-            quota_params=None,
-        )
-        # Initialize the new vector adapter
-        values['vector_adapter'] = VectorStoreAdapterFactory.create_adapter(values['vectorstore_type'])
-        logger.debug(f"Vectorstore wrapper initialized: {values}")
+        if values.get('vectorstore_type') and values.get('vectorstore_params') and values.get('embedding_model'):
+            values['vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['embeddings'])
+            values['vectoradapter'] = VectorAdapter(
+                vectorstore=values['vectorstore'],
+                embeddings=values['embeddings'],
+                quota_params=None,
+            )
+            # Initialize the new vector adapter
+            values['vector_adapter'] = VectorStoreAdapterFactory.create_adapter(values['vectorstore_type'])
+            logger.debug(f"Vectorstore wrapper initialized: {values}")
         return values
 
     def _init_pg_helper(self, language='english'):

@@ -4,6 +4,8 @@ from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import create_model, BaseModel, Field
 
 import requests
+
+from ...elitea_base import filter_missconfigured_index_tools
 from ....configurations.ado import AdoConfiguration
 from ....configurations.pgvector import PgVectorConfiguration
 from .test_plan_wrapper import TestPlanApiWrapper
@@ -79,6 +81,7 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
         return m
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         from os import environ
         if not environ.get('AZURE_DEVOPS_CACHE_DIR', None):

@@ -6,6 +6,7 @@ from functools import lru_cache
 
 from .api_wrapper import CarrierAPIWrapper
 from .tools import __all__
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from ...configurations.carrier import CarrierConfiguration
 
@@ -46,6 +47,7 @@ class AlitaCarrierToolkit(BaseToolkit):
         )
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(
             cls,
             selected_tools: Optional[List[str]] = None,

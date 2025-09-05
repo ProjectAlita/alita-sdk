@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..base.tool import BaseAction
 from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from ...configurations.figma import FigmaConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
@@ -74,6 +75,7 @@ class FigmaToolkit(BaseToolkit):
         )
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []

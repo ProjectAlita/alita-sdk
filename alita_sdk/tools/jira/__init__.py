@@ -5,6 +5,7 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
 import requests
 
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
 from ...configurations.jira import JiraConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
@@ -65,6 +66,11 @@ class JiraToolkit(BaseToolkit):
 
         model = create_model(
             name,
+            name=(str, Field(description="Toolkit name",
+                             json_schema_extra={
+                                 'toolkit_name': True,
+                                 'max_toolkit_length': JiraToolkit.toolkit_max_length})
+                  ),
             cloud=(bool, Field(description="Hosting Option", json_schema_extra={'configuration': True})),
             limit=(int, Field(description="Limit issues. Default is 5", gt=0, default=5)),
             api_version=(Optional[str], Field(description="Rest API version: optional. Default is 2", default="2")),
@@ -97,6 +103,7 @@ class JiraToolkit(BaseToolkit):
         return model
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []

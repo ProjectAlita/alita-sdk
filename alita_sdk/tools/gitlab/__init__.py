@@ -7,6 +7,7 @@ from pydantic import create_model, BaseModel, ConfigDict
 from pydantic.fields import Field
 
 from .api_wrapper import GitLabAPIWrapper
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from ...configurations.gitlab import GitlabConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
@@ -64,6 +65,7 @@ class AlitaGitlabToolkit(BaseToolkit):
         )
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []

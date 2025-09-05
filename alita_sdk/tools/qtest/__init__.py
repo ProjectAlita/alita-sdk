@@ -6,6 +6,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 
 from .api_wrapper import QtestApiWrapper
 from .tool import QtestAction
+from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER, check_connection_response
 from ...configurations.qtest import QtestConfiguration
 
@@ -61,6 +62,7 @@ class QtestToolkit(BaseToolkit):
         return m
 
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, selected_tools: list[str] | None = None, toolkit_name: Optional[str] = None, **kwargs):
         if selected_tools is None:
             selected_tools = []
