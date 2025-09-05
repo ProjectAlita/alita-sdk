@@ -140,7 +140,7 @@ class BaseToolApiWrapper(BaseModel):
 
             logger.info(message)
             dispatch_custom_event(
-                name="thinking_step_update",
+                name="thinking_step",
                 data={
                     "message": message,
                     "tool_name": tool_name,
