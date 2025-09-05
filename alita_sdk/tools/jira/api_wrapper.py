@@ -50,7 +50,9 @@ JiraInput = create_model(
 
 JiraSearch = create_model(
     "JiraSearchModel",
-    jql=(str, Field(description="Jira Query Language (JQL) query string")))
+    jql=(str, Field(description="Jira Query Language (JQL) query string")),
+    api_version=(Optional[str], Field(description="Version of Jira API to use", default="3"))
+)
 
 JiraCreateIssue = create_model(
     "JiraCreateIssueModel",
@@ -153,7 +155,8 @@ LinkIssues = create_model(
                                     Example:
                                     To link test to another issue ( test 'test' story, story 'is tested by test').
                                     Use the appropriate issue link type (e.g., "Test", "Relates", "Blocks").
-                                    If we use "Test" linktype, the test is inward issue, the story/other issue is outward issue."""))
+                                    If we use "Test" linktype, the test is inward issue, the story/other issue is outward issue.""")),
+    api_version=(Optional[str], Field(description="Version of Jira API to use", default="3"))
 )
 
 SUPPORTED_ATTACHMENT_MIME_TYPES = (
@@ -395,8 +398,8 @@ def process_search_response(jira_url, response, payload_params: Dict[str, Any] =
 
 class JiraApiWrapper(NonCodeIndexerToolkit):
     base_url: str
-    api_version: Optional[str] = "2",
-    api_key: Optional[SecretStr] = None,
+    api_version: Optional[str] = "3"
+    api_key: Optional[SecretStr] = None
     username: Optional[str] = None
     token: Optional[SecretStr] = None
     cloud: Optional[bool] = True
@@ -424,8 +427,15 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         username = values.get('username')
         token = values.get('token')
         cloud = values.get('cloud')
-        api_version = values.get('api_version', '2')
+        api_version = values.get('api_version', '3')
         additional_fields = values.get('additional_fields')
+        cls.api_version = api_version
+        cls.token = token
+        cls.url = url
+        cls.cloud = cloud
+        cls.username = username
+        cls.api_key = api_key
+        cls.verify_ssl = values.get('verify_ssl')
         if isinstance(additional_fields, str):
             values['additional_fields'] = [i.strip() for i in additional_fields.split(',')]
         if token and is_cookie_token(token):
@@ -444,7 +454,20 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             cls._client._update_header(header, value)
 
         cls.llm=values.get('llm')
-        return super().validate_toolkit(values)
+        return values
+
+    def _resolve_client(self, api_version: str):
+        if api_version == self.api_version:
+            return self._client
+        #
+        if self.token and is_cookie_token(self.token):
+            session = requests.Session()
+            session.cookies.update(parse_cookie_string(self.token.get_secret_value()))
+            return Jira(url=self.url, session=session, cloud=self.cloud, verify_ssl=self.verify_ssl, api_version=api_version)
+        elif self.token:
+            return Jira(url=self.url, token=self.token.get_secret_value(), cloud=self.cloud, verify_ssl=self.verify_ssl, api_version=api_version)
+        else:
+            return Jira(url=self.url, username=self.username, password=self.api_key.get_secret_value(), cloud=self.cloud, verify_ssl=self.verify_ssl, api_version=api_version)
 
     def _parse_issues(self, issues: Dict) -> List[dict]:
         parsed = []
@@ -545,14 +568,14 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         """)
 
 
-    def search_using_jql(self, jql: str):
+    def search_using_jql(self, jql: str, api_version: str = "3"):
         """ Search for Jira issues using JQL."""
-        parsed = self._parse_issues(self._client.jql(jql))
+        parsed = self._parse_issues(self._resolve_client(api_version).jql(jql))
         if len(parsed) == 0:
             return "No Jira issues found"
         return "Found " + str(len(parsed)) + " Jira issues:\n" + str(parsed)
 
-    def link_issues(self, inward_issue_key: str, outward_issue_key: str, linktype:str ):
+    def link_issues(self, inward_issue_key: str, outward_issue_key: str, linktype:str, api_version: str = "3"):
         """ Link issues functionality for Jira issues. To link test to another issue ( test 'test' story, story 'is tested by test').
         Use the appropriate issue link type (e.g., "Test", "Relates", "Blocks").
         If we use "Test" linktype, the test is inward issue, the story/other issue is outward issue.."""
@@ -562,10 +585,24 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             "inwardIssue": {"key": f"{inward_issue_key}"},
             "outwardIssue": {"key": f"{outward_issue_key}"},
             "comment": {
-                "body": "This test is linked to the story."
+                "body": {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {
+                                    "text": "Linked.",
+                                    "type": "text"
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
         }
-        self._client.create_issue_link(link_data)
+        self._resolve_client(api_version).create_issue_link(link_data)
         """ Get the remote links from the specified jira issue key"""
         return f"Link created using following data: {link_data}."
 
