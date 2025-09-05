@@ -180,6 +180,8 @@ def add_documents(vectorstore, documents):
     texts = []
     metadata = []
     for document in documents:
+        if not document.page_content:
+            continue
         texts.append(document.page_content)
         for key in document.metadata:
             if isinstance(document.metadata[key], list):
