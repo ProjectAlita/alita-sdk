@@ -16,7 +16,6 @@ name = "testrail"
 def get_tools(tool):
     return TestrailToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        url=tool['settings']['url'],
         testrail_configuration=tool['settings']['testrail_configuration'],
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm', None),

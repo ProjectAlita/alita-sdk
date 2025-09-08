@@ -16,7 +16,6 @@ name = "qtest"
 def get_tools(tool):
     toolkit = QtestToolkit.get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        base_url=tool['settings'].get('base_url', None),
         qtest_project_id=tool['settings'].get('qtest_project_id', tool['settings'].get('project_id', None)),
         qtest_configuration=tool['settings']['qtest_configuration'],
         toolkit_name=tool.get('toolkit_name')

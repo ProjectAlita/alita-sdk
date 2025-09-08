@@ -9,7 +9,6 @@ def get_tools(tool_type, tool):
     config_dict = {
         # common
         "selected_tools": tool['settings'].get('selected_tools', []),
-        "organization_url": tool['settings']['organization_url'],
         "ado_configuration": tool['settings']['ado_configuration'],
         "limit": tool['settings'].get('limit', 5),
         "toolkit_name": tool.get('toolkit_name', ''),

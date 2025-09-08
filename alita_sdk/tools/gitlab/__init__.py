@@ -18,7 +18,6 @@ name = "gitlab"
 def get_tools(tool):
     return AlitaGitlabToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        url=tool['settings']['url'],
         repository=tool['settings']['repository'],
         branch=tool['settings']['branch'],
         gitlab_configuration=tool['settings']['gitlab_configuration'],
