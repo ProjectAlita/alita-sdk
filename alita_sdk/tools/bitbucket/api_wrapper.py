@@ -61,7 +61,7 @@ ListBranchesInRepoModel = create_model(
 
 ListFilesModel = create_model(
     "ListFilesModel",
-    path=(Optional[str], Field(description="The path to list files from")),
+    path=(Optional[str], Field(description="The path to list files from", default=None)),
     recursive=(bool, Field(description="Whether to list files recursively", default=True)),
     branch=(Optional[str], Field(description="The branch to list files from")),
 )
