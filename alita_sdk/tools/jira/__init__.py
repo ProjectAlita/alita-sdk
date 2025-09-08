@@ -66,11 +66,6 @@ class JiraToolkit(BaseToolkit):
 
         model = create_model(
             name,
-            name=(str, Field(description="Toolkit name",
-                             json_schema_extra={
-                                 'toolkit_name': True,
-                                 'max_toolkit_length': JiraToolkit.toolkit_max_length})
-                  ),
             cloud=(bool, Field(description="Hosting Option", json_schema_extra={'configuration': True})),
             limit=(int, Field(description="Limit issues. Default is 5", gt=0, default=5)),
             api_version=(Optional[str], Field(description="Rest API version: optional. Default is 2", default="2")),

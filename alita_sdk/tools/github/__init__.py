@@ -87,8 +87,7 @@ class AlitaGitHubToolkit(BaseToolkit):
         github_api_wrapper = AlitaGitHubAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = github_api_wrapper.get_available_tools()
         tools = []
-        prefix = clean_string(toolkit_name) + TOOLKIT_SPLITTER if toolkit_name else ''
-        # prefix = clean_string(toolkit_name, AlitaGitHubToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
+        prefix = clean_string(toolkit_name, AlitaGitHubToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
