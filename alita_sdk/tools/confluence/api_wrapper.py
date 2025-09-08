@@ -223,7 +223,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
         else:
             client_instance = Confluence(url=url, username=username, password=api_key, cloud=cloud)
 
-        custom_headers = values.get('custom_headers', {})
+        custom_headers = values.get('custom_headers') or {}
         logger.info(f"Confluence tool: custom headers length: {len(custom_headers)}")
         for header, value in custom_headers.items():
             client_instance._update_header(header, value)

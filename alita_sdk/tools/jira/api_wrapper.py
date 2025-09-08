@@ -438,7 +438,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             cls._client = Jira(url=url, token=token, cloud=cloud, verify_ssl=values['verify_ssl'], api_version=api_version)
         else:
             cls._client = Jira(url=url, username=username, password=api_key, cloud=cloud, verify_ssl=values['verify_ssl'], api_version=api_version)
-        custom_headers = values.get('custom_headers', {})
+        custom_headers = values.get('custom_headers') or {}
         logger.info(f"Jira tool: custom headers length: {len(custom_headers)}")
         for header, value in custom_headers.items():
             cls._client._update_header(header, value)
