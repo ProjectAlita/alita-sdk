@@ -75,7 +75,7 @@ class JiraToolkit(BaseToolkit):
                 examples="alita,elitea;another-label"
             )),
             # optional field for custom headers as dictionary
-            custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default=None)),
+            custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default={})),
             verify_ssl=(bool, Field(description="Verify SSL", default=True)),
             additional_fields=(Optional[str], Field(description="Additional fields", default="")),
             jira_configuration=(JiraConfiguration, Field(description="Jira Configuration", json_schema_extra={'configuration_types': ['jira']})),

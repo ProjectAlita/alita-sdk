@@ -193,15 +193,6 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
     keep_markdown_format: Optional[bool] = True
     ocr_languages: Optional[str] = None
     keep_newlines: Optional[bool] = True
-    llm: Any = None
-    # indexer related
-    connection_string: Optional[SecretStr] = None
-    collection_name: Optional[str] = None
-    doctype: Optional[str] = 'doc'
-    embedding_model: Optional[str] = "HuggingFaceEmbeddings"
-    embedding_model_params: Optional[Dict[str, Any]] = {"model_name": "sentence-transformers/all-MiniLM-L6-v2"}
-    vectorstore_type: Optional[str] = "PGVector"
-
     _image_cache: ImageDescriptionCache = PrivateAttr(default_factory=ImageDescriptionCache)
 
     @model_validator(mode='before')
@@ -233,7 +224,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             client_instance = Confluence(url=url, username=username, password=api_key, cloud=cloud)
 
         custom_headers = values.get('custom_headers', {})
-        logger.info(f"Jira tool: custom headers length: {len(custom_headers)}")
+        logger.info(f"Confluence tool: custom headers length: {len(custom_headers)}")
         for header, value in custom_headers.items():
             client_instance._update_header(header, value)
 

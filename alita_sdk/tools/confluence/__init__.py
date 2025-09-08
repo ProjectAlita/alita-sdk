@@ -16,7 +16,6 @@ name = "confluence"
 def get_tools(tool):
     return ConfluenceToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
-        base_url=tool['settings']['base_url'],
         space=tool['settings'].get('space', None),
         cloud=tool['settings'].get('cloud', True),
         confluence_configuration=tool['settings']['confluence_configuration'],
@@ -82,7 +81,7 @@ class ConfluenceToolkit(BaseToolkit):
             min_retry_seconds=(int, Field(description="Min retry, sec", default=10)),
             max_retry_seconds=(int, Field(description="Max retry, sec", default=60)),
             # optional field for custom headers as dictionary
-            custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default=None)),
+            custom_headers=(Optional[dict], Field(description="Custom headers for API requests", default={})),
             confluence_configuration=(ConfluenceConfiguration, Field(description="Confluence Configuration", json_schema_extra={'configuration_types': ['confluence']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,
                                                                            description="PgVector Configuration",
