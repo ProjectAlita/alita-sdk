@@ -1,6 +1,6 @@
-from typing import Optional, List, Literal
+from typing import List, Literal
 
-from langchain_core.tools import BaseToolkit, BaseTool
+from langchain_core.tools import BaseToolkit, BaseTool, ToolException
 
 from alita_sdk.configurations.pgvector import PgVectorConfiguration
 
@@ -101,6 +101,8 @@ class MemoryToolkit(BaseToolkit):
             # The store is not provided, attempt to create it from configuration
             from ...runtime.langchain.store_manager import get_manager
             conn_str = (kwargs.get('pgvector_configuration') or {}).get('connection_string', '')
+            if not conn_str:
+                raise ToolException("Connection string is required to create PostgresStore for memory toolkit.")
             store = get_manager().get_store(conn_str)
         
         # Validate store type
