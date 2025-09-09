@@ -161,7 +161,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
         self._log_tool_event(f"Loading the documents to index...{kwargs}")
         documents = self._base_loader(**kwargs)
-        self._log_tool_event(f"Base documents were loaded. "
+        self._log_tool_event(f"Base documents were pre-loaded. "
                              f"Search for possible document duplicates and remove them from the indexing list...")
         documents = self._reduce_duplicates(documents, collection_suffix)
         self._log_tool_event(f"Duplicates were removed. "
@@ -216,6 +216,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     def _collect_dependencies(self, documents: Generator[Document, None, None]):
         for document in documents:
+            self._log_tool_event(message=f"Collecting the dependencies for document ID "
+                                         f"'{document.metadata.get('id', 'N/A')}' to collect dependencies if any...")
             dependencies = self._process_document(document)
             yield document
             for dep in dependencies:

@@ -176,7 +176,7 @@ def _init_single_mcp_tool(toolkit_name, available_tool, alita, toolkit_settings)
         tool_name = available_tool["name"]
         return McpServerTool(
             name=tool_name,
-            description=available_tool.get("description", ""),
+            description=f"MCP for a tool '{tool_name}': {available_tool.get("description", "")}",
             args_schema=McpServerTool.create_pydantic_model_from_schema(
                 available_tool.get("inputSchema", {})
             ),

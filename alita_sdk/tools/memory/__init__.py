@@ -61,7 +61,7 @@ class MemoryToolkit(BaseToolkit):
         return create_model(
             'memory',
             namespace=(str, Field(description="Memory namespace", json_schema_extra={'toolkit_name': True})),
-            pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector Configuration",
+            pgvector_configuration=(PgVectorConfiguration, Field(description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
@@ -79,7 +79,7 @@ class MemoryToolkit(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, namespace: str, store=None):
+    def get_toolkit(cls, namespace: str, store=None, **kwargs):
         """
         Get toolkit with memory tools.
         
@@ -95,6 +95,12 @@ class MemoryToolkit(BaseToolkit):
                 "PostgreSQL dependencies (psycopg) are required for MemoryToolkit. "
                 "Install with: pip install psycopg[binary]"
             )
+
+        if store is None:
+            # The store is not provided, attempt to create it from configuration
+            from ...runtime.langchain.store_manager import get_manager
+            conn_str = (kwargs.get('pgvector_configuration') or {}).get('connection_string', '')
+            store = get_manager().get_store(conn_str)
         
         # Validate store type
         if store is not None and not isinstance(store, PostgresStore):
