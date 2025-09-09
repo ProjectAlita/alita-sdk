@@ -256,6 +256,10 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         progress_step = 20 if progress_step not in range(0, 100) else progress_step
         next_progress_point = progress_step
         for document in documents:
+            if not document.page_content:
+                # To avoid case when all documents have empty content
+                # See llm_processor.add_documents which exclude metadata of docs with empty content
+                continue
             documents_count += 1
             # logger.debug(f"Indexing document: {document}")
             try:

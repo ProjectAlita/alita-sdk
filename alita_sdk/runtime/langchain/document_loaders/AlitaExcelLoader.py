@@ -65,7 +65,7 @@ class AlitaExcelLoader(AlitaTableLoader):
         else:
             return df.to_string(index=False)
 
-    def read(self):
+    def read(self, lazy: bool = False):
         df = pd.read_excel(self.file_path, sheet_name=None)
         docs = []
         for key in df.keys():

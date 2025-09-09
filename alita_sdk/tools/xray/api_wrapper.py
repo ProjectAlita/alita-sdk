@@ -9,14 +9,9 @@ from langchain_core.tools import ToolException
 from pydantic import PrivateAttr, SecretStr, create_model, model_validator, Field
 from python_graphql_client import GraphqlClient
 
-from ..elitea_base import (
-    BaseVectorStoreToolApiWrapper,
-    extend_with_vector_tools,
-)
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
-from ..utils.content_parser import file_extension_by_chunker
 
 try:
     from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings

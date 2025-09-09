@@ -1,24 +1,25 @@
-import re
-import logging
-import requests
-import json
 import base64
+import json
+import logging
+import re
 import traceback
-from typing import Optional, List, Any, Dict, Callable, Generator, Literal
 from json import JSONDecodeError
+from typing import Optional, List, Any, Dict, Callable, Generator, Literal
 
+import requests
+from langchain_community.document_loaders.confluence import ContentFormat
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import ToolException
+from markdownify import markdownify
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
-from langchain_core.documents import Document
-from langchain_core.tools import ToolException
-from langchain_core.messages import HumanMessage
-from markdownify import markdownify
-from langchain_community.document_loaders.confluence import ContentFormat
-
-from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
+from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
+from alita_sdk.tools.utils.available_tools_decorator import extend_with_parent_available_tools
 from ..llm.img_utils import ImageDescriptionCache
 from ..utils import is_cookie_token, parse_cookie_string
+from ...runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,7 @@ def parse_payload_params(params: Optional[str]) -> Dict[str, Any]:
     return {}
 
 
-class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
+class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
     # Changed from PrivateAttr to Optional field with exclude=True
     client: Optional[Any] = Field(default=None, exclude=True)
     base_url: str
@@ -229,7 +230,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             client_instance._update_header(header, value)
 
         values['client'] = client_instance
-        return values
+        return super().validate_toolkit(values)
 
     def __unquote_confluence_space(self) -> str | None:
         if self.space:
@@ -843,13 +844,68 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             yield document
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        attachments = self.get_page_attachments(document.metadata.get('id'))
-        if isinstance(attachments, str):
-            logger.info(f" {document.metadata.get('id')}: {attachments}")
-            return
-        for attachment in attachments:
-            # TODO need to retrive content from other fields/sources if both attachment.get('content', '') and attachment.get('llm_analysis', '') are None
-            yield Document(page_content=attachment.get('content', '') or attachment.get('llm_analysis', '') or '', metadata=attachment.get('metadata', {}))
+        try:
+            page_id = document.metadata.get('id')
+            attachments = self.client.get_attachments_from_content(page_id)
+            if not attachments or not attachments.get('results'):
+                return f"No attachments found for page ID {page_id}."
+
+            # Get attachment history for created/updated info
+            history_map = {}
+            for attachment in attachments['results']:
+                try:
+                    hist = self.client.history(attachment['id'])
+                    history_map[attachment['id']] = hist
+                except Exception as e:
+                    logger.warning(f"Failed to fetch history for attachment {attachment.get('title', '')}: {str(e)}")
+                    history_map[attachment['id']] = None
+
+            import re
+            for attachment in attachments['results']:
+                title = attachment.get('title', '')
+                file_ext = title.lower().split('.')[-1] if '.' in title else ''
+
+                media_type = attachment.get('metadata', {}).get('mediaType', '')
+                # Core metadata extraction with history
+                hist = history_map.get(attachment['id']) or {}
+                created_by = hist.get('createdBy', {}).get('displayName', '') if hist else attachment.get('creator', {}).get('displayName', '')
+                created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
+                last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
+
+                metadata = {
+                    'name': title,
+                    'size': attachment.get('extensions', {}).get('fileSize', None),
+                    'creator': created_by,
+                    'created': created_date,
+                    'updated': last_updated,
+                    'media_type': media_type,
+                    'labels': [label['name'] for label in
+                               attachment.get('metadata', {}).get('labels', {}).get('results', [])],
+                    'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get(
+                        '_links', {}).get('download') else None
+                }
+
+                download_url = self.base_url.rstrip('/') + attachment['_links']['download']
+
+                try:
+                    resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
+                    if resp.status_code == 200:
+                        content = resp.content
+                    else:
+                        content = f"[Failed to download {download_url}: HTTP status code {resp.status_code}]"
+                except Exception as e:
+                    content = f"[Error downloading content: {str(e)}]"
+
+                if isinstance(content, str):
+                    yield Document(page_content=content, metadata=metadata)
+                else:
+                    yield Document(page_content="", metadata={
+                        **metadata,
+                        IndexerKeywords.CONTENT_FILE_NAME.value: f".{file_ext}",
+                        IndexerKeywords.CONTENT_IN_BYTES.value: content
+                    })
+        except Exception as e:
+            yield from ()
 
     def _download_image(self, image_url):
         """
@@ -1598,7 +1654,7 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             "bins_with_llm": (Optional[bool], Field(description="Use LLM for processing binary files.", default=False)),
         }
 
-    @extend_with_vector_tools
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         # Confluence-specific tools
         confluence_tools = [
