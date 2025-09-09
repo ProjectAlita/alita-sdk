@@ -39,6 +39,7 @@ def get_tools(tools_list: list, memory_store=None):
                     namespace=tool['settings'].get('namespace', str(tool['id'])),
                     # username=tool['settings'].get('username', ''),
                     store=tool['settings'].get('store', memory_store),
+                    pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
                     toolkit_name=tool.get('toolkit_name', '')
                 )
                 all_tools.extend(toolkit_instance.get_tools())
