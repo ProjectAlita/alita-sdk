@@ -848,7 +848,8 @@ class ConfluenceAPIWrapper(BaseVectorStoreToolApiWrapper):
             logger.info(f" {document.metadata.get('id')}: {attachments}")
             return
         for attachment in attachments:
-            yield Document(page_content=attachment.get('content', '') or attachment.get('llm_analysis', ''), metadata=attachment.get('metadata', {}))
+            # TODO need to retrive content from other fields/sources if both attachment.get('content', '') and attachment.get('llm_analysis', '') are None
+            yield Document(page_content=attachment.get('content', '') or attachment.get('llm_analysis', '') or '', metadata=attachment.get('metadata', {}))
 
     def _download_image(self, image_url):
         """
