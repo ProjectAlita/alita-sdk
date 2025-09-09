@@ -63,6 +63,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 raise ToolException(f"Memory store is not provided for memory tool: {tool.get('name', tool.get('toolkit_name', 'unknown'))}")
             tools += MemoryToolkit.get_toolkit(
                 namespace=tool['settings'].get('namespace', str(tool['id'])),
+                pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
                 store=memory_store,
             ).get_tools()
         elif tool['type'] == 'artifact':
