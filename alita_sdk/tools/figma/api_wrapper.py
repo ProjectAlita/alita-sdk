@@ -301,6 +301,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             figma_pages = [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') in node_ids_include)]
         elif node_ids_exclude:
             figma_pages = [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') not in node_ids_exclude)]
+
+        # if node_types_include is not provided, default to 'frame'
+        # to avoid downloading too many images and nodes which co=annot be rendered as images
+        if not node_types_include:
+            node_types_include = ['frame']
+
         node_ids = [
             child['id']
             for page in figma_pages
@@ -371,7 +377,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 default=None)),
             'node_types_include': (Optional[List[str]], Field(
                 description="List type of nodes to include in index: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...].",
-                default=None)),
+                default=['frame'])),
             'node_types_exclude': (Optional[List[str]], Field(
                 description="List type of nodes to exclude from index. It is applied only if node_types_include is not provided: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...]",
                 default=None))
