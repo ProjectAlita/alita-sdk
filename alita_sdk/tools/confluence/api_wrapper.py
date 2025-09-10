@@ -1656,8 +1656,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
     @extend_with_parent_available_tools
     def get_available_tools(self):
-        # Confluence-specific tools
-        confluence_tools = [
+        return [
             {
                 "name": "create_page",
                 "ref": self.create_page,
@@ -1773,8 +1772,3 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 "args_schema": GetPageAttachmentsInput,
             }
         ]
-
-        # Add standardized vector search tools from base class
-        vector_search_tools = self._get_vector_search_tools()
-
-        return confluence_tools + vector_search_tools
