@@ -320,6 +320,10 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             )
         ]
 
+        if not node_ids:
+            yield from ()
+            return
+
         images = self._client.get_file_images(file_key, node_ids).images or {}
         total_images = len(images)
         if total_images == 0:
