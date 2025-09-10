@@ -12,7 +12,6 @@ from alita_sdk.tools.vector_adapters.VectorStoreAdapter import VectorStoreAdapte
 from logging import getLogger
 
 from ..utils.logging import dispatch_custom_event
-from ..utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
 
@@ -248,10 +247,6 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             tool_name="_clean_collection"
         )
 
-    def _get_indexed_data(self, collection_name: str):
-        """ Get all indexed data from vectorstore for non-code content """
-        return self.vector_adapter.get_indexed_data(self, collection_name)
-
     def _get_code_indexed_data(self, collection_suffix: str) -> Dict[str, Dict[str, Any]]:
         """ Get all indexed data from vectorstore for code content """
         return self.vector_adapter.get_code_indexed_data(self, collection_suffix)
@@ -308,26 +303,6 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         return final_docs
 
-    def _reduce_non_code_duplicates(self, documents: Generator[Any, None, None], collection_suffix: str) -> List[Any]:
-        return self._reduce_duplicates(
-            documents,
-            collection_suffix,
-            self._get_indexed_data,
-            lambda doc: doc.metadata.get('id'),
-            lambda doc, idx: (
-                    doc.metadata.get('updated_on') and
-                    idx['metadata'].get('updated_on') and
-                    doc.metadata.get('updated_on') == idx['metadata'].get('updated_on')
-            ),
-            lambda idx_data, key: (
-                    idx_data[key]['all_chunks'] +
-                    [idx_data[dep_id]['id'] for dep_id in idx_data[key][IndexerKeywords.DEPENDENT_DOCS.value]] +
-                    [chunk_db_id for dep_id in idx_data[key][IndexerKeywords.DEPENDENT_DOCS.value]
-                     for chunk_db_id in idx_data[dep_id]['all_chunks']]
-            ),
-            log_msg="Verification of documents to index started"
-        )
-
     def _reduce_code_duplicates(self, documents: Generator[Any, None, None], collection_suffix: str) -> List[Any]:
         return self._reduce_duplicates(
             documents,
@@ -343,7 +318,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             log_msg="Verification of code documents to index started"
         )
 
-    def index_documents(self, documents: Generator[Document, None, None], collection_suffix: str, progress_step: int = 20, clean_index: bool = True, is_code: bool = False):
+    def index_documents(self, documents: Generator[Document, None, None], collection_suffix: str, progress_step: int = 20, clean_index: bool = True, is_code: bool = True):
         """ Index documents in the vectorstore.
 
         Args:
@@ -374,8 +349,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 message="Filter for duplicates",
                 tool_name="index_documents")
             # remove duplicates based on metadata 'id' and 'updated_on' or 'commit_hash' fields
-            documents = self._reduce_code_duplicates(documents, collection_suffix) if is_code \
-                else self._reduce_non_code_duplicates(documents, collection_suffix)
+            documents = self._reduce_code_duplicates(documents, collection_suffix)
             self._log_tool_event(
                 message="All the duplicates were filtered out. Proceeding with indexing.",
                 tool_name="index_documents")

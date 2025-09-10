@@ -113,7 +113,7 @@ loaders_map = {
         'is_multimodal_processing': False,
         'kwargs': {
             'encoding': 'utf-8',
-            'raw_content': False,
+            'raw_content': True,
             'cleanse': False
         },
         'allowed_to_override': ['max_tokens']
@@ -122,7 +122,7 @@ loaders_map = {
         'class': AlitaExcelLoader,
         'is_multimodal_processing': False,
         'kwargs': {
-            'raw_content': False,
+            'raw_content': True,
             'cleanse': False
         },
         'allowed_to_override': ['max_tokens', LoaderProperties.LLM.value, LoaderProperties.PROMPT.value, LoaderProperties.PROMPT_DEFAULT.value]
@@ -131,7 +131,7 @@ loaders_map = {
         'class': AlitaExcelLoader,
         'is_multimodal_processing': False,
         'kwargs': {
-            'raw_content': False,
+            'raw_content': True,
             'cleanse': False
         },
         'allowed_to_override': ['max_tokens', LoaderProperties.LLM.value, LoaderProperties.PROMPT.value, LoaderProperties.PROMPT_DEFAULT.value]

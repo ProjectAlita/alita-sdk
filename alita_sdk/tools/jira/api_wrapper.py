@@ -13,7 +13,6 @@ from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
 import requests
 
-from ..elitea_base import BaseVectorStoreToolApiWrapper, extend_with_vector_tools
 from ..llm.img_utils import ImageDescriptionCache
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils import is_cookie_token, parse_cookie_string
