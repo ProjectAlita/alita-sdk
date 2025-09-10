@@ -122,6 +122,7 @@ loaders_map = {
         'class': AlitaExcelLoader,
         'is_multimodal_processing': False,
         'kwargs': {
+            'excel_by_sheets': True,
             'raw_content': True,
             'cleanse': False
         },
@@ -131,6 +132,7 @@ loaders_map = {
         'class': AlitaExcelLoader,
         'is_multimodal_processing': False,
         'kwargs': {
+            'excel_by_sheets': True,
             'raw_content': True,
             'cleanse': False
         },

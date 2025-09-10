@@ -17,6 +17,7 @@ import pandas as pd
 from json import loads
 
 from langchain_core.tools import ToolException
+from langchain_core.documents import Document
 from .AlitaTableLoader import AlitaTableLoader
     
 
@@ -64,6 +65,20 @@ class AlitaExcelLoader(AlitaTableLoader):
             return df.to_csv()
         else:
             return df.to_string(index=False)
+
+    def load(self) -> list:
+        docs = []
+        content_per_sheet = self.get_content()
+        for sheet_name, content in content_per_sheet.items():
+            metadata = {
+                "source": f'{self.file_path}:{sheet_name}',
+                "sheet_name": sheet_name,
+                "file_type": "excel",
+                "excel_by_sheets": self.excel_by_sheets,
+                "return_type": self.return_type,
+            }
+            docs.append(Document(page_content=f"Sheet: {sheet_name}\n {str(content)}", metadata=metadata))
+        return docs
 
     def read(self, lazy: bool = False):
         df = pd.read_excel(self.file_path, sheet_name=None)

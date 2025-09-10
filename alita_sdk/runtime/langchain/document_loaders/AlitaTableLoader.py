@@ -17,8 +17,6 @@ from langchain_core.documents import Document
 from typing import List, Optional, Iterator
 from json import dumps
 from .utils import cleanse_data
-from ..tools.log import print_log
-
 
 class AlitaTableLoader(BaseLoader):
     def __init__(self,
@@ -74,7 +72,6 @@ class AlitaTableLoader(BaseLoader):
                 docs.append(Document(page_content=row, metadata=metadata))
                 continue
             if self.json_documents:
-                # print_log(row)
                 metadata['columns'] = list(row.keys())
                 metadata['og_data'] = dumps(row)
                 docs.append(Document(page_content=self.row_processor(row), metadata=metadata))
