@@ -6,9 +6,9 @@ from langchain.text_splitter import CharacterTextSplitter
 import fitz
 
 try:
-    from langchain_chroma import Chroma
+    from langchain_postgres import PGVector
 except ImportError:
-    Chroma = None
+    PGVector = None
 
 from langchain_community.embeddings.sentence_transformer import (
     SentenceTransformerEmbeddings,
@@ -32,13 +32,22 @@ def get_page(urls, html_only=False):
     return docs_transformed
 
 
-def webRag(urls, max_response_size, query):
-    if Chroma is None:
-        return "Chroma is not initialized. Web rag is not available."
+def webRag(urls, max_response_size, query, connection_string=None, embedding_model=None):
+    if PGVector is None:
+        return "PGVector is not initialized. Web rag is not available."
+
+    if not connection_string or not embedding_model:
+        return "Connection string or embedding model is missing. Web rag is not available."
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     docs = text_splitter.split_documents(get_page(urls))
-    embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-    db = Chroma.from_documents(docs, embedding_function)
+    embedding_function = SentenceTransformerEmbeddings(model_name=embedding_model)
+    db = PGVector.from_documents(
+        documents=docs,
+        embedding=embedding_function,
+        collection_name="web_rag",
+        pre_delete_collection=True,
+        connection=connection_string
+    )
     docs = db.search(query, "mmr", k=10)
     text = ""
     for doc in docs:

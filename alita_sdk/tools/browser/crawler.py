@@ -27,13 +27,16 @@ class MultiURLCrawler(BaseTool):
     max_response_size: int = 3000
     name: str = "multi_url_crawler"
     description: str = "Crawls multiple URLs and returns the content related to query"
+    embedding_model: str = None
+    connection_string: str = None
     args_schema: Type[BaseModel] = create_model("MultiURLCrawlerModel",
                                                 query=(str, Field(description="Query text to search pages")),
                                                 urls=(list[str], Field(description="list of URLs to search like ['url1', 'url2']")))
 
     def _run(self, query: str, urls: list[str], run_manager=None):
         urls = [url.strip() for url in urls]
-        return webRag(urls, self.max_response_size, query)
+        return webRag(urls=urls, max_response_size=self.max_response_size, query=query,
+                      connection_string=self.connection_string, embedding_model=self.embedding_model)
 
 
 class GetHTMLContent(BaseTool):
