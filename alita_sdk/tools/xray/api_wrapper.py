@@ -561,6 +561,8 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
         return {
+            'chunking_tool': (Literal['json', ''],
+                              Field(description="Name of chunking tool for base document", default='json')),
             'jql': (Optional[str], Field(description="""JQL query for searching test cases in Xray.
 
             Standard JQL query syntax for filtering Xray test cases. Examples:
@@ -595,8 +597,6 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
             'skip_attachment_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing attachments (e.g., ['.exe', '.zip', '.bin'])",
                 default=None)),
-            'chunking_tool': (Literal['json', ''],
-                              Field(description="Name of chunking tool for base document", default='json')),
         }
 
     def _get_tests_direct(self, jql: str) -> List[Dict]:

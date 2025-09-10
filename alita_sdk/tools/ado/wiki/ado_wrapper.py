@@ -248,9 +248,9 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
+            'chunking_tool': (Literal['markdown', ''], Field(description="Name of chunking tool", default='markdown')),
             "wiki_identifier": (str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
             'title_contains': (Optional[str], Field(default=None, description="Optional filter to include only pages with titles containing exact this string")),
-            'chunking_tool':(Literal['markdown', ''], Field(description="Name of chunking tool", default='markdown'))
         }
 
     @extend_with_parent_available_tools

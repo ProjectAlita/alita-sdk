@@ -155,8 +155,9 @@ class ZephyrApiWrapper(NonCodeIndexerToolkit):
         Returns a list of fields for index_data args schema.
         """
         return {
-            "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""])),
-            'chunking_tool': (Literal['json', ''], Field(description="Name of chunking tool", default='json'))
+            'chunking_tool': (Literal['json', ''], Field(description="Name of chunking tool", default='json')),
+            "zql": (str, Field(description=zql_description, examples=["folder=\"TestToolkit\"", "name~\"TestToolkit5\""]))
+
         }
 
     def _base_loader(self, zql: str, **kwargs) -> Generator[Document, None, None]:

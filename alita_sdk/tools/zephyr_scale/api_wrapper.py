@@ -1198,6 +1198,7 @@ class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
         Returns a list of fields for index_data args schema.
         """
         return {
+            "chunking_tool": (Literal['json', ''], Field(description="Name of chunking tool", default='json')),
             "project_key": (str, Field(description="Jira project key filter")),
             "jql":(str, Field(description="""JQL-like query for searching test cases.
             Supported fields:
@@ -1216,7 +1217,6 @@ class ZephyrScaleApiWrapper(NonCodeIndexerToolkit):
             Example:
                 'folder = "Authentication" AND label in ("Smoke", "Critical") AND text ~ "login" AND orderBy = "name" AND orderDirection = "ASC"'
             """)),
-            'chunking_tool': (Literal['json', ''], Field(description="Name of chunking tool", default='json'))
         }
 
     def _base_loader(self, project_key: str, jql: str, **kwargs) -> Generator[Document, None, None]:

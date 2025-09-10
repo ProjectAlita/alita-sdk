@@ -87,10 +87,10 @@ BaseStepbackSearchParams = create_model(
 BaseIndexDataParams = create_model(
     "indexData",
     __base__=BaseIndexParams,
-    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
-                         description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
+    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
     chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 
