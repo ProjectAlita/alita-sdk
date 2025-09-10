@@ -32,15 +32,15 @@ def get_page(urls, html_only=False):
     return docs_transformed
 
 
-def webRag(urls, max_response_size, query, connection_string=None, embedding_model=None):
+def webRag(urls, max_response_size, query, connection_string=None):
     if PGVector is None:
         return "PGVector is not initialized. Web rag is not available."
 
-    if not connection_string or not embedding_model:
+    if not connection_string:
         return "Connection string or embedding model is missing. Web rag is not available."
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     docs = text_splitter.split_documents(get_page(urls))
-    embedding_function = SentenceTransformerEmbeddings(model_name=embedding_model)
+    embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
     db = PGVector.from_documents(
         documents=docs,
         embedding=embedding_function,

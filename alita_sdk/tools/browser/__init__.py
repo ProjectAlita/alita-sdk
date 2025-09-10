@@ -66,10 +66,6 @@ class BrowserToolkit(BaseToolkit):
             pgvector_configuration=(Optional[PgVectorConfiguration],
                                     Field(description="PgVector configuration (required for tools `multi_url_crawler`)",
                                           default=None, json_schema_extra={'configuration_types': ['pgvector']})),
-            embedding_model=(Optional[str],
-                             Field(default=None,
-                                   description="Embedding configuration (required for tools `multi_url_crawler`)",
-                                   json_schema_extra={'configuration_model': 'embedding'})),
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __validators__={
