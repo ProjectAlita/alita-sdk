@@ -112,7 +112,8 @@ class BrowserToolkit(BaseToolkit):
             elif tool == 'google':
                 try:
                     google_api_wrapper = GoogleSearchAPIWrapper(
-                        **wrapper_payload_google
+                        google_api_key=wrapper_payload_google.get('google_api_key'),
+                        google_cse_id=wrapper_payload_google.get('google_cse_id')
                     )
                     tool_entry = GoogleSearchResults(api_wrapper=google_api_wrapper)
                     # rename the tool to avoid conflicts
