@@ -17,7 +17,7 @@ from ..llm.img_utils import ImageDescriptionCache
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils import is_cookie_token, parse_cookie_string
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
-from ..utils.content_parser import file_extension_by_chunker
+from ..utils.content_parser import file_extension_by_chunker, process_content_by_type
 from ...runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
@@ -130,6 +130,13 @@ GetCommentsWithImageDescriptions = create_model(
 GetRemoteLinks = create_model(
     "GetRemoteLinksModel",
     jira_issue_key=(str, Field(description="Jira issue key from which remote links will be extracted, e.g. TEST-1234"))
+)
+
+GetIssueAttachments = create_model(
+    "GetIssueAttachments",
+    jira_issue_key=(str, Field(description="Jira issue key from which remote links will be extracted, e.g. TEST-1234")),
+    attachment_pattern=(Optional[str], Field(description="Regex pattern to filter attachment filenames. If not provided,"
+                                                         " all attachments will be processed", default=None))
 )
 
 ListCommentsInput = create_model(
@@ -725,19 +732,37 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error listing Jira projects: {stacktrace}")
             return ToolException(f"Error listing Jira projects: {stacktrace}")
 
-    def get_attachments_content(self, jira_issue_key: str):
-        """ Extract content of all attachments related to specified Jira issue key.
-         NOTE: only parsable attachments will be considered """
+    def get_attachments_content(self, jira_issue_key: str, attachment_pattern: Optional[str] = None):
+        """ Extract the content of all attachments related to a specified Jira issue key.
+         NOTE: only parsable attachments will be considered
+         Args:
+            jira_issue_key: The key of the Jira issue, e.g. "TEST-123
+            attachment_pattern: Optional regex pattern to filter attachments by filename.
+            If provided, only attachments with filenames matching this pattern will be processed.
+         Returns:
+            A string containing the content of all relevant attachments, separated by double newlines.
+         """
 
         attachment_data = []
         attachments = self._client.get_attachments_ids_from_issue(issue=jira_issue_key)
         for attachment in attachments:
+            if attachment_pattern and not re.search(attachment_pattern, attachment['filename']):
+                logger.info(f"Skipping attachment {attachment['filename']} as it does not match pattern {attachment_pattern}")
+                continue
+            logger.info(f"Processing attachment {attachment['filename']} with ID {attachment['attachment_id']}")
             if self.api_version == "3":
                 attachment_data.append(self._client.get_attachment_content(attachment['attachment_id']))
             else:
-                extracted_attachment = self._client.get_attachment(attachment_id=attachment['attachment_id'])
-                if extracted_attachment['mimeType'] in SUPPORTED_ATTACHMENT_MIME_TYPES:
-                    attachment_data.append(self._extract_attachment_content(extracted_attachment))
+                try:
+                    attachment_content = self._client.get_attachment_content(attachment['attachment_id'])
+                except Exception as e:
+                    logger.error(
+                        f"Failed to download attachment {attachment['filename']} for issue {jira_issue_key}: {str(e)}")
+                    attachment_content = self._client.get(
+                        path=f"secure/attachment/{attachment['attachment_id']}/{attachment['filename']}", not_json_response=True)
+                content_docs = process_content_by_type(attachment_content, attachment['filename'], llm=self.llm)
+                attachment_data.append("filename: " + attachment['filename'] + "\ncontent: " + str([doc.page_content for doc in content_docs]))
+
         return "\n\n".join(attachment_data)
 
     def execute_generic_rq(self, method: str, relative_url: str, params: Optional[str] = "", *args):
@@ -1632,7 +1657,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             {
                 "name": "get_attachments_content",
                 "description": self.get_attachments_content.__doc__,
-                "args_schema": GetRemoteLinks,
+                "args_schema": GetIssueAttachments,
                 "ref": self.get_attachments_content,
             },
             {

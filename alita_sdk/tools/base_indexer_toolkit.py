@@ -5,7 +5,7 @@ from typing import Any, Optional, List, Literal, Dict, Generator
 from langchain_core.documents import Document
 from pydantic import create_model, Field, SecretStr
 
-from .utils.content_parser import file_extension_by_chunker, process_content_by_type
+from .utils.content_parser import file_extension_by_chunker, process_document_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.tools.vectorstore_base import VectorStoreWrapperBase
 from ..runtime.utils.utils import IndexerKeywords
@@ -102,7 +102,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     connection_string: Optional[SecretStr] = None
     collection_name: Optional[str] = None
-    _embedding: Optional[Any] = None
     alita: Any = None # Elitea client, if available
 
     def __init__(self, **kwargs):
@@ -116,7 +115,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         if connection_string:
             # Initialize vectorstore params only if connection string is provided
             kwargs['vectorstore_params'] = VectorStoreAdapterFactory.create_adapter(vectorstore_type).get_vectorstore_params(collection_name, connection_string)
-            kwargs['_embedding'] = kwargs.get('alita').get_embeddings(kwargs.get('embedding_model'))
         super().__init__(**kwargs)
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
@@ -181,14 +179,14 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
         if chunking_config is None:
             chunking_config = {}
-        chunking_config['embedding'] = self._embedding
+        chunking_config['embedding'] = self.embeddings
         chunking_config['llm'] = self.llm
 
         for document in documents:
             if content_type := document.metadata.get(IndexerKeywords.CONTENT_FILE_NAME.value, None):
                 # apply parsing based on content type and chunk if chunker was applied to parent doc
                 content = document.metadata.pop(IndexerKeywords.CONTENT_IN_BYTES.value, None)
-                yield from process_content_by_type(
+                yield from process_document_by_type(
                     document=document,
                     content=content,
                     extension_source=content_type, llm=self.llm, chunking_config=chunking_config)
@@ -199,7 +197,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                     continue
                 # apply parsing based on content type resolved from chunking_tool
                 content_type = file_extension_by_chunker(chunking_tool)
-                yield from process_content_by_type(
+                yield from process_document_by_type(
                     document=document,
                     content=content_in_bytes,
                     extension_source=content_type, llm=self.llm, chunking_config=chunking_config)

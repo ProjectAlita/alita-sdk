@@ -10,7 +10,6 @@ from pydantic import BaseModel, model_validator, Field
 
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from alita_sdk.tools.vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
-from ..langchain.tools.vector import VectorAdapter
 from ..utils.logging import dispatch_custom_event
 
 logger = getLogger(__name__)
@@ -138,10 +137,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
     vectorstore_params: Optional[dict]  = None
     max_docs_per_add: int = 100
     dataset: str = None
-    embedding: Any = None
     vectorstore: Any = None
-    # Review usage of old adapter
-    vectoradapter: Any = None
     pg_helper: Any = None
     embeddings: Any = None
     # New adapter for vector database operations
@@ -152,17 +148,13 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
     def validate_toolkit(cls, values):
         from ..langchain.interfaces.llm_processor import get_vectorstore
         logger.debug(f"Validating toolkit: {values}")
-        if 'vectorstore_params' in values:
-            values["dataset"] = values.get('vectorstore_params').get('collection_name')
-        if values.get('embedding_model'):
-            values['embeddings'] = values['alita'].get_embeddings(values['embedding_model'])
+        values["dataset"] = values.get('collection_name')
+
+        if values.get('alita') and values.get('embedding_model'):
+            values['embeddings'] = values.get('alita').get_embeddings(values.get('embedding_model'))
+
         if values.get('vectorstore_type') and values.get('vectorstore_params') and values.get('embedding_model'):
             values['vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['embeddings'])
-            values['vectoradapter'] = VectorAdapter(
-                vectorstore=values['vectorstore'],
-                embeddings=values['embeddings'],
-                quota_params=None,
-            )
             # Initialize the new vector adapter
             values['vector_adapter'] = VectorStoreAdapterFactory.create_adapter(values['vectorstore_type'])
             logger.debug(f"Vectorstore wrapper initialized: {values}")
@@ -223,8 +215,6 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         self._log_data("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
         try:
             self._clean_collection(collection_suffix)
-            self.vectoradapter.persist()
-            self.vectoradapter.vacuum()
             self._log_data("Previous index has been removed",
                            tool_name="index_documents")
         except Exception as e:
@@ -238,7 +228,6 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 logger.warning(f"Document is missing required metadata field 'id' or 'updated_on': {doc.metadata}")
 
         logger.debug(f"Indexing documents: {documents}")
-        logger.debug(self.vectoradapter)
 
         # if collection_suffix is provided, add it to metadata of each document
         if collection_suffix:

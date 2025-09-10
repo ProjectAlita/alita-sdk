@@ -201,17 +201,40 @@ def load_content_from_bytes(file_content: bytes, extension: str = None, loader_e
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-def process_content_by_type(document: Document, content, extension_source: str, llm = None, chunking_config=None) -> Generator[Document, None, None]:
+def process_document_by_type(content, extension_source: str, document: Document = None, llm = None, chunking_config=None) \
+        -> Generator[Document, None, None]:
+    """Process the content of a file based on its type using a configured loader cosidering the origin document."""
+    try:
+        chunks = process_content_by_type(content, extension_source, llm, chunking_config)
+    except Exception as e:
+        msg = f"Error during content for file {extension_source}:\n{e}"
+        logger.warning(msg)
+        yield Document(
+            page_content=msg,
+            metadata={**document.metadata, 'chunk_id': 1}
+        )
+        return
+    for chunk in chunks:
+        yield Document(
+            page_content=sanitize_for_postgres(chunk.page_content),
+            metadata={**document.metadata, **chunk.metadata}
+                )
+
+
+def process_content_by_type(content, filename: str, llm=None, chunking_config=None) -> \
+        Generator[Document, None, None]:
+    """Process the content of a file based on its type using a configured loader."""
     temp_file_path = None
     try:
-        extension = "." + extension_source.split('.')[-1].lower()
+        extension = "." + filename.split('.')[-1].lower()
 
         with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
             temp_file_path = temp_file.name
             if content is None:
-                logger.warning(f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
+                logger.warning(
+                    f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
                 return
-            
+
             temp_file.write(content)
             temp_file.flush()
 
@@ -238,21 +261,7 @@ def process_content_by_type(document: Document, content, extension_source: str, 
                 loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value)
                 loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
-            try:
-                chunks = loader.load()
-            except Exception as e:
-                msg = f"Error during content for file {temp_file_path}:\n{e}"
-                logger.warning(msg)
-                yield Document(
-                    page_content=msg,
-                    metadata={**document.metadata, 'chunk_id':1}
-                )
-                return
-            for chunk in chunks:
-                yield Document(
-                    page_content=sanitize_for_postgres(chunk.page_content),
-                    metadata={**document.metadata, **chunk.metadata}
-                )
+            return loader.load()
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
