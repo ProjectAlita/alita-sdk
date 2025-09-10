@@ -39,10 +39,13 @@ BaseIndexParams = create_model(
 BaseCodeIndexParams = create_model(
     "BaseCodeIndexParams",
     collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
+    clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
+    progress_step=(Optional[int], Field(default=5, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
     branch=(Optional[str], Field(description="Branch to index files from. Defaults to active branch if None.", default=None)),
     whitelist=(Optional[List[str]], Field(description='File extensions or paths to include. Defaults to all files if None. Example: ["*.md", "*.java"]', default=None)),
     blacklist=(Optional[List[str]], Field(description='File extensions or paths to exclude. Defaults to no exclusions if None. Example: ["*.md", "*.java"]', default=None)),
-    clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
+
 )
 
 RemoveIndexParams = create_model(
@@ -115,10 +118,10 @@ BaseStepbackSearchParams = create_model(
 BaseIndexDataParams = create_model(
     "indexData",
     __base__=BaseIndexParams,
-    progress_step=(Optional[int], Field(default=5, ge=0, le=100,
-                         description="Optional step size for progress reporting during indexing")),
     clean_index=(Optional[bool], Field(default=False,
                        description="Optional flag to enforce clean existing index before indexing new data")),
+    progress_step=(Optional[int], Field(default=5, ge=0, le=100,
+                         description="Optional step size for progress reporting during indexing")),
     chunking_tool=(Literal[None,'markdown', 'statistical', 'proposal'], Field(description="Name of chunking tool", default=None)),
     chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
