@@ -118,9 +118,10 @@ class JMeterReportParser(PerformanceReportParser):
 
 class GatlingReportParser(PerformanceReportParser):
 
-    def __init__(self, log_file: str, think_times="5,0-10,0"):
+    def __init__(self, log_file: str, include_group_pauses, think_times="5,0-10,0"):
         self.calculated_think_time = think_times
         self.log_file = log_file
+        self.include_group_pauses = include_group_pauses
 
     @staticmethod
     def convert_timestamp_to_datetime(timestamp: int) -> datetime:
@@ -210,7 +211,7 @@ class GatlingReportParser(PerformanceReportParser):
                                 ramp_end = self.convert_timestamp_to_datetime(int(line.split('\t')[3]))
 
                     elif line.startswith('GROUP'):
-                        self.parse_group_line(groups, line)
+                        self.parse_group_line(groups, line, self.include_group_pauses)
         except FileNotFoundError as e:
             print(f"File not found: {e}")
             raise
@@ -242,11 +243,14 @@ class GatlingReportParser(PerformanceReportParser):
             requests[request_name].append((response_time, status))
 
     @staticmethod
-    def parse_group_line(groups, line):
+    def parse_group_line(groups, line, include_group_pauses):
         parts = line.split('\t')
         if len(parts) >= 6:
             group_name = parts[1]
-            response_time = int(parts[4])
+            if include_group_pauses:
+                response_time = int(parts[3]) - int(parts[2])
+            else:
+                response_time = int(parts[4])
             status = parts[5].strip()
             groups[group_name].append((response_time, status))
 

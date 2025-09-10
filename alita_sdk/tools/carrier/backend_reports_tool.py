@@ -154,6 +154,7 @@ class CreateExcelReportTool(BaseTool):
             "tp_threshold": (int, Field(default=None, description="Throughput threshold")),
             "rt_threshold": (int, Field(default=None, description="Response time threshold")),
             "er_threshold": (int, Field(default=None, description="Error rate threshold")),
+            "include_group_pauses": (bool, Field(default=False, description="Include group pauses in Gatling Excel report")),
         }
     )
 
@@ -200,6 +201,7 @@ class CreateExcelReportTool(BaseTool):
             "tp_threshold": 10,
             "rt_threshold": 500,
             "er_threshold": 5,
+            "include_group_pauses": False,
         }
 
     def _request_parameter_confirmation(self, default_parameters):
@@ -217,7 +219,8 @@ class CreateExcelReportTool(BaseTool):
         excel_report_file_name = f'/tmp/reports_test_results_{report["build_id"]}_excel_report.xlsx'
         bucket_name = report["name"].replace("_", "").replace(" ", "").lower()
 
-        result_stats_j = self._parse_report(test_log_file_path, lg_type, parameters["think_time"], is_absolute_file_path=True)
+        result_stats_j = self._parse_report(test_log_file_path, lg_type, parameters["think_time"],
+                                            parameters["include_group_pauses"], is_absolute_file_path=True)
         calc_thr_j = self._calculate_thresholds(result_stats_j, parameters)
 
         return self._generate_and_upload_report(
@@ -233,21 +236,22 @@ class CreateExcelReportTool(BaseTool):
         excel_report_file_name = f'{file_path}_{current_date}.xlsx'
         bucket_name = bucket
 
-        result_stats_j = self._parse_report(file_path, lg_type, parameters["think_time"], is_absolute_file_path=True)
+        result_stats_j = self._parse_report(file_path, lg_type, parameters["think_time"],
+                                            parameters["include_group_pauses"], is_absolute_file_path=True)
         calc_thr_j = self._calculate_thresholds(result_stats_j, parameters)
 
         return self._generate_and_upload_report(
             result_stats_j, carrier_report, calc_thr_j, parameters, excel_report_file_name, bucket_name, file_path
         )
 
-    def _parse_report(self, file_path, lg_type, think_time, is_absolute_file_path=False):
+    def _parse_report(self, file_path, lg_type, think_time, include_group_pauses, is_absolute_file_path=False):
         """Parse the report based on its type."""
         if lg_type == "gatling":
             if is_absolute_file_path:
                 report_file = file_path
             else:
                 report_file = get_latest_log_file(file_path, "simulation.log")
-            parser = GatlingReportParser(report_file, think_time)
+            parser = GatlingReportParser(report_file, include_group_pauses, think_time)
             result_stats_j = parser.parse()
             result_stats_j["requests"].update(result_stats_j["groups"])
         elif lg_type == "jmeter":
