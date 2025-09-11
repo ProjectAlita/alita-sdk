@@ -93,7 +93,7 @@ class Assistant:
             elif app_type == "xml":
                 messages.append(HumanMessage(XML_ADDON))
             elif app_type in ['openai', 'dial']:
-                messages.append(HumanMessage("{{input}}"))
+                messages.append(MessagesPlaceholder("input"))
             messages.append(MessagesPlaceholder("agent_scratchpad"))
             variables = {}
             input_variables = []
