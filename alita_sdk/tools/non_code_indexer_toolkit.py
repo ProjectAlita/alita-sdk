@@ -1,4 +1,5 @@
 from langchain_core.documents import Document
+from langchain_core.tools import ToolException
 
 from alita_sdk.runtime.utils.utils import IndexerKeywords
 from alita_sdk.tools.base_indexer_toolkit import BaseIndexerToolkit
@@ -6,6 +7,9 @@ from alita_sdk.tools.base_indexer_toolkit import BaseIndexerToolkit
 
 class NonCodeIndexerToolkit(BaseIndexerToolkit):
     def _get_indexed_data(self, collection_suffix: str):
+        if not self.vector_adapter:
+            raise ToolException("Vector adapter is not initialized. "
+                             "Check your configuration: embedding_model and vectorstore_type.")
         return self.vector_adapter.get_indexed_data(self, collection_suffix)
 
     def key_fn(self, document: Document):
