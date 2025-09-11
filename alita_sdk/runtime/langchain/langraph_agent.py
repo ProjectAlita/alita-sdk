@@ -584,14 +584,11 @@ def create_graph(
             entry_point = clean_string(schema['entry_point'])
         except KeyError:
             raise ToolException("Entry point is not defined in the schema. Please define 'entry_point' in the schema.")
-        for key, value in state.items():
-            if 'type' in value and 'value' in value:
-                # set default value for state variable if it is defined in the schema
-                state_default_node = StateDefaultNode(default_vars=state)
-                lg_builder.add_node(state_default_node.name, state_default_node)
-                lg_builder.set_entry_point(state_default_node.name)
-                lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
-                break
+        if state.items():
+            state_default_node = StateDefaultNode(default_vars=set_defaults(state))
+            lg_builder.add_node(state_default_node.name, state_default_node)
+            lg_builder.set_entry_point(state_default_node.name)
+            lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
         else:
             # if no state variables are defined, set the entry point directly
             lg_builder.set_entry_point(entry_point)
@@ -633,6 +630,24 @@ def create_graph(
     )
     return compiled.validate()
 
+def set_defaults(d):
+    """Set default values for dictionary entries based on their type."""
+    type_defaults = {
+        'str': '',
+        'list': [],
+        'int': 0,
+        'float': 0.0,
+        'bool': False,
+        # add more types as needed
+    }
+    for k, v in d.items():
+        # Skip 'input' key as it is not a state initial variable
+        if k == 'input':
+            continue
+        # set value or default if type is defined
+        if 'value' not in v:
+            v['value'] = type_defaults.get(v['type'], None)
+    return d
 
 def convert_dict_to_message(msg_dict):
     """Convert a dictionary message to a LangChain message object."""
