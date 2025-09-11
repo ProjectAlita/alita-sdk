@@ -207,7 +207,7 @@ def process_document_by_type(content, extension_source: str, document: Document 
     try:
         chunks = process_content_by_type(content, extension_source, llm, chunking_config)
     except Exception as e:
-        msg = f"Error during content for file {extension_source}:\n{e}"
+        msg = f"Error during content parsing for file {extension_source}:\n{e}"
         logger.warning(msg)
         yield Document(
             page_content=msg,
@@ -218,7 +218,7 @@ def process_document_by_type(content, extension_source: str, document: Document 
         yield Document(
             page_content=sanitize_for_postgres(chunk.page_content),
             metadata={**document.metadata, **chunk.metadata}
-                )
+        )
 
 
 def process_content_by_type(content, filename: str, llm=None, chunking_config=None) -> \
@@ -233,7 +233,7 @@ def process_content_by_type(content, filename: str, llm=None, chunking_config=No
             if content is None:
                 logger.warning(
                     f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
-                return
+                return []
 
             temp_file.write(content)
             temp_file.flush()
@@ -241,7 +241,7 @@ def process_content_by_type(content, filename: str, llm=None, chunking_config=No
             loader_config = loaders_map.get(extension)
             if not loader_config:
                 logger.warning(f"No loader found for file extension: {extension}. File: {temp_file_path}")
-                return
+                return []
 
             loader_cls = loader_config['class']
             loader_kwargs = loader_config['kwargs']
