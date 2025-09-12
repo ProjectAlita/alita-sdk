@@ -694,7 +694,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         
         # Append current input to existing messages instead of overwriting
         if input.get('input'):
-            current_message = HumanMessage(content=input.get('input'))
+            current_message = input.get('input')[-1]
             if input.get('messages'):
                 # Ensure existing messages are LangChain objects
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]
