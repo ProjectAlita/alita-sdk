@@ -584,11 +584,19 @@ def create_graph(
             entry_point = clean_string(schema['entry_point'])
         except KeyError:
             raise ToolException("Entry point is not defined in the schema. Please define 'entry_point' in the schema.")
-        if state.items():
-            state_default_node = StateDefaultNode(default_vars=set_defaults(state))
-            lg_builder.add_node(state_default_node.name, state_default_node)
-            lg_builder.set_entry_point(state_default_node.name)
-            lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
+        # if state.items():
+        #     state_default_node = StateDefaultNode(default_vars=set_defaults(state))
+        #     lg_builder.add_node(state_default_node.name, state_default_node)
+        #     lg_builder.set_entry_point(state_default_node.name)
+        #     lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
+        for key, value in state.items():
+            if 'type' in value and 'value' in value:
+                # set default value for state variable if it is defined in the schema
+                state_default_node = StateDefaultNode(default_vars=state)
+                lg_builder.add_node(state_default_node.name, state_default_node)
+                lg_builder.set_entry_point(state_default_node.name)
+                lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
+                break
         else:
             # if no state variables are defined, set the entry point directly
             lg_builder.set_entry_point(entry_point)
@@ -710,7 +718,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            if self.output_variables and self.output_variables[0] != "messages":
+            if self.output_variables and self.output_variables[0] in result and self.output_variables[0] != "messages":
                 # If output_variables are specified, use the value of first one or use the last messages as default
                 output = result.get(self.output_variables[0], result['messages'][-1].content)
             else:
