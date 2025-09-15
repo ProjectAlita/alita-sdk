@@ -31,7 +31,8 @@ def formulate_query(kwargs):
             chat_history = []
             for each in kwargs.get('chat_history')[:]:
                 chat_history.append(AIMessage(each))
-    result = {"input": kwargs.get('task'), "chat_history": chat_history}
+    input_message = AIMessage(content=kwargs.get('task'))
+    result = {"input": [input_message], "chat_history": chat_history}
     for key, value in kwargs.items():
         if key not in ("task", "chat_history"):
             result[key] = value
