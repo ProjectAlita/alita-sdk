@@ -50,7 +50,7 @@ def create_llm_input_with_messages(
         input_messages.extend(messages)
     else:
         # conditionally add a default human message if no chat history
-        input_messages.extend([HumanMessage(content="")])
+        input_messages.extend([HumanMessage(content="Reply to this message.")])
 
     return input_messages
 
