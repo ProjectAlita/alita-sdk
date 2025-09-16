@@ -4,6 +4,7 @@ import logging
 import re
 from enum import Enum
 from typing import Dict, List, Generator, Optional, Union
+from urllib.parse import urlparse, parse_qs
 
 import requests
 from FigmaPy import FigmaPy
@@ -238,6 +239,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
     def _base_loader(
             self,
+            file_or_page_url: Optional[str] = None,
             project_id: Optional[str] = None,
             file_keys_include: Optional[List[str]] = None,
             file_keys_exclude: Optional[List[str]] = None,
@@ -247,6 +249,24 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_types_exclude: Optional[List[str]] = None,
             **kwargs
     ) -> Generator[Document, None, None]:
+        if file_or_page_url:
+            # If URL is provided and valid, extract and override file_keys_include and node_ids_include
+            try:
+                parsed = urlparse(file_or_page_url)
+                path_parts = parsed.path.strip('/').split('/')
+    
+                # Check if the path matches the expected format
+                if len(path_parts) >= 2 and path_parts[0] == 'design':
+                    file_keys_include = [path_parts[1]]
+                    if len(path_parts) == 3:
+                        # To ensure url structure matches Figma's format with 3 path segments
+                        query_params = parse_qs(parsed.query)
+                        if "node-id" in query_params:
+                            node_ids_include = query_params.get('node-id', [])
+            except Exception as e:
+                raise ToolException(
+                    f"Unexpected error while processing Figma url {file_or_page_url}: {e}")
+        
         # If both include and exclude are provided, use only include
         if file_keys_include:
             self._log_tool_event(f"Loading files: {file_keys_include}")
@@ -364,8 +384,11 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
+            "file_or_page_url": (Optional[str], Field(
+                description="Url to file or page to index: i.e. https://www.figma.com/design/[YOUR_FILE_KEY]/Login-page-designs?node-id=[YOUR_PAGE_ID]",
+                default=None)),
             "project_id": (Optional[str], Field(
-                description="ID of the project to list files from: i.e. 55391681'",
+                description="ID of the project to list files from: i.e. 55391681",
                 default=None)),
             'file_keys_include': (Optional[List[str]], Field(
                 description="List of file keys to include in index if project_id is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
