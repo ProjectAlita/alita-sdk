@@ -16,10 +16,11 @@ from typing import Iterator
 import pandas as pd
 from json import loads
 
-from langchain_core.tools import ToolException
+from openpyxl import load_workbook
 from langchain_core.documents import Document
 from .AlitaTableLoader import AlitaTableLoader
     
+cell_delimeter = " | "
 
 class AlitaExcelLoader(AlitaTableLoader):
 
@@ -39,32 +40,65 @@ class AlitaExcelLoader(AlitaTableLoader):
 
     def get_content(self):
         try:
-            dfs = pd.read_excel(self.file_path, sheet_name=self.sheet_name)
+            # Load the workbook
+            workbook = load_workbook(self.file_path, data_only=True)  # `data_only=True` ensures we get cell values, not formulas
 
-            if self.excel_by_sheets:
+            if self.sheet_name:
+                # If a specific sheet name is provided, parse only that sheet
+                if self.sheet_name in workbook.sheetnames:
+                    sheet_content = self.parse_sheet(workbook[self.sheet_name])
+                    return sheet_content
+                else:
+                    raise ValueError(f"Sheet '{self.sheet_name}' does not exist in the workbook.")
+            elif self.excel_by_sheets:
+                # Parse each sheet individually and return as a dictionary
                 result = {}
-                for sheet_name, df in dfs.items():
-                    df.fillna('', inplace=True)
-                    result[sheet_name] = self.parse_sheet(df)
+                for sheet_name in workbook.sheetnames:
+                    sheet_content = self.parse_sheet(workbook[sheet_name])
+                    result[sheet_name] = sheet_content
                 return result
             else:
+                # Combine all sheets into a single string result
                 result = []
-                for sheet_name, df in dfs.items():
-                    string_content = self.parse_sheet(df)
-                    result.append(f"====== Sheet name: {sheet_name} ======\n{string_content}")
+                for sheet_name in workbook.sheetnames:
+                    sheet_content = self.parse_sheet(workbook[sheet_name])
+                    result.append(f"====== Sheet name: {sheet_name} ======\n{sheet_content}")
                 return "\n\n".join(result)
         except Exception as e:
-            return ToolException(f"Error reading Excel file: {e}")
+            return f"Error reading Excel file: {e}"
 
-    def parse_sheet(self, df):
-        df.fillna('', inplace=True)
+    def parse_sheet(self, sheet):
+        """
+        Parses a single sheet, extracting text and hyperlinks, and formats them.
+        """
+        sheet_content = []
 
+        for row in sheet.iter_rows():
+            row_content = []
+            for cell in row:
+                if cell.hyperlink:
+                    # If the cell has a hyperlink, format it as Markdown
+                    hyperlink = cell.hyperlink.target
+                    cell_value = cell.value or ''  # Use cell value or empty string
+                    row_content.append(f"[{cell_value}]({hyperlink})")
+                else:
+                    # If no hyperlink, use the cell value (computed value if formula)
+                    row_content.append(str(cell.value) if cell.value is not None else "")
+            # Join the row content into a single line using `|` as the delimiter
+            sheet_content.append(cell_delimeter.join(row_content))
+
+        # Format the sheet content based on the return type
         if self.return_type == 'dict':
-            return df.to_dict(orient='records')
+            # Convert to a list of dictionaries (each row is a dictionary)
+            headers = sheet_content[0].split(cell_delimeter) if sheet_content else []
+            data_rows = sheet_content[1:] if len(sheet_content) > 1 else []
+            return [dict(zip(headers, row.split(cell_delimeter))) for row in data_rows]
         elif self.return_type == 'csv':
-            return df.to_csv()
+            # Return as CSV (newline-separated rows, comma-separated values)
+            return "\n".join([",".join(row.split(cell_delimeter)) for row in sheet_content])
         else:
-            return df.to_string(index=False)
+            # Default: Return as plain text (newline-separated rows, pipe-separated values)
+            return "\n".join(sheet_content)
 
     def load(self) -> list:
         docs = []
