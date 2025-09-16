@@ -539,7 +539,9 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         :param title: title
         :param type: type of content: page or blogpost. Defaults to page
         """
-        return self.client.get_page_id(space=self.space, title=title, type=type)
+
+        result = self.client.get_page_id(space=self.space, title=title, type=type)
+        return result if result else "Page not found. Check the title or space."
 
     def _strip_base64_images(self, content):
         base64_md_pattern = r'data:image/(png|jpeg|gif);base64,[a-zA-Z0-9+/=]+'
@@ -562,7 +564,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 }
                 pages_info.append(page_info)
             start += self.limit
-        return str(pages_info)
+        return str(pages_info) if pages_info else f"Unable to find anything using query {cql}. Check space or query."
 
     def search_pages(self, query: str, skip_images: bool = False):
         """Search pages in Confluence by query text in title or page content."""

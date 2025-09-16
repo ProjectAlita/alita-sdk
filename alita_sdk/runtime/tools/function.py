@@ -4,7 +4,7 @@ from json import dumps
 from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import ToolCall
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from typing import Any, Optional, Union, Annotated
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
@@ -48,7 +48,13 @@ class FunctionTool(BaseTool):
                 return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
             else:
                 if self.output_variables[0] == "messages":
-                    return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
+                    return {
+                        "messages": [{
+                            "role": "assistant",
+                            "content": dumps(tool_result) if not isinstance(tool_result, ToolException) else str(
+                                tool_result)
+                        }]
+                    }
                 else:
                     return { self.output_variables[0]: tool_result }
         except ValidationError:

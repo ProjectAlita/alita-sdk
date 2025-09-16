@@ -1102,7 +1102,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                 st_cb = AlitaStreamlitCallback(st)
                 logger.info(st.session_state.messages)
                 response = st.session_state.agent_executor.invoke(
-                    {"input": prompt, "chat_history": st.session_state.messages[:-1]},
+                    {"input": [prompt], "chat_history": st.session_state.messages[:-1]},
                     { 'callbacks': [st_cb], 'configurable': {"thread_id": st.session_state.thread_id}}
                 )
                 st.write(response["output"])
