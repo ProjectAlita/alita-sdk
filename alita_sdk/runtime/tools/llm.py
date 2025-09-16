@@ -14,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_llm_input_with_messages(
-    prompt: Dict[str, str], 
-    messages: List[BaseMessage], 
+    prompt: Dict[str, str],
     params: Dict[str, Any]
 ) -> List[BaseMessage]:
     """
@@ -23,13 +22,12 @@ def create_llm_input_with_messages(
     
     Args:
         prompt: The prompt configuration with template
-        messages: List of chat history messages
         params: Additional parameters for prompt formatting
         
     Returns:
         List of messages to send to LLM
     """
-    logger.info(f"Creating LLM input with messages: {len(messages)} messages, params: {params}")
+    logger.info(f"Creating LLM input with params: {params}")
     
     # Build the input messages
     input_messages = []
@@ -47,9 +45,13 @@ def create_llm_input_with_messages(
             raise ToolException(error_msg)
     
     # Add the chat history messages
+    messages = params.get('messages', [])
     if messages:
         input_messages.extend(messages)
-    
+    else:
+        # conditionally add a default human message if no chat history
+        input_messages.extend([HumanMessage(content="Reply to this message.")])
+
     return input_messages
 
 
@@ -124,12 +126,13 @@ class LLMNode(BaseTool):
         # Create parameters for prompt formatting from state
         params = {}
         if isinstance(state, dict):
-            for var in self.input_variables or []:
-                if var != "messages" and var in state:
-                    params[var] = state[var]
+            params = {var: state[var] for var in (self.input_variables or []) if var != "messages" and var in state}
+            # message as a part of chat history added ONLY if "messages" is in input_variables
+            if "messages" in (self.input_variables or []):
+                params["messages"] = messages
         
         # Create LLM input with proper message handling
-        llm_input = create_llm_input_with_messages(self.prompt, messages, params)
+        llm_input = create_llm_input_with_messages(self.prompt, params)
         
         # Get the LLM client, potentially with tools bound
         llm_client = self.client
@@ -268,17 +271,14 @@ class LLMNode(BaseTool):
                     if json_output_vars:
                         try:
                             response = _extract_json(content) or {}
-                            response_data = {key: response.get(key) for key in json_output_vars if key in response}
-                            
-                            # Always add the messages to the response
-                            new_messages = messages + [AIMessage(content=content)]
-                            response_data['messages'] = new_messages
-                            
-                            return response_data
+                            response_data = {key: response.get(key, content) for key in json_output_vars}
                         except (ValueError, json.JSONDecodeError) as e:
-                            # LLM returned non-JSON content, treat as plain text
-                            logger.warning(f"Expected JSON output but got plain text. Output variables specified: {json_output_vars}. Error: {e}")
-                            # Fall through to plain text handling
+                            logger.warning(
+                                f"Expected JSON output but got plain text. Output variables specified: {json_output_vars}. Error: {e}")
+                            response_data = {var: content for var in json_output_vars}
+                        new_messages = messages + [AIMessage(content=content)]
+                        response_data['messages'] = new_messages
+                        return response_data
                     
                     # Simple text response (either no output variables or JSON parsing failed)
                     new_messages = messages + [AIMessage(content=content)]
