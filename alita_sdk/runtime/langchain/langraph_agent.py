@@ -253,8 +253,17 @@ class StateModifierNode(Runnable):
                 input_data[var] = state.get(var)
 
         # Render the template using Jinja
-        from jinja2 import Template
-        rendered_message = Template(self.template).render(**input_data)
+        import json
+        from jinja2 import Environment
+
+        def from_json(value):
+            return json.loads(value)
+
+        env = Environment()
+        env.filters['from_json'] = from_json
+        
+        template = env.from_string(self.template)
+        rendered_message = template.render(**input_data)
         result = {}
         # Store the rendered message in the state or messages
         if len(self.output_variables) > 0:
