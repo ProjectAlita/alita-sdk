@@ -255,13 +255,29 @@ class StateModifierNode(Runnable):
         type_of_output = type(state.get(self.output_variables[0])) if self.output_variables else None
         # Render the template using Jinja
         import json
+        import base64
         from jinja2 import Environment
 
         def from_json(value):
-            return json.loads(value)
+            """Convert JSON string to Python object"""
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse JSON value: {e}")
+                return value
+        
+        def base64_to_string(value):
+            """Convert base64 encoded string to regular string"""
+            try:
+                return base64.b64decode(value).decode('utf-8')
+            except Exception as e:
+                logger.warning(f"Failed to decode base64 value: {e}")
+                return value
+        
 
         env = Environment()
         env.filters['from_json'] = from_json
+        env.filters['base64ToString'] = base64_to_string
         
         template = env.from_string(self.template)
         rendered_message = template.render(**input_data)
