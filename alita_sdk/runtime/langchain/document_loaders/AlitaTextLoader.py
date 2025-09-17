@@ -1,10 +1,13 @@
-from typing import Iterator
+from typing import Iterator, Generator
 
 from langchain_core.documents import Document
 
 from langchain_community.document_loaders.base import BaseLoader
 from langchain_community.document_loaders.helpers import detect_file_encodings
 from langchain_core.tools import ToolException
+
+from alita_sdk.tools.chunkers import markdown_chunker
+
 
 class AlitaTextLoader(BaseLoader):
 
@@ -19,6 +22,8 @@ class AlitaTextLoader(BaseLoader):
             raise ToolException("'file_path' or 'file_content' parameter should be provided.")
         self.encoding = kwargs.get('encoding', 'utf-8')
         self.autodetect_encoding = kwargs.get('autodetect_encoding', False)
+        self.max_tokens=kwargs.get('max_tokens', 1024)
+        self.token_overlap = kwargs.get('token_overlap', 10)
 
     def get_content(self):
         text = ""
@@ -59,8 +64,16 @@ class AlitaTextLoader(BaseLoader):
 
         return text
 
+    def generate_document(self, text, metadata) -> Generator[Document, None, None]:
+        yield Document(page_content=text, metadata=metadata)
+
     def lazy_load(self) -> Iterator[Document]:
         """Load from file path."""
         text = self.get_content()
         metadata = {"source": str(self.file_path) if hasattr(self, 'file_path') else self.file_name}
-        yield Document(page_content=text, metadata=metadata)
+        chunks = markdown_chunker(file_content_generator=self.generate_document(text, metadata),
+                                  config={
+                                      "max_tokens": self.max_tokens,
+                                      "token_overlap": self.token_overlap
+                                  })
+        yield from chunks
