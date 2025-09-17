@@ -34,6 +34,7 @@ class Assistant:
         self.app_type = app_type
         self.memory = memory
         self.store = store
+        self.max_iterations = data.get('meta', {}).get('step_limit', 25)
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
@@ -145,7 +146,8 @@ class Assistant:
     def _agent_executor(self, agent: Any):
         return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
                                                   verbose=True, handle_parsing_errors=True,
-                                                  max_execution_time=None, return_intermediate_steps=True)
+                                                  max_execution_time=None, return_intermediate_steps=True,
+                                                  max_iterations=self.max_iterations)
 
     def getAgentExecutor(self):
         # Exclude compiled graph runnables from simple tool agents
