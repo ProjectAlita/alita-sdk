@@ -307,76 +307,110 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         else:
             raise ValueError("You must provide at least project_id or file_keys_include.")
 
+    def has_image_representation(self, node):
+        node_type = node.get('type', '').lower()
+        default_images_types = [
+            'image', 'canvas', 'frame', 'vector', 'table', 'slice', 'sticky', 'shape_with_text', 'connector'
+        ]
+        # filter nodes of type which has image representation
+        # or rectangles with image as background
+        if (node_type in default_images_types
+                or (node_type == 'rectangle' and 'fills' in node and any(
+                    fill.get('type') == 'IMAGE' for fill in node['fills'] if isinstance(fill, dict)))):
+            return True
+        return False
+
+    def get_texts_recursive(self, node):
+        texts = []
+        node_type = node.get('type', '').lower()
+        if node_type == 'text':
+            texts.append(node.get('characters', ''))
+        if 'children' in node:
+            for child in node['children']:
+                texts.extend(self.get_texts_recursive(child))
+        return texts
+
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         file_key = document.metadata.get('id', '')
         self._log_tool_event(f"Loading details (images) for `{file_key}`")
-        #
         figma_pages = self._client.get_file(file_key).document.get('children', [])
         node_ids_include = document.metadata.pop('figma_pages_include', [])
         node_ids_exclude = document.metadata.pop('figma_pages_exclude', [])
-        node_types_include = [t.lower() for t in document.metadata.pop('figma_nodes_include', [])]
-        node_types_exclude = [t.lower() for t in document.metadata.pop('figma_nodes_exclude', [])]
+        node_types_include = [t.strip().lower() for t in document.metadata.pop('figma_nodes_include', [])]
+        node_types_exclude = [t.strip().lower() for t in document.metadata.pop('figma_nodes_exclude', [])]
         self._log_tool_event(f"Included pages: {node_ids_include}. Excluded pages: {node_ids_exclude}.")
         if node_ids_include:
             figma_pages = [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') in node_ids_include)]
         elif node_ids_exclude:
             figma_pages = [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') not in node_ids_exclude)]
 
-        # if node_types_include is not provided, default to 'frame'
-        # to avoid downloading too many images and nodes which co=annot be rendered as images
-        if not node_types_include:
-            node_types_include = ['frame']
+        image_nodes = []
+        text_nodes = {}
+        for page in figma_pages:
+            for node in page.get('children', []):
+                # filter by node_type if specified any include or exclude
+                node_type = node.get('type', '').lower()
+                include = node_types_include and node_type in node_types_include
+                exclude = node_types_exclude and node_type not in node_types_exclude
+                no_filter = not node_types_include and not node_types_exclude
 
-        node_ids = [
-            child['id']
-            for page in figma_pages
-            if 'children' in page
-            for child in page['children']
-            if 'id' in child
-            and (
-                (node_types_include and child.get('type').lower() in node_types_include)
-                or (node_types_exclude and child.get('type').lower() not in node_types_exclude)
-                or (not node_types_include and not node_types_exclude)
-            )
-        ]
-
-        if not node_ids:
-            yield from ()
-            return
-
-        images = self._client.get_file_images(file_key, node_ids).images or {}
-        total_images = len(images)
-        if total_images == 0:
-            logging.info(f"No images found for file {file_key}.")
-            return
-        progress_step = max(1, total_images // 10)
-        for idx, (node_id, image_url) in enumerate(images.items(), 1):
-            if not image_url:
-                logging.warning(f"Image URL not found for node_id {node_id} in file {file_key}. Skipping.")
-                continue
-            response = requests.get(image_url)
-            if response.status_code == 200:
-                content_type = response.headers.get('Content-Type', '')
-                if 'text/html' not in content_type.lower():
-                    extension = f".{content_type.split('/')[-1]}" if content_type.startswith('image') else '.txt'
-                    page_content = load_content_from_bytes(
-                        file_content=response.content,
-                        extension=extension, llm=self.llm)
+                if include or exclude or no_filter:
+                    node_id = node.get('id')
+                    if node_id:
+                        if self.has_image_representation(node):
+                            image_nodes.append(node['id'])
+                        else:
+                            text_nodes[node['id']] = self.get_texts_recursive(node)
+        # process image nodes
+        if image_nodes:
+            images = self._client.get_file_images(file_key, image_nodes).images or {}
+            total_images = len(images)
+            if total_images == 0:
+                logging.info(f"No images found for file {file_key}.")
+                return
+            progress_step = max(1, total_images // 10)
+            for idx, (node_id, image_url) in enumerate(images.items(), 1):
+                if not image_url:
+                    logging.warning(f"Image URL not found for node_id {node_id} in file {file_key}. Skipping.")
+                    continue
+                response = requests.get(image_url)
+                if response.status_code == 200:
+                    content_type = response.headers.get('Content-Type', '')
+                    if 'text/html' not in content_type.lower():
+                        extension = f".{content_type.split('/')[-1]}" if content_type.startswith('image') else '.txt'
+                        page_content = load_content_from_bytes(
+                            file_content=response.content,
+                            extension=extension, llm=self.llm)
+                        yield Document(
+                            page_content=page_content,
+                            metadata={
+                                'id': node_id,
+                                'updated_on': document.metadata.get('updated_on', ''),
+                                'file_key': file_key,
+                                'node_id': node_id,
+                                'image_url': image_url,
+                                'type': 'image'
+                            }
+                        )
+                if idx % progress_step == 0 or idx == total_images:
+                    percent = int((idx / total_images) * 100)
+                    msg = f"Processed {idx}/{total_images} images ({percent}%) for file {file_key}."
+                    logging.info(msg)
+                    self._log_tool_event(msg)
+        # process text nodes
+        if text_nodes:
+            for node_id, texts in text_nodes.items():
+                if texts:
                     yield Document(
-                        page_content=page_content,
+                        page_content="\n".join(texts),
                         metadata={
                             'id': node_id,
                             'updated_on': document.metadata.get('updated_on', ''),
                             'file_key': file_key,
                             'node_id': node_id,
-                            'image_url': image_url
+                            'type': 'text'
                         }
                     )
-            if idx % progress_step == 0 or idx == total_images:
-                percent = int((idx / total_images) * 100)
-                msg = f"Processed {idx}/{total_images} images ({percent}%) for file {file_key}."
-                logging.info(msg)
-                self._log_tool_event(msg)
 
     def _remove_metadata_keys(self):
         return super()._remove_metadata_keys() + ['figma_pages_include', 'figma_pages_exclude', 'figma_nodes_include', 'figma_nodes_exclude']
