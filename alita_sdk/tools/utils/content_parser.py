@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 from logging import getLogger
 from pathlib import Path
@@ -8,6 +9,7 @@ from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 
 from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map, LoaderProperties
+from ...runtime.langchain.document_loaders.AlitaTextLoader import AlitaTextLoader
 from ...runtime.utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
@@ -231,7 +233,8 @@ def process_content_by_type(content, filename: str, llm=None, chunking_config=No
     """Process the content of a file based on its type using a configured loader."""
     temp_file_path = None
     try:
-        extension = "." + filename.split('.')[-1].lower()
+        match = re.search(r'\.([^.]+)$', filename)
+        extension = f".{match.group(1).lower()}" if match else ".txt"
 
         with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
             temp_file_path = temp_file.name
