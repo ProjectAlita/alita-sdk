@@ -563,12 +563,14 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         Use the appropriate issue link type (e.g., "Test", "Relates", "Blocks").
         If we use "Test" linktype, the test is inward issue, the story/other issue is outward issue.."""
 
+        comment = "This test is linked to the story."
+        comment_body = {"content": [{"content": [{"text": comment,"type": "text"}],"type": "paragraph"}],"type": "doc","version": 1} if self.api_version == "3" else comment
         link_data = {
             "type": {"name": f"{linktype}"},
             "inwardIssue": {"key": f"{inward_issue_key}"},
             "outwardIssue": {"key": f"{outward_issue_key}"},
             "comment": {
-                "body": "This test is linked to the story."
+                "body": comment_body
             }
         }
         self._client.create_issue_link(link_data)
@@ -706,6 +708,8 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
     def add_comments(self, issue_key: str, comment: str):
         """ Add a comment to a Jira issue."""
         try:
+            if self.api_version == '3':
+                comment = {"content": [{"content": [{"text": comment,"type": "text"}],"type": "paragraph"}],"type": "doc","version": 1}
             self._client.issue_add_comment(issue_key, comment)
             issue_url = f"{self._client.url}browse/{issue_key}"
             output = f"Done. Comment is added for issue {issue_key}. You can view it at {issue_url}"
