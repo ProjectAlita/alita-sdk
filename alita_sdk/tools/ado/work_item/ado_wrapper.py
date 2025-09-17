@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import urllib.parse
 from typing import Dict, List, Generator, Optional
 
@@ -7,6 +8,7 @@ from azure.devops.connection import Connection
 from azure.devops.v7_1.core import CoreClient
 from azure.devops.v7_1.wiki import WikiClient
 from azure.devops.v7_1.work_item_tracking import TeamContext, Wiql, WorkItemTrackingClient
+from bs4 import BeautifulSoup
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from msrest.authentication import BasicAuthentication
@@ -15,6 +17,7 @@ from pydantic import model_validator
 from pydantic.fields import Field
 
 from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ...utils.content_parser import parse_file_content
 from ....runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
@@ -53,7 +56,11 @@ ADOGetWorkItem = create_model(
     id=(int, Field(description="The work item id")),
     fields=(Optional[list[str]], Field(description="Comma-separated list of requested fields", default=None)),
     as_of=(Optional[str], Field(description="AsOf UTC date time string", default=None)),
-    expand=(Optional[str], Field(description="The expand parameters for work item attributes. Possible options are { None, Relations, Fields, Links, All }.", default=None))
+    expand=(Optional[str], Field(description="The expand parameters for work item attributes. Possible options are { None, Relations, Fields, Links, All }.", default=None)),
+    parse_attachments=(Optional[bool], Field(description="Value that defines is attachment should be parsed.", default=False)),
+    image_description_prompt=(Optional[str],
+                     Field(description="Prompt which is used for image description", default=None)),
+
 )
 
 ADOLinkWorkItem = create_model(
@@ -284,8 +291,23 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error searching work items: {e}")
             return ToolException(f"Error searching work items: {e}")
 
+    def parse_attachment_by_url(self, attachment_url, file_name=None, image_description_prompt=None):
+        match = re.search(r'attachments/([\w-]+)(?:\?fileName=([^&]+))?', attachment_url)
+        if match:
+            attachment_id = match.group(1)
+            if not file_name:
+                file_name = match.group(2)
+            if not file_name:
+                raise ToolException("File name must be provided either in the URL or as a parameter.")
+            return self.parse_attachment_by_id(attachment_id, file_name, image_description_prompt)
+        raise ToolException(f"Attachment '{attachment_url}' was not found.")
 
-    def get_work_item(self, id: int, fields: Optional[list[str]] = None, as_of: Optional[str] = None, expand: Optional[str] = None):
+    def parse_attachment_by_id(self, attachment_id, file_name, image_description_prompt):
+        file_content = self.get_attachment_content(attachment_id)
+        return parse_file_content(file_content=file_content, file_name=file_name,
+                                            llm=self.llm, prompt=image_description_prompt)
+
+    def get_work_item(self, id: int, fields: Optional[list[str]] = None, as_of: Optional[str] = None, expand: Optional[str] = None, parse_attachments=False, image_description_prompt=None):
         """Get a single work item by ID."""
         try:
             # Validate that the Azure DevOps client is initialized
@@ -312,6 +334,24 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 parsed_item['relations'] = []
                 for relation in relations_data:
                     parsed_item['relations'].append(relation.as_dict())
+
+            if parse_attachments:
+                # describe images in work item fields if present
+                for field_name, field_value in fields_data.items():
+                    if isinstance(field_value, str):
+                        soup = BeautifulSoup(field_value, 'html.parser')
+                        images = soup.find_all('img')
+                        for img in images:
+                            src = img.get('src')
+                            if src:
+                                description = self.parse_attachment_by_url(src, image_description_prompt)
+                                img['image-description'] = description
+                        parsed_item[field_name] = str(soup)
+                # parse attached documents if present
+                if parsed_item['relations']:
+                    for attachment in parsed_item['relations']:
+                        attachment['content'] = self.parse_attachment_by_url(attachment['url'], attachment['attributes']['name'], image_description_prompt)
+
 
             return parsed_item
         except Exception as e:
@@ -522,10 +562,13 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 'attachment_ids': {rel.url.split('/')[-1]:rel.attributes.get('name', '') for rel in wi.relations or [] if rel.rel == 'AttachedFile'}
             })
 
+    def get_attachment_content(self, attachment_id):
+        content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
+        return b"".join(content_generator)
+
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         for attachment_id, file_name in document.metadata.get('attachment_ids', {}).items():
-            content_generator = self._client.get_attachment_content(id=attachment_id, download=True)
-            content = b"".join(x for x in content_generator)
+            content = self.get_attachment_content(attachment_id=attachment_id)
             yield Document(page_content="", metadata={'id': attachment_id, IndexerKeywords.CONTENT_FILE_NAME.value: file_name, IndexerKeywords.CONTENT_IN_BYTES.value: content})
 
     def _index_tool_params(self):
