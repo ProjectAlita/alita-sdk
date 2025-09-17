@@ -55,6 +55,8 @@ def parse_type(type_str):
     """Parse a type string into an actual Python type."""
     try:
         # Evaluate the type string using builtins and imported modules
+        if type_str == 'number':
+            type_str = 'int'
         return eval(type_str, {**vars(builtins), **globals()})
     except Exception as e:
         print(f"Error parsing type: {e}")

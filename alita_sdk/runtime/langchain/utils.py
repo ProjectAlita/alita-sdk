@@ -121,6 +121,8 @@ def parse_type(type_str):
     """Parse a type string into an actual Python type."""
     try:
         # Evaluate the type string using builtins and imported modules
+        if type_str == 'number':
+            type_str = 'int'
         return eval(type_str, {**vars(builtins), **globals()})
     except Exception as e:
         print(f"Error parsing type: {e}")
@@ -138,6 +140,7 @@ def create_state(data: Optional[dict] = None):
             state_dict[key] = Annotated[list[AnyMessage], add_messages]
         elif value in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number']:
             state_dict[key] = parse_type(value)
+    logger.debug(f"Created state: {state_dict}")
     return TypedDict('State', state_dict)
 
 def create_typed_dict_from_yaml(data):

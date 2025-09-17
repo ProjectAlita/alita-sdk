@@ -248,10 +248,11 @@ class StateModifierNode(Runnable):
 
         # Collect input variables from state
         input_data = {}
+        
         for var in self.input_variables:
             if var in state:
                 input_data[var] = state.get(var)
-
+        type_of_output = type(state.get(self.output_variables[0])) if self.output_variables else None
         # Render the template using Jinja
         import json
         from jinja2 import Environment
@@ -269,7 +270,35 @@ class StateModifierNode(Runnable):
         if len(self.output_variables) > 0:
             # Use the first output variable to store the rendered content
             output_var = self.output_variables[0]
-            result[output_var] = rendered_message
+            
+            # Convert rendered_message to the appropriate type
+            if type_of_output is not None:
+                try:
+                    if type_of_output == dict:
+                        result[output_var] = json.loads(rendered_message) if isinstance(rendered_message, str) else dict(rendered_message)
+                    elif type_of_output == list:
+                        result[output_var] = json.loads(rendered_message) if isinstance(rendered_message, str) else list(rendered_message)
+                    elif type_of_output == int:
+                        result[output_var] = int(rendered_message)
+                    elif type_of_output == float:
+                        result[output_var] = float(rendered_message)
+                    elif type_of_output == str:
+                        result[output_var] = str(rendered_message)
+                    elif type_of_output == bool:
+                        if isinstance(rendered_message, str):
+                            result[output_var] = rendered_message.lower() in ('true', '1', 'yes', 'on')
+                        else:
+                            result[output_var] = bool(rendered_message)
+                    elif type_of_output == type(None):
+                        result[output_var] = None
+                    else:
+                        # Fallback to string if type is not recognized
+                        result[output_var] = str(rendered_message)
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    logger.warning(f"Failed to convert rendered_message to {type_of_output.__name__}: {e}. Using string fallback.")
+                    result[output_var] = str(rendered_message)
+            else:
+                result[output_var] = rendered_message
 
         # Clean up specified variables (make them empty, not delete)
         
