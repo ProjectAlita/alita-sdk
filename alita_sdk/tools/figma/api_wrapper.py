@@ -61,11 +61,11 @@ class ArgsSchema(Enum):
         ),
         geometry=(
             Optional[str],
-            Field(description="Sets to 'paths' to export vector data"),
+            Field(description="Sets to 'paths' to export vector data", default=None),
         ),
         version=(
             Optional[str],
-            Field(description="Sets version of file"),
+            Field(description="Sets version of file", default=None),
         ),
         extra_params=(
             Optional[Dict[str, Union[str, int, None]]],
@@ -120,7 +120,8 @@ class ArgsSchema(Enum):
         client_meta=(
             Optional[dict],
             Field(
-                description="Positioning information of the comment (Vector, FrameOffset, Region, FrameOffsetRegion)"
+                description="Positioning information of the comment (Vector, FrameOffset, Region, FrameOffsetRegion)",
+                default=None,
             ),
         ),
         extra_params=(
@@ -147,26 +148,28 @@ class ArgsSchema(Enum):
             ),
         ),
         ids=(
-            str,
+            Optional[str],
             Field(
                 description="Specifies id of file images separated by comma",
                 examples=["8:6,1:7"],
+                default="0:0",
             ),
         ),
         scale=(
             Optional[str],
-            Field(description="A number between 0.01 and 4, the image scaling factor"),
+            Field(description="A number between 0.01 and 4, the image scaling factor", default=None),
         ),
         format=(
             Optional[str],
             Field(
                 description="A string enum for the image output format",
                 examples=["jpg", "png", "svg", "pdf"],
+                default=None,
             ),
         ),
         version=(
             Optional[str],
-            Field(description="A specific version ID to use"),
+            Field(description="A specific version ID to use", default=None),
         ),
         extra_params=(
             Optional[Dict[str, Union[str, int, None]]],
@@ -636,7 +639,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     def get_file_images(
         self,
         file_key: str,
-        ids: str = "0:0",
+        ids: Optional[str] = "0:0",
         scale: Optional[str] = None,
         format: Optional[str] = None,
         version: Optional[str] = None,
