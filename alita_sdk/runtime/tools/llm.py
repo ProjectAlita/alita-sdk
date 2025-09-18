@@ -31,26 +31,25 @@ def create_llm_input_with_messages(
     
     # Build the input messages
     input_messages = []
+    messages = params.get('messages', [])
     
     # Add system message from prompt if available
     if prompt:
         try:
             # Format the system message using the prompt template or value and params
             prompt_str = prompt['template'] if 'template' in prompt else prompt['value']
-            system_content = prompt_str.format(**params) if params else prompt_str
-            input_messages.append(SystemMessage(content=system_content))
+            prompt_content = prompt_str.format(**params) if params else prompt_str
+            # if user hasn't specified chat history, add system message as HumanMessage
+            input_messages.append(SystemMessage(content=prompt_content) if messages else HumanMessage(content=prompt_content))
         except KeyError as e:
             error_msg = f"KeyError in prompt formatting: {e}. Available params: {list(params.keys())}"
             logger.error(error_msg)
             raise ToolException(error_msg)
     
     # Add the chat history messages
-    messages = params.get('messages', [])
+
     if messages:
         input_messages.extend(messages)
-    else:
-        # conditionally add a default human message if no chat history
-        input_messages.extend([HumanMessage(content="Reply to this message.")])
 
     return input_messages
 
