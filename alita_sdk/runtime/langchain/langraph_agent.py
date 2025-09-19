@@ -459,7 +459,7 @@ def create_graph(
                                                        {'messages': {'type': 'variable', 'value': 'messages'}})
                             lg_builder.add_node(node_id, FunctionTool(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='dict',
+                                name=node['id'], return_type='str',
                                 output_variables=node.get('output', []),
                                 input_variables=input_params,
                                 input_mapping= input_mapping
@@ -746,6 +746,8 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         # Append current input to existing messages instead of overwriting
         if input.get('input'):
             current_message = input.get('input')[-1]
+            # TODO: add handler after we add 2+ inputs (filterByType, etc.)
+            input['input'] = current_message  # Clear input after extracting current message
             if input.get('messages'):
                 # Ensure existing messages are LangChain objects
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]
