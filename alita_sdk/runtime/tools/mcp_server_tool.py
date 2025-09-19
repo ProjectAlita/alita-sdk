@@ -95,7 +95,7 @@ class McpServerTool(BaseTool):
             "tool_timeout_sec": self.tool_timeout_sec,
             "tool_call_id": str(uuid.uuid4()),
             "params": {
-                "name": self.name.rsplit(TOOLKIT_SPLITTER)[1],
+                "name": self.name.rsplit(TOOLKIT_SPLITTER)[1] if TOOLKIT_SPLITTER in self.name else self.name,
                 "arguments": kwargs
             }
         }
