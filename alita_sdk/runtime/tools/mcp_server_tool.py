@@ -5,6 +5,8 @@ from typing import Any, Type, Literal, Optional, Union, List
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, create_model, EmailStr, constr
 
+from ...tools.utils import TOOLKIT_SPLITTER
+
 logger = getLogger(__name__)
 
 
@@ -93,7 +95,7 @@ class McpServerTool(BaseTool):
             "tool_timeout_sec": self.tool_timeout_sec,
             "tool_call_id": str(uuid.uuid4()),
             "params": {
-                "name": self.name,
+                "name": self.name.rsplit(TOOLKIT_SPLITTER)[1],
                 "arguments": kwargs
             }
         }

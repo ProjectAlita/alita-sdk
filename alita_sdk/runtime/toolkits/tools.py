@@ -15,6 +15,7 @@ from ..tools.mcp_server_tool import McpServerTool
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
+from ...tools.utils import TOOLKIT_SPLITTER
 
 logger = logging.getLogger(__name__)
 
@@ -150,11 +151,11 @@ def _mcp_tools(tools_list, alita):
         tools = []
         #
         for selected_toolkit in tools_list:
-            toolkit_name = selected_toolkit['type']
-            toolkit_conf = toolkit_lookup.get(toolkit_name)
+            server_toolkit_name = selected_toolkit['type']
+            toolkit_conf = toolkit_lookup.get(server_toolkit_name)
             #
             if not toolkit_conf:
-                logger.debug(f"Toolkit '{toolkit_name}' not found in available MCP toolkits. Skipping...")
+                logger.debug(f"Toolkit '{server_toolkit_name}' not found in available MCP toolkits. Skipping...")
                 continue
             #
             available_tools = toolkit_conf.get("tools", [])
@@ -162,7 +163,7 @@ def _mcp_tools(tools_list, alita):
             for available_tool in available_tools:
                 tool_name = available_tool.get("name", "").lower()
                 if not selected_tools or tool_name in selected_tools:
-                    if server_tool := _init_single_mcp_tool(toolkit_name, available_tool, alita, selected_toolkit['settings']):
+                    if server_tool := _init_single_mcp_tool(server_toolkit_name, selected_toolkit["name"], available_tool, alita, selected_toolkit['settings']):
                         tools.append(server_tool)
         return tools
     except Exception:
@@ -170,9 +171,10 @@ def _mcp_tools(tools_list, alita):
         return []
 
 
-def _init_single_mcp_tool(toolkit_name, available_tool, alita, toolkit_settings):
+def _init_single_mcp_tool(server_toolkit_name, toolkit_name, available_tool, alita, toolkit_settings):
     try:
-        tool_name = available_tool["name"]
+
+        tool_name = f'{toolkit_name}{TOOLKIT_SPLITTER}{available_tool["name"]}'
         return McpServerTool(
             name=tool_name,
             description=f"MCP for a tool '{tool_name}': {available_tool.get("description", "")}",
@@ -180,9 +182,9 @@ def _init_single_mcp_tool(toolkit_name, available_tool, alita, toolkit_settings)
                 available_tool.get("inputSchema", {})
             ),
             client=alita,
-            server=toolkit_name,
+            server=server_toolkit_name,
             tool_timeout_sec=toolkit_settings.get("timeout", 90)
         )
     except Exception as e:
-        logger.error(f"Failed to create McpServerTool for '{toolkit_name}.{tool_name}': {e}")
+        logger.error(f"Failed to create McpServerTool ('{server_toolkit_name}') for '{toolkit_name}.{tool_name}': {e}")
         return None
