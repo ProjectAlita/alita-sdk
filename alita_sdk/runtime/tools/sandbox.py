@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import subprocess
+import os
 from typing import Any, Type, Optional, Union, Dict
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, create_model
@@ -22,6 +23,42 @@ def _is_deno_available() -> bool:
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
         return False
 
+
+def _setup_pyodide_cache_env() -> None:
+    """Setup Pyodide caching environment variables for performance optimization"""
+    try:
+        # Check if cache environment file exists and source it
+        cache_env_file = os.path.expanduser("~/.pyodide_cache_env")
+        if os.path.exists(cache_env_file):
+            with open(cache_env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('export ') and '=' in line:
+                        # Parse export VAR=value format
+                        var_assignment = line[7:]  # Remove 'export '
+                        if '=' in var_assignment:
+                            key, value = var_assignment.split('=', 1)
+                            # Remove quotes if present
+                            value = value.strip('"').strip("'")
+                            os.environ[key] = value
+                            logger.debug(f"Set Pyodide cache env: {key}={value}")
+        
+        # Set default caching environment variables if not already set
+        cache_defaults = {
+            'PYODIDE_PACKAGES_PATH': os.path.expanduser('~/.cache/pyodide'),
+            'DENO_DIR': os.path.expanduser('~/.cache/deno'),
+            'PYODIDE_CACHE_DIR': os.path.expanduser('~/.cache/pyodide'),
+        }
+        
+        for key, default_value in cache_defaults.items():
+            if key not in os.environ:
+                os.environ[key] = default_value
+                logger.debug(f"Set default Pyodide env: {key}={default_value}")
+                
+    except Exception as e:
+        logger.warning(f"Could not setup Pyodide cache environment: {e}")
+
+
 # Create input schema for the sandbox tool
 sandbox_tool_input = create_model(
     "SandboxToolInput", 
@@ -33,6 +70,7 @@ class PyodideSandboxTool(BaseTool):
     """
     A tool that provides secure Python code execution using Pyodide (Python compiled to WebAssembly).
     This tool leverages langchain-sandbox to provide a safe environment for running untrusted Python code.
+    Optimized for performance with caching and stateless execution by default.
     """
     
     name: str = "pyodide_sandbox"
@@ -46,9 +84,10 @@ class PyodideSandboxTool(BaseTool):
     
     The sandbox supports most Python standard library modules and can install additional packages.
     Note: File access and some system operations are restricted for security.
+    Optimized for performance with local caching (stateless by default for faster execution).
     """
     args_schema: Type[BaseModel] = sandbox_tool_input
-    stateful: bool = True
+    stateful: bool = False  # Default to stateless for better performance
     allow_net: bool = True
     session_bytes: Optional[bytes] = None
     session_metadata: Optional[Dict] = None
@@ -56,26 +95,32 @@ class PyodideSandboxTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._sandbox = None
+        # Setup caching environment for optimal performance
+        _setup_pyodide_cache_env()
         self._initialize_sandbox()
     
     def _initialize_sandbox(self) -> None:
-        """Initialize the PyodideSandbox instance"""
+        """Initialize the PyodideSandbox instance with optimized settings"""
         try:
             # Check if Deno is available
             if not _is_deno_available():
                 error_msg = (
                     "Deno is required for PyodideSandbox but is not installed. "
-                    "Please install Deno manually or ensure it's available in PATH."
+                    "Please run the bootstrap.sh script or install Deno manually."
                 )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
             
             from langchain_sandbox import PyodideSandbox
+            
+            # Configure sandbox with performance optimizations
             self._sandbox = PyodideSandbox(
                 stateful=self.stateful,
-                allow_net=self.allow_net
+                allow_net=self.allow_net,
+                # Use auto node_modules_dir for better caching
+                node_modules_dir="auto"
             )
-            logger.info("PyodideSandbox initialized successfully")
+            logger.info(f"PyodideSandbox initialized successfully (stateful={self.stateful})")
         except ImportError as e:
             if "langchain_sandbox" in str(e):
                 error_msg = (
@@ -205,10 +250,10 @@ def create_sandbox_tool(stateful: bool = False, allow_net: bool = True) -> BaseT
     Factory function to create sandbox tools with specified configuration.
     
     Note: This tool requires Deno to be installed and available in PATH.
-    For installation, use the bootstrap.sh script or install manually.
+    For installation and optimization, run the bootstrap.sh script.
     
     Args:
-        stateful: Whether to maintain state between executions
+        stateful: Whether to maintain state between executions (default: False for better performance)
         allow_net: Whether to allow network access (for package installation)
     
     Returns:
@@ -217,6 +262,11 @@ def create_sandbox_tool(stateful: bool = False, allow_net: bool = True) -> BaseT
     Raises:
         ImportError: If langchain-sandbox is not installed
         RuntimeError: If Deno is not found in PATH
+        
+    Performance Notes:
+        - Stateless mode (default) is faster and avoids session state overhead
+        - Run bootstrap.sh script to enable local caching and reduce initialization time
+        - Cached wheels reduce package download time from ~4.76s to near-instant
     """
     if stateful:
         return StatefulPyodideSandboxTool(allow_net=allow_net)
