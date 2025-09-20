@@ -1,0 +1,92 @@
+# GitHub Actions workflow for dependency conflict checking
+name: Dependency Conflict Check
+
+on:
+  push:
+    paths:
+      - 'alita-sdk/pyproject.toml'
+      - '.github/workflows/dependency-check.yml'
+  pull_request:
+    paths:
+      - 'alita-sdk/pyproject.toml'
+  workflow_dispatch:
+
+jobs:
+  dependency-check:
+    name: Check Dependencies for Conflicts
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+        extras-group: ['runtime', 'tools', 'community', 'dev', 'all']
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('alita-sdk/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          ${{ runner.os }}-pip-
+    
+    - name: Install pip-tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-tools pipdeptree
+    
+    - name: Check dependencies with pip-compile
+      working-directory: alita-sdk
+      run: |
+        echo "Checking dependencies for extras: ${{ matrix.extras-group }}"
+        echo "-e .[${{ matrix.extras-group }}]" > temp_requirements.in
+        pip-compile temp_requirements.in --dry-run --verbose
+        rm temp_requirements.in
+    
+    - name: Simulate installation
+      working-directory: alita-sdk
+      run: |
+        echo "Simulating installation for extras: ${{ matrix.extras-group }}"
+        pip install -e ".[${{ matrix.extras-group }}]" --dry-run
+    
+    - name: Install and check with pipdeptree
+      working-directory: alita-sdk
+      run: |
+        echo "Installing and analyzing with pipdeptree"
+        pip install -e ".[${{ matrix.extras-group }}]"
+        pipdeptree --warn fail
+        pipdeptree -p alita-sdk
+    
+    - name: Upload dependency tree as artifact
+      if: matrix.extras-group == 'all' && matrix.python-version == '3.12'
+      uses: actions/upload-artifact@v3
+      with:
+        name: dependency-tree
+        path: |
+          dependency_tree.txt
+      continue-on-error: true
+    
+  dependency-summary:
+    name: Dependency Check Summary
+    runs-on: ubuntu-latest
+    needs: dependency-check
+    if: always()
+    
+    steps:
+    - name: Check results
+      run: |
+        if [ "${{ needs.dependency-check.result }}" = "failure" ]; then
+          echo "❌ Dependency conflicts detected!"
+          echo "Please check the logs and update pyproject.toml accordingly."
+          exit 1
+        else
+          echo "✅ All dependency checks passed!"
+        fi
