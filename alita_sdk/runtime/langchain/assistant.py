@@ -179,7 +179,7 @@ class Assistant:
         # Add sandbox tool by default for react agents
         try:
             from ..tools.sandbox import create_sandbox_tool
-            sandbox_tool = create_sandbox_tool(stateful=True, allow_net=True)
+            sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
             simple_tools.append(sandbox_tool)
             logger.info("Added PyodideSandboxTool to react agent")
         except ImportError as e:
