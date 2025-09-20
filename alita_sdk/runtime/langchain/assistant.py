@@ -176,6 +176,22 @@ class Assistant:
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
         
+        # Add sandbox tool by default for react agents
+        try:
+            from ..tools.sandbox import create_sandbox_tool
+            sandbox_tool = create_sandbox_tool(stateful=True, allow_net=True)
+            simple_tools.append(sandbox_tool)
+            logger.info("Added PyodideSandboxTool to react agent")
+        except ImportError as e:
+            logger.warning(f"Failed to add PyodideSandboxTool: {e}. Install langchain-sandbox to enable this feature.")
+        except RuntimeError as e:
+            if "Deno" in str(e):
+                logger.warning("Failed to add PyodideSandboxTool: Deno is required. Install from https://docs.deno.com/runtime/getting_started/installation/")
+            else:
+                logger.warning(f"Failed to add PyodideSandboxTool: {e}")
+        except Exception as e:
+            logger.error(f"Error adding PyodideSandboxTool: {e}")
+        
         # Set up memory/checkpointer if available
         checkpointer = None
         if self.memory is not None:
