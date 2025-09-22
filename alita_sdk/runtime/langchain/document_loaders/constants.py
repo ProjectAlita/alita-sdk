@@ -14,7 +14,7 @@
 
 from langchain_community.document_loaders import (
     AirbyteJSONLoader, UnstructuredHTMLLoader,
-    PythonLoader)
+    PythonLoader, UnstructuredXMLLoader)
 
 from .AlitaCSVLoader import AlitaCSVLoader
 from .AlitaDocxMammothLoader import AlitaDocxMammothLoader
@@ -172,6 +172,12 @@ loaders_map = {
     },
     '.html': {
         'class': UnstructuredHTMLLoader,
+        'is_multimodal_processing': False,
+        'kwargs': {},
+        'allowed_to_override': ['max_tokens', LoaderProperties.LLM.value, LoaderProperties.PROMPT.value, LoaderProperties.PROMPT_DEFAULT.value]
+    },
+    '.xml': {
+        'class': UnstructuredXMLLoader,
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': ['max_tokens', LoaderProperties.LLM.value, LoaderProperties.PROMPT.value, LoaderProperties.PROMPT_DEFAULT.value]
