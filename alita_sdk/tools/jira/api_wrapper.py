@@ -1047,6 +1047,22 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         """
         if isinstance(field_data, dict) and 'filename' in field_data and 'content' in field_data:
             return f"!{field_data['filename']}|alt={field_data['filename']}!"
+        if 'content' in field_data and isinstance(field_data['content'], list):
+            result = []
+            for content_item in field_data['content']:
+                if 'content' in content_item and isinstance(content_item['content'], list) and len(content_item['content']) > 0:
+                    if content_item.get('type') == 'mediaSingle':
+                        media = content_item['content'][0]
+                        attrs = media.get('attrs', {})
+                        if attrs.get('type') == 'file':
+                            alt = attrs.get('alt', '')
+                            image_str = f'!{alt}|alt="{alt}"!'
+                            result.append(image_str)
+                    elif content_item.get('type') == 'paragraph':
+                        result.append(content_item['content'][0].get('text', ''))
+                    else:
+                        result.append(self._extract_image_data(content_item))
+            return '\n'.join(result)
         return str(field_data)
 
     def get_field_with_image_descriptions(self, jira_issue_key: str, field_name: str, prompt: Optional[str] = None,
@@ -1223,18 +1239,22 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             comment_created = comment.get('created', 'Unknown date')
 
             # Process the comment body by replacing image references with descriptions
-            processed_body = re.sub(image_pattern,
-                                    lambda match: self.process_image_match(match, comment_body, attachment_resolver, context_radius, prompt),
-                                    comment_body)
+            try:
+                processed_body = re.sub(image_pattern,
+                                        lambda match: self.process_image_match(match, comment_body, attachment_resolver, context_radius, prompt),
+                                        comment_body)
 
-            # Add the processed comment to our results
-            processed_comments.append({
-                "author": comment_author,
-                "created": comment_created,
-                "id": comment.get('id'),
-                "original_content": comment_body,
-                "processed_content": processed_body
-            })
+                # Add the processed comment to our results
+                processed_comments.append({
+                    "author": comment_author,
+                    "created": comment_created,
+                    "id": comment.get('id'),
+                    "original_content": comment_body,
+                    "processed_content": processed_body
+                })
+            except Exception as e:
+                logger.error(f"Error processing image references in comment: {str(e)}")
+                # TODO process comment in api 3 format
         return processed_comments
 
     def get_comments_with_image_descriptions(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500):
@@ -1419,7 +1439,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         if validate_query is not None:
             params["validateQuery"] = validate_query
 
-        url = self._client.resource_url("search")
+        url = self._client.resource_url("search/jql" if self.api_version == '3' else "search")
 
         while True:
             params["startAt"] = int(start)
@@ -1436,6 +1456,8 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             if limit is not None and len(response["issues"]) + start >= limit:
                 break
             if not response["issues"]:
+                break
+            if len(issues) < limit:
                 break
             start += len(issues)
 
