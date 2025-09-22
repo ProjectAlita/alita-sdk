@@ -67,8 +67,7 @@ class ConfluenceToolkit(BaseToolkit):
 
         model = create_model(
             name,
-            space=(str, Field(description="Space", json_schema_extra={'toolkit_name': True,
-                                                                                    'max_toolkit_length': ConfluenceToolkit.toolkit_max_length})),
+            space=(str, Field(description="Space")),
             cloud=(bool, Field(description="Hosting Option", json_schema_extra={'configuration': True})),
             limit=(int, Field(description="Pages limit per request", default=5)),
             labels=(Optional[str], Field(

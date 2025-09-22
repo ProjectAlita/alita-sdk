@@ -39,9 +39,6 @@ class TestrailToolkit(BaseToolkit):
         TestrailToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            name=(str, Field(description="Toolkit name", json_schema_extra={
-                'toolkit_name': True,
-                "max_length": TestrailToolkit.toolkit_max_length})),
             testrail_configuration=(Optional[TestRailConfiguration], Field(description="TestRail Configuration", json_schema_extra={'configuration_types': ['testrail']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,
                                                                            description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
