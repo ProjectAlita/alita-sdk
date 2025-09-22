@@ -21,6 +21,34 @@ GLOBAL_RETAIN = ['id', 'name', 'type', 'document', 'children']
 GLOBAL_REMOVE = []
 GLOBAL_DEPTH_START = 4
 GLOBAL_DEPTH_END = 6
+EXTRA_PARAMS = (
+    Optional[Dict[str, Union[str, int, None]]],
+    Field(
+        description=(
+            "Additional parameters for customizing response processing:\n"
+            "- `limit`: Maximum size of the output in characters.\n"
+            "- `regexp`: Regex pattern to filter or clean the output.\n"
+            "- `fields_retain`: List of field names to always keep in the output, on levels starting from `depth_start`.\n"
+            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
+            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
+            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
+            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects."
+        ),
+        default={
+            "limit": GLOBAL_LIMIT, "regexp": None,
+            "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
+            "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
+        },
+        examples=[
+            {
+                "limit": "1000",
+                "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
+                "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
+                "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
+            }
+        ],
+    ),
+)
 
 
 class ArgsSchema(Enum):
@@ -40,32 +68,7 @@ class ArgsSchema(Enum):
                 examples=["8:6,1:7"],
             ),
         ),
-        extra_params=(
-            Optional[Dict[str, Union[str, int, None]]],
-            Field(
-                description="Additional parameters for customizing response processing:\n"
-                            "- `limit`: Maximum size of the output in characters.\n"
-                            "- `regexp`: Regex pattern to filter or clean the output.\n"
-                            "- `fields_retain`: List of field names to always keep in the output, on levevels starting from `depth_start`.\n"
-                            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-                            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-                            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-                            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects.",
-                default={
-                    "limit": GLOBAL_LIMIT, "regexp": None,
-                    "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                    "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                },
-                examples=[
-                    {
-                        "limit": "1000",
-                        "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
-                        "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                        "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                    }
-                ],
-            ),
-        ),
+        extra_params=EXTRA_PARAMS,
     )
     File = create_model(
         "FileNodes",
@@ -84,32 +87,7 @@ class ArgsSchema(Enum):
             Optional[str],
             Field(description="Sets version of file", default=None),
         ),
-        extra_params=(
-            Optional[Dict[str, Union[str, int, None]]],
-            Field(
-                description="Additional parameters for customizing response processing:\n"
-                            "- `limit`: Maximum size of the output in characters.\n"
-                            "- `regexp`: Regex pattern to filter or clean the output.\n"
-                            "- `fields_retain`: List of field names to always keep in the output, on levevels starting from `depth_start`.\n"
-                            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-                            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-                            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-                            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects.",
-                default={
-                    "limit": GLOBAL_LIMIT, "regexp": None,
-                    "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                    "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                },
-                examples=[
-                    {
-                        "limit": "1000",
-                        "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
-                        "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                        "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                    }
-                ],
-            ),
-        ),
+        extra_params=EXTRA_PARAMS,
     )
     FileKey = create_model(
         "FileKey",
@@ -120,32 +98,7 @@ class ArgsSchema(Enum):
                 examples=["Fp24FuzPwH0L74ODSrCnQo"],
             ),
         ),
-        extra_params=(
-            Optional[Dict[str, Union[str, int, None]]],
-            Field(
-                description="Additional parameters for customizing response processing:\n"
-                            "- `limit`: Maximum size of the output in characters.\n"
-                            "- `regexp`: Regex pattern to filter or clean the output.\n"
-                            "- `fields_retain`: List of field names to always keep in the output, on levevels starting from `depth_start`.\n"
-                            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-                            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-                            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-                            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects.",
-                default={
-                    "limit": GLOBAL_LIMIT, "regexp": None,
-                    "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                    "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                },
-                examples=[
-                    {
-                        "limit": "1000",
-                        "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
-                        "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                        "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                    }
-                ],
-            ),
-        ),
+        extra_params=EXTRA_PARAMS,
     )
     FileComment = create_model(
         "FileComment",
@@ -167,32 +120,7 @@ class ArgsSchema(Enum):
                 default=None,
             ),
         ),
-        extra_params=(
-            Optional[Dict[str, Union[str, int, None]]],
-            Field(
-                description="Additional parameters for customizing response processing:\n"
-                            "- `limit`: Maximum size of the output in characters.\n"
-                            "- `regexp`: Regex pattern to filter or clean the output.\n"
-                            "- `fields_retain`: List of field names to always keep in the output, on levevels starting from `depth_start`.\n"
-                            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-                            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-                            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-                            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects.",
-                default={
-                    "limit": GLOBAL_LIMIT, "regexp": None,
-                    "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                    "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                },
-                examples=[
-                    {
-                        "limit": "1000",
-                        "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
-                        "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                        "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                    }
-                ],
-            ),
-        ),
+        extra_params=EXTRA_PARAMS,
     )
     FileImages = create_model(
         "FileImages",
@@ -227,32 +155,7 @@ class ArgsSchema(Enum):
             Optional[str],
             Field(description="A specific version ID to use", default=None),
         ),
-        extra_params=(
-            Optional[Dict[str, Union[str, int, None]]],
-            Field(
-                description="Additional parameters for customizing response processing:\n"
-                            "- `limit`: Maximum size of the output in characters.\n"
-                            "- `regexp`: Regex pattern to filter or clean the output.\n"
-                            "- `fields_retain`: List of field names to always keep in the output, on levevels starting from `depth_start`.\n"
-                            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-                            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-                            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-                            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects.",
-                default={
-                    "limit": GLOBAL_LIMIT, "regexp": None,
-                    "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                    "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                },
-                examples=[
-                    {
-                        "limit": "1000",
-                        "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
-                        "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                        "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                    }
-                ],
-            ),
-        ),
+        extra_params=EXTRA_PARAMS,
     )
     TeamProjects = create_model(
         "TeamProjects",
@@ -263,32 +166,7 @@ class ArgsSchema(Enum):
                 examples=["1101853299713989222"],
             ),
         ),
-        extra_params=(
-            Optional[Dict[str, Union[str, int, None]]],
-            Field(
-                description="Additional parameters for customizing response processing:\n"
-                            "- `limit`: Maximum size of the output in characters.\n"
-                            "- `regexp`: Regex pattern to filter or clean the output.\n"
-                            "- `fields_retain`: List of field names to always keep in the output, on levevels starting from `depth_start`.\n"
-                            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-                            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-                            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-                            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects.",
-                default={
-                    "limit": GLOBAL_LIMIT, "regexp": None,
-                    "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                    "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                },
-                examples=[
-                    {
-                        "limit": "1000",
-                        "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
-                        "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                        "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                    }
-                ],
-            ),
-        ),
+        extra_params=EXTRA_PARAMS,
     )
     ProjectFiles = create_model(
         "ProjectFiles",
@@ -299,32 +177,7 @@ class ArgsSchema(Enum):
                 examples=["55391681"],
             ),
         ),
-        extra_params=(
-            Optional[Dict[str, Union[str, int, None]]],
-            Field(
-                description="Additional parameters for customizing response processing:\n"
-                            "- `limit`: Maximum size of the output in characters.\n"
-                            "- `regexp`: Regex pattern to filter or clean the output.\n"
-                            "- `fields_retain`: List of field names to always keep in the output, on levevels starting from `depth_start`.\n"
-                            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-                            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-                            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-                            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects.",
-                default={
-                    "limit": GLOBAL_LIMIT, "regexp": None,
-                    "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                    "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                },
-                examples=[
-                    {
-                        "limit": "1000",
-                        "regexp": r'("strokes"|"fills")\s*:\s*("[^"]*"|[^\s,}\[]+)\s*(?=,|\}|\n)',
-                        "fields_retain": GLOBAL_RETAIN, "fields_remove": GLOBAL_REMOVE,
-                        "depth_start": GLOBAL_DEPTH_START, "depth_end": GLOBAL_DEPTH_END,
-                    }
-                ],
-            ),
-        ),
+        extra_params=EXTRA_PARAMS,
     )
 
 
@@ -656,10 +509,10 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             """
             fields_retain = set(fields_retain or [])
             fields_remove = set(fields_remove or []) - fields_retain # fields in remove have lower priority than in retain
-    
+
             retained = set()
             removed = set()
-    
+
             def _process(o, d):
                 if depth_end is not None and d >= depth_end:
                     return None  # Ignore keys at or beyond cut_depth
@@ -684,7 +537,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     return [_process(item, d + 1) for item in o]
                 else:
                     return o
-    
+
             new_obj = _process(obj, depth)
             return {
                 "result": json.dumps(new_obj),
@@ -701,14 +554,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             extra_params = kwargs.pop("extra_params", {})
-
             limit = extra_params.get("limit", self.global_limit)
             regexp = extra_params.get("regexp", self.global_regexp)
             fields_retain = extra_params.get("fields_retain", self.global_fields_retain)
             fields_remove = extra_params.get("fields_remove", self.global_fields_remove)
             depth_start = extra_params.get("depth_start", self.global_depth_start)
             depth_end = extra_params.get("depth_end", self.global_depth_end)
-
             try:
                 limit = int(limit)
                 result = func(self, *args, **kwargs)
@@ -718,7 +569,6 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     return ToolException(
                         "Response result is empty. Check your input parameters or credentials"
                     )
-
                 if isinstance(result, (dict, list)):
                     raw_result = result
                     processed_result = simplified_dict(raw_result)
@@ -735,11 +585,10 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                                 f"The following fields were retained: {reduced['retained_fields']}. "
                                 f"Starting from depth_end = {depth_end} all fields were ignored. "
                                 f"You can adjust fields_retain, fields_remove, depth_start, depth_end, limit and regexp parameters to get more precise output")
-                        return f"## NOTE:\n{note}.\n## Result: {reduced["result"]}"[:limit]
+                        return f"## NOTE:\n{note}.\n## Result: {reduced['result']}"[:limit]
                     return str_result
                 else:
                     result = json.dumps(result)
-
                 if regexp:
                     regexp = re.compile(regexp)
                     result = re.sub(regexp, "", result)
