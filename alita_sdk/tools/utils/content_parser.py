@@ -306,6 +306,8 @@ def file_extension_by_chunker(chunker_name: str) -> str:
         return ".txt"
     if name == "html":
         return ".html"
+    if name == "xml":
+        return ".xml"
     if name == "csv":
         return ".csv"
     return None
