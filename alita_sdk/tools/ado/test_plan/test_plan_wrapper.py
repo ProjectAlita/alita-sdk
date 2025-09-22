@@ -277,7 +277,7 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
                          test_steps_format: str = 'json'):
         """Creates a new test case in specified suite in Azure DevOps."""
         work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url,
-                                                  token=self.token.get_secret_value(), project=self.project)
+                                                  token=self.token.get_secret_value(), project=self.project, llm=self.llm)
         if test_steps_format == 'json':
             steps_xml = self.get_test_steps_xml(json.loads(test_steps))
         elif test_steps_format == 'xml':

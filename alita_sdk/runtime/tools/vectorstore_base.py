@@ -136,7 +136,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
     vectorstore_type: Optional[str]  = None
     vectorstore_params: Optional[dict]  = None
     max_docs_per_add: int = 100
-    dataset: str = None
+    dataset: Optional[str] = None
     vectorstore: Any = None
     pg_helper: Any = None
     embeddings: Any = None
