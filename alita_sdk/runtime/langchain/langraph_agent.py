@@ -455,14 +455,11 @@ def create_graph(
                                 input_variables=node.get('input', ['messages'])))
                         elif node_type == 'agent':
                             input_params = node.get('input', ['messages'])
-                            input_mapping = {'task': {'type': 'fstring', 'value': f"{node.get('task', '')}"},
-                                                      'chat_history': {'type': 'fixed', 'value': []}}
-                            # Add 'chat_history' to input_mapping only if 'messages' is in input_params
-                            if 'messages' in input_params:
-                                input_mapping['chat_history'] = {'type': 'variable', 'value': 'messages'}
+                            input_mapping = node.get('input_mapping',
+                                                       {'messages': {'type': 'variable', 'value': 'messages'}})
                             lg_builder.add_node(node_id, FunctionTool(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='dict',
+                                name=node['id'], return_type='str',
                                 output_variables=node.get('output', []),
                                 input_variables=input_params,
                                 input_mapping= input_mapping
@@ -638,19 +635,11 @@ def create_graph(
             entry_point = clean_string(schema['entry_point'])
         except KeyError:
             raise ToolException("Entry point is not defined in the schema. Please define 'entry_point' in the schema.")
-        # if state.items():
-        #     state_default_node = StateDefaultNode(default_vars=set_defaults(state))
-        #     lg_builder.add_node(state_default_node.name, state_default_node)
-        #     lg_builder.set_entry_point(state_default_node.name)
-        #     lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
-        for key, value in state.items():
-            if 'type' in value and 'value' in value:
-                # set default value for state variable if it is defined in the schema
-                state_default_node = StateDefaultNode(default_vars=state)
-                lg_builder.add_node(state_default_node.name, state_default_node)
-                lg_builder.set_entry_point(state_default_node.name)
-                lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
-                break
+        if state.items():
+            state_default_node = StateDefaultNode(default_vars=set_defaults(state))
+            lg_builder.add_node(state_default_node.name, state_default_node)
+            lg_builder.set_entry_point(state_default_node.name)
+            lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
         else:
             # if no state variables are defined, set the entry point directly
             lg_builder.set_entry_point(entry_point)
@@ -757,6 +746,8 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         # Append current input to existing messages instead of overwriting
         if input.get('input'):
             current_message = input.get('input')[-1]
+            # TODO: add handler after we add 2+ inputs (filterByType, etc.)
+            input['input'] = current_message  # Clear input after extracting current message
             if input.get('messages'):
                 # Ensure existing messages are LangChain objects
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]

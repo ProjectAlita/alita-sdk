@@ -2,8 +2,8 @@ import json
 
 from ..utils.utils import clean_string
 from langchain_core.tools import BaseTool
-from langchain_core.messages import BaseMessage, AIMessage, ToolCall
-from typing import Any, Type, Optional, Union
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
+from typing import Any, Type, Optional
 from pydantic import create_model, field_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
@@ -31,7 +31,7 @@ def formulate_query(kwargs):
             chat_history = []
             for each in kwargs.get('chat_history')[:]:
                 chat_history.append(AIMessage(each))
-    input_message = AIMessage(content=kwargs.get('task'))
+    input_message = HumanMessage(content=kwargs.get('task'))
     result = {"input": [input_message], "chat_history": chat_history}
     for key, value in kwargs.items():
         if key not in ("task", "chat_history"):
