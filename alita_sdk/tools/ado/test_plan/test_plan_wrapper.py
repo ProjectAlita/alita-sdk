@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import xml.etree.ElementTree as ET
 from typing import Generator, Literal, Optional, List
 
@@ -384,6 +385,10 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             field_dicts = case.get('work_item', {}).get('work_item_fields', [])
             data = {k: v for d in field_dicts for k, v in d.items()}
             if chunking_tool:
+                steps = data.get('Microsoft.VSTS.TCM.Steps', '')
+                # Remove XML declaration if present (like <?xml version="1.0" encoding="utf-16"?>) to avoid encoding issues
+                steps_no_decl = re.sub(r'<\?xml[^>]*\?>', '', steps, count=1).lstrip()
+
                 yield Document(
                     page_content='',
                     metadata={
@@ -394,7 +399,7 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
                         'description': data.get('System.Description', ''),
                         'updated_on': data.get('System.Rev', ''),
                         # content is in metadata for chunking tool post-processing
-                        IndexerKeywords.CONTENT_IN_BYTES.value: data.get('Microsoft.VSTS.TCM.Steps', '').encode("utf-8")
+                        IndexerKeywords.CONTENT_IN_BYTES.value: steps_no_decl.encode("utf-8")
                     })
             else:
                 yield Document(
@@ -411,7 +416,7 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
-            'chunking_tool': (Literal['html', ''], Field(description="Name of chunking tool", default='html')),
+            'chunking_tool': (Literal['xml', ''], Field(description="Name of chunking tool", default='xml')),
             "plan_id": (int, Field(description="ID of the test plan for which test cases are requested")),
             "suite_ids": (Optional[List[int]], Field(description='List of test suite IDs for which test cases are requested '
                                                                  '(can be empty for all suites indexing from the plan). '
