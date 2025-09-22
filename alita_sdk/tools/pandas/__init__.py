@@ -29,7 +29,7 @@ class PandasToolkit(BaseToolkit):
         PandasToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            bucket_name=(str, Field(default=None, title="Bucket name", description="Bucket where the content file is stored", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': PandasToolkit.toolkit_max_length})),
+            bucket_name=(str, Field(default=None, title="Bucket name", description="Bucket where the content file is stored")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Pandas", "icon_url": "pandas-icon.svg",
                                                                   "categories": ["analysis"],

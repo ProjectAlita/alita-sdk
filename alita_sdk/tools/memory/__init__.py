@@ -61,7 +61,7 @@ class MemoryToolkit(BaseToolkit):
 
         return create_model(
             'memory',
-            namespace=(str, Field(description="Memory namespace", json_schema_extra={'toolkit_name': True})),
+            namespace=(str, Field(description="Memory namespace")),
             pgvector_configuration=(PgVectorConfiguration, Field(description="PgVector Configuration",
                                                                            json_schema_extra={
                                                                                'configuration_types': ['pgvector']})),
