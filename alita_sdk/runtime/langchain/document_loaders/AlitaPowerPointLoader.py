@@ -36,15 +36,23 @@ class AlitaPowerPointLoader:
     def read_pptx_slide(self, slide, index):
         text_content = f'Slide: {index}\n'
         for shape in slide.shapes:
-            if hasattr(shape, "text"):
-                text_content += shape.text + "\n"
+            if hasattr(shape, "text_frame") and shape.text_frame is not None:
+                for paragraph in shape.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        if run.hyperlink and run.hyperlink.address:
+                            link_text = run.text.strip() or "Link"
+                            link_url = run.hyperlink.address
+                            text_content += f" [{link_text}]({link_url}) "
+                        else:
+                            text_content += run.text
+                text_content += "\n"
             elif self.extract_images and shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 try:
                     caption = perform_llm_prediction_for_image_bytes(shape.image.blob, self.llm)
                 except:
                     caption = "unknown"
                 text_content += "\n**Image Transcript:**\n" + caption + "\n--------------------\n"
-        return text_content
+        return text_content + "\n"
 
     def load(self):
         if not self.file_path:
