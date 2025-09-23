@@ -747,7 +747,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if input.get('input'):
             current_message = input.get('input')[-1]
             # TODO: add handler after we add 2+ inputs (filterByType, etc.)
-            input['input'] = current_message  # Clear input after extracting current message
+            input['input'] = current_message if isinstance(current_message, str) else str(current_message)
             if input.get('messages'):
                 # Ensure existing messages are LangChain objects
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]

@@ -349,7 +349,8 @@ class AlitaClient:
         return self._process_requst(resp)
 
     def list_artifacts(self, bucket_name: str):
-        url = f'{self.artifacts_url}/{bucket_name}'
+        # Ensure bucket name is lowercase as required by the API
+        url = f'{self.artifacts_url}/{bucket_name.lower()}'
         data = requests.get(url, headers=self.headers, verify=False)
         return self._process_requst(data)
 

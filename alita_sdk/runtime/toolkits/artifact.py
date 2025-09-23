@@ -6,7 +6,7 @@ from langchain_core.tools import BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 from ..tools.artifact import ArtifactWrapper
-from alita_sdk.tools.base.tool import BaseAction
+from ...tools.base.tool import BaseAction
 from ...configurations.pgvector import PgVectorConfiguration
 
 

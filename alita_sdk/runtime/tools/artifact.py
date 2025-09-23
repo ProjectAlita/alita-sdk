@@ -7,8 +7,8 @@ from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import create_model, Field, model_validator
 
-from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
-from alita_sdk.tools.utils.available_tools_decorator import extend_with_parent_available_tools
+from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ...tools.utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
 
 

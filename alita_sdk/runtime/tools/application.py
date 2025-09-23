@@ -1,7 +1,7 @@
 import json
 
 from ..utils.utils import clean_string
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from typing import Any, Type, Optional
 from pydantic import create_model, field_validator, BaseModel
@@ -31,7 +31,11 @@ def formulate_query(kwargs):
             chat_history = []
             for each in kwargs.get('chat_history')[:]:
                 chat_history.append(AIMessage(each))
-    input_message = HumanMessage(content=kwargs.get('task'))
+    user_task = kwargs.get('task')
+    if not user_task:
+        raise ToolException("Task is required to invoke the application. "
+                            "Check the provided input (some errors may happen on previous steps).")
+    input_message = HumanMessage(content=user_task)
     result = {"input": [input_message], "chat_history": chat_history}
     for key, value in kwargs.items():
         if key not in ("task", "chat_history"):
