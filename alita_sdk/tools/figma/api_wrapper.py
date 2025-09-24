@@ -227,9 +227,9 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             self._log_tool_event(f"Loading files: {file_keys_include}")
             for file_key in file_keys_include:
                 self._log_tool_event(f"Loading file `{file_key}`")
-                file = self._client.get_file(file_key)
+                file = self._client.get_file(file_key, geometry='depth=1') # fetch only top-level structure (only pages without inner components)
                 if not file:
-                    raise ToolException(f"Unexpected error while retrieving file {file_key}. Probably file is under editing. Try again later.")
+                    raise ToolException(f"Unexpected error while retrieving file {file_key}. Please try specifying the node-id of an inner page.")
                 metadata = {
                     'id': file_key,
                     'file_key': file_key,
@@ -284,20 +284,47 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             for child in node['children']:
                 texts.extend(self.get_texts_recursive(child))
         return texts
+    
+    def _load_pages(self, document: Document):
+        file_key = document.metadata.get('id', '')
+        node_ids_include = document.metadata.pop('figma_pages_include', [])
+        node_ids_exclude = document.metadata.pop('figma_pages_exclude', [])
+        self._log_tool_event(f"Included pages: {node_ids_include}. Excluded pages: {node_ids_exclude}.")
+        if node_ids_include:
+            # try to fetch only specified pages/nodes in one request
+            file = self._get_file_nodes(file_key,','.join(node_ids_include)) # attempt to fetch only specified pages/nodes in one request
+            if file:
+                return [node['document'] for node in file.get('nodes', {}).values() if 'document' in node]
+        else:
+            # 
+            file = self._client.get_file(file_key)
+            if file:
+                figma_pages = file.document.get('children', [])
+                return [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') not in node_ids_exclude)]
+        # fallback to loading all pages and filtering them one by one
+        file = self._client.get_file(file_key, geometry='depth=1')
+        if not file:
+            raise ToolException(
+                f"Unexpected error while retrieving file {file_key}. Please try specifying the node-id of an inner page.")
+        figma_pages_raw = file.document.get('children', [])
+        # extract pages one by one
+        if node_ids_include:
+            return [self._get_file_nodes(file_key, node_id) for node_id in node_ids_include]
+        else:
+            # return [self._get_file_nodes(file_key, page["id"]) for page in figma_pages_raw if ('id' in page and page['id'].replace(':', '-') not in node_ids_exclude)]
+            result = []
+            for page in figma_pages_raw:
+                if 'id' in page and page['id'].replace(':', '-') not in node_ids_exclude:
+                    page_res = self._get_file_nodes(file_key, page["id"]).get('nodes', {}).get(page["id"], {}).get("document", {})
+                    result.append(page_res)
+            return result
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         file_key = document.metadata.get('id', '')
         self._log_tool_event(f"Loading details (images) for `{file_key}`")
-        figma_pages = self._client.get_file(file_key).document.get('children', [])
-        node_ids_include = document.metadata.pop('figma_pages_include', [])
-        node_ids_exclude = document.metadata.pop('figma_pages_exclude', [])
+        figma_pages = self._load_pages(document)
         node_types_include = [t.strip().lower() for t in document.metadata.pop('figma_nodes_include', [])]
         node_types_exclude = [t.strip().lower() for t in document.metadata.pop('figma_nodes_exclude', [])]
-        self._log_tool_event(f"Included pages: {node_ids_include}. Excluded pages: {node_ids_exclude}.")
-        if node_ids_include:
-            figma_pages = [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') in node_ids_include)]
-        elif node_ids_exclude:
-            figma_pages = [node for node in figma_pages if ('id' in node and node['id'].replace(':', '-') not in node_ids_exclude)]
 
         image_nodes = []
         text_nodes = {}
@@ -604,6 +631,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
     @process_output
     def get_file_nodes(self, file_key: str, ids: str, **kwargs):
+        """Reads a specified file nodes by field key from Figma."""
+        return self._client.api_request(
+            f"files/{file_key}/nodes?ids={str(ids)}", method="get"
+        )
+
+    def _get_file_nodes(self, file_key: str, ids: str, **kwargs):
         """Reads a specified file nodes by field key from Figma."""
         return self._client.api_request(
             f"files/{file_key}/nodes?ids={str(ids)}", method="get"
