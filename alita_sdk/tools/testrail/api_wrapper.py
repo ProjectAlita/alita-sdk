@@ -10,7 +10,7 @@ from pydantic import SecretStr, create_model, model_validator
 from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
 
-from ..chunkers.code.constants import get_file_extension
+from ..chunkers.code.constants import get_file_extension, image_extensions
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
@@ -658,13 +658,29 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             case_id = base_data.get("id")
 
             # get a list of attachments for the case
-            attachments = self._client.attachments.get_attachments_for_case_bulk(case_id=case_id)
+            attachments_response = self._client.attachments.get_attachments_for_case(case_id=case_id)
+
+            # Extract attachments from response - handle both old and new API response formats
+            if isinstance(attachments_response, dict) and 'attachments' in attachments_response:
+                attachments = attachments_response['attachments']
+            else:
+                attachments = attachments_response if isinstance(attachments_response, list) else []
 
             # process each attachment to extract its content
             for attachment in attachments:
                 attachment_name = attachment.get('filename') or attachment.get('name')
                 attachment['filename'] = attachment_name
-                attachment['filetype'] = attachment.get('filetype', attachment_name.rsplit(".")[1])
+                
+                # Handle filetype: use existing field if present, otherwise extract from filename
+                if 'filetype' not in attachment or not attachment['filetype']:
+                    file_extension = get_file_extension(attachment_name)
+                    attachment['filetype'] = file_extension.lstrip('.')
+                
+                # Handle is_image: use existing field if present, otherwise check file extension
+                if 'is_image' not in attachment:
+                    file_extension = get_file_extension(attachment_name)
+                    attachment['is_image'] = file_extension in image_extensions
+                
                 if get_file_extension(attachment_name) in self._skip_attachment_extensions:
                     logger.info(f"Skipping attachment {attachment['filename']} with unsupported extension.")
                     continue
