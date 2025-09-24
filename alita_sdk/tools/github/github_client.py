@@ -87,7 +87,6 @@ class GitHubClient(BaseModel):
 
     # Using optional variables with None defaults instead of PrivateAttr
     github_api: Optional[Github] = Field(default=None, exclude=True)
-    github_repo_instance: Optional[Repository.Repository] = Field(default=None, exclude=True)
 
     # Adding auth config and repo config as optional fields for initialization
     auth_config: Optional[GitHubAuthConfig] = Field(default=None, exclude=True)
@@ -95,6 +94,19 @@ class GitHubClient(BaseModel):
     
     # Alita instance
     alita: Optional[Any] = Field(default=None, exclude=True)
+
+    @property
+    def github_repo_instance(self) -> Optional[Repository.Repository]:
+        if not hasattr(self, "_github_repo_instance") or self._github_repo_instance is None:
+            try:
+                if self.github_api and self.github_repository:
+                    self._github_repo_instance = self.github_api.get_repo(self.github_repository)
+                else:
+                    self._github_repo_instance = None
+            except Exception as e:
+                # Only raise when accessed, not during initialization
+                return ToolException(e)
+        return self._github_repo_instance
 
     @model_validator(mode='before')
     def initialize_github_client(cls, values):
@@ -143,15 +155,6 @@ class GitHubClient(BaseModel):
                 values["github_api"] = installation.get_github_for_installation()
             else:
                 values["github_api"] = Github(base_url=values["github_base_url"], auth=auth)
-
-            # Get repository instance
-            if values.get("github_repository"):
-                values["github_repo_instance"] = values["github_api"].get_repo(values["github_repository"])
-        else:
-            # Initialize with default authentication if no auth_config provided
-            values["github_api"] = Github(base_url=values.get("github_base_url", DEFAULT_BASE_URL))
-            if values.get("github_repository"):
-                values["github_repo_instance"] = values["github_api"].get_repo(values["github_repository"])
 
         return values
 
