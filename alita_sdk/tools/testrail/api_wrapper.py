@@ -117,6 +117,13 @@ getCases = create_model(
             description="A list of case field keys to include in the data output. If None, defaults to ['title', 'id'].",
         ),
     ),
+    suite_id=(Optional[str],
+              Field(
+                  default=None,
+                  description="[Optional] Suite id for test cases extraction in case "
+                              "project is in multiple suite mode (setting 3)",
+              ),
+              ),
 )
 
 getCasesByFilter = create_model(
@@ -413,7 +420,8 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         return f"Extracted test case:\n{str(extracted_case)}"
 
     def get_cases(
-        self, project_id: str, output_format: str = "json", keys: Optional[List[str]] = None
+        self, project_id: str, output_format: str = "json", keys: Optional[List[str]] = None,
+            suite_id: Optional[str] = None
     ) -> Union[str, ToolException]:
         """
         Extracts a list of test cases in the specified format: `json`, `csv`, or `markdown`.
@@ -436,10 +444,11 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         try:
             # Check if project requires suite_id for multiple suite mode
             self._validate_suite_mode_requirements(
-                project_id=project_id
+                project_id=project_id,
+                suite_id=suite_id
             )
             
-            extracted_cases = self._client.cases.get_cases(project_id=project_id)
+            extracted_cases = self._client.cases.get_cases(project_id=project_id, suite_id=suite_id)
             # support old versions of testrail_api
             cases = extracted_cases.get("cases") if isinstance(extracted_cases, dict) else extracted_cases
 
@@ -653,7 +662,10 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
 
             # process each attachment to extract its content
             for attachment in attachments:
-                if get_file_extension(attachment['filename']) in self._skip_attachment_extensions:
+                attachment_name = attachment.get('filename') or attachment.get('name')
+                attachment['filename'] = attachment_name
+                attachment['filetype'] = attachment.get('filetype', attachment_name.rsplit(".")[1])
+                if get_file_extension(attachment_name) in self._skip_attachment_extensions:
                     logger.info(f"Skipping attachment {attachment['filename']} with unsupported extension.")
                     continue
 
