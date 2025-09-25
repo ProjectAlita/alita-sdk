@@ -202,7 +202,8 @@ class AlitaClient:
             model=model_name,
             api_key=self.auth_token,
             streaming=model_config.get("streaming", True),
-            stream_usage=model_config.get("stream_usage", True),
+            # Set defaul stream usage to False, enable on indexer_worker level if needed
+            stream_usage=model_config.get("stream_usage", False),
             max_tokens=model_config.get("max_tokens", None),
             top_p=model_config.get("top_p"),
             temperature=model_config.get("temperature"),
@@ -496,6 +497,7 @@ class AlitaClient:
         return AIMessage(content=content, additional_kwargs={"references": references})
 
     def _get_real_user_id(self):
+        return 30
         try:
             import tasknode_task # pylint: disable=E0401
             monitoring_meta = tasknode_task.meta.get("monitoring", {})
