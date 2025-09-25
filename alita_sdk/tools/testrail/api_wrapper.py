@@ -10,7 +10,7 @@ from pydantic import SecretStr, create_model, model_validator
 from pydantic.fields import Field, PrivateAttr
 from testrail_api import StatusCodeError, TestRailAPI
 
-from ..chunkers.code.constants import get_file_extension
+from ..chunkers.code.constants import get_file_extension, image_extensions
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
@@ -117,6 +117,13 @@ getCases = create_model(
             description="A list of case field keys to include in the data output. If None, defaults to ['title', 'id'].",
         ),
     ),
+    suite_id=(Optional[str],
+              Field(
+                  default=None,
+                  description="[Optional] Suite id for test cases extraction in case "
+                              "project is in multiple suite mode (setting 3)",
+              ),
+              ),
 )
 
 getCasesByFilter = create_model(
@@ -323,6 +330,30 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         cls._client = TestRailAPI(url, email, password)
         return super().validate_toolkit(values)
 
+    def _validate_suite_mode_requirements(self, project_id: str, suite_id: Optional[str] = None) -> None:
+        """
+        Validate if project requires suite_id when in multiple suite mode.
+        
+        Args:
+            project_id: The TestRail project ID to check
+            suite_id: The suite ID if provided (optional)
+            custom_error_msg: Custom error message to use (optional)
+        
+        Raises:
+            ToolException: If project is in multiple suite mode and no suite_id is provided
+        """
+        if suite_id:
+            return  # No validation needed if suite_id is already provided
+            
+        try:
+            project = self._client.projects.get_project(project_id=project_id)
+            # 1 for single suite mode, 2 for single suite + baselines, 3 for multiple suites
+            suite_mode = project.get('suite_mode', 1)
+            if suite_mode == 3:
+                raise ToolException("Project is in multiple suite mode, please provide suite_id to extract test cases.")
+        except StatusCodeError as e:
+            logger.warning(f"Unable to check project suite mode: {e}")
+
     def add_cases(self, add_test_cases_data: str):
         """Adds new test cases into Testrail per defined parameters.
                 add_test_cases_data: str - JSON string which includes list of objects with following parameters:
@@ -389,7 +420,8 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         return f"Extracted test case:\n{str(extracted_case)}"
 
     def get_cases(
-        self, project_id: str, output_format: str = "json", keys: Optional[List[str]] = None
+        self, project_id: str, output_format: str = "json", keys: Optional[List[str]] = None,
+            suite_id: Optional[str] = None
     ) -> Union[str, ToolException]:
         """
         Extracts a list of test cases in the specified format: `json`, `csv`, or `markdown`.
@@ -410,8 +442,15 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         invalid_keys = [key for key in keys if key not in SUPPORTED_KEYS]
 
         try:
-            extracted_cases = self._client.cases.get_cases(project_id=project_id)
-            cases = extracted_cases.get("cases")
+            # Check if project requires suite_id for multiple suite mode
+            self._validate_suite_mode_requirements(
+                project_id=project_id,
+                suite_id=suite_id
+            )
+            
+            extracted_cases = self._client.cases.get_cases(project_id=project_id, suite_id=suite_id)
+            # support old versions of testrail_api
+            cases = extracted_cases.get("cases") if isinstance(extracted_cases, dict) else extracted_cases
 
             if cases is None:
                 return ToolException("No test cases found in the extracted data.")
@@ -466,10 +505,18 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                     "json_case_arguments must be a JSON string or dictionary."
                 )
             self._log_tool_event(message=f"Extract test cases per filter {params}", tool_name='get_cases_by_filter')
+            
+            # Check if project requires suite_id when not provided in params
+            suite_id_in_params = params.get('suite_id', None)
+            self._validate_suite_mode_requirements(
+                project_id=project_id,
+                suite_id=str(suite_id_in_params) if suite_id_in_params else None
+            )
+            
             extracted_cases = self._client.cases.get_cases(
                 project_id=project_id, **params
             )
-            self._log_tool_event(message=f"Test cases were extracted", tool_name='get_cases_by_filter')
+            self._log_tool_event(message="Test cases were extracted", tool_name='get_cases_by_filter')
             # support old versions of testrail_api
             cases = extracted_cases.get("cases") if isinstance(extracted_cases, dict) else extracted_cases
 
@@ -542,13 +589,21 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         self._include_attachments = kwargs.get('include_attachments', False)
         self._skip_attachment_extensions = kwargs.get('skip_attachment_extensions', [])
 
+        def _extract_cases_from_response(response):
+            """Extract cases from API response, supporting both old and new testrail_api versions."""
+            return response.get('cases', []) if isinstance(response, dict) else response
+
         try:
+            # Check if project requires suite_id when not provided
+            self._validate_suite_mode_requirements(project_id=project_id, suite_id=suite_id)
+
             if suite_id:
                 resp = self._client.cases.get_cases(project_id=project_id, suite_id=int(suite_id))
-                cases = resp.get('cases', [])
             else:
                 resp = self._client.cases.get_cases(project_id=project_id)
-                cases = resp.get('cases', [])
+            
+            cases = _extract_cases_from_response(resp)
+            
         except StatusCodeError as e:
             raise ToolException(f"Unable to extract test cases: {e}")
             # Apply filters
@@ -603,11 +658,30 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             case_id = base_data.get("id")
 
             # get a list of attachments for the case
-            attachments = self._client.attachments.get_attachments_for_case_bulk(case_id=case_id)
+            attachments_response = self._client.attachments.get_attachments_for_case(case_id=case_id)
+
+            # Extract attachments from response - handle both old and new API response formats
+            if isinstance(attachments_response, dict) and 'attachments' in attachments_response:
+                attachments = attachments_response['attachments']
+            else:
+                attachments = attachments_response if isinstance(attachments_response, list) else []
 
             # process each attachment to extract its content
             for attachment in attachments:
-                if get_file_extension(attachment['filename']) in self._skip_attachment_extensions:
+                attachment_name = attachment.get('filename') or attachment.get('name')
+                attachment['filename'] = attachment_name
+                
+                # Handle filetype: use existing field if present, otherwise extract from filename
+                if 'filetype' not in attachment or not attachment['filetype']:
+                    file_extension = get_file_extension(attachment_name)
+                    attachment['filetype'] = file_extension.lstrip('.')
+                
+                # Handle is_image: use existing field if present, otherwise check file extension
+                if 'is_image' not in attachment:
+                    file_extension = get_file_extension(attachment_name)
+                    attachment['is_image'] = file_extension in image_extensions
+                
+                if get_file_extension(attachment_name) in self._skip_attachment_extensions:
                     logger.info(f"Skipping attachment {attachment['filename']} with unsupported extension.")
                     continue
 
