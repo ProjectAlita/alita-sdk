@@ -105,7 +105,7 @@ class GitHubClient(BaseModel):
                     self._github_repo_instance = None
             except Exception as e:
                 # Only raise when accessed, not during initialization
-                return ToolException(e)
+                raise ToolException(e)
         return self._github_repo_instance
 
     @model_validator(mode='before')
