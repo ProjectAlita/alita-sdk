@@ -85,7 +85,12 @@ class AlitaClient:
             # This loop iterates over each key-value pair in the arguments dictionary,
             # and if a value is a Pydantic object, it replaces it with its dictionary representation using .dict().
             for arg_name, arg_value in params.get('params', {}).get('arguments', {}).items():
-                if hasattr(arg_value, "dict") and callable(arg_value.dict):
+                if isinstance(arg_value, list):
+                    params['params']['arguments'][arg_name] = [
+                        item.dict() if hasattr(item, "dict") and callable(item.dict) else item
+                        for item in arg_value
+                    ]
+                elif hasattr(arg_value, "dict") and callable(arg_value.dict):
                     params['params']['arguments'][arg_name] = arg_value.dict()
             #
             response = requests.post(url, headers=self.headers, json=params, verify=False)
