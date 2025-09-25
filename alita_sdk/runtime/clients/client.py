@@ -497,7 +497,6 @@ class AlitaClient:
         return AIMessage(content=content, additional_kwargs={"references": references})
 
     def _get_real_user_id(self):
-        return 30
         try:
             import tasknode_task # pylint: disable=E0401
             monitoring_meta = tasknode_task.meta.get("monitoring", {})
