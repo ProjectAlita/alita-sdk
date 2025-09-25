@@ -22,7 +22,7 @@ GLOBAL_REMOVE = []
 GLOBAL_DEPTH_START = 4
 GLOBAL_DEPTH_END = 6
 EXTRA_PARAMS = (
-    Optional[Dict[str, Union[str, int, None]]],
+    Optional[Dict[str, Union[str, int, List, None]]],
     Field(
         description=(
             "Additional parameters for customizing response processing:\n"
