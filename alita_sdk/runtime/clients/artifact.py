@@ -42,7 +42,17 @@ class Artifact:
             return f"{data['error']}. {data['content'] if data['content'] else ''}"
         detected = chardet.detect(data)
         if detected['encoding'] is not None:
-            return data.decode(detected['encoding'])
+            try:
+                return data.decode(detected['encoding'])
+            except Exception:
+                logger.error("Error while default encoding")
+                return parse_file_content(file_name=artifact_name,
+                                          file_content=data,
+                                          is_capture_image=is_capture_image,
+                                          page_number=page_number,
+                                          sheet_name=sheet_name,
+                                          excel_by_sheets=excel_by_sheets,
+                                          llm=llm)
         else:
             return parse_file_content(file_name=artifact_name,
                                   file_content=data,
