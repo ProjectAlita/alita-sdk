@@ -1,58 +1,15 @@
-import json
 import logging
 from traceback import format_exc
 from typing import Any, Optional, Dict, List, Union
 
 from langchain_core.messages import HumanMessage, BaseMessage, SystemMessage, AIMessage
-from langchain_core.tools import BaseTool, ToolException
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool, ToolException
 from pydantic import Field
 
-from ..langchain.utils import _extract_json, create_pydantic_model, create_params
+from ..langchain.utils import create_pydantic_model, propagate_the_input_mapping
 
 logger = logging.getLogger(__name__)
-
-
-def create_llm_input_with_messages(
-    prompt: Dict[str, str],
-    params: Dict[str, Any]
-) -> List[BaseMessage]:
-    """
-    Create LLM input by combining system prompt with chat history messages.
-    
-    Args:
-        prompt: The prompt configuration with template
-        params: Additional parameters for prompt formatting
-        
-    Returns:
-        List of messages to send to LLM
-    """
-    logger.info(f"Creating LLM input with params: {params}")
-    
-    # Build the input messages
-    input_messages = []
-    messages = params.get('messages', [])
-    
-    # Add system message from prompt if available
-    if prompt:
-        try:
-            # Format the system message using the prompt template or value and params
-            prompt_str = prompt['template'] if 'template' in prompt else prompt['value']
-            prompt_content = prompt_str.format(**params) if params else prompt_str
-            # if user hasn't specified chat history, add system message as HumanMessage
-            input_messages.append(SystemMessage(content=prompt_content) if messages else HumanMessage(content=prompt_content))
-        except KeyError as e:
-            error_msg = f"KeyError in prompt formatting: {e}. Available params: {list(params.keys())}"
-            logger.error(error_msg)
-            raise ToolException(error_msg)
-    
-    # Add the chat history messages
-
-    if messages:
-        input_messages.extend(messages)
-
-    return input_messages
-
 
 class LLMNode(BaseTool):
     """Enhanced LLM node with chat history and tool binding support"""
@@ -62,12 +19,12 @@ class LLMNode(BaseTool):
     description: str = Field(default='This is tool node for LLM with chat history and tool support', description='Description of the LLM node')
     
     # LLM-specific fields
-    prompt: Dict[str, str] = Field(default_factory=dict, description='Prompt configuration')
     client: Any = Field(default=None, description='LLM client instance')
     return_type: str = Field(default="str", description='Return type')
     response_key: str = Field(default="messages", description='Response key')
     structured_output_dict: Optional[dict[str, str]] = Field(default=None, description='Structured output dictionary')
     output_variables: Optional[List[str]] = Field(default=None, description='Output variables')
+    input_mapping: Optional[dict[str, dict]] = Field(default=None, description='Input mapping')
     input_variables: Optional[List[str]] = Field(default=None, description='Input variables')
     structured_output: Optional[bool] = Field(default=False, description='Whether to use structured output')
     available_tools: Optional[List[BaseTool]] = Field(default=None, description='Available tools for binding')
@@ -118,21 +75,19 @@ class LLMNode(BaseTool):
             Updated state with LLM response
         """
         # Extract messages from state
-        
+
+        func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
+                                                state=state)
+        # Verify there are prompt, task parameters since they are required
+        if not func_args.get('prompt') or not func_args.get('task'):
+            raise ToolException(f"LLMNode requires 'prompt' and 'task' parameters in input mapping. "
+                                f"Actual params: {func_args}")
+
         messages = state.get("messages", []) if isinstance(state, dict) else []
-        logger.info(f"Invoking LLMNode with {len(messages)} messages")
-        logger.info("Messages: %s", messages)
-        # Create parameters for prompt formatting from state
-        params = {}
-        if isinstance(state, dict):
-            params = {var: state[var] for var in (self.input_variables or []) if var != "messages" and var in state}
-            # message as a part of chat history added ONLY if "messages" is in input_variables
-            if "messages" in (self.input_variables or []):
-                params["messages"] = messages
-        
-        # Create LLM input with proper message handling
-        llm_input = create_llm_input_with_messages(self.prompt, params)
-        
+        logger.info(f"Invoking LLMNode with {len(messages)} messages and prompt: {func_args.get('prompt')}")
+        llm_input = [SystemMessage(content=func_args.get('prompt')), HumanMessage(content=func_args.get('task'))]
+        llm_input.extend(func_args.get('chat_history', []))
+
         # Get the LLM client, potentially with tools bound
         llm_client = self.client
         
@@ -268,13 +223,8 @@ class LLMNode(BaseTool):
                     # Try to extract JSON if output variables are specified (but exclude 'messages' which is handled separately)
                     json_output_vars = [var for var in (self.output_variables or []) if var != 'messages']
                     if json_output_vars:
-                        try:
-                            response = _extract_json(content) or {}
-                            response_data = {key: response.get(key, content) for key in json_output_vars}
-                        except (ValueError, json.JSONDecodeError) as e:
-                            logger.warning(
-                                f"Expected JSON output but got plain text. Output variables specified: {json_output_vars}. Error: {e}")
-                            response_data = {var: content for var in json_output_vars}
+                        # set response to be the first output variable for non-structured output
+                        response_data = {json_output_vars[0]: content}
                         new_messages = messages + [AIMessage(content=content)]
                         response_data['messages'] = new_messages
                         return response_data
