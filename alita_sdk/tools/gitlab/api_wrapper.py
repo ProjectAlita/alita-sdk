@@ -1,8 +1,11 @@
 # api_wrapper.py
 from typing import Any, Dict, List, Optional
 import fnmatch
-from ...tools.elitea_base import BaseCodeToolApiWrapper
+
+from ..code_indexer_toolkit import CodeIndexerToolkit
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
+
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 
 AppendFileModel = create_model(
     "AppendFileModel",
@@ -97,7 +100,7 @@ GetCommitsModel = create_model(
     author=(Optional[str], Field(description="Author name", default=None)),
 )
 
-class GitLabAPIWrapper(BaseCodeToolApiWrapper):
+class GitLabAPIWrapper(CodeIndexerToolkit):
     url: str
     repository: str
     private_token: SecretStr
@@ -127,7 +130,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
         cls._repo_instance = g.projects.get(values.get('repository'))
         cls._git = g
         cls._active_branch = values.get('branch')
-        return values
+        return super().validate_toolkit(values)
 
     def set_active_branch(self, branch_name: str) -> str:
         self._active_branch = branch_name
@@ -417,6 +420,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             for commit in commits
         ]
 
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {
@@ -521,4 +525,4 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 "description": "Retrieve a list of commits from the repository.",
                 "args_schema": GetCommitsModel,
             }
-        ] + self._get_vector_search_tools()
+        ]

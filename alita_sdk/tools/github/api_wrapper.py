@@ -1,9 +1,7 @@
-from typing import Any, Dict, List, Optional, Union, Tuple
 import logging
-import traceback
-import json
-import re
-from pydantic import BaseModel, model_validator, Field, SecretStr
+from typing import Any, Dict, Optional
+
+from pydantic import model_validator, Field, SecretStr
 
 from .github_client import GitHubClient
 from .graphql_client_wrapper import GraphQLClientWrapper
@@ -11,28 +9,17 @@ from .schemas import (
     GitHubAuthConfig,
     GitHubRepoConfig
 )
-
-from ..elitea_base import BaseCodeToolApiWrapper
-
-from langchain_core.callbacks import dispatch_custom_event
+from ..code_indexer_toolkit import CodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 
 logger = logging.getLogger(__name__)
 
 # Import prompts for tools
-from .tool_prompts import (
-    UPDATE_FILE_PROMPT,
-    CREATE_ISSUE_PROMPT,
-    UPDATE_ISSUE_PROMPT,
-    CREATE_ISSUE_ON_PROJECT_PROMPT,
-    UPDATE_ISSUE_ON_PROJECT_PROMPT
-)
 
 # Create schema models for the new indexing functionality
-from pydantic import create_model
-from typing import Literal
 
 
-class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
+class AlitaGitHubAPIWrapper(CodeIndexerToolkit):
     """
     Wrapper for GitHub API that integrates both REST and GraphQL functionality.
     """
@@ -117,7 +104,7 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
         if "llm" not in values:
             values["llm"] = None
 
-        return values
+        return super().validate_toolkit(values)
 
     # Expose GitHub REST client methods directly via property
     @property
@@ -131,7 +118,7 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
         """Access to GitHub GraphQL client methods"""
         return self.graphql_client_instance
 
-
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         # this is horrible, I need to think on something better
         if not self.github_client_instance:
@@ -142,12 +129,8 @@ class AlitaGitHubAPIWrapper(BaseCodeToolApiWrapper):
             graphql_tools = GraphQLClientWrapper.model_construct().get_available_tools()
         else:
             graphql_tools = self.graphql_client_instance.get_available_tools()
-            
-        # Add vector search tools from base class (includes index_data + search tools)
-        vector_search_tools = self._get_vector_search_tools()
         
-        tools = github_tools + graphql_tools + vector_search_tools
-        return tools
+        return github_tools + graphql_tools
 
     def _get_files(self, path: str = "", branch: str = None):
         """Get list of files from GitHub repository."""
