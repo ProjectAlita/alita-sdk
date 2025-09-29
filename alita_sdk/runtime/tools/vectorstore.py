@@ -137,7 +137,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     embedding_model_params: dict
     vectorstore_type: str
     vectorstore_params: dict
-    max_docs_per_add: int = 100
+    max_docs_per_add: int = 20
     dataset: str = None
     embedding: Any = None
     vectorstore: Any = None

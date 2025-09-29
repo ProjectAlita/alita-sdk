@@ -69,6 +69,7 @@ class AlitaClient:
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.configurations: list = configurations or []
+        self.model_timeout = kwargs.get('model_timeout', 120)
 
     def get_mcp_toolkits(self):
         if user_id := self._get_real_user_id():
@@ -184,6 +185,7 @@ class AlitaClient:
             model=embedding_model,
             api_key=self.auth_token,
             openai_organization=str(self.project_id),
+            request_timeout=self.model_timeout
         )
 
     def get_llm(self, model_name: str, model_config: dict) -> ChatOpenAI:
