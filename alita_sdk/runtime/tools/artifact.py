@@ -3,6 +3,7 @@ import logging
 import re
 from typing import Any, Optional, Generator, List
 
+from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import create_model, Field, model_validator
@@ -30,7 +31,21 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         return self.artifact.list(bucket_name, return_as_string)
 
     def create_file(self, filename: str, filedata: str, bucket_name = None):
-        return self.artifact.create(filename, filedata, bucket_name)
+        result = self.artifact.create(filename, filedata, bucket_name)
+        
+        # Dispatch custom event for file creation
+        dispatch_custom_event("file_modified", {
+            "message": f"File '{filename}' created successfully",
+            "filename": filename,
+            "tool_name": "createFile",
+            "toolkit": "artifact",
+            "operation_type": "create",
+            "meta": {
+                "bucket": bucket_name or self.bucket
+            }
+        })
+        
+        return result
 
     def read_file(self,
                   filename: str,
@@ -51,10 +66,38 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         return self.artifact.delete(filename, bucket_name)
 
     def append_data(self, filename: str, filedata: str, bucket_name = None):
-        return self.artifact.append(filename, filedata, bucket_name)
+        result = self.artifact.append(filename, filedata, bucket_name)
+        
+        # Dispatch custom event for file append
+        dispatch_custom_event("file_modified", {
+            "message": f"Data appended to file '{filename}' successfully",
+            "filename": filename,
+            "tool_name": "appendData",
+            "toolkit": "artifact",
+            "operation_type": "modify",
+            "meta": {
+                "bucket": bucket_name or self.bucket
+            }
+        })
+        
+        return result
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
-        return self.artifact.overwrite(filename, filedata, bucket_name)
+        result = self.artifact.overwrite(filename, filedata, bucket_name)
+        
+        # Dispatch custom event for file overwrite
+        dispatch_custom_event("file_modified", {
+            "message": f"File '{filename}' overwritten successfully",
+            "filename": filename,
+            "tool_name": "overwriteData",
+            "toolkit": "artifact",
+            "operation_type": "modify",
+            "meta": {
+                "bucket": bucket_name or self.bucket
+            }
+        })
+        
+        return result
 
     def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
         return self.artifact.client.create_bucket(bucket_name, expiration_measure, expiration_value)
