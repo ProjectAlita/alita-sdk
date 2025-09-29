@@ -201,7 +201,7 @@ class AlitaExcelLoader(AlitaTableLoader):
         return docs
 
     def read(self, lazy: bool = False):
-        df = pd.read_excel(self.file_path, sheet_name=None)
+        df = pd.read_excel(self.file_path, sheet_name=None, engine='calamine')
         docs = []
         for key in df.keys():
             if self.raw_content:
@@ -212,7 +212,7 @@ class AlitaExcelLoader(AlitaTableLoader):
         return docs
 
     def read_lazy(self) -> Iterator[dict]:
-        df = pd.read_excel(self.file_path, sheet_name=None)
+        df = pd.read_excel(self.file_path, sheet_name=None, engine='calamine')
         for key in df.keys():
             if self.raw_content:
                 yield df[key].to_string()
