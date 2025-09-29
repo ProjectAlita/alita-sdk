@@ -30,8 +30,6 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
         AlitaGitlabSpaceToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True,
-                                                                            'max_toolkit_length': AlitaGitlabSpaceToolkit.toolkit_max_length})),
             gitlab_configuration=(GitlabConfiguration, Field(description="GitLab configuration",
                                                                        json_schema_extra={
                                                                            'configuration_types': ['gitlab']})),

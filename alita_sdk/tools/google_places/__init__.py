@@ -30,7 +30,7 @@ class GooglePlacesToolkit(BaseToolkit):
         GooglePlacesToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            results_count=(Optional[int], Field(description="Results number to show", default=None, json_schema_extra={'toolkit_name': True, 'max_toolkit_length': GooglePlacesToolkit.toolkit_max_length})),
+            results_count=(Optional[int], Field(description="Results number to show", default=None)),
             google_places_configuration=(GooglePlacesConfiguration, Field(description="Google Places Configuration", json_schema_extra={'configuration_types': ['google_places']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
