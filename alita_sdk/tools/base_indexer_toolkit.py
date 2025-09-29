@@ -279,7 +279,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """Cleans the indexed data in the collection."""
         super()._clean_collection(collection_suffix=collection_suffix)
         return (f"Collection '{collection_suffix}' has been removed from the vector store.\n"
-                f"Available collections: {self.list_collections()}")
+                f"Available collections: {self.list_collections()}") if collection_suffix \
+            else "All collections have been removed from the vector store." 
 
     def _build_collection_filter(self, filter: dict | str, collection_suffix: str = "") -> dict:
         """Builds a filter for the collection based on the provided suffix."""
