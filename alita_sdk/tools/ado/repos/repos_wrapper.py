@@ -644,6 +644,9 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
 
         return dumps(data)
 
+    def download_file(self, path):
+        return b"".join(self._client.get_item_content(self.repository_id, path=path, project=self.project, download=True))
+
     def get_file_content(self, commit_id, path):
         version_descriptor = GitVersionDescriptor(
             version=commit_id, version_type="commit"
