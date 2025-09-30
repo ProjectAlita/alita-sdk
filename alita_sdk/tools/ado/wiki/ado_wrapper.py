@@ -1,5 +1,7 @@
 import hashlib
 import logging
+import re
+import requests
 from typing import Generator, Literal, Optional
 
 from azure.devops.connection import Connection
@@ -15,8 +17,11 @@ from pydantic import create_model, PrivateAttr, SecretStr
 from pydantic import model_validator
 from pydantic.fields import Field
 
+import alita_sdk.tools.ado.work_item
+from ..repos import ReposApiWrapper
 from ...non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...utils.available_tools_decorator import extend_with_parent_available_tools
+from ...utils.content_parser import parse_file_content
 from ....runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
@@ -29,13 +34,17 @@ GetWikiInput = create_model(
 GetPageByPathInput = create_model(
     "GetPageByPathInput",
     wiki_identified=(str, Field(description="Wiki ID or wiki name")),
-    page_name=(str, Field(description="Wiki page path"))
+    page_name=(str, Field(description="Wiki page path")),
+    image_description_prompt=(Optional[str],
+                              Field(description="Prompt which is used for image description", default=None))
 )
 
 GetPageByIdInput = create_model(
     "GetPageByIdInput",
     wiki_identified=(str, Field(description="Wiki ID or wiki name")),
-    page_id=(int, Field(description="Wiki page ID"))
+    page_id=(int, Field(description="Wiki page ID")),
+    image_description_prompt=(Optional[str],
+                              Field(description="Prompt which is used for image description", default=None))
 )
 
 ModifyPageInput = create_model(
@@ -94,23 +103,74 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error during the attempt to extract wiki: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki: {str(e)}")
 
-    def get_wiki_page_by_path(self, wiki_identified: str, page_name: str):
+    def get_wiki_page_by_path(self, wiki_identified: str, page_name: str, image_description_prompt=None):
         """Extract ADO wiki page content."""
         try:
-            return self._client.get_page(project=self.project, wiki_identifier=wiki_identified, path=page_name,
-                                         include_content=True).page.content
+            return self._process_images(self._client.get_page(project=self.project, wiki_identifier=wiki_identified, path=page_name,
+                                         include_content=True).page.content,
+                                        image_description_prompt=image_description_prompt)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
-    def get_wiki_page_by_id(self, wiki_identified: str, page_id: int):
+    def get_wiki_page_by_id(self, wiki_identified: str, page_id: int, image_description_prompt=None):
         """Extract ADO wiki page content."""
         try:
-            return (self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_identified, id=page_id,
-                                                include_content=True).page.content)
+            return self._process_images(self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_identified, id=page_id,
+                                                include_content=True).page.content,
+                                        image_description_prompt=image_description_prompt)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
+
+    def _process_images(self, page_content: str, image_description_prompt=None):
+
+        image_pattern = r"!\[(.*?)\]\((.*?)\)"
+        matches = re.findall(image_pattern, page_content)
+
+        for image_name, image_url in matches:
+            if image_url.startswith("/.attachments/"):
+                try:
+                    description = self.process_attachment(attachment_url=image_url,
+                                                          attachment_name=image_name,
+                                                          image_description_prompt=image_description_prompt)
+                except Exception as e:
+                    logger.error(f"Error parsing attachment: {str(e)}")
+                    description = f"Error parsing attachment: {image_url}"
+            else:
+                try:
+                    response = requests.get(image_url)
+                    response.raise_for_status()
+                    file_content = response.content
+                    description = parse_file_content(
+                        file_content=file_content,
+                        file_name="image.png",
+                        llm=self.llm,
+                        prompt=image_description_prompt
+                    )
+                except Exception as e:
+                    logger.error(f"Error fetching external image: {str(e)}")
+                    description = f"Error fetching external image: image_url"
+
+            new_image_markdown = f"![{image_name}]({description})"
+            page_content = page_content.replace(f"![{image_name}]({image_url})", new_image_markdown)
+        return page_content
+
+    def process_attachment(self, attachment_url, attachment_name, image_description_prompt):
+        wiki_master_branch = "wikiMaster"
+        repos_wrapper = ReposApiWrapper(organization_url=self.organization_url,
+                                        project=self.project,
+                                        token=self.token.get_secret_value(),
+                                        repository_id="Test_agent.wiki",
+                                        base_branch=wiki_master_branch,
+                                        active_branch=wiki_master_branch)
+        attachment_content = repos_wrapper.download_file(path=attachment_url)
+        return parse_file_content(
+            file_content=attachment_content,
+            file_name=attachment_name,
+            llm=self.llm,
+            prompt=image_description_prompt
+        )
 
     def delete_page_by_path(self, wiki_identified: str, page_name: str):
         """Extract ADO wiki page content."""
