@@ -39,7 +39,7 @@ class LoaderProperties(Enum):
 image_loaders_map = {
     '.png': {
         'class': AlitaImageLoader,
-        'description': 'Portable Network Graphics image file',
+        'mime_type': 'image/png',
         'is_multimodal_processing': True,
         'kwargs': {},
         'allowed_to_override': [
@@ -50,7 +50,7 @@ image_loaders_map = {
     },
     '.jpg': {
         'class': AlitaImageLoader,
-        'description': 'JPEG image file',
+        'mime_type': 'image/jpeg',
         'is_multimodal_processing': True,
         'kwargs': {},
         'allowed_to_override': [
@@ -61,7 +61,7 @@ image_loaders_map = {
     },
     '.jpeg': {
         'class': AlitaImageLoader,
-        'description': 'JPEG image file',
+        'mime_type': 'image/jpeg',
         'is_multimodal_processing': True,
         'kwargs': {},
         'allowed_to_override': [
@@ -72,7 +72,7 @@ image_loaders_map = {
     },
     '.gif': {
         'class': AlitaImageLoader,
-        'description': 'Graphics Interchange Format image file',
+        'mime_type': 'image/gif',
         'is_multimodal_processing': True,
         'kwargs': {},
         'allowed_to_override': [
@@ -83,7 +83,7 @@ image_loaders_map = {
     },
     '.bmp': {
         'class': AlitaImageLoader,
-        'description': 'Bitmap image file',
+        'mime_type': 'image/bmp',
         'is_multimodal_processing': True,
         'kwargs': {},
         'allowed_to_override': [
@@ -94,7 +94,7 @@ image_loaders_map = {
     },
     '.svg': {
         'class': AlitaImageLoader,
-        'description': 'Scalable Vector Graphics image file',
+        'mime_type': 'image/svg+xml',
         'is_multimodal_processing': True,
         'kwargs': {},
         'allowed_to_override': [
@@ -109,7 +109,7 @@ image_loaders_map = {
 document_loaders_map = {
     '.txt': {
         'class': AlitaTextLoader,
-        'description': 'Plain text file',
+        'mime_type': 'text/plain',
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
@@ -118,7 +118,7 @@ document_loaders_map = {
     },
     '.yml': {
         'class': AlitaTextLoader,
-        'description': 'YAML configuration file',
+        'mime_type': 'application/x-yaml',
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
@@ -127,7 +127,7 @@ document_loaders_map = {
     },
     '.yaml': {
         'class': AlitaTextLoader,
-        'description': 'YAML configuration file',
+        'mime_type': 'application/x-yaml',
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
@@ -136,7 +136,7 @@ document_loaders_map = {
     },
     '.groovy': {
         'class': AlitaTextLoader,
-        'description': 'Groovy script file',
+        'mime_type': 'text/x-groovy',
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
@@ -145,14 +145,14 @@ document_loaders_map = {
     },
     '.md': {
         'class': AlitaMarkdownLoader,
-        'description': 'Markdown document file',
+        'mime_type': 'text/markdown',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': ['max_tokens']
     },
     '.csv': {
         'class': AlitaCSVLoader,
-        'description': 'Comma-separated values file',
+        'mime_type': 'text/csv',
         'is_multimodal_processing': False,
         'kwargs': {
             'encoding': 'utf-8',
@@ -163,7 +163,8 @@ document_loaders_map = {
     },
     '.xlsx': {
         'class': AlitaExcelLoader,
-        'description': 'Microsoft Excel spreadsheet file',
+        'mime_type': ('application/vnd.openxmlformats-officedocument.'
+                      'spreadsheetml.sheet'),
         'is_multimodal_processing': False,
         'kwargs': {
             'excel_by_sheets': True,
@@ -178,7 +179,7 @@ document_loaders_map = {
     },
     '.xls': {
         'class': AlitaExcelLoader,
-        'description': 'Microsoft Excel legacy spreadsheet file',
+        'mime_type': 'application/vnd.ms-excel',
         'is_multimodal_processing': False,
         'kwargs': {
             'excel_by_sheets': True,
@@ -193,7 +194,7 @@ document_loaders_map = {
     },
     '.pdf': {
         'class': AlitaPDFLoader,
-        'description': 'Portable Document Format file',
+        'mime_type': 'application/pdf',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': [
@@ -204,7 +205,8 @@ document_loaders_map = {
     },
     '.docx': {
         'class': AlitaDocxMammothLoader,
-        'description': 'Microsoft Word document file',
+        'mime_type': ('application/vnd.openxmlformats-officedocument.'
+                      'wordprocessingml.document'),
         'is_multimodal_processing': True,
         'kwargs': {
             'extract_images': True
@@ -217,21 +219,21 @@ document_loaders_map = {
     },
     '.json': {
         'class': AlitaJSONLoader,
-        'description': 'JavaScript Object Notation file',
+        'mime_type': 'application/json',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': ['max_tokens']
     },
     '.jsonl': {
         'class': AirbyteJSONLoader,
-        'description': 'JSON Lines file',
+        'mime_type': 'application/jsonl',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': ['max_tokens']
     },
     '.htm': {
         'class': UnstructuredHTMLLoader,
-        'description': 'HyperText Markup Language file',
+        'mime_type': 'text/html',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': [
@@ -242,7 +244,7 @@ document_loaders_map = {
     },
     '.html': {
         'class': UnstructuredHTMLLoader,
-        'description': 'HyperText Markup Language file',
+        'mime_type': 'text/html',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': [
@@ -253,7 +255,7 @@ document_loaders_map = {
     },
     '.xml': {
         'class': UnstructuredXMLLoader,
-        'description': 'Extensible Markup Language file',
+        'mime_type': 'application/xml',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': [
@@ -264,7 +266,7 @@ document_loaders_map = {
     },
     '.ppt': {
         'class': AlitaPowerPointLoader,
-        'description': 'Microsoft PowerPoint presentation file',
+        'mime_type': 'application/vnd.ms-powerpoint',
         'is_multimodal_processing': False,
         'kwargs': {
             'mode': 'paged'
@@ -277,7 +279,8 @@ document_loaders_map = {
     },
     '.pptx': {
         'class': AlitaPowerPointLoader,
-        'description': 'Microsoft PowerPoint presentation file',
+        'mime_type': ('application/vnd.openxmlformats-officedocument.'
+                      'presentationml.presentation'),
         'is_multimodal_processing': False,
         'kwargs': {
             'mode': 'paged'
@@ -290,7 +293,7 @@ document_loaders_map = {
     },
     '.py': {
         'class': AlitaPythonLoader,
-        'description': 'Python source code file',
+        'mime_type': 'text/x-python',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': ['max_tokens']
