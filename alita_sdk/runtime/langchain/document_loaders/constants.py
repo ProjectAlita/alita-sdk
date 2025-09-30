@@ -300,5 +300,43 @@ document_loaders_map = {
     }
 }
 
+code_extensions = [
+    # '.py',  # Python
+    '.js',  # JavaScript
+    '.ts',  # TypeScript
+    '.java',  # Java
+    '.cpp',  # C++
+    '.c',  # C
+    '.cs',  # C#
+    '.rb',  # Ruby
+    '.go',  # Go
+    '.php',  # PHP
+    '.swift',  # Swift
+    '.kt',  # Kotlin
+    '.rs',  # Rust
+    '.m',  # Objective-C
+    '.scala',  # Scala
+    '.pl',  # Perl
+    '.sh',  # Shell
+    '.bat',  # Batch
+    '.lua',  # Lua
+    '.r',  # R
+    '.pas',  # Pascal
+    '.asm',  # Assembly
+    '.dart',  # Dart
+    '.groovy',  # Groovy
+    '.sql',  # SQL
+]
+
+default_loader_config = {
+    'class': AlitaTextLoader,
+    'mime_type': 'text/plain',
+    'is_multimodal_processing': False,
+    'kwargs': {},
+    'allowed_to_override': ['max_tokens']
+}
+
+code_loaders_map = {ext: default_loader_config for ext in code_extensions}
+
 # Combined mapping for backward compatibility
-loaders_map = {**image_loaders_map, **document_loaders_map}
+loaders_map = {**image_loaders_map, **document_loaders_map, **code_loaders_map}
