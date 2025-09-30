@@ -583,11 +583,10 @@ def create_graph(
                     available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
                 
                 lg_builder.add_node(node_id, LLMNode(
-                    client=client, 
-                    prompt=node.get('prompt', {}),
-                    name=node['id'], 
+                    client=client,
+                    input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
+                    name=node['id'],
                     return_type='dict',
-                    response_key=node.get('response_key', 'messages'),
                     structured_output_dict=output_vars_dict,
                     output_variables=output_vars,
                     input_variables=node.get('input', ['messages']),
