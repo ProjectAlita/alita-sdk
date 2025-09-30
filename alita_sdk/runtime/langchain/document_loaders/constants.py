@@ -255,7 +255,7 @@ document_loaders_map = {
     },
     '.xml': {
         'class': UnstructuredXMLLoader,
-        'mime_type': 'application/xml',
+        'mime_type': 'text/xml',
         'is_multimodal_processing': False,
         'kwargs': {},
         'allowed_to_override': [
