@@ -1,8 +1,8 @@
 import logging
 from traceback import format_exc
-from typing import Any, Optional, Dict, List, Union
+from typing import Any, Optional, List, Union
 
-from langchain_core.messages import HumanMessage, BaseMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import Field
@@ -16,8 +16,9 @@ class LLMNode(BaseTool):
     
     # Override BaseTool required fields
     name: str = Field(default='LLMNode', description='Name of the LLM node')
-    description: str = Field(default='This is tool node for LLM with chat history and tool support', description='Description of the LLM node')
-    
+    description: str = Field(default='This is tool node for LLM with chat history and tool support',
+                             description='Description of the LLM node')
+
     # LLM-specific fields
     client: Any = Field(default=None, description='LLM client instance')
     return_type: str = Field(default="str", description='Return type')
@@ -58,10 +59,10 @@ class LLMNode(BaseTool):
         return filtered_tools
 
     def invoke(
-        self,
-        state: Union[str, dict],
-        config: Optional[RunnableConfig] = None,
-        **kwargs: Any,
+            self,
+            state: Union[str, dict],
+            config: Optional[RunnableConfig] = None,
+            **kwargs: Any,
     ) -> dict:
         """
         Invoke the LLM node with proper message handling and tool binding.
@@ -78,19 +79,30 @@ class LLMNode(BaseTool):
 
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
-        # Verify there are prompt, task parameters since they are required
-        if not func_args.get('prompt') or not func_args.get('task'):
-            raise ToolException(f"LLMNode requires 'prompt' and 'task' parameters in input mapping. "
-                                f"Actual params: {func_args}")
 
-        messages = state.get("messages", []) if isinstance(state, dict) else []
-        logger.info(f"Invoking LLMNode with {len(messages)} messages and prompt: {func_args.get('prompt')}")
-        llm_input = [SystemMessage(content=func_args.get('prompt')), HumanMessage(content=func_args.get('task'))]
-        llm_input.extend(func_args.get('chat_history', []))
+        # there are 2 possible flows here: LLM node from pipeline (with prompt and task)
+        # or standalone LLM node for chat (with messages only)
+        if 'system' in func_args.keys():
+            # Flow for LLM node with prompt/task from pipeline
+            if not func_args.get('system') or not func_args.get('task'):
+                raise ToolException(f"LLMNode requires 'system' and 'task' parameters in input mapping. "
+                                    f"Actual params: {func_args}")
+            messages = [SystemMessage(content=func_args.get('system')), HumanMessage(content=func_args.get('task'))]
+            messages.extend(func_args.get('chat_history', []))
+        else:
+            # Flow for chat-based LLM node w/o prompt/task from pipeline but with messages in state
+            # verify messages structure
+            messages = state.get("messages", []) if isinstance(state, dict) else []
+            if messages:
+                # the last message has to be HumanMessage
+                if not isinstance(messages[:1][0], HumanMessage):
+                    raise ToolException("LLMNode requires the last message to be a HumanMessage")
+            else:
+                raise ToolException("LLMNode requires 'messages' in state for chat-based interaction")
 
         # Get the LLM client, potentially with tools bound
         llm_client = self.client
-        
+
         if len(self.tool_names or []) > 0:
             filtered_tools = self.get_filtered_tools()
             if filtered_tools:
@@ -98,7 +110,7 @@ class LLMNode(BaseTool):
                 llm_client = self.client.bind_tools(filtered_tools)
             else:
                 logger.warning("No tools to bind to LLM")
-        
+
         try:
             if self.structured_output and self.output_variables:
                 # Handle structured output
@@ -111,17 +123,17 @@ class LLMNode(BaseTool):
                 }
                 struct_model = create_pydantic_model(f"LLMOutput", struct_params)
                 llm = llm_client.with_structured_output(struct_model)
-                completion = llm.invoke(llm_input, config=config)
+                completion = llm.invoke(messages, config=config)
                 result = completion.model_dump()
-                
+
                 # Ensure messages are properly formatted
                 if result.get('messages') and isinstance(result['messages'], list):
                     result['messages'] = [{'role': 'assistant', 'content': '\n'.join(result['messages'])}]
-                
+
                 return result
             else:
                 # Handle regular completion
-                completion = llm_client.invoke(llm_input, config=config)
+                completion = llm_client.invoke(messages, config=config)
                 logger.info(f"Initial completion: {completion}")
                 # Handle both tool-calling and regular responses
                 if hasattr(completion, 'tool_calls') and completion.tool_calls:
@@ -129,24 +141,30 @@ class LLMNode(BaseTool):
                     new_messages = messages + [completion]
                     max_iterations = 15
                     iteration = 0
-                    
+
                     # Continue executing tools until no more tool calls or max iterations reached
                     current_completion = completion
-                    while (hasattr(current_completion, 'tool_calls') and 
-                           current_completion.tool_calls and 
+                    while (hasattr(current_completion, 'tool_calls') and
+                           current_completion.tool_calls and
                            iteration < max_iterations):
-                        
+
                         iteration += 1
                         logger.info(f"Tool execution iteration {iteration}/{max_iterations}")
-                        
+
                         # Execute each tool call in the current completion
-                        tool_calls = current_completion.tool_calls if hasattr(current_completion.tool_calls, '__iter__') else []
-                        
+                        tool_calls = current_completion.tool_calls if hasattr(current_completion.tool_calls,
+                                                                              '__iter__') else []
+
                         for tool_call in tool_calls:
-                            tool_name = tool_call.get('name', '') if isinstance(tool_call, dict) else getattr(tool_call, 'name', '')
-                            tool_args = tool_call.get('args', {}) if isinstance(tool_call, dict) else getattr(tool_call, 'args', {})
-                            tool_call_id = tool_call.get('id', '') if isinstance(tool_call, dict) else getattr(tool_call, 'id', '')
-                            
+                            tool_name = tool_call.get('name', '') if isinstance(tool_call, dict) else getattr(tool_call,
+                                                                                                              'name',
+                                                                                                              '')
+                            tool_args = tool_call.get('args', {}) if isinstance(tool_call, dict) else getattr(tool_call,
+                                                                                                              'args',
+                                                                                                              {})
+                            tool_call_id = tool_call.get('id', '') if isinstance(tool_call, dict) else getattr(
+                                tool_call, 'id', '')
+
                             # Find the tool in filtered tools
                             filtered_tools = self.get_filtered_tools()
                             tool_to_execute = None
@@ -154,12 +172,12 @@ class LLMNode(BaseTool):
                                 if tool.name == tool_name:
                                     tool_to_execute = tool
                                     break
-                            
+
                             if tool_to_execute:
                                 try:
                                     logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
                                     tool_result = tool_to_execute.invoke(tool_args)
-                                    
+
                                     # Create tool message with result
                                     from langchain_core.messages import ToolMessage
                                     tool_message = ToolMessage(
@@ -167,7 +185,7 @@ class LLMNode(BaseTool):
                                         tool_call_id=tool_call_id
                                     )
                                     new_messages.append(tool_message)
-                                    
+
                                 except Exception as e:
                                     logger.error(f"Error executing tool '{tool_name}': {e}")
                                     # Create error tool message
@@ -186,26 +204,26 @@ class LLMNode(BaseTool):
                                     tool_call_id=tool_call_id
                                 )
                                 new_messages.append(tool_message)
-                        
+
                         # Call LLM again with tool results to get next response
                         try:
                             current_completion = llm_client.invoke(new_messages, config=config)
                             new_messages.append(current_completion)
-                            
+
                             # Check if we still have tool calls
                             if hasattr(current_completion, 'tool_calls') and current_completion.tool_calls:
                                 logger.info(f"LLM requested {len(current_completion.tool_calls)} more tool calls")
                             else:
                                 logger.info("LLM completed without requesting more tools")
                                 break
-                                
+
                         except Exception as e:
                             logger.error(f"Error in LLM call during iteration {iteration}: {e}")
                             # Add error message and break the loop
                             error_msg = f"Error processing tool results in iteration {iteration}: {str(e)}"
                             new_messages.append(AIMessage(content=error_msg))
                             break
-                    
+
                     # Log completion status
                     if iteration >= max_iterations:
                         logger.warning(f"Reached maximum iterations ({max_iterations}) for tool execution")
@@ -214,12 +232,12 @@ class LLMNode(BaseTool):
                         new_messages.append(AIMessage(content=warning_msg))
                     else:
                         logger.info(f"Tool execution completed after {iteration} iterations")
-                    
+
                     return {"messages": new_messages}
                 else:
                     # Regular text response
                     content = completion.content.strip() if hasattr(completion, 'content') else str(completion)
-                    
+
                     # Try to extract JSON if output variables are specified (but exclude 'messages' which is handled separately)
                     json_output_vars = [var for var in (self.output_variables or []) if var != 'messages']
                     if json_output_vars:
@@ -228,11 +246,11 @@ class LLMNode(BaseTool):
                         new_messages = messages + [AIMessage(content=content)]
                         response_data['messages'] = new_messages
                         return response_data
-                    
+
                     # Simple text response (either no output variables or JSON parsing failed)
                     new_messages = messages + [AIMessage(content=content)]
                     return {"messages": new_messages}
-                        
+
         except Exception as e:
             logger.error(f"Error in LLM Node: {format_exc()}")
             error_msg = f"Error: {e}"
