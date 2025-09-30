@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Union, Any, Optional, Annotated, get_type_hints
 from uuid import uuid4
 from typing import Dict
@@ -274,11 +275,20 @@ class StateModifierNode(Runnable):
                 logger.warning(f"Failed to decode base64 value: {e}")
                 return value
         
+        def split_by_words(value, chunk_size=100):
+            words = value.split()
+            return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+        
+        def split_by_regex(value, pattern):
+            """Splits the provided string using the specified regex pattern."""
+            return re.split(pattern, value)
 
         env = Environment()
         env.filters['from_json'] = from_json
-        env.filters['base64ToString'] = base64_to_string
-        
+        env.filters['base64_to_string'] = base64_to_string
+        env.filters['split_by_words'] = split_by_words
+        env.filters['split_by_regex'] = split_by_regex
+
         template = env.from_string(self.template)
         rendered_message = template.render(**input_data)
         result = {}
