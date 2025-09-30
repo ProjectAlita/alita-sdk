@@ -95,7 +95,7 @@ class LLMNode(BaseTool):
             messages = state.get("messages", []) if isinstance(state, dict) else []
             if messages:
                 # the last message has to be HumanMessage
-                if not isinstance(messages[:1][0], HumanMessage):
+                if not isinstance(messages[-1], HumanMessage):
                     raise ToolException("LLMNode requires the last message to be a HumanMessage")
             else:
                 raise ToolException("LLMNode requires 'messages' in state for chat-based interaction")
