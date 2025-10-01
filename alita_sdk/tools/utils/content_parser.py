@@ -1,3 +1,4 @@
+from copy import deepcopy
 import os
 import re
 import tempfile
@@ -126,7 +127,7 @@ def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = F
 
 def get_loader_kwargs(loader_object, file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                     sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False, prompt=None):
-    loader_kwargs = loader_object['kwargs']
+    loader_kwargs = deepcopy(loader_object['kwargs'])
     loader_kwargs.update({
         "file_path": file_path,
         "file_content": file_content,
