@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any, Optional, Union, List
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -6,6 +7,10 @@ from ..utils.evaluate import EvaluateTemplate
 from ..utils.utils import clean_string
 
 logger = logging.getLogger(__name__)
+
+def clean_node_str(s: str)-> str:
+        cleaned_string = re.sub(r'[^\w\s]', '', s)
+        return cleaned_string
 
 class RouterNode(BaseTool):
     name: str = 'RouterNode'
@@ -22,7 +27,7 @@ class RouterNode(BaseTool):
         template = EvaluateTemplate(self.condition, input_data)
         result = template.evaluate()
         logger.info(f"RouterNode evaluated condition '{self.condition}' with input {input_data} => {result}")
-        result = clean_string(str(result))
+        result = clean_node_str(str(result))
         if result in self.routes:
             # If the result is one of the routes, return it
             return {"router_output": result}
