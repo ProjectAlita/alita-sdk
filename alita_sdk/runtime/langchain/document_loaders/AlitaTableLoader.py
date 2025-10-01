@@ -63,7 +63,7 @@ class AlitaTableLoader(BaseLoader):
                 "source": f'{self.file_path}:{idx+1}',
                 "table_source": self.file_path,
             }
-            if len(docs) == 0:
+            if len(docs) == 0 and not self.raw_content:
                 header_metadata = metadata.copy()
                 header_metadata["header"] = "true"
                 header = "\t".join([str(value) for value in row.keys()])
