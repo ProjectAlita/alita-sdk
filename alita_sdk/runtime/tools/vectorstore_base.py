@@ -187,12 +187,12 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         """
         Clean the vectorstore collection by deleting all indexed data.
         """
-        self._log_data(
+        self._log_tool_event(
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
         self.vector_adapter.clean_collection(self, collection_suffix)
-        self._log_data(
+        self._log_tool_event(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
@@ -212,10 +212,10 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
 
     def _clean_index(self, collection_suffix: str):
         logger.info("Cleaning index before re-indexing all documents.")
-        self._log_data("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
+        self._log_tool_event("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
         try:
             self._clean_collection(collection_suffix)
-            self._log_data("Previous index has been removed",
+            self._log_tool_event("Previous index has been removed",
                            tool_name="index_documents")
         except Exception as e:
             logger.warning(f"Failed to clean index: {str(e)}. Continuing with re-indexing.")
@@ -261,7 +261,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 if percent >= next_progress_point:
                     msg = f"Indexing progress: {percent}%. Processed {documents_count} of {total_docs} documents."
                     logger.debug(msg)
-                    self._log_data(msg)
+                    self._log_tool_event(msg)
                     next_progress_point += progress_step
             except Exception:
                 from traceback import format_exc
@@ -568,21 +568,6 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             )
         ])
         return result.content
-
-    def _log_data(self, message: str, tool_name: str = "index_data"):
-        """Log data and dispatch custom event for indexing progress"""
-
-        try:
-            dispatch_custom_event(
-                name="thinking_step",
-                data={
-                    "message": message,
-                    "tool_name": tool_name,
-                    "toolkit": "vectorstore",
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to dispatch progress event: {str(e)}")
 
     def get_available_tools(self):
         return [

@@ -155,24 +155,77 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         #
         if clean_index:
             self._clean_index(collection_suffix)
-        #
+        # 
         self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
         self._log_tool_event(f"Loading the documents to index...{kwargs}")
         documents = self._base_loader(**kwargs)
+        documents = list(documents) # consume/exhaust generator to count items
+        documents_count = len(documents)
+        documents = (doc for doc in documents)
         self._log_tool_event(f"Base documents were pre-loaded. "
                              f"Search for possible document duplicates and remove them from the indexing list...")
-        documents = self._reduce_duplicates(documents, collection_suffix)
+        # documents = self._reduce_duplicates(documents, collection_suffix)
         self._log_tool_event(f"Duplicates were removed. "
                              f"Processing documents to collect dependencies and prepare them for indexing...")
-        documents = self._extend_data(documents) # update content of not-reduced base document if needed (for sharepoint and similar)
-        documents = self._collect_dependencies(documents) # collect dependencies for base documents
-        self._log_tool_event(f"Documents were processed. "
-                             f"Applying chunking tool '{chunking_tool}' if specified and preparing documents for indexing...")
-        documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
-        list_documents = list(documents)
-        self._clean_metadata(list_documents)
-        self._log_tool_event(f"Documents are ready for indexing. Total documents to index: {len(list_documents)}")
-        return self._save_index(list_documents, collection_suffix=collection_suffix, progress_step=progress_step)
+        return self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, collection_suffix=collection_suffix, progress_step=progress_step)
+
+    def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, collection_suffix: Optional[str] = None, progress_step: int = 20):
+        self._log_tool_event(f"Base documents are ready for indexing. {base_total} base documents in total to index.")
+        from ..runtime.langchain.interfaces.llm_processor import add_documents
+        #
+        base_doc_counter = 0
+        total_counter = 0
+        pg_vector_add_docs_chunk = []
+        for base_doc in base_documents:
+            base_doc_counter += 1
+            self._log_tool_event(f"Processing dependent documents for base documents #{base_doc_counter}.")
+
+            # (base_doc for _ in range(1)) - wrap single base_doc to Generator in order to reuse existing code
+            documents = self._extend_data((base_doc for _ in range(1)))  # update content of not-reduced base document if needed (for sharepoint and similar)
+            documents = self._collect_dependencies(documents)  # collect dependencies for base documents
+            self._log_tool_event(f"Dependent documents were processed. "
+                                 f"Applying chunking tool '{chunking_tool}' if specified and preparing documents for indexing...")
+            documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
+            self._clean_metadata(documents)
+
+            logger.debug(f"Indexing base document #{base_doc_counter}: {base_doc} and all dependent documents: {documents}")
+
+            dependent_docs_counter = 0
+            # 
+            for doc in documents:
+                if not doc.page_content:
+                    # To avoid case when all documents have empty content
+                    # See llm_processor.add_documents which exclude metadata of docs with empty content
+                    continue
+                #
+                if 'id' not in doc.metadata or 'updated_on' not in doc.metadata:
+                    logger.warning(f"Document is missing required metadata field 'id' or 'updated_on': {doc.metadata}")
+                #
+                # if collection_suffix is provided, add it to metadata of each document
+                if collection_suffix:
+                    if not doc.metadata.get('collection'):
+                        doc.metadata['collection'] = collection_suffix
+                    else:
+                        doc.metadata['collection'] += f";{collection_suffix}"
+                #
+                try:
+                    pg_vector_add_docs_chunk.append(doc)
+                    dependent_docs_counter += 1
+                    if len(pg_vector_add_docs_chunk) >= self.max_docs_per_add:
+                        add_documents(vectorstore=self.vectorstore, documents=pg_vector_add_docs_chunk)
+                        self._log_tool_event(f"{len(pg_vector_add_docs_chunk)} documents have been indexed. Continuing...")
+                        pg_vector_add_docs_chunk = []
+                except Exception:
+                    from traceback import format_exc
+                    logger.error(f"Error: {format_exc()}")
+                    return {"status": "error", "message": f"Error: {format_exc()}"}
+            msg = f"Indexed base document #{base_doc_counter} out of {base_total} (with {dependent_docs_counter} dependencies)."
+            logger.debug(msg)
+            self._log_tool_event(msg)
+            total_counter += dependent_docs_counter
+        if pg_vector_add_docs_chunk:
+            add_documents(vectorstore=self.vectorstore, documents=pg_vector_add_docs_chunk)
+        return {"status": "ok", "message": f"successfully indexed {total_counter} documents"}
 
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
         from ..tools.chunkers import __all__ as chunkers
@@ -222,11 +275,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 dep.metadata[IndexerKeywords.PARENT.value] = document.metadata.get('id', None)
                 yield dep
 
-    def _clean_metadata(self, documents: list[Document]):
+    def _clean_metadata(self, documents: Generator[Document, None, None]):
         for document in documents:
             remove_keys = self._remove_metadata_keys()
             for key in remove_keys:
                 document.metadata.pop(key, None)
+            yield document
 
     def _reduce_duplicates(
             self,
@@ -235,11 +289,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             log_msg: str = "Verification of documents to index started"
     ) -> Generator[Document, None, None]:
         """Generic duplicate reduction logic for documents."""
-        self._log_data(log_msg, tool_name="index_documents")
+        self._log_tool_event(log_msg, tool_name="index_documents")
         indexed_data = self._get_indexed_data(collection_suffix)
         indexed_keys = set(indexed_data.keys())
         if not indexed_keys:
-            self._log_data("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
+            self._log_tool_event("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
             yield from documents
             return
 
@@ -257,7 +311,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 yield document
 
         if docs_to_remove:
-            self._log_data(
+            self._log_tool_event(
                 f"Removing {len(docs_to_remove)} documents from vectorstore that are already indexed with different updated_on.",
                 tool_name="index_documents"
             )

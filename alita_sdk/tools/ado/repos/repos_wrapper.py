@@ -24,7 +24,8 @@ from msrest.authentication import BasicAuthentication
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
 from ..utils import extract_old_new_pairs, generate_diff, get_content_from_generator
-from ...elitea_base import BaseCodeToolApiWrapper
+from ...code_indexer_toolkit import CodeIndexerToolkit
+from ...utils.available_tools_decorator import extend_with_parent_available_tools
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +243,7 @@ class ArgsSchema(Enum):
     )
 
 
-class ReposApiWrapper(BaseCodeToolApiWrapper):
+class ReposApiWrapper(CodeIndexerToolkit):
     # TODO use ado_repos_configuration fields
     organization_url: Optional[str]
     project: Optional[str]
@@ -293,7 +294,7 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
             if not branch_exists(active_branch):
                 raise ToolException(f"The active branch '{active_branch}' does not exist.")
 
-        return values
+        return super().validate_toolkit(values)
 
     def _get_commits(self, file_path: str, branch: str, top: int = None) -> List[GitCommitRef]:
         """
@@ -1174,9 +1175,10 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to retrieve commits due to error:\n{str(e)}")
 
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         """Return a list of available tools."""
-        tools = [
+        return [
             {
                 "ref": self.list_branches_in_repo,
                 "name": "list_branches_in_repo",
@@ -1267,8 +1269,4 @@ class ReposApiWrapper(BaseCodeToolApiWrapper):
                 "description": self.get_commits.__doc__,
                 "args_schema": ArgsSchema.GetCommits.value,
             },
-        ]        # Add vector search tools from base class (includes index_data + search tools)
-        vector_search_tools = self._get_vector_search_tools()
-        tools.extend(vector_search_tools)
-
-        return tools
+        ]
