@@ -1330,7 +1330,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
 
             # Use provided JQL query or default to all issues
             if not jql:
-                jql_query = "ORDER BY updated DESC"  # Default to get all issues ordered by update time
+                jql_query = "created >= \"1970-01-01\" ORDER BY updated DESC"  # Default to get all issues ordered by update time
             else:
                 jql_query = jql
 
