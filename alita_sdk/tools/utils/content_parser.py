@@ -297,7 +297,9 @@ def sanitize_for_postgres(text: str, replacement: str = "") -> str:
     return text.replace("\x00", replacement)
 
 
-def file_extension_by_chunker(chunker_name: str) -> str:
+def file_extension_by_chunker(chunker_name: str) -> str | None:
+    if not chunker_name:
+        return None
     name = chunker_name.lower()
     if name == "markdown":
         return ".md"
