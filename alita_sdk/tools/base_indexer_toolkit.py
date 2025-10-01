@@ -155,7 +155,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         #
         if clean_index:
             self._clean_index(collection_suffix)
-        # 
+        #
         self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
         self._log_tool_event(f"Loading the documents to index...{kwargs}")
         documents = self._base_loader(**kwargs)
@@ -191,7 +191,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             logger.debug(f"Indexing base document #{base_doc_counter}: {base_doc} and all dependent documents: {documents}")
 
             dependent_docs_counter = 0
-            # 
+            #
             for doc in documents:
                 if not doc.page_content:
                     # To avoid case when all documents have empty content
@@ -357,6 +357,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      **kwargs):
         """ Searches indexed documents in the vector store."""
         # build filter on top of collection_suffix
+
+        available_collections = super().list_collections()
+        if collection_suffix and collection_suffix not in available_collections:
+            return f"Collection '{collection_suffix}' not found. Available collections: {available_collections}"
+
         filter = self._build_collection_filter(filter, collection_suffix)
         found_docs = super().search_documents(
             query,

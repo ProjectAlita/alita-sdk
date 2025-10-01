@@ -20,7 +20,6 @@ class ArtifactToolkit(BaseToolkit):
         ArtifactToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             "artifact",
-            # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             bucket = (str, FieldInfo(description="Bucket name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ArtifactToolkit.toolkit_max_length})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
