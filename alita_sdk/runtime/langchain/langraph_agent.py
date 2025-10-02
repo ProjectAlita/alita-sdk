@@ -695,6 +695,7 @@ def set_defaults(d):
     type_defaults = {
         'str': '',
         'list': [],
+        'dict': {},
         'int': 0,
         'float': 0.0,
         'bool': False,
