@@ -760,8 +760,9 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 import re
                 def replace_var(match):
                     var_name = match.group(1)
-                    return str(all_variables.get(var_name, match.group(0)))
-                
+                    value = all_variables.get(var_name, match.group(0))
+                    return resolve_variables(value) if isinstance(value, str) else value
+
                 return re.sub(r'\{\{([^}]+)\}\}', replace_var, text)
             
             # Prepare the request
