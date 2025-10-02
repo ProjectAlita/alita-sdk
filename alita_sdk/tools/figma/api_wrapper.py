@@ -345,7 +345,8 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                             text_nodes[node['id']] = self.get_texts_recursive(node)
         # process image nodes
         if image_nodes:
-            images = self._client.get_file_images(file_key, image_nodes).images or {}
+            file_images = self._client.get_file_images(file_key, image_nodes)
+            images = self._client.get_file_images(file_key, image_nodes).images or {} if file_images else {}
             total_images = len(images)
             if total_images == 0:
                 logging.info(f"No images found for file {file_key}.")
