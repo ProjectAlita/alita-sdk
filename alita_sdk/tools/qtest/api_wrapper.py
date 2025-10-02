@@ -1,13 +1,13 @@
 import json
 import logging
 from traceback import format_exc
-from typing import Any
+from typing import Any, Optional
 
 import swagger_client
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
 from sklearn.feature_extraction.text import strip_tags
-from swagger_client import TestCaseApi, SearchApi, PropertyResource
+from swagger_client import TestCaseApi, SearchApi, PropertyResource, ModuleApi
 from swagger_client.rest import ApiException
 
 from ..elitea_base import BaseToolApiWrapper
@@ -99,6 +99,17 @@ DeleteTestCase = create_model(
     qtest_id=(int, Field(description="Qtest id e.g. 3253490123")),
 )
 
+GetModules = create_model(
+    "GetModules",
+    parent_id=(Optional[int],
+               Field(description="ID of the parent Module. Leave it blank to retrieve Modules under root",
+                                    default=None)),
+    search=(Optional[str],
+               Field(description="The free-text to search for Modules by names. You can utilize this parameter to search for Modules. Leave it blank to retrieve all Modules under root or the parent Module",
+                     default=None)),
+
+)
+
 class QtestApiWrapper(BaseToolApiWrapper):
     base_url: str
     qtest_project_id: int
@@ -139,6 +150,9 @@ class QtestApiWrapper(BaseToolApiWrapper):
     def __instantiate_test_api_instance(self) -> TestCaseApi:
         # Instantiate the TestCaseApi instance according to the qtest api documentation and swagger client
         return swagger_client.TestCaseApi(self._client)
+
+    def __instantiate_module_api_instance(self) -> ModuleApi:
+        return swagger_client.ModuleApi(self._client)
 
     def __build_body_for_create_test_case(self, test_cases_data: list[dict],
                                           folder_to_place_test_cases_to: str = '') -> list:
@@ -401,6 +415,20 @@ class QtestApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"""Unable to delete test case in project with id - {self.qtest_project_id} and qtest_id - {qtest_id}. \n Exception: \n {stacktrace}""") from e
 
+    def get_modules(self, parent_id: int = None, search: str = None):
+        """
+        :param int project_id: ID of the project (required)
+        :param int parent_id: ID of the parent Module. Leave it blank to retrieve Modules under root
+        :param str search: The free-text to search for Modules by names. You can utilize this parameter to search for Modules. Leave it blank to retrieve all Modules under root or the parent Module
+        """
+        module_api = self.__instantiate_module_api_instance()
+        kwargs = {}
+        if parent_id:
+            kwargs["parent_id"] = parent_id
+        if search:
+            kwargs["search"] = search
+        return module_api.get_sub_modules_of(project_id=self.qtest_project_id, **kwargs)
+
     def get_available_tools(self):
         return [
             {
@@ -444,5 +472,12 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 "description": """Link tests to Jira requirements. The input is jira issue id and th list of test ids in format '["TC-123", "TC-234", "TC-345"]'""",
                 "args_schema": QtestLinkTestCaseToJiraRequirement,
                 "ref": self.link_tests_to_jira_requirement,
+            },
+            {
+                "name": "get_modules",
+                "mode": "get_modules",
+                "description": self.get_modules.__doc__,
+                "args_schema": GetModules,
+                "ref": self.get_modules,
             }
         ]
