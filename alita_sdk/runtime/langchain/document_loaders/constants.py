@@ -288,7 +288,9 @@ document_loaders_map = {
         'allowed_to_override': [
             'max_tokens', 'mode', LoaderProperties.LLM.value,
             LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
+            LoaderProperties.PROMPT_DEFAULT.value,
+            "pages_per_chunk",
+            "extract_images"
         ]
     },
     '.py': {

@@ -270,7 +270,7 @@ def process_content_by_type(content, filename: str, llm=None, chunking_config=No
                 loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value)
                 loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
             loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
-            return loader.load()
+            yield from loader.load()
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
