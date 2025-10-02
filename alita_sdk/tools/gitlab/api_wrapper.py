@@ -2,6 +2,8 @@
 from typing import Any, Dict, List, Optional
 import fnmatch
 
+from langchain_core.tools import ToolException
+
 from ..code_indexer_toolkit import CodeIndexerToolkit
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
