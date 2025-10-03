@@ -1,4 +1,6 @@
 import hashlib
+import io
+import json
 import logging
 import re
 from typing import Any, Optional, Generator, List
@@ -6,6 +8,7 @@ from typing import Any, Optional, Generator, List
 from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
+from openpyxl.workbook.workbook import Workbook
 from pydantic import create_model, Field, model_validator
 
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
@@ -31,21 +34,56 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         return self.artifact.list(bucket_name, return_as_string)
 
     def create_file(self, filename: str, filedata: str, bucket_name = None):
+        if filename.endswith(".xlsx"):
+            data = json.loads(filedata)
+            filedata = self.create_xlsx_filedata(data)
+
         result = self.artifact.create(filename, filedata, bucket_name)
         
         # Dispatch custom event for file creation
-        dispatch_custom_event("file_modified", {
-            "message": f"File '{filename}' created successfully",
-            "filename": filename,
-            "tool_name": "createFile",
-            "toolkit": "artifact",
-            "operation_type": "create",
-            "meta": {
-                "bucket": bucket_name or self.bucket
-            }
-        })
-        
+        self._log_tool_event(
+            tool_name="file_modified",
+            message="""
+            {
+                "message": f"File '{filename}' created successfully",
+                "filename": filename,
+                "tool_name": "createFile",
+                "toolkit": "artifact",
+                "operation_type": "create",
+                "meta": {
+                    "bucket": bucket_name or self.bucket
+                }
+            }""")
+
         return result
+
+    def create_xlsx_filedata(self, data: dict[str, list[list]]) -> bytes:
+        try:
+            workbook = Workbook()
+
+            first_sheet = True
+            for sheet_name, sheet_data in data.items():
+                if first_sheet:
+                    sheet = workbook.active
+                    sheet.title = sheet_name
+                    first_sheet = False
+                else:
+                    sheet = workbook.create_sheet(title=sheet_name)
+
+                for row in sheet_data:
+                    sheet.append(row)
+
+            file_buffer = io.BytesIO()
+            workbook.save(file_buffer)
+            file_buffer.seek(0)
+
+            return file_buffer.read()
+
+        except json.JSONDecodeError:
+            raise ValueError("Invalid JSON format for .xlsx file data.")
+        except Exception as e:
+            raise ValueError(f"Error processing .xlsx file data: {e}")
+
 
     def read_file(self,
                   filename: str,
@@ -190,7 +228,17 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                 "args_schema": create_model(
                     "createFile", 
                     filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="Stringified content of the file")),
+                    filedata=(str, Field(description="""Stringified content of the file.
+                    Example for .xlsx filedata format:
+                    {
+                        "Sheet1":[
+                            ["Name", "Age", "City"],
+                            ["Alice", 25, "New York"],
+                            ["Bob", 30, "San Francisco"],
+                            ["Charlie", 35, "Los Angeles"]
+                        ]
+                    }
+                    """)),
                     bucket_name=bucket_name
                 )
             },
