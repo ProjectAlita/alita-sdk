@@ -1,5 +1,7 @@
+import base64
 import json
 import logging
+import re
 from traceback import format_exc
 from typing import Any
 
@@ -11,6 +13,7 @@ from swagger_client import TestCaseApi, SearchApi, PropertyResource
 from swagger_client.rest import ApiException
 
 from ..elitea_base import BaseToolApiWrapper
+from ..utils.content_parser import parse_file_content
 
 QTEST_ID = "QTest Id"
 
@@ -64,7 +67,10 @@ logger = logging.getLogger(__name__)
 
 QtestDataQuerySearch = create_model(
     "QtestDataQuerySearch",
-    dql=(str, Field(description="Qtest Data Query Language (DQL) query string")))
+    dql=(str, Field(description="Qtest Data Query Language (DQL) query string")),
+    extract_images=(Optional[bool], Field(description="Should images be processed by llm", default=False)),
+    prompt=(Optional[str], Field(description="Prompt for image processing", default=None))
+)
 
 QtestCreateTestCase = create_model(
     "QtestCreateTestCase",
@@ -92,6 +98,8 @@ UpdateTestCase = create_model(
 FindTestCaseById = create_model(
     "FindTestCaseById",
     test_id=(str, Field(description="Test case ID e.g. TC-1234")),
+    extract_images=(Optional[bool], Field(description="Should images be processed by llm", default=False)),
+    prompt=(Optional[str], Field(description="Prompt for image processing", default=None))
 )
 
 DeleteTestCase = create_model(
@@ -107,6 +115,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
     page: int = 1
     no_of_tests_shown_in_dql_search: int = 10
     _client: Any = PrivateAttr()
+    llm: Any
 
     @model_validator(mode='before')
     @classmethod
@@ -220,7 +229,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to create test case in project - {self.qtest_project_id} with the following content:\n{test_case_content}.\n\n Stacktrace was {stacktrace}") from e
 
-    def __parse_data(self, response_to_parse: dict, parsed_data: list):
+    def __parse_data(self, response_to_parse: dict, parsed_data: list, extract_images: bool=False, prompt: str=None):
         import html
         for item in response_to_parse['items']:
             parsed_data_row = {
@@ -231,8 +240,8 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 QTEST_ID: item['id'],
                 'Steps': list(map(lambda step: {
                     'Test Step Number': step[0] + 1,
-                    'Test Step Description': step[1]['description'],
-                    'Test Step Expected Result': step[1]['expected']
+                    'Test Step Description': self._process_image(step[1]['description'], extract_images, prompt),
+                    'Test Step Expected Result':  self._process_image(step[1]['expected'], extract_images, prompt)
                 }, enumerate(item['test_steps']))),
                 'Status': ''.join([properties['field_value_name'] for properties in item['properties']
                                    if properties['field_name'] == 'Status']),
@@ -245,7 +254,27 @@ class QtestApiWrapper(BaseToolApiWrapper):
             }
             parsed_data.append(parsed_data_row)
 
-    def __perform_search_by_dql(self, dql: str) -> list:
+    def _process_image(self, content: str, extract: bool=False, prompt: str=None):
+        #extract image by regex
+        img_regex = r'<img\s+src="data:image\/[^;]+;base64,([^"]+)"\s+[^>]*data-filename="([^"]+)"[^>]*>'
+
+        def replace_image(match):
+            base64_content = match.group(1)
+            file_name = match.group(2)
+
+            file_content = base64.b64decode(base64_content)
+
+            if extract:
+                description = f"<img description=\"{parse_file_content(file_content=file_content, file_name=file_name, prompt=prompt, llm=self.llm)}\">"
+            else:
+                description = ""
+
+            return description
+        #replace image tag by description
+        content = re.sub(img_regex, replace_image, content)
+        return content
+
+    def __perform_search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None) -> list:
         search_instance: SearchApi = swagger_client.SearchApi(self._client)
         body = swagger_client.ArtifactSearchParams(object_type='test-cases', fields=['*'],
                                                    query=dql)
@@ -256,7 +285,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
             api_response = search_instance.search_artifact(self.qtest_project_id, body, append_test_steps=append_test_steps,
                                                            include_external_properties=include_external_properties,
                                                            page_size=self.no_of_items_per_page, page=self.page)
-            self.__parse_data(api_response, parsed_data)
+            self.__parse_data(api_response, parsed_data, extract_images, prompt)
 
             if api_response['links']:
                 while api_response['links'][0]['rel'] == 'next':
@@ -265,7 +294,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
                                                                    append_test_steps=append_test_steps,
                                                                    include_external_properties=include_external_properties,
                                                                    page_size=self.no_of_items_per_page, page=next_page)
-                    self.__parse_data(api_response, parsed_data)
+                    self.__parse_data(api_response, parsed_data, extract_images, prompt)
         except ApiException as e:
             stacktrace = format_exc()
             logger.error(f"Exception when calling SearchApi->search_artifact: \n {stacktrace}")
@@ -333,9 +362,9 @@ class QtestApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error: {format_exc()}")
             raise e
 
-    def search_by_dql(self, dql: str):
+    def search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None):
         """Search for the test cases in qTest using Data Query Language """
-        parsed_data = self.__perform_search_by_dql(dql)
+        parsed_data = self.__perform_search_by_dql(dql, extract_images, prompt)
         return "Found " + str(
             len(parsed_data)) + f" Qtest test cases:\n" + str(parsed_data[:self.no_of_tests_shown_in_dql_search])
 
@@ -384,10 +413,10 @@ class QtestApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"""Unable to update test case in project with id - {self.qtest_project_id} and test id - {test_id}.\n Exception: \n {stacktrace}""") from e
 
-    def find_test_case_by_id(self, test_id: str) -> str:
+    def find_test_case_by_id(self, test_id: str, extract_images=False, prompt=None) -> str:
         """ Find the test case by its id. Id should be in format TC-123. """
         dql: str = f"Id = '{test_id}'"
-        return f"{self.search_by_dql(dql=dql)}"
+        return f"{self.search_by_dql(dql=dql, extract_images=extract_images, prompt=prompt)}"
 
     def delete_test_case(self, qtest_id: int) -> str:
         """ Delete the test case by its id. Id should be in format 3534653120. """

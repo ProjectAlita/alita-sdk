@@ -17,8 +17,10 @@ def get_tools(tool):
     toolkit = QtestToolkit.get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         qtest_project_id=tool['settings'].get('qtest_project_id', tool['settings'].get('project_id', None)),
+        no_of_tests_shown_in_dql_search=tool['settings'].get('no_of_tests_shown_in_dql_search'),
         qtest_configuration=tool['settings']['qtest_configuration'],
-        toolkit_name=tool.get('toolkit_name')
+        toolkit_name=tool.get('toolkit_name'),
+        llm=tool['settings'].get('llm', None)
     )
     return toolkit.tools
 
@@ -37,7 +39,10 @@ class QtestToolkit(BaseToolkit):
                 'configuration_types': ['qtest']})),
             qtest_project_id=(int, Field(default=None, description="QTest project id", json_schema_extra={'toolkit_name': True,
                                                                                             'max_toolkit_length': QtestToolkit.toolkit_max_length})),
-            selected_tools=(List[Literal[tuple(selected_tools)]],
+            no_of_tests_shown_in_dql_search=(Optional[int], Field(description="Max number of items returned by dql search",
+                                                                  default=10)),
+
+        selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "QTest", "icon_url": "qtest.svg",
                                                                   "categories": ["test management"],
