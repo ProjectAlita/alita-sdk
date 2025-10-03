@@ -126,6 +126,12 @@ class LLMNode(BaseTool):
                 llm = llm_client.with_structured_output(struct_model)
                 completion = llm.invoke(messages, config=config)
                 result = completion.model_dump()
+                # update result with types from state
+                for key in result.keys():
+                    if state and key in state and isinstance(state[key], dict):
+                        result[key] = {
+                            "type": state[key].get("type", "str"),
+                            "value": result[key]}
 
                 # Ensure messages are properly formatted
                 if result.get('messages') and isinstance(result['messages'], list):

@@ -226,10 +226,10 @@ class StateDefaultNode(Runnable):
             if isinstance(value, dict) and 'value' in value:
                 temp_value = value['value']
                 try:
-                    result[key] = ast.literal_eval(temp_value)
+                    result[key] = {"type": value.get("type", str), "value": ast.literal_eval(temp_value)}
                 except:
                     logger.debug("Unable to evaluate value, using as is")
-                    result[key] = temp_value
+                    result[key] = {"type": value.get("type", str), "value": temp_value}
         return result
 
 
@@ -556,7 +556,7 @@ def create_graph(
             elif node_type == 'llm':
                 output_vars = node.get('output', [])
                 output_vars_dict = {
-                    var: get_type_hints(state_class).get(var, str).__name__
+                    var: get_type_hints(state_class).get(var, str).get("type").__name__
                     for var in output_vars
                 }
                 

@@ -130,16 +130,20 @@ def parse_type(type_str):
 
 
 def create_state(data: Optional[dict] = None):
-    state_dict = {'input': str, 'router_output': str}  # Always include router_output
+    state_dict = {
+        'input': {'type': str, 'value': None},
+        'router_output': {'type': str, 'value': None}
+    }  # Always include router_output
     if not data:
         data = {'messages': 'list[str]'}
     for key, value in data.items():
         # support of old & new UI
-        value = value['type'] if isinstance(value, dict) else value
+        var_type = value['type'] if isinstance(value, dict) else value
+        var_value = value.get('value', None) if isinstance(value, dict) else None
         if key == 'messages':
-            state_dict[key] = Annotated[list[AnyMessage], add_messages]
-        elif value in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number', 'dict']:
-            state_dict[key] = parse_type(value)
+            state_dict[key] = {'type': Annotated[list[AnyMessage], add_messages], 'value': var_value}
+        elif var_type in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number', 'dict']:
+            state_dict[key] = {'type': parse_type(var_type), 'value': var_value}
     logger.debug(f"Created state: {state_dict}")
     return TypedDict('State', state_dict)
 
@@ -157,14 +161,14 @@ def create_params(input_variables: list[str], state: dict) -> dict:
     return {
         var: '\n'.join(str(message.content) for message in state.get('messages', []))
         if var == 'messages'
-        else str(state.get(var, ''))
+        else (state.get(var, {}).get('value', '') if var in state else '')
         for var in input_variables
     }
 
 def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables: list[str], state: dict, **kwargs) -> dict:
     input_data = {}
-    for key, value in input_mapping.items():
-        source_dict = value.get('source')
+    for key, mapping_value in input_mapping.items():
+        source_dict = mapping_value.get('source')
         if source_dict and source_dict != 'state':
             source = kwargs[source_dict]
             var_dict = source
@@ -172,12 +176,13 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
             source = state
             var_dict = create_params(input_variables, source)
 
-        if value['type'] == 'fstring':
-            input_data[key] = value['value'].format(**var_dict)
-        elif value['type'] == 'fixed':
-            input_data[key] = value['value']
+        if mapping_value['type'] == 'fstring':
+            input_data[key] = mapping_value['value'].format(**var_dict)
+        elif mapping_value['type'] == 'fixed':
+            input_data[key] = mapping_value['value']
         else:
-            input_data[key] = source.get(value['value'], "")
+            input_data[key] = source.get(mapping_value['value'], {}).get('value', '') \
+                if mapping_value['value'] in source else ''
     return input_data
 
 
