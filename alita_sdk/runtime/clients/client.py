@@ -231,25 +231,40 @@ class AlitaClient:
         if not self.model_image_generation:
             raise ValueError("Image generation model is not configured for this client")
 
-        # Prepare the request data
+        # Prepare the request data - only include non-"auto" parameters
+        # This prevents LiteLLM from adding unsupported parameters to extra_body
         image_generation_data = {
             "prompt": prompt,
             "model": self.model_image_generation,
             "n": n,
-            "size": size,
-            "quality": quality,
             "response_format": response_format,
+            # Enable drop_params to prevent LiteLLM from adding unsupported params to extra_body
+            "drop_params": True
         }
+
+        # Only add optional parameters if they have meaningful values
+        if size and size.lower() != "auto":
+            image_generation_data["size"] = size
+            
+        if quality and quality.lower() != "auto":
+            image_generation_data["quality"] = quality
 
         if style:
             image_generation_data["style"] = style
 
+        # Standard headers for image generation
+        image_headers = self.headers.copy()
+        image_headers.update({
+            "Content-Type": "application/json",
+        })
+
         logger.info(f"Generating image with model: {self.model_image_generation}, prompt: {prompt[:50]}...")
+        logger.debug(f"Image generation request data: {image_generation_data}")
 
         try:
             response = requests.post(
                 self.image_generation_url,
-                headers=self.headers,
+                headers=image_headers,
                 json=image_generation_data,
                 verify=False,
                 timeout=self.model_timeout
@@ -259,6 +274,12 @@ class AlitaClient:
 
         except requests.exceptions.HTTPError as e:
             logger.error(f"Image generation failed: {e.response.status_code} - {e.response.text}")
+            # Try to parse the error response for more details
+            try:
+                error_details = e.response.json()
+                logger.error(f"Error details: {error_details}")
+            except:
+                pass
             raise
         except requests.exceptions.RequestException as e:
             logger.error(f"Image generation request failed: {e}")
