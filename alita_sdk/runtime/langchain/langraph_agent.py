@@ -701,6 +701,9 @@ def set_defaults(d):
         'bool': False,
         # add more types as needed
     }
+    # Build state_types mapping with STRING type names (not actual type objects)
+    state_types = {}
+
     for k, v in d.items():
         # Skip 'input' key as it is not a state initial variable
         if k == 'input':
@@ -708,6 +711,16 @@ def set_defaults(d):
         # set value or default if type is defined
         if 'value' not in v:
             v['value'] = type_defaults.get(v['type'], None)
+
+        # Also build the state_types mapping with STRING type names
+        var_type = v['type'] if isinstance(v, dict) else v
+        if var_type in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number']:
+            # Store the string type name, not the actual type object
+            state_types[k] = var_type if var_type != 'number' else 'int'
+
+    # Add state_types as a default value that will be set at initialization
+    # Use string type names to avoid serialization issues
+    d['state_types'] = {'type': 'dict', 'value': state_types}
     return d
 
 def convert_dict_to_message(msg_dict):
