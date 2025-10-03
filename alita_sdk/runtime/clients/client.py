@@ -68,8 +68,10 @@ class AlitaClient:
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
+        self.image_generation_url = f"{self.base_url}{self.llm_path}/images/generations"
         self.configurations: list = configurations or []
         self.model_timeout = kwargs.get('model_timeout', 120)
+        self.model_image_generation = kwargs.get('model_image_generation')
 
     def get_mcp_toolkits(self):
         if user_id := self._get_real_user_id():
@@ -218,6 +220,49 @@ class AlitaClient:
             openai_organization=str(self.project_id),
         )
 
+    def generate_image(self,
+                       prompt: str,
+                       n: int = 1,
+                       size: str = "auto",
+                       quality: str = "auto",
+                       response_format: str = "b64_json",
+                       style: Optional[str] = None) -> dict:
+
+        if not self.model_image_generation:
+            raise ValueError("Image generation model is not configured for this client")
+
+        # Prepare the request data
+        image_generation_data = {
+            "prompt": prompt,
+            "model": self.model_image_generation,
+            "n": n,
+            "size": size,
+            "quality": quality,
+            "response_format": response_format,
+        }
+
+        if style:
+            image_generation_data["style"] = style
+
+        logger.info(f"Generating image with model: {self.model_image_generation}, prompt: {prompt[:50]}...")
+
+        try:
+            response = requests.post(
+                self.image_generation_url,
+                headers=self.headers,
+                json=image_generation_data,
+                verify=False,
+                timeout=self.model_timeout
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Image generation failed: {e.response.status_code} - {e.response.text}")
+            raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Image generation request failed: {e}")
+            raise
 
     def get_app_version_details(self, application_id: int, application_version_id: int) -> dict:
         url = f"{self.application_versions}/{application_id}/{application_version_id}"

@@ -38,7 +38,8 @@ class Assistant:
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
-        
+
+        self.alita_client = alita
         self.client = client
         # For predict agents, use the client as-is since it's already configured
         # if app_type == "predict":
@@ -191,6 +192,18 @@ class Assistant:
                 logger.warning(f"Failed to add PyodideSandboxTool: {e}")
         except Exception as e:
             logger.error(f"Error adding PyodideSandboxTool: {e}")
+        
+        # Add image generation tool if model is configured
+        if self.alita_client.model_image_generation is not None:
+            try:
+                from ..tools.image_generation import (
+                    create_image_generation_tool
+                )
+                image_tool = create_image_generation_tool(self.alita_client)
+                simple_tools.append(image_tool)
+                logger.info("Added ImageGenerationTool to react agent")
+            except Exception as e:
+                logger.error(f"Error adding ImageGenerationTool: {e}")
         
         # Set up memory/checkpointer if available
         checkpointer = None

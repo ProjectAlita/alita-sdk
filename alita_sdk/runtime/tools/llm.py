@@ -179,12 +179,25 @@ class LLMNode(BaseTool):
                                     logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
                                     tool_result = tool_to_execute.invoke(tool_args)
 
-                                    # Create tool message with result
+                                    # Create tool message with result - preserve structured content
                                     from langchain_core.messages import ToolMessage
-                                    tool_message = ToolMessage(
-                                        content=str(tool_result),
-                                        tool_call_id=tool_call_id
-                                    )
+                                    
+                                    # Check if tool_result is structured content (list of dicts)
+                                    # TODO: need solid check for being compatible with ToolMessage content format
+                                    if isinstance(tool_result, list) and all(
+                                        isinstance(item, dict) and 'type' in item for item in tool_result
+                                    ):
+                                        # Use structured content directly for multimodal support
+                                        tool_message = ToolMessage(
+                                            content=tool_result,
+                                            tool_call_id=tool_call_id
+                                        )
+                                    else:
+                                        # Fallback to string conversion for other tool results
+                                        tool_message = ToolMessage(
+                                            content=str(tool_result),
+                                            tool_call_id=tool_call_id
+                                        )
                                     new_messages.append(tool_message)
 
                                 except Exception as e:
