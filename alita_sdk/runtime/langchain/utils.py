@@ -131,6 +131,7 @@ def parse_type(type_str):
 
 def create_state(data: Optional[dict] = None):
     state_dict = {'input': str, 'router_output': str}  # Always include router_output
+    types_dict = {}
     if not data:
         data = {'messages': 'list[str]'}
     for key, value in data.items():
@@ -140,6 +141,9 @@ def create_state(data: Optional[dict] = None):
             state_dict[key] = Annotated[list[AnyMessage], add_messages]
         elif value in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number', 'dict']:
             state_dict[key] = parse_type(value)
+
+    state_dict["state_types"] = types_dict  # Default value for state_types
+    types_dict["state_types"] = dict
     logger.debug(f"Created state: {state_dict}")
     return TypedDict('State', state_dict)
 
