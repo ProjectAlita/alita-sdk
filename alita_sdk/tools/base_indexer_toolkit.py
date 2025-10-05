@@ -3,7 +3,7 @@ import logging
 from typing import Any, Optional, List, Literal, Dict, Generator
 
 from langchain_core.documents import Document
-from pydantic import create_model, Field, SecretStr
+from pydantic import create_model, Field, PrivateAttr, SecretStr
 
 from .utils.content_parser import file_extension_by_chunker, process_document_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
@@ -97,7 +97,7 @@ BaseIndexDataParams = create_model(
 
 class BaseIndexerToolkit(VectorStoreWrapperBase):
     """Base class for tool API wrappers that support vector store functionality."""
-
+    _base_total: int = PrivateAttr(default=None)
     doctype: str = "document"
 
     connection_string: Optional[SecretStr] = None
@@ -159,18 +159,15 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
         self._log_tool_event(f"Loading the documents to index...{kwargs}")
         documents = self._base_loader(**kwargs)
-        documents = list(documents) # consume/exhaust generator to count items
-        documents_count = len(documents)
-        documents = (doc for doc in documents)
         self._log_tool_event(f"Base documents were pre-loaded. "
                              f"Search for possible document duplicates and remove them from the indexing list...")
         # documents = self._reduce_duplicates(documents, collection_suffix)
         self._log_tool_event(f"Duplicates were removed. "
                              f"Processing documents to collect dependencies and prepare them for indexing...")
-        return self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, collection_suffix=collection_suffix, progress_step=progress_step)
+        return self._save_index_generator(documents, chunking_tool, chunking_config, collection_suffix=collection_suffix, progress_step=progress_step)
 
-    def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, collection_suffix: Optional[str] = None, progress_step: int = 20):
-        self._log_tool_event(f"Base documents are ready for indexing. {base_total} base documents in total to index.")
+    def _save_index_generator(self, base_documents: Generator[Document, None, None], chunking_tool, chunking_config, collection_suffix: Optional[str] = None, progress_step: int = 20):
+        self._log_tool_event(f"Base documents are ready for indexing. {self._base_total} base documents in total to index.")
         from ..runtime.langchain.interfaces.llm_processor import add_documents
         #
         base_doc_counter = 0
@@ -219,7 +216,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                     from traceback import format_exc
                     logger.error(f"Error: {format_exc()}")
                     return {"status": "error", "message": f"Error: {format_exc()}"}
-            msg = f"Indexed base document #{base_doc_counter} out of {base_total} (with {dependent_docs_counter} dependencies)."
+            msg = f"Indexed base document #{base_doc_counter} out of {self._base_total} (with {dependent_docs_counter} dependencies)."
             logger.debug(msg)
             self._log_tool_event(msg)
             total_counter += dependent_docs_counter

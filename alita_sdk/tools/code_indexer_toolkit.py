@@ -87,6 +87,7 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
         """
     
         _files = self.__handle_get_files("", self.__get_branch(branch))
+        self._base_total = len(_files)
         self._log_tool_event(message="Listing files in branch", tool_name="loader")
         logger.info(f"Files in branch: {_files}")
     
