@@ -20,3 +20,9 @@ def clean_string(s: str) -> str:
     # Replace these characters with an empty string
     cleaned_string = re.sub(clean_string_pattern, '', s)
     return cleaned_string
+
+
+def clean_node_str(s: str) -> str:
+    """Cleans a node string by removing all non-alphanumeric characters except underscores and spaces."""
+    cleaned_string = re.sub(r'[^\w\s]', '', s)
+    return cleaned_string

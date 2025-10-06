@@ -458,7 +458,7 @@ def create_graph(
                     if tool.name == tool_name:
                         if node_type == 'function':
                             lg_builder.add_node(node_id, FunctionTool(
-                                tool=tool, name=node['id'], return_type='dict',
+                                tool=tool, name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_mapping=node.get('input_mapping',
                                                        {'messages': {'type': 'variable', 'value': 'messages'}}),
@@ -469,7 +469,7 @@ def create_graph(
                                                        {'messages': {'type': 'variable', 'value': 'messages'}})
                             lg_builder.add_node(node_id, FunctionTool(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='str',
+                                name=node_id, return_type='str',
                                 output_variables=node.get('output', []),
                                 input_variables=input_params,
                                 input_mapping= input_mapping
@@ -493,7 +493,7 @@ def create_graph(
                         elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='dict',
+                                name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 structured_output=node.get('structured_output', False),
@@ -511,7 +511,7 @@ def create_graph(
                         elif node_type == 'loop':
                             lg_builder.add_node(node_id, LoopNode(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='dict',
+                                name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 task=node.get('task', '')
@@ -526,7 +526,7 @@ def create_graph(
                                         logger.debug(f"Loop tool discovered: {t}")
                                         lg_builder.add_node(node_id, LoopToolNode(
                                             client=client,
-                                            name=node['id'], return_type='dict',
+                                            name=node_id, return_type='dict',
                                             tool=tool, loop_tool=t,
                                             variables_mapping=node.get('variables_mapping', {}),
                                             output_variables=node.get('output', []),
@@ -546,7 +546,7 @@ def create_graph(
                                 client=client, tool=tool,
                                 index_tool=indexer_tool,
                                 input_mapping=node.get('input_mapping', {}),
-                                name=node['id'], return_type='dict',
+                                name=node_id, return_type='dict',
                                 chunking_tool=node.get('chunking_tool', None),
                                 chunking_config=node.get('chunking_config', {}),
                                 output_variables=node.get('output', []),
@@ -585,7 +585,7 @@ def create_graph(
                 lg_builder.add_node(node_id, LLMNode(
                     client=client,
                     input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
-                    name=node['id'],
+                    name=node_id,
                     return_type='dict',
                     structured_output_dict=output_vars_dict,
                     output_variables=output_vars,
@@ -596,7 +596,7 @@ def create_graph(
             elif node_type == 'router':
                 # Add a RouterNode as an independent node
                 lg_builder.add_node(node_id, RouterNode(
-                    name=node['id'],
+                    name=node_id,
                     condition=node.get('condition', ''),
                     routes=node.get('routes', []),
                     default_output=node.get('default_output', 'END'),
@@ -754,7 +754,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
     def invoke(self, input: Union[dict[str, Any], Any],
                config: Optional[RunnableConfig] = None,
                *args, **kwargs):
-        logger.info(f"Incomming Input: {input}")
+        logger.info(f"Incoming Input: {input}")
         if config is None:
             config = RunnableConfig()
         if not config.get("configurable", {}).get("thread_id", ""):
@@ -788,7 +788,9 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         try:
             if self.output_variables and self.output_variables[0] != "messages":
                 # If output_variables are specified, use the value of first one or use the last messages as default
-                output = result.get(self.output_variables[0], result['messages'][-1].content)
+                output = result.get(self.output_variables[0])
+                if not output:
+                    output = result['messages'][-1].content
             else:
                 output = result['messages'][-1].content
         except:
