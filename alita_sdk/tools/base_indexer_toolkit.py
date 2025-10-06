@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any, Optional, List, Literal, Dict, Generator
+import time
+from typing import Any, Optional, List, Dict, Generator
 
 from langchain_core.documents import Document
 from pydantic import create_model, Field, SecretStr
@@ -147,6 +148,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         yield from ()
 
     def index_data(self, **kwargs):
+        from ..runtime.langchain.interfaces.llm_processor import add_documents
         collection_suffix = kwargs.get("collection_suffix")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
@@ -156,6 +158,18 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         if clean_index:
             self._clean_index(collection_suffix)
         #
+        # create and add initial index meta document
+        index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{collection_suffix}", metadata={
+            "collection": collection_suffix,
+            "type": IndexerKeywords.INDEX_META_TYPE.value,
+            "indexed": 0,
+            "state": IndexerKeywords.INDEX_META_IN_PROGRESS.value,
+            "index_configuration": kwargs,
+            "created_on": time.time(),
+            "updated_on": time.time(),
+        })
+        index_meta_ids = add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc])
+        #
         self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
         self._log_tool_event(f"Loading the documents to index...{kwargs}")
         documents = self._base_loader(**kwargs)
@@ -164,10 +178,18 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         documents = (doc for doc in documents)
         self._log_tool_event(f"Base documents were pre-loaded. "
                              f"Search for possible document duplicates and remove them from the indexing list...")
-        # documents = self._reduce_duplicates(documents, collection_suffix)
+        documents = self._reduce_duplicates(documents, collection_suffix)
         self._log_tool_event(f"Duplicates were removed. "
                              f"Processing documents to collect dependencies and prepare them for indexing...")
-        return self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, collection_suffix=collection_suffix, progress_step=progress_step)
+        result = self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, collection_suffix=collection_suffix, progress_step=progress_step)
+        #
+        # update index meta document
+        index_meta_doc.metadata["indexed"] = result
+        index_meta_doc.metadata["state"] = IndexerKeywords.INDEX_META_COMPLETED.value
+        index_meta_doc.metadata["updated_on"] = time.time()
+        add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=index_meta_ids)
+        #
+        return {"status": "ok", "message": f"successfully indexed {result} documents"}
 
     def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, collection_suffix: Optional[str] = None, progress_step: int = 20):
         self._log_tool_event(f"Base documents are ready for indexing. {base_total} base documents in total to index.")
@@ -225,7 +247,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             total_counter += dependent_docs_counter
         if pg_vector_add_docs_chunk:
             add_documents(vectorstore=self.vectorstore, documents=pg_vector_add_docs_chunk)
-        return {"status": "ok", "message": f"successfully indexed {total_counter} documents"}
+        return total_counter
 
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
         from ..tools.chunkers import __all__ as chunkers
@@ -344,7 +366,40 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             filter.update({"collection": {
                 "$eq": collection_suffix.strip()
             }})
+        filter = {
+            "$and": [
+                filter,
+                {"$or": [
+                    {"type": {"$exists": False}},
+                    {"type": {"$ne": IndexerKeywords.INDEX_META_TYPE.value}}
+                ]},
+            ]
+        }
         return filter
+
+    def index_meta_read(self):
+        from sqlalchemy import func
+        from sqlalchemy.orm import Session
+
+        store = self.vectorstore
+        try:
+            with Session(store.session_maker.bind) as session:
+                meta = session.query(
+                        store.EmbeddingStore.id,
+                        store.EmbeddingStore.cmetadata
+                    ).filter(
+                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'type') == IndexerKeywords.INDEX_META_TYPE.value
+                    ).all()
+                return [
+                    {"id": id_, "metadata": cmetadata}
+                    for id_, cmetadata in meta
+                ]
+        except Exception as e:
+            logger.error(f"Failed to get index_meta from PGVector: {str(e)}")
+            return []
+
+    def index_meta_delete(self, index_meta_ids: list[str]):
+        self.vectorstore.delete(ids=index_meta_ids)
 
     def search_index(self,
                      query: str,
