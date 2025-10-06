@@ -8,10 +8,6 @@ from ..utils.utils import clean_string
 
 logger = logging.getLogger(__name__)
 
-def clean_node_str(s: str)-> str:
-        cleaned_string = re.sub(r'[^\w\s]', '', s)
-        return cleaned_string
-
 class RouterNode(BaseTool):
     name: str = 'RouterNode'
     description: str = 'A router node that evaluates a condition and routes accordingly.'
@@ -27,8 +23,8 @@ class RouterNode(BaseTool):
         template = EvaluateTemplate(self.condition, input_data)
         result = template.evaluate()
         logger.info(f"RouterNode evaluated condition '{self.condition}' with input {input_data} => {result}")
-        result = clean_node_str(str(result))
-        if result in self.routes:
+        result = clean_string(str(result))
+        if result in [clean_string(formatted_result) for formatted_result in self.routes]:
             # If the result is one of the routes, return it
             return {"router_output": result}
         elif result == self.default_output:
