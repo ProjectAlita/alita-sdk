@@ -754,18 +754,15 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                 logger.info(f"Skipping attachment {attachment['filename']} as it does not match pattern {attachment_pattern}")
                 continue
             logger.info(f"Processing attachment {attachment['filename']} with ID {attachment['attachment_id']}")
-            if self.api_version == "3":
-                attachment_data.append(self._client.get_attachment_content(attachment['attachment_id']))
-            else:
-                try:
-                    attachment_content = self._client.get_attachment_content(attachment['attachment_id'])
-                except Exception as e:
-                    logger.error(
-                        f"Failed to download attachment {attachment['filename']} for issue {jira_issue_key}: {str(e)}")
-                    attachment_content = self._client.get(
-                        path=f"secure/attachment/{attachment['attachment_id']}/{attachment['filename']}", not_json_response=True)
-                content_docs = process_content_by_type(attachment_content, attachment['filename'], llm=self.llm)
-                attachment_data.append("filename: " + attachment['filename'] + "\ncontent: " + str([doc.page_content for doc in content_docs]))
+            try:
+                attachment_content = self._client.get_attachment_content(attachment['attachment_id'])
+            except Exception as e:
+                logger.error(
+                    f"Failed to download attachment {attachment['filename']} for issue {jira_issue_key}: {str(e)}")
+                attachment_content = self._client.get(
+                    path=f"secure/attachment/{attachment['attachment_id']}/{attachment['filename']}", not_json_response=True)
+            content_docs = process_content_by_type(attachment_content, attachment['filename'], llm=self.llm, fallback_extensions=[".txt", ".png"])
+            attachment_data.append("filename: " + attachment['filename'] + "\ncontent: " + str([doc.page_content for doc in content_docs]))
 
         return "\n\n".join(attachment_data)
 
