@@ -553,6 +553,17 @@ def create_graph(
                                 input_variables=node.get('input', ['messages']),
                                 structured_output=node.get('structured_output', False)))
                         break
+            elif node_type == 'code':
+                from ..tools.sandbox import create_sandbox_tool
+                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
+                lg_builder.add_node(node_id, FunctionTool(
+                    tool=sandbox_tool, name=node['id'], return_type='dict',
+                    output_variables=node.get('output', []),
+                    input_mapping=node.get('input_mapping',
+                                       {'code':
+                                            {'type': 'fixed', 'value': node.get('code', 'Code block is empty')}
+                                        }),
+                    input_variables=node.get('input', ['messages'])))
             elif node_type == 'llm':
                 output_vars = node.get('output', [])
                 output_vars_dict = {

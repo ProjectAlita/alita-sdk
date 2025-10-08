@@ -190,30 +190,32 @@ class PyodideSandboxTool(BaseTool):
                 self.session_bytes = result.session_bytes
                 self.session_metadata = result.session_metadata
             
-            # Format the output
-            output_parts = []
-            
+            result_dict = {}
+
             if result.result is not None:
-                output_parts.append(f"Result: {result.result}")
-            
+                result_dict["result"] = result.result
+
             if result.stdout:
-                output_parts.append(f"Output: {result.stdout}")
-            
+                result_dict["output"] = result.stdout
+
             if result.stderr:
-                output_parts.append(f"Error: {result.stderr}")
-            
+                result_dict["error"] = result.stderr
+
             if result.status == 'error':
-                output_parts.append(f"Execution failed with status: {result.status}")
-            
+                result_dict["status"] = "Execution failed"
+
             execution_info = f"Execution time: {result.execution_time:.2f}s"
             if result.session_metadata and 'packages' in result.session_metadata:
                 packages = result.session_metadata.get('packages', [])
                 if packages:
                     execution_info += f", Packages: {', '.join(packages)}"
-            
-            output_parts.append(execution_info)
-            
-            return "\n".join(output_parts) if output_parts else "Code executed successfully (no output)"
+
+            result_dict["execution_info"] = execution_info
+            result_dict["formatted_output"] = "\n".join(
+                f"{key}: {value}" for key, value in result_dict.items() if key != "formatted_output"
+            )
+
+            return result_dict
             
         except Exception as e:
             logger.error(f"Error executing code in sandbox: {e}")
