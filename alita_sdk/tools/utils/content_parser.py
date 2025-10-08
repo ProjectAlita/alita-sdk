@@ -229,51 +229,65 @@ def process_document_by_type(content, extension_source: str, document: Document 
         )
 
 
-def process_content_by_type(content, filename: str, llm=None, chunking_config=None) -> \
+def process_content_by_type(content, filename: str, llm=None, chunking_config=None, fallback_extensions=None) -> \
         Generator[Document, None, None]:
     """Process the content of a file based on its type using a configured loader."""
     temp_file_path = None
-    try:
-        match = re.search(r'\.([^.]+)$', filename)
-        extension = f".{match.group(1).lower()}" if match else ".txt"
+    extensions = fallback_extensions if fallback_extensions else []
+    match = re.search(r'\.([^.]+)$', filename)
 
-        with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            if content is None:
-                logger.warning(
-                    f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
-                return []
+    if match:
+        extensions.insert(0, f".{match.group(1).lower()}")
+    elif not extensions:
+        extensions = [".txt"]
 
-            temp_file.write(content)
-            temp_file.flush()
-
-            loader_config = loaders_map.get(extension)
-            if not loader_config:
-                logger.warning(f"No loader found for file extension: {extension}. File: {temp_file_path}")
-                return []
-
-            loader_cls = loader_config['class']
-            loader_kwargs = loader_config['kwargs']
-            # Determine which loader configuration keys are allowed to be overridden by user input.
-            # If 'allowed_to_override' is specified in the loader configuration, use it; otherwise, allow all keys in loader_kwargs.
-            allowed_to_override = loader_config.get('allowed_to_override', list(loader_kwargs.keys()))
-            # If a chunking_config is provided and contains custom configuration for the current file extension,
-            # update loader_kwargs with user-supplied values, but only for keys explicitly permitted in allowed_to_override.
-            # This ensures that only safe and intended parameters can be customized, preventing accidental or unauthorized changes
-            # to critical loader settings.
-            if chunking_config and (users_config_for_extension := chunking_config.get(extension, {})):
-                for key in set(users_config_for_extension.keys()) & set(allowed_to_override):
-                    loader_kwargs[key] = users_config_for_extension[key]
-            if LoaderProperties.LLM.value in loader_kwargs:
-                loader_kwargs[LoaderProperties.LLM.value] = llm
-            if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs:
-                loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value)
-                loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
-            loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
-            yield from loader.load()
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+    for extension in extensions:
+        try:
+            with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
+                temp_file_path = temp_file.name
+                if content is None:
+                    logger.warning(
+                        f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
+                    return []
+    
+                temp_file.write(content)
+                temp_file.flush()
+    
+                loader_config = loaders_map.get(extension)
+                if not loader_config:
+                    logger.warning(f"No loader found for file extension: {extension}. File: {temp_file_path}")
+                    return []
+    
+                loader_cls = loader_config['class']
+                loader_kwargs = loader_config['kwargs']
+                # Determine which loader configuration keys are allowed to be overridden by user input.
+                # If 'allowed_to_override' is specified in the loader configuration, use it; otherwise, allow all keys in loader_kwargs.
+                allowed_to_override = loader_config.get('allowed_to_override', list(loader_kwargs.keys()))
+                # If a chunking_config is provided and contains custom configuration for the current file extension,
+                # update loader_kwargs with user-supplied values, but only for keys explicitly permitted in allowed_to_override.
+                # This ensures that only safe and intended parameters can be customized, preventing accidental or unauthorized changes
+                # to critical loader settings.
+                if chunking_config and (users_config_for_extension := chunking_config.get(extension, {})):
+                    for key in set(users_config_for_extension.keys()) & set(allowed_to_override):
+                        loader_kwargs[key] = users_config_for_extension[key]
+                if LoaderProperties.LLM.value in loader_kwargs:
+                    loader_kwargs[LoaderProperties.LLM.value] = llm
+                if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs:
+                    loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value)
+                    loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
+                loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
+                yield from loader.load()
+                break
+        except Exception as e:
+            if fallback_extensions:
+                logger.warning(f"Error loading attachment: {str(e)} for file {temp_file_path} (extension: {extension})")
+                logger.warning(f"Continuing with fallback extensions: {fallback_extensions}.")
+                continue
+            else:
+                raise e
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
 # FIXME copied from langchain_core/utils/strings.py of 0.3.74 version
 # https://github.com/langchain-ai/langchain/pull/32157
