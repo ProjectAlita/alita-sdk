@@ -45,18 +45,19 @@ class FunctionTool(BaseTool):
             )
             logger.info(f"ToolNode response: {tool_result}")
             # handler for PyodideSandboxTool
-            if (self.tool and self.tool.name == 'pyodide_sandbox'):
+            if self.tool and self.tool.name.lower() == 'pyodide_sandbox':
                 #walkthrough the output variables and assign the values from tool_result dict
                 tool_result_converted = {}
+                # if no output variables defined, return the whole result as dict to a state
+                if not self.output_variables:
+                    return tool_result if isinstance(tool_result, dict) else {"result": tool_result}
                 for var in self.output_variables:
                     if var in tool_result:
                         tool_result_converted[var] = tool_result[var]
                     else:
+                        # handler in case user points to a var that is not in the output of the tool
                         tool_result_converted[var] = tool_result.get('result', 'Execution result is missing')
                 return tool_result_converted
-
-
-
 
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
