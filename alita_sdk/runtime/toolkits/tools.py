@@ -165,7 +165,7 @@ def _mcp_tools(tools_list, alita):
                 if not selected_tools or tool_name in selected_tools:
                     if server_tool := _init_single_mcp_tool(server_toolkit_name,
                                                             # selected_toolkit["name"] is None for toolkit_test
-                                                            selected_toolkit["name"] if selected_toolkit.get("name")
+                                                            selected_toolkit["toolkit_name"] if selected_toolkit.get("toolkit_name")
                                                             else server_toolkit_name,
                                                             available_tool, alita, selected_toolkit['settings']):
                         tools.append(server_tool)
