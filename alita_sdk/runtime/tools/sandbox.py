@@ -211,9 +211,9 @@ class PyodideSandboxTool(BaseTool):
                     execution_info += f", Packages: {', '.join(packages)}"
 
             result_dict["execution_info"] = execution_info
-            result_dict["formatted_output"] = "\n".join(
-                f"{key}: {value}" for key, value in result_dict.items() if key != "formatted_output"
-            )
+            # result_dict["formatted_output"] = "\n".join(
+            #     f"{key}: {value}" for key, value in result_dict.items() if key != "formatted_output"
+            # )
 
             return result_dict
             
