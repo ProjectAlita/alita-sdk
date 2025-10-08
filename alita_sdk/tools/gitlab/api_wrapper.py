@@ -1,13 +1,13 @@
 # api_wrapper.py
-from typing import Any, Dict, List, Optional
 import fnmatch
+from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import ToolException
-
-from ..code_indexer_toolkit import CodeIndexerToolkit
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
+from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..utils.content_parser import parse_file_content
 
 AppendFileModel = create_model(
     "AppendFileModel",
@@ -318,7 +318,9 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
     def read_file(self, file_path: str, branch: str) -> str:
         self.set_active_branch(branch)
         file = self.repo_instance.files.get(file_path, branch)
-        return file.decode().decode("utf-8")
+        return parse_file_content(file_name=file_path,
+                                  file_content=file.decode(),
+                                  llm=self.llm)
 
     def update_file(self, file_query: str, branch: str) -> str:
         if branch == self.branch:
