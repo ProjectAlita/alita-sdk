@@ -1,3 +1,4 @@
+import json
 import logging
 from json import dumps
 
@@ -21,6 +22,7 @@ class FunctionTool(BaseTool):
     input_variables: Optional[list[str]] = None
     input_mapping: Optional[dict[str, dict]] = None
     output_variables: Optional[list[str]] = None
+    structured_output: Optional[bool] = False
 
     def invoke(
             self,
@@ -45,15 +47,26 @@ class FunctionTool(BaseTool):
             )
             logger.info(f"ToolNode response: {tool_result}")
             # handler for PyodideSandboxTool
-            if self.tool.name.lower() == 'pyodide_sandbox' and self.output_variables:
-                #walkthrough the output variables and assign the values from tool_result dict
+            if self.tool.name.lower() == 'pyodide_sandbox':
                 tool_result_converted = {}
-                for var in self.output_variables:
-                    if var in tool_result:
-                        tool_result_converted[var] = tool_result[var]
-                    else:
-                        # handler in case user points to a var that is not in the output of the tool
-                        tool_result_converted[var] = tool_result.get('result', 'Execution result is missing')
+                if self.output_variables:
+                    for var in self.output_variables:
+                        if var in tool_result:
+                            tool_result_converted[var] = tool_result[var]
+                        else:
+                            # handler in case user points to a var that is not in the output of the tool
+                            tool_result_converted[var] = tool_result.get('result', 'Execution result is missing')
+                else:
+                    tool_result_converted.update({"messages": [{"role": "assistant", "content": dumps(tool_result)}]})
+
+                if self.structured_output:
+                    # execute code tool and update state variables
+                    try:
+                        result_value = tool_result.get('result', {})
+                        tool_result_converted.update(result_value if isinstance(result_value, dict)
+                                                     else json.loads(result_value))
+                    except json.JSONDecodeError:
+                        logger.error(f"JSONDecodeError: {tool_result}")
                 return tool_result_converted
 
             if not self.output_variables:
