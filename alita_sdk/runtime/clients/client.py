@@ -213,7 +213,6 @@ class AlitaClient:
             streaming=model_config.get("streaming", True),
             stream_usage=model_config.get("stream_usage", True),
             max_tokens=model_config.get("max_tokens", None),
-            top_p=model_config.get("top_p"),
             temperature=model_config.get("temperature"),
             max_retries=model_config.get("max_retries", 3),
             seed=model_config.get("seed", None),
