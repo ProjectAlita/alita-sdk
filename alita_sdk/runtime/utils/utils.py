@@ -11,6 +11,9 @@ class IndexerKeywords(Enum):
     UPDATED_ON = 'updated_on'
     CONTENT_IN_BYTES = 'loader_content'
     CONTENT_FILE_NAME = 'loader_content_type'
+    INDEX_META_TYPE = 'index_meta'
+    INDEX_META_IN_PROGRESS = 'in_progress'
+    INDEX_META_COMPLETED = 'completed'
 
 # This pattern matches characters that are NOT alphanumeric, underscores, or hyphens
 clean_string_pattern = re.compile(r'[^a-zA-Z0-9_.-]')
