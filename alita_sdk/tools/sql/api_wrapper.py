@@ -1,8 +1,8 @@
 import logging
-from typing import Optional, Any
+from typing import Optional
 
-from pydantic import BaseModel, create_model, model_validator, Field, SecretStr
-from pydantic.fields import PrivateAttr
+from pydantic import create_model, SecretStr, model_validator
+from pydantic.fields import PrivateAttr, Field
 from sqlalchemy import create_engine, text, inspect, Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -27,7 +27,7 @@ class SQLApiWrapper(BaseToolApiWrapper):
     username: str
     password: SecretStr
     database_name: str
-    _client: Optional[Engine] = PrivateAttr()
+    _client: Optional[Engine] = PrivateAttr(default=None)
 
     @model_validator(mode='before')
     @classmethod
@@ -35,27 +35,55 @@ class SQLApiWrapper(BaseToolApiWrapper):
         for field in SQLConfig.model_fields:
             if field not in values or not values[field]:
                 raise ValueError(f"{field} is a required field and must be provided.")
-
-        dialect = values['dialect']
-        host = values['host']
-        username = values['username']
-        password = values['password']
-        database_name = values['database_name']
-        port = values['port']
-
-        if dialect == SQLDialect.POSTGRES:
-            connection_string = f'postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}'
-        elif dialect == SQLDialect.MYSQL:
-            connection_string = f'mysql+pymysql://{username}:{password}@{host}:{port}/{database_name}'
-        else:
-            raise ValueError(f"Unsupported database type. Supported types are: {[e.value for e in SQLDialect]}")
-
-        cls._client = create_engine(connection_string)
         return values
+
+    def _mask_password_in_error(self, error_message: str) -> str:
+        """Mask password in error messages, showing only last 4 characters."""
+        password_str = self.password.get_secret_value()
+        if len(password_str) <= 4:
+            masked_password = "****"
+        else:
+            masked_password = "****" + password_str[-4:]
+
+        # Replace password in error message
+        return error_message.replace(password_str, masked_password)
+
+    @property
+    def client(self) -> Engine:
+        """Lazy property to create and return database engine with error handling."""
+        if self._client is None:
+            try:
+                dialect = self.dialect
+                host = self.host
+                username = self.username
+                password = self.password.get_secret_value()
+                database_name = self.database_name
+                port = self.port
+
+                if dialect == SQLDialect.POSTGRES:
+                    connection_string = f'postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}'
+                elif dialect == SQLDialect.MYSQL:
+                    connection_string = f'mysql+pymysql://{username}:{password}@{host}:{port}/{database_name}'
+                else:
+                    raise ValueError(f"Unsupported database type. Supported types are: {[e.value for e in SQLDialect]}")
+
+                self._client = create_engine(connection_string)
+
+                # Test the connection
+                with self._client.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+
+            except Exception as e:
+                error_message = str(e)
+                masked_error = self._mask_password_in_error(error_message)
+                logger.error(f"Database connection failed: {masked_error}")
+                raise ValueError(f"Database connection failed: {masked_error}")
+
+        return self._client
 
     def execute_sql(self, sql_query: str):
         """Executes the provided SQL query on the configured database."""
-        engine = self._client
+        engine = self.client
         maker_session = sessionmaker(bind=engine)
         session = maker_session()
         try:
@@ -78,7 +106,7 @@ class SQLApiWrapper(BaseToolApiWrapper):
 
     def list_tables_and_columns(self):
         """Lists all tables and their columns in the configured database."""
-        inspector = inspect(self._client)
+        inspector = inspect(self.client)
         data = {}
         tables = inspector.get_table_names()
         for table in tables:
