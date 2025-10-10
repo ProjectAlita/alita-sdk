@@ -805,15 +805,17 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 output = result['messages'][-1].content
         except:
             output = list(result.values())[-1]
-        thread_id = None
         config_state = self.get_state(config)
-        if config_state.next:
-            thread_id = config['configurable']['thread_id']
+        is_execution_finished = not config_state.next
+        if is_execution_finished:
+            thread_id = None
+
+
 
         result_with_state = {
             "output": output,
             "thread_id": thread_id,
-            "execution_finished": not config_state.next
+            "execution_finished": is_execution_finished
         }
 
         # Include all state values in the result
