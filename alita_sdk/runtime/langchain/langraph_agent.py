@@ -556,10 +556,59 @@ def create_graph(
             elif node_type == 'code':
                 from ..tools.sandbox import create_sandbox_tool
                 sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
+                # # pickle the client
+                # import pickle
+                #
+                # serialized_client = pickle.dumps(client)
+                #
+                # # code = node.get('code', "return 'Code block is empty'")
+                # # f"""import pickle
+                # # alita = pickle.loads({serialized_client})
+                # # \n\n{code}"""
+                #
+                # code = node.get('code', "return 'Code block is empty'")
+                # f"""import pickle
+                # alita = pickle.loads({serialized_client})
+                #
+                # print(alita.temperature)"""
+
+
+                #
+                client_init_params = {
+                    'base_url': client.base_url,
+                    'project_id': client.project_id,
+                    'auth_token': client.auth_token,
+                    'api_extra_headers': getattr(client, 'api_extra_headers', None),
+                    'configurations': getattr(client, 'configurations', None),
+                    'model_timeout': getattr(client, 'model_timeout', 120),
+                    'model_image_generation': getattr(client, 'model_image_generation', None),
+                    'XSECRET': client.headers.get('X-SECRET', 'secret')
+                }
+
+                # Generate code that imports and recreates AlitaClient
+                code = f"""
+                # Import AlitaClient (adjust import path based on your project structure)
+                from alita_sdk.runtime.clients.client import AlitaClient
+
+                # Recreate the client with extracted parameters
+                alita = AlitaClient(
+                    base_url="{client_init_params['base_url']}",
+                    project_id={client_init_params['project_id']},
+                    auth_token="{client_init_params['auth_token']}",
+                    api_extra_headers={client_init_params['api_extra_headers']},
+                    configurations={client_init_params['configurations']},
+                    model_timeout={client_init_params['model_timeout']},
+                    model_image_generation={client_init_params['model_image_generation']},
+                    XSECRET="{client_init_params['XSECRET']}"
+                )
+                
+                print(alita.temperature)
+                """
+                # {node.get('code', "return 'Code block is empty'")}
                 lg_builder.add_node(node_id, FunctionTool(
                     tool=sandbox_tool, name=node['id'], return_type='dict',
                     output_variables=node.get('output', []),
-                    input_mapping={'code': {'type': 'fixed', 'value': node.get('code', 'Code block is empty')}},
+                    input_mapping={'code': {'type': 'fixed', 'value': code}},
                     input_variables=node.get('input', ['messages']),
                     structured_output=node.get('structured_output', False)
                 ))
