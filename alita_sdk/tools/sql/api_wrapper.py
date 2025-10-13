@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
 
+from langchain_core.tools import ToolException
 from pydantic import create_model, SecretStr, model_validator
 from pydantic.fields import PrivateAttr, Field
 from sqlalchemy import create_engine, text, inspect, Engine
@@ -45,8 +46,11 @@ class SQLApiWrapper(BaseToolApiWrapper):
         else:
             masked_password = "****" + password_str[-4:]
 
-        # Replace password in error message
-        return error_message.replace(password_str, masked_password)
+        # Replace all occurrences of the password, and any substring of the password that may appear in the error message
+        for part in [password_str, password_str.replace('@', ''), password_str.split('@')[-1]]:
+            if part and part in error_message:
+                error_message = error_message.replace(part, masked_password)
+        return error_message
 
     @property
     def client(self) -> Engine:
@@ -81,6 +85,21 @@ class SQLApiWrapper(BaseToolApiWrapper):
 
         return self._client
 
+    def _handle_database_errors(func):
+        """Decorator to catch exceptions and mask passwords in error messages."""
+
+        def wrapper(self, *args, **kwargs):
+            try:
+                return func(self, *args, **kwargs)
+            except Exception as e:
+                error_message = str(e)
+                masked_error = self._mask_password_in_error(error_message)
+                logger.error(f"Database operation failed in {func.__name__}: {masked_error}")
+                raise ToolException(masked_error)
+
+        return wrapper
+
+    @_handle_database_errors
     def execute_sql(self, sql_query: str):
         """Executes the provided SQL query on the configured database."""
         engine = self.client
@@ -104,6 +123,7 @@ class SQLApiWrapper(BaseToolApiWrapper):
         finally:
             session.close()
 
+    @_handle_database_errors
     def list_tables_and_columns(self):
         """Lists all tables and their columns in the configured database."""
         inspector = inspect(self.client)
