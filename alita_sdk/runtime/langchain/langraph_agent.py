@@ -796,13 +796,14 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            if self.output_variables and self.output_variables[0] != "messages":
-                # If output_variables are specified, use the value of first one or use the last messages as default
-                output = result.get(self.output_variables[0])
-                if not output:
-                    output = result['messages'][-1].content
-            else:
-                output = result['messages'][-1].content
+            # if self.output_variables and self.output_variables[0] != "messages":
+            #     # If output_variables are specified, use the value of first one or use the last messages as default
+            #     output = result.get(self.output_variables[0])
+            #     if not output:
+            #         output = result['messages'][-1].content
+            # else:
+            #     output = result['messages'][-1].content
+            output = result['messages'][-1].content
         except:
             output = list(result.values())[-1]
         config_state = self.get_state(config)
