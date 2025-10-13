@@ -340,7 +340,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Invalid JSON response from Postman API: {str(e)}")
 
-    def _apply_authentication(self, headers, params, all_variables, resolve_variables):
+    def _apply_authentication(self, headers, params, all_variables, native_auth, resolve_variables):
         """Apply authentication based on environment_config auth settings.
         
         Supports multiple authentication types:
@@ -363,14 +363,15 @@ class PostmanApiWrapper(BaseToolApiWrapper):
         import base64
         
         # Handle structured auth configuration only - no backward compatibility
-        auth_config = self.environment_config.get('auth')
+        auth_config = self.environment_config.get('auth', native_auth)
         if auth_config and isinstance(auth_config, dict):
             auth_type = auth_config.get('type', '').lower()
             auth_params = auth_config.get('params', {})
             
             if auth_type == 'bearer':
                 # Bearer token authentication
-                token = resolve_variables(str(auth_params.get('token', '')))
+                tokent_raw = auth_config.get('bearer', [{}])[0].get('value', '')
+                token = resolve_variables(str(tokent_raw))
                 if token:
                     headers['Authorization'] = f'Bearer {token}'
                     
@@ -739,7 +740,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             all_variables = {}
             
             # 1. Start with environment_config variables (lowest priority)
-            all_variables.update(self.environment_config)
+            all_variables.update(self._get_variables_from_env_config())
             
             # 2. Add collection variables
             collection_variables = collection_data.get('variable', [])
@@ -760,8 +761,8 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 import re
                 def replace_var(match):
                     var_name = match.group(1)
-                    value = all_variables.get(var_name, match.group(0))
-                    return resolve_variables(value) if isinstance(value, str) else value
+                    value = all_variables.get(var_name, None)
+                    return resolve_variables(str(value)) if value else match.group(0)
 
                 return re.sub(r'\{\{([^}]+)\}\}', replace_var, text)
             
@@ -792,7 +793,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             headers = {}
             
             # Handle authentication from environment_config
-            self._apply_authentication(headers, params, all_variables, resolve_variables)
+            self._apply_authentication(headers, params, all_variables, request_data.get('auth', None), resolve_variables)
             
             # Add headers from request
             request_headers = request_data.get('header', [])
@@ -1641,7 +1642,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
 
         # Find the request
         request_item = self.analyzer.find_request_by_path(
-            collection_data["item"], request_path)
+            collection_data["item"], request_path, collection_data.get("auth", None))
         if not request_item:
             raise ToolException(f"Request '{request_path}' not found")
 
@@ -2161,4 +2162,13 @@ class PostmanApiWrapper(BaseToolApiWrapper):
         items = collection.get('item', [])
         parse_items(items)
         
+        return result
+    
+    def _get_variables_from_env_config(self):
+        """Extracts all enabled variables from the 'values' field in environment_config."""
+        result = {}
+        values = self.environment_config.get("values", [])
+        for var in values:
+            if var.get("enabled", True) and "key" in var and "value" in var:
+                result[var["key"]] = var["value"]
         return result
