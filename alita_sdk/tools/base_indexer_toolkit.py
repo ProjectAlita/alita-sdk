@@ -7,8 +7,10 @@ from typing import Any, Optional, List, Dict, Generator
 from langchain_core.documents import Document
 from pydantic import create_model, Field, SecretStr
 
+from .utils import make_json_serializable
 from .utils.content_parser import file_extension_by_chunker, process_document_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
+from ..runtime.langchain.document_loaders.constants import loaders_allowed_to_override
 from ..runtime.tools.vectorstore_base import VectorStoreWrapperBase
 from ..runtime.utils.utils import IndexerKeywords
 
@@ -93,7 +95,7 @@ BaseIndexDataParams = create_model(
                        description="Optional flag to enforce clean existing index before indexing new data")),
     progress_step=(Optional[int], Field(default=10, ge=0, le=100,
                          description="Optional step size for progress reporting during indexing")),
-    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
+    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default=loaders_allowed_to_override)),
 )
 
 

@@ -88,9 +88,9 @@ Other extra parameters (for particular toolkit needs) can be provided by the imp
 
 It is intended to provide unified settings for content parsers handling both base and dependent documents.  
 Some parsers support LLM capabilities for advanced content processing (for example, a PDF parser that analyzes images).  
-To enable LLM processing for such parsers, include _llm_ key in chunking_config with any value (e.g., 'True').  
+To enable LLM processing for such parsers, set _use_llm_ in chunking_config to _true_.  
 The optional _prompt_ parameter can be used to guide the LLM in processing the document content.  
-Use _prompt_default_ parameter with any value (e.g., 'True') to use built-in detailed prompt to process images.  
+Set _use_prompt_default_ to _true_ to use built-in detailed prompt to process images.  
 Note: the complexity of a prompt may affect processing time and token usage.  
-**Example:** `{".pdf": {"llm": true, "prompt": "Provide only information regarding colors and wrap output with image tag."}}`
+**Example:** `{".pdf": {"use_llm": true, "prompt": "Provide only information regarding colors and wrap output with image tag."}}`
 
