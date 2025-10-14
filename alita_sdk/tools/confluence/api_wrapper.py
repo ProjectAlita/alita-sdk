@@ -815,6 +815,10 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         from .loader import AlitaConfluenceLoader
         from copy import copy
         content_format = kwargs.get('content_format', 'view').lower()
+
+        self._index_include_attachments = kwargs.get('include_attachments', False)
+        self._include_extensions = kwargs.get('include_extensions', [])
+        self._skip_extensions = kwargs.get('skip_extensions', [])
         base_params = {
             'url': self.base_url,
             'space_key': self.space,
@@ -847,65 +851,79 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         try:
-            page_id = document.metadata.get('id')
-            attachments = self.client.get_attachments_from_content(page_id)
-            if not attachments or not attachments.get('results'):
-                return f"No attachments found for page ID {page_id}."
+            if self._index_include_attachments:
+                page_id = document.metadata.get('id')
+                attachments = self.client.get_attachments_from_content(page_id)
+                if not attachments or not attachments.get('results'):
+                    return f"No attachments found for page ID {page_id}."
 
-            # Get attachment history for created/updated info
-            history_map = {}
-            for attachment in attachments['results']:
-                try:
-                    hist = self.client.history(attachment['id'])
-                    history_map[attachment['id']] = hist
-                except Exception as e:
-                    logger.warning(f"Failed to fetch history for attachment {attachment.get('title', '')}: {str(e)}")
-                    history_map[attachment['id']] = None
+                # Get attachment history for created/updated info
+                history_map = {}
+                for attachment in attachments['results']:
+                    try:
+                        hist = self.client.history(attachment['id'])
+                        history_map[attachment['id']] = hist
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch history for attachment {attachment.get('title', '')}: {str(e)}")
+                        history_map[attachment['id']] = None
 
-            import re
-            for attachment in attachments['results']:
-                title = attachment.get('title', '')
-                file_ext = title.lower().split('.')[-1] if '.' in title else ''
+                import re
+                for attachment in attachments['results']:
+                    title = attachment.get('title', '')
+                    file_ext = title.lower().split('.')[-1] if '.' in title else ''
 
-                media_type = attachment.get('metadata', {}).get('mediaType', '')
-                # Core metadata extraction with history
-                hist = history_map.get(attachment['id']) or {}
-                created_by = hist.get('createdBy', {}).get('displayName', '') if hist else attachment.get('creator', {}).get('displayName', '')
-                created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
-                last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
+                    # Re-verify extension filters
+                    # Check if file should be skipped based on skip_extensions
+                    if any(re.match(pattern.replace('*', '.*') + '$', title, re.IGNORECASE)
+                           for pattern in self._skip_extensions):
+                        continue
 
-                metadata = {
-                    'name': title,
-                    'size': attachment.get('extensions', {}).get('fileSize', None),
-                    'creator': created_by,
-                    'created': created_date,
-                    'updated': last_updated,
-                    'media_type': media_type,
-                    'labels': [label['name'] for label in
-                               attachment.get('metadata', {}).get('labels', {}).get('results', [])],
-                    'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get(
-                        '_links', {}).get('download') else None
-                }
+                    # Check if file should be included based on include_extensions
+                    # If include_extensions is empty, process all files (that weren't skipped)
+                    if self._include_extensions and not (
+                    any(re.match(pattern.replace('*', '.*') + '$', title, re.IGNORECASE)
+                        for pattern in self._include_extensions)):
+                        continue
 
-                download_url = self.base_url.rstrip('/') + attachment['_links']['download']
+                    media_type = attachment.get('metadata', {}).get('mediaType', '')
+                    # Core metadata extraction with history
+                    hist = history_map.get(attachment['id']) or {}
+                    created_by = hist.get('createdBy', {}).get('displayName', '') if hist else attachment.get('creator', {}).get('displayName', '')
+                    created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
+                    last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
 
-                try:
-                    resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
-                    if resp.status_code == 200:
-                        content = resp.content
+                    metadata = {
+                        'name': title,
+                        'size': attachment.get('extensions', {}).get('fileSize', None),
+                        'creator': created_by,
+                        'created': created_date,
+                        'updated': last_updated,
+                        'media_type': media_type,
+                        'labels': [label['name'] for label in
+                                   attachment.get('metadata', {}).get('labels', {}).get('results', [])],
+                        'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get(
+                            '_links', {}).get('download') else None
+                    }
+
+                    download_url = self.base_url.rstrip('/') + attachment['_links']['download']
+
+                    try:
+                        resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
+                        if resp.status_code == 200:
+                            content = resp.content
+                        else:
+                            content = f"[Failed to download {download_url}: HTTP status code {resp.status_code}]"
+                    except Exception as e:
+                        content = f"[Error downloading content: {str(e)}]"
+
+                    if isinstance(content, str):
+                        yield Document(page_content=content, metadata=metadata)
                     else:
-                        content = f"[Failed to download {download_url}: HTTP status code {resp.status_code}]"
-                except Exception as e:
-                    content = f"[Error downloading content: {str(e)}]"
-
-                if isinstance(content, str):
-                    yield Document(page_content=content, metadata=metadata)
-                else:
-                    yield Document(page_content="", metadata={
-                        **metadata,
-                        IndexerKeywords.CONTENT_FILE_NAME.value: f".{file_ext}",
-                        IndexerKeywords.CONTENT_IN_BYTES.value: content
-                    })
+                        yield Document(page_content="", metadata={
+                            **metadata,
+                            IndexerKeywords.CONTENT_FILE_NAME.value: f".{file_ext}",
+                            IndexerKeywords.CONTENT_IN_BYTES.value: content
+                        })
         except Exception as e:
             yield from ()
 
@@ -1648,6 +1666,13 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             "include_restricted_content": (Optional[bool], Field(description="Include restricted content.", default=False)),
             "include_archived_content": (Optional[bool], Field(description="Include archived content.", default=False)),
             "include_attachments": (Optional[bool], Field(description="Include attachments.", default=False)),
+            'include_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to include when processing attachments: i.e. ['*.png', '*.jpg']. "
+                            "If empty, all files will be processed (except skip_extensions).",
+                default=[])),
+            'skip_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to skip when processing attachments: i.e. ['*.png', '*.jpg']",
+                default=[])),
             "include_comments": (Optional[bool], Field(description="Include comments.", default=False)),
             "include_labels": (Optional[bool], Field(description="Include labels.", default=True)),
             "ocr_languages": (Optional[str], Field(description="OCR languages for processing attachments.", default='eng')),
