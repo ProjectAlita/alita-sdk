@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import time
@@ -148,7 +149,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         yield from ()
 
     def index_data(self, **kwargs):
-        from ..runtime.langchain.interfaces.llm_processor import add_documents
         collection_suffix = kwargs.get("collection_suffix")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
@@ -158,17 +158,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         if clean_index:
             self._clean_index(collection_suffix)
         #
-        # create and add initial index meta document
-        index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{collection_suffix}", metadata={
-            "collection": collection_suffix,
-            "type": IndexerKeywords.INDEX_META_TYPE.value,
-            "indexed": 0,
-            "state": IndexerKeywords.INDEX_META_IN_PROGRESS.value,
-            "index_configuration": kwargs,
-            "created_on": time.time(),
-            "updated_on": time.time(),
-        })
-        index_meta_ids = add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc])
+        self.index_meta_init(collection_suffix, kwargs)
         #
         self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
         self._log_tool_event(f"Loading the documents to index...{kwargs}")
@@ -183,11 +173,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                              f"Processing documents to collect dependencies and prepare them for indexing...")
         result = self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, collection_suffix=collection_suffix, progress_step=progress_step)
         #
-        # update index meta document
-        index_meta_doc.metadata["indexed"] = result
-        index_meta_doc.metadata["state"] = IndexerKeywords.INDEX_META_COMPLETED.value
-        index_meta_doc.metadata["updated_on"] = time.time()
-        add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=index_meta_ids)
+        self.index_meta_update(collection_suffix, IndexerKeywords.INDEX_META_COMPLETED.value, result)
         #
         return {"status": "ok", "message": f"successfully indexed {result} documents"}
 
@@ -377,30 +363,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             }
         return filter
 
-    def index_meta_read(self):
-        from sqlalchemy import func
-        from sqlalchemy.orm import Session
-
-        store = self.vectorstore
-        try:
-            with Session(store.session_maker.bind) as session:
-                meta = session.query(
-                        store.EmbeddingStore.id,
-                        store.EmbeddingStore.cmetadata
-                    ).filter(
-                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'type') == IndexerKeywords.INDEX_META_TYPE.value
-                    ).all()
-                return [
-                    {"id": id_, "metadata": cmetadata}
-                    for id_, cmetadata in meta
-                ]
-        except Exception as e:
-            logger.error(f"Failed to get index_meta from PGVector: {str(e)}")
-            return []
-
-    def index_meta_delete(self, index_meta_ids: list[str]):
-        self.vectorstore.delete(ids=index_meta_ids)
-
     def search_index(self,
                      query: str,
                      collection_suffix: str = "",
@@ -480,6 +442,51 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             reranking_config=reranking_config, 
             extended_search=extended_search
         )
+    
+    def index_meta_init(self, collection_suffix: str, index_configuration: dict[str, Any]):
+        index_meta_raw = super().get_index_meta(collection_suffix)
+        from ..runtime.langchain.interfaces.llm_processor import add_documents
+        created_on = time.time()
+        metadata = {
+            "collection": collection_suffix,
+            "type": IndexerKeywords.INDEX_META_TYPE.value,
+            "indexed": 0,
+            "state": IndexerKeywords.INDEX_META_IN_PROGRESS.value,
+            "index_configuration": index_configuration,
+            "created_on": created_on,
+            "updated_on": created_on,
+            "history": "[]",
+        }
+        index_meta_ids = None
+        #
+        if index_meta_raw:
+            history_raw = index_meta_raw.get("metadata", {}).get("history", "[]")
+            if isinstance(history_raw, str) and history_raw.strip():
+                try:
+                    history = json.loads(history_raw)
+                except (json.JSONDecodeError, TypeError):
+                    history = []
+            else:
+                history = []
+            new_history_item = {k: v for k, v in index_meta_raw.get("metadata", {}).items() if k != "history"}
+            history.append(new_history_item)
+            metadata["history"] = json.dumps(history)
+            index_meta_ids = [index_meta_raw.get("id")]
+        #
+        index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{collection_suffix}", metadata=metadata)
+        add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=index_meta_ids)
+
+    def index_meta_update(self, collection_suffix: str, state: str, result: int):
+        index_meta_raw = super().get_index_meta(collection_suffix)
+        from ..runtime.langchain.interfaces.llm_processor import add_documents
+        #
+        if index_meta_raw:
+            metadata = copy.deepcopy(index_meta_raw.get("metadata", {}))
+            metadata["indexed"] = result
+            metadata["state"] = state
+            metadata["updated_on"] = time.time()
+            index_meta_doc = Document(page_content=index_meta_raw.get("content", ""), metadata=metadata)
+            add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=[index_meta_raw.get("id")])
 
     def get_available_tools(self):
         """

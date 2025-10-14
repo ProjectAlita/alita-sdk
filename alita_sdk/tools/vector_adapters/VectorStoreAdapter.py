@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, List
 from logging import getLogger
 
+from ...runtime.utils.utils import IndexerKeywords
+
 logger = getLogger(__name__)
 
 
@@ -46,6 +48,11 @@ class VectorStoreAdapter(ABC):
     @abstractmethod
     def add_to_collection(self, vectorstore_wrapper, entry_id, new_collection_value):
         """Add a new collection name to the metadata"""
+        pass
+
+    @abstractmethod
+    def get_index_meta(self, vectorstore_wrapper, collection_suffix: str) -> List[Dict[str, Any]]:
+        """Get all index_meta entries from the vector store."""
         pass
 
 
@@ -265,6 +272,29 @@ class PGVectorAdapter(VectorStoreAdapter):
         except Exception as e:
             logger.error(f"Failed to update collection for entry ID {entry_id}: {str(e)}")
 
+    def get_index_meta(self, vectorstore_wrapper, collection_suffix: str) -> List[Dict[str, Any]]:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import func
+
+        store = vectorstore_wrapper.vectorstore
+        try:
+            with Session(store.session_maker.bind) as session:
+                meta = session.query(
+                    store.EmbeddingStore.id,
+                    store.EmbeddingStore.document,
+                    store.EmbeddingStore.cmetadata
+                ).filter(
+                    store.EmbeddingStore.cmetadata['type'].astext == IndexerKeywords.INDEX_META_TYPE.value,
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
+                ).all()
+                result = []
+                for id, document, cmetadata in meta:
+                    result.append({"id": id, "content": document, "metadata": cmetadata})
+                return result
+        except Exception as e:
+            logger.error(f"Failed to get index_meta from PGVector: {str(e)}")
+            raise e
+
 
 class ChromaAdapter(VectorStoreAdapter):
     """Adapter for Chroma database operations."""
@@ -360,6 +390,9 @@ class ChromaAdapter(VectorStoreAdapter):
         # For Chroma, we would need to update the metadata through vectorstore operations
         # This is a simplified implementation - in practice, you might need more complex logic
         logger.warning("add_to_collection for Chroma is not fully implemented yet")
+
+    def get_index_meta(self, vectorstore_wrapper, collection_suffix: str) -> List[Dict[str, Any]]:
+        logger.warning("get_index_meta for Chroma is not implemented yet")
 
 
 class VectorStoreAdapterFactory:

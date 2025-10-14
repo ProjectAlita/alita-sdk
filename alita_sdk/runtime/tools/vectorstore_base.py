@@ -183,6 +183,12 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             return "No indexed collections"
         return collections
 
+    def get_index_meta(self, collection_suffix: str):
+        index_metas = self.vector_adapter.get_index_meta(self, collection_suffix)
+        if len(index_metas) > 1:
+            raise RuntimeError(f"Multiple index_meta documents found: {index_metas}")
+        return index_metas[0] if index_metas else None
+
     def _clean_collection(self, collection_suffix: str = ''):
         """
         Clean the vectorstore collection by deleting all indexed data.
