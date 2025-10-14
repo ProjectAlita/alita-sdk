@@ -793,7 +793,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             #         output = result['messages'][-1].content
             # else:
             #     output = result['messages'][-1].content
-            output = result['messages'][-1].content
+            output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)), result['messages'][-1].content)
         except:
             output = list(result.values())[-1]
         config_state = self.get_state(config)
