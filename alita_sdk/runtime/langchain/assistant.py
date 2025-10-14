@@ -111,7 +111,10 @@ class Assistant:
                 messages.extend(chat_history)
             self.prompt = Jinja2TemplatedChatMessagesTemplate(messages=messages)
             if input_variables:
-                self.prompt.input_variables = input_variables
+                if hasattr(self.prompt, 'input_variables') and self.prompt.input_variables is not None:
+                    self.prompt.input_variables.extend(input_variables)
+                else:
+                    self.prompt.input_variables = input_variables
             if variables:
                 self.prompt.partial_variables = variables
             try:
