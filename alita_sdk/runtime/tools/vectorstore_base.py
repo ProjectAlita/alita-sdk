@@ -6,6 +6,8 @@ from typing import Any, Optional, List, Dict, Generator
 
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import ToolException
+from psycopg.errors import DataException
 from pydantic import BaseModel, model_validator, Field
 
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
@@ -316,6 +318,15 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                     if doc_id not in unique_docs or score > chunk_type_scores.get(doc_id, 0):
                         unique_docs[doc_id] = doc
                         chunk_type_scores[doc_id] = score
+            except DataException as dimException:
+                exception_str = str(dimException)
+                if 'different vector dimensions' in exception_str:
+                    logger.error(f"Data exception: {exception_str}")
+                    raise ToolException(f"Global search cannot be completed since collections were indexed using "
+                                        f"different embedding models. Use search within a single collection."
+                                        f"\nDetails: {exception_str}")
+                raise ToolException(f"Data exception during search. Possibly invalid filter: {exception_str}")
+
             except Exception as e:
                 logger.warning(f"Error searching for document chunks: {str(e)}")
             
