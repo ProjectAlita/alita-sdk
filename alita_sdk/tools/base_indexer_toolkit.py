@@ -366,15 +366,15 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             filter.update({"collection": {
                 "$eq": collection_suffix.strip()
             }})
-        filter = {
-            "$and": [
-                filter,
-                {"$or": [
-                    {"type": {"$exists": False}},
-                    {"type": {"$ne": IndexerKeywords.INDEX_META_TYPE.value}}
-                ]},
-            ]
-        }
+            filter = {
+                "$and": [
+                    filter,
+                    {"$or": [
+                        {"type": {"$exists": False}},
+                        {"type": {"$ne": IndexerKeywords.INDEX_META_TYPE.value}}
+                    ]},
+                ]
+            }
         return filter
 
     def index_meta_read(self):
