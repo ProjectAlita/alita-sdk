@@ -352,6 +352,9 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             filter.update({"collection": {
                 "$eq": collection_suffix.strip()
             }})
+
+        if filter:
+            # Exclude index meta documents from search results
             filter = {
                 "$and": [
                     filter,
@@ -361,6 +364,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                     ]},
                 ]
             }
+        else:
+            filter = {"$or": [
+                {"type": {"$exists": False}},
+                {"type": {"$ne": IndexerKeywords.INDEX_META_TYPE.value}}
+            ]}
         return filter
 
     def search_index(self,
