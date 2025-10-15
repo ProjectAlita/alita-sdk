@@ -29,12 +29,15 @@ class Assistant:
                  app_type: str = "openai",
                  tools: Optional[list] = [],
                  memory: Optional[Any] = None,
-                 store: Optional[BaseStore] = None):
+                 store: Optional[BaseStore] = None,
+                 internal_tools: Optional[list] = None
+                 ):
 
         self.app_type = app_type
         self.memory = memory
         self.store = store
         self.max_iterations = data.get('meta', {}).get('step_limit', 25)
+        self.internal_tools = internal_tools or []
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
@@ -179,23 +182,26 @@ class Assistant:
         """
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        
-        # Add sandbox tool by default for react agents
-        try:
-            from ..tools.sandbox import create_sandbox_tool
-            sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
-            simple_tools.append(sandbox_tool)
-            logger.info("Added PyodideSandboxTool to react agent")
-        except ImportError as e:
-            logger.warning(f"Failed to add PyodideSandboxTool: {e}. Install langchain-sandbox to enable this feature.")
-        except RuntimeError as e:
-            if "Deno" in str(e):
-                logger.warning("Failed to add PyodideSandboxTool: Deno is required. Install from https://docs.deno.com/runtime/getting_started/installation/")
-            else:
-                logger.warning(f"Failed to add PyodideSandboxTool: {e}")
-        except Exception as e:
-            logger.error(f"Error adding PyodideSandboxTool: {e}")
-        
+
+        if self.internal_tools and 'pyodide' in self.internal_tools:
+            try:
+                from ..tools.sandbox import create_sandbox_tool
+                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
+                simple_tools.append(sandbox_tool)
+                logger.info("Added PyodideSandboxTool to react agent")
+            except ImportError as e:
+                logger.warning(
+                    f"Failed to add PyodideSandboxTool: {e}. Install langchain-sandbox to enable this feature.")
+            except RuntimeError as e:
+                if "Deno" in str(e):
+                    logger.warning(
+                        "Failed to add PyodideSandboxTool: Deno is required. "
+                        "Install from https://docs.deno.com/runtime/getting_started/installation/")
+                else:
+                    logger.warning(f"Failed to add PyodideSandboxTool: {e}")
+            except Exception as e:
+                logger.error(f"Error adding PyodideSandboxTool: {e}")
+
         # Add image generation tool if model is configured
         if self.alita_client.model_image_generation is not None:
             try:
