@@ -1,10 +1,10 @@
-import logging
 import asyncio
+import logging
 import subprocess
 import os
-from typing import Any, Type, Optional, Union, Dict
+from typing import Any, Type, Optional, Dict
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, create_model
 from pydantic.fields import FieldInfo
 
 logger = logging.getLogger(__name__)

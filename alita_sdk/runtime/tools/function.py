@@ -1,5 +1,6 @@
 import json
 import logging
+from copy import deepcopy
 from json import dumps
 
 from langchain_core.callbacks import dispatch_custom_event
@@ -24,6 +25,48 @@ class FunctionTool(BaseTool):
     output_variables: Optional[list[str]] = None
     structured_output: Optional[bool] = False
 
+    def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> None:
+        """Prepare input for PyodideSandboxTool by injecting state into the code block."""
+        # add state into the code block here since it might be changed during the execution of the code
+        state_copy = deepcopy(state)
+        # pickle state
+        import pickle
+
+        del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
+        serialized_state = pickle.dumps(state_copy)
+        code_block = self.input_mapping['code']['value']
+        # inject state into the code block as alita_state variable
+        self.input_mapping['code']['value'] = f"""import pickle\nalita_state = pickle.loads({serialized_state})\n\n{code_block}"""
+
+    def _handle_pyodide_output(self, tool_result: Any) -> dict:
+        """Handle output processing for PyodideSandboxTool results."""
+        tool_result_converted = {}
+
+        if self.output_variables:
+            for var in self.output_variables:
+                if var in tool_result:
+                    tool_result_converted[var] = tool_result[var]
+                else:
+                    # handler in case user points to a var that is not in the output of the tool
+                    tool_result_converted[var] = tool_result.get('result', 'Execution result is missing')
+        else:
+            tool_result_converted.update({"messages": [{"role": "assistant", "content": dumps(tool_result)}]})
+
+        if self.structured_output:
+            # execute code tool and update state variables
+            try:
+                result_value = tool_result.get('result', {})
+                tool_result_converted.update(result_value if isinstance(result_value, dict)
+                                           else json.loads(result_value))
+            except json.JSONDecodeError:
+                logger.error(f"JSONDecodeError: {tool_result}")
+
+        return tool_result_converted
+
+    def _is_pyodide_tool(self) -> bool:
+        """Check if the current tool is a PyodideSandboxTool."""
+        return self.tool.name.lower() == 'pyodide_sandbox'
+
     def invoke(
             self,
             state: Union[str, dict, ToolCall],
@@ -33,6 +76,11 @@ class FunctionTool(BaseTool):
         params = convert_to_openai_tool(self.tool).get(
             'function', {'parameters': {}}).get(
             'parameters', {'properties': {}}).get('properties', {})
+
+        # special handler for PyodideSandboxTool
+        if self._is_pyodide_tool():
+            self._prepare_pyodide_input(state)
+
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
         try:
@@ -46,28 +94,10 @@ class FunctionTool(BaseTool):
                 }, config=config
             )
             logger.info(f"ToolNode response: {tool_result}")
-            # handler for PyodideSandboxTool
-            if self.tool.name.lower() == 'pyodide_sandbox':
-                tool_result_converted = {}
-                if self.output_variables:
-                    for var in self.output_variables:
-                        if var in tool_result:
-                            tool_result_converted[var] = tool_result[var]
-                        else:
-                            # handler in case user points to a var that is not in the output of the tool
-                            tool_result_converted[var] = tool_result.get('result', 'Execution result is missing')
-                else:
-                    tool_result_converted.update({"messages": [{"role": "assistant", "content": dumps(tool_result)}]})
 
-                if self.structured_output:
-                    # execute code tool and update state variables
-                    try:
-                        result_value = tool_result.get('result', {})
-                        tool_result_converted.update(result_value if isinstance(result_value, dict)
-                                                     else json.loads(result_value))
-                    except json.JSONDecodeError:
-                        logger.error(f"JSONDecodeError: {tool_result}")
-                return tool_result_converted
+            # handler for PyodideSandboxTool
+            if self._is_pyodide_tool():
+                return self._handle_pyodide_output(tool_result)
 
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
