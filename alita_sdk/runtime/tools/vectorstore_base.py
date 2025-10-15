@@ -177,6 +177,37 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
+    def _similarity_search_with_score(self, query: str, filter: dict = None, k: int = 10):
+        """
+        Perform similarity search with proper exception handling for DataException.
+
+        Args:
+            query: Search query string
+            filter: Optional filter dictionary
+            k: Number of results to return
+
+        Returns:
+            List of (Document, score) tuples
+
+        Raises:
+            ToolException: When DataException occurs or other search errors
+        """
+        try:
+            return self.vectorstore.similarity_search_with_score(
+                query, filter=filter, k=k
+            )
+        except DataException as dimException:
+            exception_str = str(dimException)
+            if 'different vector dimensions' in exception_str:
+                logger.error(f"Data exception: {exception_str}")
+                raise ToolException(f"Global search cannot be completed since collections were indexed using "
+                                    f"different embedding models. Use search within a single collection."
+                                    f"\nDetails: {exception_str}")
+            raise ToolException(f"Data exception during search. Possibly invalid filter: {exception_str}")
+        except Exception as e:
+            logger.error(f"Error during similarity search: {str(e)}")
+            raise ToolException(f"Search failed: {str(e)}")
+
     def list_collections(self) -> List[str]:
         """List all collections in the vectorstore."""
 
@@ -311,7 +342,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 }
                 
             try:
-                document_items = self.vectorstore.similarity_search_with_score(
+                document_items = self._similarity_search_with_score(
                     query, filter=document_filter, k=search_top
                 )                
                 # Add document results to unique docs
@@ -324,15 +355,6 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                     if doc_id not in unique_docs or score > chunk_type_scores.get(doc_id, 0):
                         unique_docs[doc_id] = doc
                         chunk_type_scores[doc_id] = score
-            except DataException as dimException:
-                exception_str = str(dimException)
-                if 'different vector dimensions' in exception_str:
-                    logger.error(f"Data exception: {exception_str}")
-                    raise ToolException(f"Global search cannot be completed since collections were indexed using "
-                                        f"different embedding models. Use search within a single collection."
-                                        f"\nDetails: {exception_str}")
-                raise ToolException(f"Data exception during search. Possibly invalid filter: {exception_str}")
-
             except Exception as e:
                 logger.warning(f"Error searching for document chunks: {str(e)}")
             
@@ -353,18 +375,16 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                     }
                 
                 try:
-                    chunk_items = self.vectorstore.similarity_search_with_score(
+                    chunk_items = self._similarity_search_with_score(
                         query, filter=chunk_filter, k=search_top
                     )
-                    
-                    logger.debug(f"Chunk items for {chunk_type}: {chunk_items[0]}")
-                    
+
                     for doc, score in chunk_items:
                         # Create unique identifier for document
                         source = doc.metadata.get('source')
                         chunk_id = doc.metadata.get('chunk_id')
                         doc_id = f"{source}_{chunk_id}" if source and chunk_id else str(doc.metadata.get('id', id(doc)))
-                        
+
                         # Store document and its score
                         if doc_id not in unique_docs:
                             unique_docs[doc_id] = doc
@@ -384,9 +404,9 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                                 doc_filter = {
                                     "$and": doc_filter_parts
                                 }
-                                
+
                             try:
-                                fetch_items = self.vectorstore.similarity_search_with_score(
+                                fetch_items = self._similarity_search_with_score(
                                     query, filter=doc_filter, k=1
                                 )
                                 if fetch_items:
@@ -400,7 +420,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         else:
             # Default search behavior (unchanged)
             max_search_results = 30 if search_top * 3 > 30 else search_top * 3
-            vector_items = self.vectorstore.similarity_search_with_score(
+            vector_items = self._similarity_search_with_score(
                 query, filter=filter, k=max_search_results
             )
             
@@ -418,7 +438,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         doc_map = OrderedDict(
             sorted(doc_map.items(), key=lambda x: x[1][1], reverse=True)
         )
-        
+
         # Process full-text search if configured
         if full_text_search and full_text_search.get('enabled') and full_text_search.get('fields'):
             language = full_text_search.get('language', 'english')
@@ -431,7 +451,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 for field_name in full_text_search.get('fields', []):
                     try:
                         text_results = self.pg_helper.full_text_search(field_name, query)
-                        
+
                         # Combine text search results with vector results
                         for result in text_results:
                             doc_id = result['id']
