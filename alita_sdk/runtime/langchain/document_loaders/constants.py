@@ -30,10 +30,18 @@ from enum import Enum
 
 
 class LoaderProperties(Enum):
-    LLM = 'llm'
+    LLM = 'use_llm'
+    PROMPT_DEFAULT = 'use_default_prompt'
     PROMPT = 'prompt'
-    PROMPT_DEFAULT = 'prompt_default'
 
+DEFAULT_ALLOWED_BASE = {'max_tokens': 512}
+
+DEFAULT_ALLOWED_WITH_LLM = {
+    **DEFAULT_ALLOWED_BASE,
+    LoaderProperties.LLM.value: False,
+    LoaderProperties.PROMPT_DEFAULT.value: False,
+    LoaderProperties.PROMPT.value: "",
+}
 
 # Image file loaders mapping
 image_loaders_map = {
@@ -42,66 +50,42 @@ image_loaders_map = {
         'mime_type': 'image/png',
         'is_multimodal_processing': True,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ],
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM,
     },
     '.jpg': {
         'class': AlitaImageLoader,
         'mime_type': 'image/jpeg',
         'is_multimodal_processing': True,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.jpeg': {
         'class': AlitaImageLoader,
         'mime_type': 'image/jpeg',
         'is_multimodal_processing': True,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.gif': {
         'class': AlitaImageLoader,
         'mime_type': 'image/gif',
         'is_multimodal_processing': True,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.bmp': {
         'class': AlitaImageLoader,
         'mime_type': 'image/bmp',
         'is_multimodal_processing': True,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.svg': {
         'class': AlitaImageLoader,
         'mime_type': 'image/svg+xml',
         'is_multimodal_processing': True,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     }
 }
 
@@ -114,7 +98,7 @@ document_loaders_map = {
         'kwargs': {
             'autodetect_encoding': True
         },
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.yml': {
         'class': AlitaTextLoader,
@@ -123,7 +107,7 @@ document_loaders_map = {
         'kwargs': {
             'autodetect_encoding': True
         },
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.yaml': {
         'class': AlitaTextLoader,
@@ -132,7 +116,7 @@ document_loaders_map = {
         'kwargs': {
             'autodetect_encoding': True
         },
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.groovy': {
         'class': AlitaTextLoader,
@@ -141,14 +125,14 @@ document_loaders_map = {
         'kwargs': {
             'autodetect_encoding': True
         },
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.md': {
         'class': AlitaMarkdownLoader,
         'mime_type': 'text/markdown',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.csv': {
         'class': AlitaCSVLoader,
@@ -159,7 +143,7 @@ document_loaders_map = {
             'raw_content': True,
             'cleanse': False
         },
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.xlsx': {
         'class': AlitaExcelLoader,
@@ -171,11 +155,7 @@ document_loaders_map = {
             'raw_content': True,
             'cleanse': False
         },
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.xls': {
         'class': AlitaExcelLoader,
@@ -186,22 +166,14 @@ document_loaders_map = {
             'raw_content': True,
             'cleanse': False
         },
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.pdf': {
         'class': AlitaPDFLoader,
         'mime_type': 'application/pdf',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.docx': {
         'class': AlitaDocxMammothLoader,
@@ -211,58 +183,42 @@ document_loaders_map = {
         'kwargs': {
             'extract_images': True
         },
-        'allowed_to_override': [
-            'max_tokens', 'mode', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': {**DEFAULT_ALLOWED_WITH_LLM, 'mode': 'paged'}
     },
     '.json': {
         'class': AlitaJSONLoader,
         'mime_type': 'application/json',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.jsonl': {
         'class': AirbyteJSONLoader,
         'mime_type': 'application/jsonl',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.htm': {
         'class': UnstructuredHTMLLoader,
         'mime_type': 'text/html',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.html': {
         'class': UnstructuredHTMLLoader,
         'mime_type': 'text/html',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.xml': {
         'class': UnstructuredXMLLoader,
         'mime_type': 'text/xml',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': [
-            'max_tokens', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
     '.ppt': {
         'class': AlitaPowerPointLoader,
@@ -271,11 +227,7 @@ document_loaders_map = {
         'kwargs': {
             'mode': 'paged'
         },
-        'allowed_to_override': [
-            'max_tokens', 'mode', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value
-        ]
+        'allowed_to_override': {**DEFAULT_ALLOWED_WITH_LLM, 'mode': 'paged'}
     },
     '.pptx': {
         'class': AlitaPowerPointLoader,
@@ -285,20 +237,19 @@ document_loaders_map = {
         'kwargs': {
             'mode': 'paged'
         },
-        'allowed_to_override': [
-            'max_tokens', 'mode', LoaderProperties.LLM.value,
-            LoaderProperties.PROMPT.value,
-            LoaderProperties.PROMPT_DEFAULT.value,
-            "pages_per_chunk",
-            "extract_images"
-        ]
+        'allowed_to_override': {
+            **DEFAULT_ALLOWED_WITH_LLM,
+            'mode': 'paged',
+            'pages_per_chunk': 5,
+            'extract_images': False,
+        }
     },
     '.py': {
         'class': AlitaPythonLoader,
         'mime_type': 'text/x-python',
         'is_multimodal_processing': False,
         'kwargs': {},
-        'allowed_to_override': ['max_tokens']
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     }
 }
 
@@ -335,10 +286,16 @@ default_loader_config = {
     'mime_type': 'text/plain',
     'is_multimodal_processing': False,
     'kwargs': {},
-    'allowed_to_override': ['max_tokens']
+    'allowed_to_override': DEFAULT_ALLOWED_BASE
 }
 
 code_loaders_map = {ext: default_loader_config for ext in code_extensions}
 
 # Combined mapping for backward compatibility
 loaders_map = {**image_loaders_map, **document_loaders_map, **code_loaders_map}
+
+loaders_allowed_to_override = {
+    extension: config.get('allowed_to_override')
+    for extension, config in loaders_map.items()
+    if 'allowed_to_override' in config
+}
