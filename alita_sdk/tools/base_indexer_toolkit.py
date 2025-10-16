@@ -19,19 +19,19 @@ logger = logging.getLogger(__name__)
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
     "BaseIndexParams",
-    index_name=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
+    index_name=(str, Field(description="Index name (max 7 characters)", min_length=1, max_length=7)),
 )
 
 RemoveIndexParams = create_model(
     "RemoveIndexParams",
-    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional index name (max 7 characters)", default="", max_length=7)),
 )
 
 BaseSearchParams = create_model(
     "BaseSearchParams",
     query=(str, Field(description="Query text to search in the index")),
     index_name=(Optional[str], Field(
-        description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
+        description="Optional index name (max 7 characters). Leave empty to search across all datasets",
         default="", max_length=7)),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -61,7 +61,7 @@ BaseSearchParams = create_model(
 BaseStepbackSearchParams = create_model(
     "BaseStepbackSearchParams",
     query=(str, Field(description="Query text to search in the index")),
-    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional index name (max 7 characters)", default="", max_length=7)),
     messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",

@@ -33,12 +33,12 @@ LoaderSchema = create_model(
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
     "BaseIndexParams",
-    index_name=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
+    index_name=(str, Field(description="Index name (max 7 characters)", min_length=1, max_length=7)),
 )
 
 BaseCodeIndexParams = create_model(
     "BaseCodeIndexParams",
-    index_name=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
+    index_name=(str, Field(description="Index name (max 7 characters)", min_length=1, max_length=7)),
     clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
     progress_step=(Optional[int], Field(default=5, ge=0, le=100,
                          description="Optional step size for progress reporting during indexing")),
@@ -50,14 +50,14 @@ BaseCodeIndexParams = create_model(
 
 RemoveIndexParams = create_model(
     "RemoveIndexParams",
-    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional index name (max 7 characters)", default="", max_length=7)),
 )
 
 BaseSearchParams = create_model(
     "BaseSearchParams",
     query=(str, Field(description="Query text to search in the index")),
     index_name=(Optional[str], Field(
-        description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
+        description="Optional index name (max 7 characters). Leave empty to search across all datasets",
         default="", max_length=7)),
     filter=(Optional[dict], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -87,7 +87,7 @@ BaseSearchParams = create_model(
 BaseStepbackSearchParams = create_model(
     "BaseStepbackSearchParams",
     query=(str, Field(description="Query text to search in the index")),
-    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional index name (max 7 characters)", default="", max_length=7)),
     messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
     filter=(Optional[dict], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -537,7 +537,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 "args_schema": RemoveIndexParams
             },
             {
-                "name": "list_collections",
+                "name": "list_indexes",
                 "mode": "list_collections",
                 "ref": self.list_collections,
                 "description": self.list_collections.__doc__,
