@@ -26,12 +26,12 @@ class VectorStoreAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_indexed_ids(self, vectorstore_wrapper, collection_suffix: Optional[str] = '') -> List[str]:
+    def get_indexed_ids(self, vectorstore_wrapper, index_name: Optional[str] = '') -> List[str]:
         """Get all indexed document IDs from vectorstore"""
         pass
 
     @abstractmethod
-    def clean_collection(self, vectorstore_wrapper, collection_suffix: str = ''):
+    def clean_collection(self, vectorstore_wrapper, index_name: str = ''):
         """Clean the vectorstore collection by deleting all indexed data."""
         pass
 
@@ -41,7 +41,7 @@ class VectorStoreAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_code_indexed_data(self, vectorstore_wrapper, collection_suffix) -> Dict[str, Dict[str, Any]]:
+    def get_code_indexed_data(self, vectorstore_wrapper, index_name) -> Dict[str, Dict[str, Any]]:
         """Get all indexed data from vectorstore for code content"""
         pass
 
@@ -51,7 +51,7 @@ class VectorStoreAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_index_meta(self, vectorstore_wrapper, collection_suffix: str) -> List[Dict[str, Any]]:
+    def get_index_meta(self, vectorstore_wrapper, index_name: str) -> List[Dict[str, Any]]:
         """Get all index_meta entries from the vector store."""
         pass
 
@@ -106,7 +106,7 @@ class PGVectorAdapter(VectorStoreAdapter):
             session.commit()
             logger.info(f"Schema '{schema_name}' has been dropped.")
 
-    def get_indexed_ids(self, vectorstore_wrapper, collection_suffix: Optional[str] = '') -> List[str]:
+    def get_indexed_ids(self, vectorstore_wrapper, index_name: Optional[str] = '') -> List[str]:
         """Get all indexed document IDs from PGVector"""
         from sqlalchemy.orm import Session
         from sqlalchemy import func
@@ -116,10 +116,10 @@ class PGVectorAdapter(VectorStoreAdapter):
             with Session(store.session_maker.bind) as session:
                 # Start building the query
                 query = session.query(store.EmbeddingStore.id)
-                # Apply filter only if collection_suffix is provided
-                if collection_suffix:
+                # Apply filter only if index_name is provided
+                if index_name:
                     query = query.filter(
-                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
+                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name
                     )
                 ids = query.all()
                 return [str(id_tuple[0]) for id_tuple in ids]
@@ -127,18 +127,18 @@ class PGVectorAdapter(VectorStoreAdapter):
             logger.error(f"Failed to get indexed IDs from PGVector: {str(e)}")
             return []
 
-    def clean_collection(self, vectorstore_wrapper, collection_suffix: str = ''):
+    def clean_collection(self, vectorstore_wrapper, index_name: str = ''):
         """Clean the vectorstore collection by deleting all indexed data."""
         # This logic deletes all data from the vectorstore collection without removal of collection.
         # Collection itself remains available for future indexing.
-        vectorstore_wrapper.vectorstore.delete(ids=self.get_indexed_ids(vectorstore_wrapper, collection_suffix))
+        vectorstore_wrapper.vectorstore.delete(ids=self.get_indexed_ids(vectorstore_wrapper, index_name))
 
     def is_vectorstore_type(self, vectorstore) -> bool:
         """Check if the vectorstore is a PGVector store."""
         return hasattr(vectorstore, 'session_maker') and hasattr(vectorstore, 'EmbeddingStore')
 
-    def get_indexed_data(self, vectorstore_wrapper, collection_suffix: str)-> Dict[str, Dict[str, Any]]:
-        """Get all indexed data from PGVector for non-code content per collection_suffix."""
+    def get_indexed_data(self, vectorstore_wrapper, index_name: str)-> Dict[str, Dict[str, Any]]:
+        """Get all indexed data from PGVector for non-code content per index_name."""
         from sqlalchemy.orm import Session
         from sqlalchemy import func
         from ...runtime.utils.utils import IndexerKeywords
@@ -154,7 +154,7 @@ class PGVectorAdapter(VectorStoreAdapter):
                     store.EmbeddingStore.document,
                     store.EmbeddingStore.cmetadata
                 ).filter(
-                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name
                 ).all()
 
             # Process the retrieved data
@@ -187,7 +187,7 @@ class PGVectorAdapter(VectorStoreAdapter):
 
         return result
 
-    def get_code_indexed_data(self, vectorstore_wrapper, collection_suffix: str) -> Dict[str, Dict[str, Any]]:
+    def get_code_indexed_data(self, vectorstore_wrapper, index_name: str) -> Dict[str, Dict[str, Any]]:
         """Get all indexed code data from PGVector per collection suffix."""
         from sqlalchemy.orm import Session
         from sqlalchemy import func
@@ -202,7 +202,7 @@ class PGVectorAdapter(VectorStoreAdapter):
                     store.EmbeddingStore.id,
                     store.EmbeddingStore.cmetadata
                 ).filter(
-                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name
                 ).all()
 
             for db_id, meta in docs:
@@ -272,7 +272,7 @@ class PGVectorAdapter(VectorStoreAdapter):
         except Exception as e:
             logger.error(f"Failed to update collection for entry ID {entry_id}: {str(e)}")
 
-    def get_index_meta(self, vectorstore_wrapper, collection_suffix: str) -> List[Dict[str, Any]]:
+    def get_index_meta(self, vectorstore_wrapper, index_name: str) -> List[Dict[str, Any]]:
         from sqlalchemy.orm import Session
         from sqlalchemy import func
 
@@ -285,7 +285,7 @@ class PGVectorAdapter(VectorStoreAdapter):
                     store.EmbeddingStore.cmetadata
                 ).filter(
                     store.EmbeddingStore.cmetadata['type'].astext == IndexerKeywords.INDEX_META_TYPE.value,
-                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == collection_suffix
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name
                 ).all()
                 result = []
                 for id, document, cmetadata in meta:
@@ -312,7 +312,7 @@ class ChromaAdapter(VectorStoreAdapter):
     def remove_collection(self, vectorstore_wrapper, collection_name: str):
         vectorstore_wrapper.vectorstore.delete_collection()
 
-    def get_indexed_ids(self, vectorstore_wrapper, collection_suffix: Optional[str] = '') -> List[str]:
+    def get_indexed_ids(self, vectorstore_wrapper, index_name: Optional[str] = '') -> List[str]:
         """Get all indexed document IDs from Chroma"""
         try:
             data = vectorstore_wrapper.vectorstore.get(include=[])  # Only get IDs, no metadata
@@ -321,9 +321,9 @@ class ChromaAdapter(VectorStoreAdapter):
             logger.error(f"Failed to get indexed IDs from Chroma: {str(e)}")
             return []
 
-    def clean_collection(self, vectorstore_wrapper, collection_suffix: str = ''):
+    def clean_collection(self, vectorstore_wrapper, index_name: str = ''):
         """Clean the vectorstore collection by deleting all indexed data."""
-        vectorstore_wrapper.vectorstore.delete(ids=self.get_indexed_ids(vectorstore_wrapper, collection_suffix))
+        vectorstore_wrapper.vectorstore.delete(ids=self.get_indexed_ids(vectorstore_wrapper, index_name))
 
     def get_indexed_data(self, vectorstore_wrapper):
         """Get all indexed data from Chroma for non-code content"""
@@ -361,7 +361,7 @@ class ChromaAdapter(VectorStoreAdapter):
 
         return result
 
-    def get_code_indexed_data(self, vectorstore_wrapper, collection_suffix) -> Dict[str, Dict[str, Any]]:
+    def get_code_indexed_data(self, vectorstore_wrapper, index_name) -> Dict[str, Dict[str, Any]]:
         """Get all indexed code data from Chroma."""
         result = {}
         try:
@@ -391,7 +391,7 @@ class ChromaAdapter(VectorStoreAdapter):
         # This is a simplified implementation - in practice, you might need more complex logic
         logger.warning("add_to_collection for Chroma is not fully implemented yet")
 
-    def get_index_meta(self, vectorstore_wrapper, collection_suffix: str) -> List[Dict[str, Any]]:
+    def get_index_meta(self, vectorstore_wrapper, index_name: str) -> List[Dict[str, Any]]:
         logger.warning("get_index_meta for Chroma is not implemented yet")
 
 

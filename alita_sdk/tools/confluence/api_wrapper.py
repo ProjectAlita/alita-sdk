@@ -1674,7 +1674,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 description="List of file extensions to skip when processing attachments: i.e. ['*.png', '*.jpg']",
                 default=[])),
             "include_comments": (Optional[bool], Field(description="Include comments.", default=False)),
-            "include_labels": (Optional[bool], Field(description="Include labels.", default=True)),
+            "include_labels": (Optional[bool], Field(description="Include labels.", default=False)),
             "ocr_languages": (Optional[str], Field(description="OCR languages for processing attachments.", default='eng')),
             "keep_markdown_format": (Optional[bool], Field(description="Keep the markdown format.", default=True)),
             "keep_newlines": (Optional[bool], Field(description="Keep newlines in the content.", default=True)),

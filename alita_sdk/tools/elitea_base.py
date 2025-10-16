@@ -33,12 +33,12 @@ LoaderSchema = create_model(
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
     "BaseIndexParams",
-    collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
+    index_name=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
 )
 
 BaseCodeIndexParams = create_model(
     "BaseCodeIndexParams",
-    collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
+    index_name=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
     clean_index=(Optional[bool], Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")),
     progress_step=(Optional[int], Field(default=5, ge=0, le=100,
                          description="Optional step size for progress reporting during indexing")),
@@ -50,13 +50,13 @@ BaseCodeIndexParams = create_model(
 
 RemoveIndexParams = create_model(
     "RemoveIndexParams",
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
 )
 
 BaseSearchParams = create_model(
     "BaseSearchParams",
     query=(str, Field(description="Query text to search in the index")),
-    collection_suffix=(Optional[str], Field(
+    index_name=(Optional[str], Field(
         description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
         default="", max_length=7)),
     filter=(Optional[dict], Field(
@@ -87,7 +87,7 @@ BaseSearchParams = create_model(
 BaseStepbackSearchParams = create_model(
     "BaseStepbackSearchParams",
     query=(str, Field(description="Query text to search in the index")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
     messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
     filter=(Optional[dict], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -324,12 +324,12 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             #
             docs = base_chunker(file_content_generator=docs, config=base_chunking_config)
         #
-        collection_suffix = kwargs.get("collection_suffix")
+        index_name = kwargs.get("index_name")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
         vs = self._init_vector_store()
         #
-        return vs.index_documents(docs, collection_suffix=collection_suffix, progress_step=progress_step, clean_index=clean_index)
+        return vs.index_documents(docs, index_name=index_name, progress_step=progress_step, clean_index=clean_index)
 
     def _process_documents(self, documents: List[Document]) -> Generator[Document, None, None]:
         """
@@ -399,10 +399,10 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             )
         return self._vector_store
 
-    def remove_index(self, collection_suffix: str = ""):
+    def remove_index(self, index_name: str = ""):
         """Cleans the indexed data in the collection."""
-        self._init_vector_store()._clean_collection(collection_suffix=collection_suffix)
-        return (f"Collection '{collection_suffix}' has been removed from the vector store.\n"
+        self._init_vector_store()._clean_collection(index_name=index_name)
+        return (f"Collection '{index_name}' has been removed from the vector store.\n"
                 f"Available collections: {self.list_collections()}")
 
     def list_collections(self):
@@ -410,19 +410,19 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         vectorstore_wrapper = self._init_vector_store()
         return vectorstore_wrapper.list_collections()
 
-    def _build_collection_filter(self, filter: dict | str, collection_suffix: str = "") -> dict:
+    def _build_collection_filter(self, filter: dict | str, index_name: str = "") -> dict:
         """Builds a filter for the collection based on the provided suffix."""
 
         filter = filter if isinstance(filter, dict) else json.loads(filter)
-        if collection_suffix:
+        if index_name:
             filter.update({"collection": {
-                "$eq": collection_suffix.strip()
+                "$eq": index_name.strip()
             }})
         return filter
 
     def search_index(self,
                      query: str,
-                     collection_suffix: str = "",
+                     index_name: str = "",
                      filter: dict | str = {}, cut_off: float = 0.5,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
@@ -431,7 +431,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      **kwargs):
         """ Searches indexed documents in the vector store."""
         vectorstore = self._init_vector_store()
-        filter = self._build_collection_filter(filter, collection_suffix)
+        filter = self._build_collection_filter(filter, index_name)
         found_docs = vectorstore.search_documents(
             query,
             doctype=self.doctype,
@@ -448,7 +448,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def stepback_search_index(self,
                      query: str,
                      messages: List[Dict[str, Any]] = [],
-                     collection_suffix: str = "",
+                     index_name: str = "",
                      filter: dict | str = {}, cut_off: float = 0.5,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
@@ -457,7 +457,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      **kwargs):
         """ Searches indexed documents in the vector store."""
 
-        filter = self._build_collection_filter(filter, collection_suffix)
+        filter = self._build_collection_filter(filter, index_name)
         vectorstore = self._init_vector_store()
         found_docs = vectorstore.stepback_search(
             query,
@@ -475,7 +475,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
     def stepback_summary_index(self,
                      query: str,
                      messages: List[Dict[str, Any]] = [],
-                     collection_suffix: str = "",
+                     index_name: str = "",
                      filter: dict | str = {}, cut_off: float = 0.5,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
@@ -484,7 +484,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                      **kwargs):
         """ Generates a summary of indexed documents using stepback technique."""
         vectorstore = self._init_vector_store()
-        filter = self._build_collection_filter(filter, collection_suffix)
+        filter = self._build_collection_filter(filter, index_name)
 
         found_docs = vectorstore.stepback_summary(
             query,
@@ -655,7 +655,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         return parse_code_files_for_db(file_content_generator())
     
     def index_data(self,
-                   collection_suffix: str,
+                   index_name: str,
                    branch: Optional[str] = None,
                    whitelist: Optional[List[str]] = None,
                    blacklist: Optional[List[str]] = None,
@@ -669,7 +669,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         )
         vectorstore = self._init_vector_store()
         clean_index = kwargs.get('clean_index', False)
-        return vectorstore.index_documents(documents, collection_suffix=collection_suffix,
+        return vectorstore.index_documents(documents, index_name=index_name,
                                            clean_index=clean_index, is_code=True,
                                            progress_step=kwargs.get('progress_step', 5))
 

@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 class CodeIndexerToolkit(BaseIndexerToolkit):
-    def _get_indexed_data(self, collection_suffix: str):
+    def _get_indexed_data(self, index_name: str):
         if not self.vector_adapter:
             raise ToolException("Vector adapter is not initialized. "
                              "Check your configuration: embedding_model and vectorstore_type.")
-        return self.vector_adapter.get_code_indexed_data(self, collection_suffix)
+        return self.vector_adapter.get_code_indexed_data(self, index_name)
 
     def key_fn(self, document: Document):
         return document.metadata.get('id')

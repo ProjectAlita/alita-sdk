@@ -216,13 +216,13 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             return "No indexed collections"
         return collections
 
-    def get_index_meta(self, collection_suffix: str):
-        index_metas = self.vector_adapter.get_index_meta(self, collection_suffix)
+    def get_index_meta(self, index_name: str):
+        index_metas = self.vector_adapter.get_index_meta(self, index_name)
         if len(index_metas) > 1:
             raise RuntimeError(f"Multiple index_meta documents found: {index_metas}")
         return index_metas[0] if index_metas else None
 
-    def _clean_collection(self, collection_suffix: str = ''):
+    def _clean_collection(self, index_name: str = ''):
         """
         Clean the vectorstore collection by deleting all indexed data.
         """
@@ -230,13 +230,13 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
-        self.vector_adapter.clean_collection(self, collection_suffix)
+        self.vector_adapter.clean_collection(self, index_name)
         self._log_tool_event(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
 
-    def index_documents(self, documents: Generator[Document, None, None], collection_suffix: str, progress_step: int = 20, clean_index: bool = True):
+    def index_documents(self, documents: Generator[Document, None, None], index_name: str, progress_step: int = 20, clean_index: bool = True):
         """ Index documents in the vectorstore.
 
         Args:
@@ -245,21 +245,21 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             clean_index (bool): If True, clean the index before re-indexing all documents.
         """
         if clean_index:
-            self._clean_index(collection_suffix)
+            self._clean_index(index_name)
 
-        return self._save_index(list(documents), collection_suffix, progress_step)
+        return self._save_index(list(documents), index_name, progress_step)
 
-    def _clean_index(self, collection_suffix: str):
+    def _clean_index(self, index_name: str):
         logger.info("Cleaning index before re-indexing all documents.")
         self._log_tool_event("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
         try:
-            self._clean_collection(collection_suffix)
+            self._clean_collection(index_name)
             self._log_tool_event("Previous index has been removed",
                            tool_name="index_documents")
         except Exception as e:
             logger.warning(f"Failed to clean index: {str(e)}. Continuing with re-indexing.")
 
-    def _save_index(self, documents: list[Document], collection_suffix: Optional[str] = None, progress_step: int = 20):
+    def _save_index(self, documents: list[Document], index_name: Optional[str] = None, progress_step: int = 20):
         from ..langchain.interfaces.llm_processor import add_documents
         #
         for doc in documents:
@@ -268,13 +268,13 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
 
         logger.debug(f"Indexing documents: {documents}")
 
-        # if collection_suffix is provided, add it to metadata of each document
-        if collection_suffix:
+        # if index_name is provided, add it to metadata of each document
+        if index_name:
             for doc in documents:
                 if not doc.metadata.get('collection'):
-                    doc.metadata['collection'] = collection_suffix
+                    doc.metadata['collection'] = index_name
                 else:
-                    doc.metadata['collection'] += f";{collection_suffix}"
+                    doc.metadata['collection'] += f";{index_name}"
 
         total_docs = len(documents)
         documents_count = 0

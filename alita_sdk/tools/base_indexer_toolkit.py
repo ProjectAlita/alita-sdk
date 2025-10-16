@@ -19,18 +19,18 @@ logger = logging.getLogger(__name__)
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
     "BaseIndexParams",
-    collection_suffix=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
+    index_name=(str, Field(description="Suffix for collection name (max 7 characters) used to separate datasets", min_length=1, max_length=7)),
 )
 
 RemoveIndexParams = create_model(
     "RemoveIndexParams",
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
 )
 
 BaseSearchParams = create_model(
     "BaseSearchParams",
     query=(str, Field(description="Query text to search in the index")),
-    collection_suffix=(Optional[str], Field(
+    index_name=(Optional[str], Field(
         description="Optional suffix for collection name (max 7 characters). Leave empty to search across all datasets",
         default="", max_length=7)),
     filter=(Optional[dict | str], Field(
@@ -61,7 +61,7 @@ BaseSearchParams = create_model(
 BaseStepbackSearchParams = create_model(
     "BaseStepbackSearchParams",
     query=(str, Field(description="Query text to search in the index")),
-    collection_suffix=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
+    index_name=(Optional[str], Field(description="Optional suffix for collection name (max 7 characters)", default="", max_length=7)),
     messages=(Optional[List], Field(description="Chat messages for stepback search context", default=[])),
     filter=(Optional[dict | str], Field(
         description="Filter to apply to the search results. Can be a dictionary or a JSON string.",
@@ -151,18 +151,18 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         yield from ()
 
     def index_data(self, **kwargs):
-        collection_suffix = kwargs.get("collection_suffix")
+        index_name = kwargs.get("index_name")
         progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
         chunking_tool = kwargs.get("chunking_tool")
         chunking_config = kwargs.get("chunking_config")
         #
         if clean_index:
-            self._clean_index(collection_suffix)
+            self._clean_index(index_name)
         #
-        self.index_meta_init(collection_suffix, kwargs)
+        self.index_meta_init(index_name, kwargs)
         #
-        self._log_tool_event(f"Indexing data into collection with suffix '{collection_suffix}'. It can take some time...")
+        self._log_tool_event(f"Indexing data into collection with suffix '{index_name}'. It can take some time...")
         self._log_tool_event(f"Loading the documents to index...{kwargs}")
         documents = self._base_loader(**kwargs)
         documents = list(documents) # consume/exhaust generator to count items
@@ -170,16 +170,16 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         documents = (doc for doc in documents)
         self._log_tool_event(f"Base documents were pre-loaded. "
                              f"Search for possible document duplicates and remove them from the indexing list...")
-        documents = self._reduce_duplicates(documents, collection_suffix)
+        documents = self._reduce_duplicates(documents, index_name)
         self._log_tool_event(f"Duplicates were removed. "
                              f"Processing documents to collect dependencies and prepare them for indexing...")
-        result = self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, collection_suffix=collection_suffix, progress_step=progress_step)
+        result = self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, index_name=index_name, progress_step=progress_step)
         #
-        self.index_meta_update(collection_suffix, IndexerKeywords.INDEX_META_COMPLETED.value, result)
+        self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, result)
         #
         return {"status": "ok", "message": f"successfully indexed {result} documents"}
 
-    def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, collection_suffix: Optional[str] = None, progress_step: int = 20):
+    def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, index_name: Optional[str] = None, progress_step: int = 20):
         self._log_tool_event(f"Base documents are ready for indexing. {base_total} base documents in total to index.")
         from ..runtime.langchain.interfaces.llm_processor import add_documents
         #
@@ -211,12 +211,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 if 'id' not in doc.metadata or 'updated_on' not in doc.metadata:
                     logger.warning(f"Document is missing required metadata field 'id' or 'updated_on': {doc.metadata}")
                 #
-                # if collection_suffix is provided, add it to metadata of each document
-                if collection_suffix:
+                # if index_name is provided, add it to metadata of each document
+                if index_name:
                     if not doc.metadata.get('collection'):
-                        doc.metadata['collection'] = collection_suffix
+                        doc.metadata['collection'] = index_name
                     else:
-                        doc.metadata['collection'] += f";{collection_suffix}"
+                        doc.metadata['collection'] += f";{index_name}"
                 #
                 try:
                     pg_vector_add_docs_chunk.append(doc)
@@ -295,12 +295,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def _reduce_duplicates(
             self,
             documents: Generator[Any, None, None],
-            collection_suffix: str,
+            index_name: str,
             log_msg: str = "Verification of documents to index started"
     ) -> Generator[Document, None, None]:
         """Generic duplicate reduction logic for documents."""
         self._log_tool_event(log_msg, tool_name="index_documents")
-        indexed_data = self._get_indexed_data(collection_suffix)
+        indexed_data = self._get_indexed_data(index_name)
         indexed_keys = set(indexed_data.keys())
         if not indexed_keys:
             self._log_tool_event("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
@@ -312,7 +312,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         for document in documents:
             key = self.key_fn(document)
             key = key if isinstance(key, str) else str(key)
-            if key in indexed_keys and collection_suffix == indexed_data[key]['metadata'].get('collection'):
+            if key in indexed_keys and index_name == indexed_data[key]['metadata'].get('collection'):
                 if self.compare_fn(document, indexed_data[key]):
                     continue
                 yield document
@@ -327,7 +327,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             )
             self.vectorstore.delete(ids=list(docs_to_remove))
     
-    def _get_indexed_data(self, collection_suffix: str):
+    def _get_indexed_data(self, index_name: str):
         raise NotImplementedError("Subclasses must implement this method")
 
     def key_fn(self, document: Document):
@@ -339,20 +339,20 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def remove_ids_fn(self, idx_data, key: str):
         raise NotImplementedError("Subclasses must implement this method")
 
-    def remove_index(self, collection_suffix: str = ""):
+    def remove_index(self, index_name: str = ""):
         """Cleans the indexed data in the collection."""
-        super()._clean_collection(collection_suffix=collection_suffix)
-        return (f"Collection '{collection_suffix}' has been removed from the vector store.\n"
-                f"Available collections: {self.list_collections()}") if collection_suffix \
+        super()._clean_collection(index_name=index_name)
+        return (f"Collection '{index_name}' has been removed from the vector store.\n"
+                f"Available collections: {self.list_collections()}") if index_name \
             else "All collections have been removed from the vector store." 
 
-    def _build_collection_filter(self, filter: dict | str, collection_suffix: str = "") -> dict:
+    def _build_collection_filter(self, filter: dict | str, index_name: str = "") -> dict:
         """Builds a filter for the collection based on the provided suffix."""
 
         filter = filter if isinstance(filter, dict) else json.loads(filter)
-        if collection_suffix:
+        if index_name:
             filter.update({"collection": {
-                "$eq": collection_suffix.strip()
+                "$eq": index_name.strip()
             }})
 
         if filter:
@@ -375,7 +375,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     def search_index(self,
                      query: str,
-                     collection_suffix: str = "",
+                     index_name: str = "",
                      filter: dict | str = {}, cut_off: float = 0.5,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
@@ -383,13 +383,13 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      extended_search: Optional[List[str]] = None,
                      **kwargs):
         """ Searches indexed documents in the vector store."""
-        # build filter on top of collection_suffix
+        # build filter on top of index_name
 
         available_collections = super().list_collections()
-        if collection_suffix and collection_suffix not in available_collections:
-            return f"Collection '{collection_suffix}' not found. Available collections: {available_collections}"
+        if index_name and index_name not in available_collections:
+            return f"Collection '{index_name}' not found. Available collections: {available_collections}"
 
-        filter = self._build_collection_filter(filter, collection_suffix)
+        filter = self._build_collection_filter(filter, index_name)
         found_docs = super().search_documents(
             query,
             doctype=self.doctype,
@@ -406,7 +406,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def stepback_search_index(self,
                      query: str,
                      messages: List[Dict[str, Any]] = [],
-                     collection_suffix: str = "",
+                     index_name: str = "",
                      filter: dict | str = {}, cut_off: float = 0.5,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
@@ -414,7 +414,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      extended_search: Optional[List[str]] = None,
                      **kwargs):
         """ Searches indexed documents in the vector store."""
-        filter = self._build_collection_filter(filter, collection_suffix)
+        filter = self._build_collection_filter(filter, index_name)
         found_docs = super().stepback_search(
             query,
             messages,
@@ -431,7 +431,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def stepback_summary_index(self,
                      query: str,
                      messages: List[Dict[str, Any]] = [],
-                     collection_suffix: str = "",
+                     index_name: str = "",
                      filter: dict | str = {}, cut_off: float = 0.5,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
@@ -440,7 +440,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      **kwargs):
         """ Generates a summary of indexed documents using stepback technique."""
 
-        filter = self._build_collection_filter(filter, collection_suffix)
+        filter = self._build_collection_filter(filter, index_name)
         return super().stepback_summary(
             query, 
             messages, 
@@ -453,12 +453,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             extended_search=extended_search
         )
     
-    def index_meta_init(self, collection_suffix: str, index_configuration: dict[str, Any]):
-        index_meta_raw = super().get_index_meta(collection_suffix)
+    def index_meta_init(self, index_name: str, index_configuration: dict[str, Any]):
+        index_meta_raw = super().get_index_meta(index_name)
         from ..runtime.langchain.interfaces.llm_processor import add_documents
         created_on = time.time()
         metadata = {
-            "collection": collection_suffix,
+            "collection": index_name,
             "type": IndexerKeywords.INDEX_META_TYPE.value,
             "indexed": 0,
             "state": IndexerKeywords.INDEX_META_IN_PROGRESS.value,
@@ -483,11 +483,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             metadata["history"] = json.dumps(history)
             index_meta_ids = [index_meta_raw.get("id")]
         #
-        index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{collection_suffix}", metadata=metadata)
+        index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)
         add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=index_meta_ids)
 
-    def index_meta_update(self, collection_suffix: str, state: str, result: int):
-        index_meta_raw = super().get_index_meta(collection_suffix)
+    def index_meta_update(self, index_name: str, state: str, result: int):
+        index_meta_raw = super().get_index_meta(index_name)
         from ..runtime.langchain.interfaces.llm_processor import add_documents
         #
         if index_meta_raw:

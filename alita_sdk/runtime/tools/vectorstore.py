@@ -207,9 +207,9 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             tool_name="_remove_collection"
         )
 
-    def _get_indexed_ids(self, collection_suffix: Optional[str] = '') -> List[str]:
+    def _get_indexed_ids(self, index_name: Optional[str] = '') -> List[str]:
         """Get all indexed document IDs from vectorstore"""
-        return self.vector_adapter.get_indexed_ids(self, collection_suffix)
+        return self.vector_adapter.get_indexed_ids(self, index_name)
 
     def list_collections(self) -> Any:
         """List all collections in the vectorstore.
@@ -233,7 +233,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             return {"collections": [], "message": "No indexed collections"}
         return cols
 
-    def _clean_collection(self, collection_suffix: str = ''):
+    def _clean_collection(self, index_name: str = ''):
         """
         Clean the vectorstore collection by deleting all indexed data.
         """
@@ -241,15 +241,15 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
-        self.vector_adapter.clean_collection(self, collection_suffix)
+        self.vector_adapter.clean_collection(self, index_name)
         self._log_data(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
 
-    def _get_code_indexed_data(self, collection_suffix: str) -> Dict[str, Dict[str, Any]]:
+    def _get_code_indexed_data(self, index_name: str) -> Dict[str, Dict[str, Any]]:
         """ Get all indexed data from vectorstore for code content """
-        return self.vector_adapter.get_code_indexed_data(self, collection_suffix)
+        return self.vector_adapter.get_code_indexed_data(self, index_name)
 
     def _add_to_collection(self, entry_id, new_collection_value):
         """Add a new collection name to the `collection` key in the `metadata` column."""
@@ -258,7 +258,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     def _reduce_duplicates(
             self,
             documents: Generator[Any, None, None],
-            collection_suffix: str,
+            index_name: str,
             get_indexed_data: Callable,
             key_fn: Callable,
             compare_fn: Callable,
@@ -267,7 +267,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
     ) -> List[Any]:
         """Generic duplicate reduction logic for documents."""
         self._log_data(log_msg, tool_name="index_documents")
-        indexed_data = get_indexed_data(collection_suffix)
+        indexed_data = get_indexed_data(index_name)
         indexed_keys = set(indexed_data.keys())
         if not indexed_keys:
             self._log_data("Vectorstore is empty, indexing all incoming documents", tool_name="index_documents")
@@ -279,14 +279,14 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         for document in documents:
             key = key_fn(document)
             key = key if isinstance(key, str) else str(key)
-            if key in indexed_keys and collection_suffix == indexed_data[key]['metadata'].get('collection'):
+            if key in indexed_keys and index_name == indexed_data[key]['metadata'].get('collection'):
                 if compare_fn(document, indexed_data[key]):
                     # Disabled addition of new collection to already indexed documents
                     # # check metadata.collection and update if needed
                     # for update_collection_id in remove_ids_fn(indexed_data, key):
                     #     self._add_to_collection(
                     #         update_collection_id,
-                    #         collection_suffix
+                    #         index_name
                     #     )
                     continue
                 final_docs.append(document)
@@ -303,10 +303,10 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         return final_docs
 
-    def _reduce_code_duplicates(self, documents: Generator[Any, None, None], collection_suffix: str) -> List[Any]:
+    def _reduce_code_duplicates(self, documents: Generator[Any, None, None], index_name: str) -> List[Any]:
         return self._reduce_duplicates(
             documents,
-            collection_suffix,
+            index_name,
             self._get_code_indexed_data,
             lambda doc: doc.metadata.get('filename'),
             lambda doc, idx: (
@@ -318,7 +318,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
             log_msg="Verification of code documents to index started"
         )
 
-    def index_documents(self, documents: Generator[Document, None, None], collection_suffix: str, progress_step: int = 20, clean_index: bool = True, is_code: bool = True):
+    def index_documents(self, documents: Generator[Document, None, None], index_name: str, progress_step: int = 20, clean_index: bool = True, is_code: bool = True):
         """ Index documents in the vectorstore.
 
         Args:
@@ -329,13 +329,13 @@ class VectorStoreWrapper(BaseToolApiWrapper):
 
         from ..langchain.interfaces.llm_processor import add_documents
 
-        self._log_tool_event(message=f"Starting the indexing... Parameters: {collection_suffix=}, {clean_index=}, {is_code}", tool_name="index_documents")
+        self._log_tool_event(message=f"Starting the indexing... Parameters: {index_name=}, {clean_index=}, {is_code}", tool_name="index_documents")
         # pre-process documents if needed (find duplicates, etc.)
         if clean_index:
             logger.info("Cleaning index before re-indexing all documents.")
             self._log_data("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
             try:
-                self._clean_collection(collection_suffix)
+                self._clean_collection(index_name)
                 self.vectoradapter.persist()
                 self.vectoradapter.vacuum()
                 self._log_data("Previous index has been removed",
@@ -349,7 +349,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 message="Filter for duplicates",
                 tool_name="index_documents")
             # remove duplicates based on metadata 'id' and 'updated_on' or 'commit_hash' fields
-            documents = self._reduce_code_duplicates(documents, collection_suffix)
+            documents = self._reduce_code_duplicates(documents, index_name)
             self._log_tool_event(
                 message="All the duplicates were filtered out. Proceeding with indexing.",
                 tool_name="index_documents")
@@ -377,13 +377,13 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         self._log_tool_event(message=f"Documents for indexing were processed. Total documents: {len(documents)}",
                              tool_name="index_documents")
 
-        # if collection_suffix is provided, add it to metadata of each document
-        if collection_suffix:
+        # if index_name is provided, add it to metadata of each document
+        if index_name:
             for doc in documents:
                 if not doc.metadata.get('collection'):
-                    doc.metadata['collection'] = collection_suffix
+                    doc.metadata['collection'] = index_name
                 else:
-                    doc.metadata['collection'] += f";{collection_suffix}"
+                    doc.metadata['collection'] += f";{index_name}"
 
         total_docs = len(documents)
         documents_count = 0
