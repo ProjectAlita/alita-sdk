@@ -17,7 +17,7 @@ from ..runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
-INDEX_TOOL_NAMES = ['index_data', 'remove_index', 'list_collections', 'search_index', 'stepback_search_index',
+INDEX_TOOL_NAMES = ['index_data', 'remove_index', 'list_indexes', 'search_index', 'stepback_search_index',
                             'stepback_summary_index']
 
 LoaderSchema = create_model(
@@ -403,9 +403,9 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         """Cleans the indexed data in the collection."""
         self._init_vector_store()._clean_collection(index_name=index_name)
         return (f"Collection '{index_name}' has been removed from the vector store.\n"
-                f"Available collections: {self.list_collections()}")
+                f"Available collections: {self.list_indexes()}")
 
-    def list_collections(self):
+    def list_indexes(self):
         """Lists all collections in the vector store."""
         vectorstore_wrapper = self._init_vector_store()
         return vectorstore_wrapper.list_collections()
@@ -538,9 +538,9 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
             },
             {
                 "name": "list_indexes",
-                "mode": "list_collections",
-                "ref": self.list_collections,
-                "description": self.list_collections.__doc__,
+                "mode": "list_indexes",
+                "ref": self.list_indexes,
+                "description": self.list_indexes.__doc__,
                 "args_schema": create_model("ListCollectionsParams")  # No parameters
             },
 
