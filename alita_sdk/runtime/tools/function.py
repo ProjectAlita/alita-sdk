@@ -25,7 +25,7 @@ class FunctionTool(BaseTool):
     output_variables: Optional[list[str]] = None
     structured_output: Optional[bool] = False
 
-    def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> None:
+    def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> str:
         """Prepare input for PyodideSandboxTool by injecting state into the code block."""
         # add state into the code block here since it might be changed during the execution of the code
         state_copy = deepcopy(state)
@@ -34,9 +34,17 @@ class FunctionTool(BaseTool):
 
         del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
         serialized_state = pickle.dumps(state_copy)
-        code_block = self.input_mapping['code']['value']
         # inject state into the code block as alita_state variable
-        self.input_mapping['code']['value'] = f"""import pickle\nalita_state = pickle.loads({serialized_state})\n\n{code_block}"""
+        pyodide_predata = f"""import pickle\nalita_state = pickle.loads({serialized_state})\n"""
+        # add classes related to sandbox client
+        # read the content of alita_sdk/runtime/cliens/sandbox_client.py
+        try:
+            with open('alita_sdk/runtime/clients/sandbox_client.py', 'r') as f:
+                sandbox_client_code = f.read()
+            pyodide_predata += f"\n{sandbox_client_code}\n"
+        except FileNotFoundError:
+            logger.error("sandbox_client.py not found. Ensure 'alita_sdk/runtime/clients/sandbox_client.py' exists.")
+        return pyodide_predata
 
     def _handle_pyodide_output(self, tool_result: Any) -> dict:
         """Handle output processing for PyodideSandboxTool results."""
@@ -79,12 +87,13 @@ class FunctionTool(BaseTool):
             'function', {'parameters': {}}).get(
             'parameters', {'properties': {}}).get('properties', {})
 
-        # special handler for PyodideSandboxTool
-        if self._is_pyodide_tool():
-            self._prepare_pyodide_input(state)
-
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
+
+        # special handler for PyodideSandboxTool
+        if self._is_pyodide_tool():
+            code = func_args['code']
+            func_args['code'] = f"{self._prepare_pyodide_input(state)}\n{code}"
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
             dispatch_custom_event(
