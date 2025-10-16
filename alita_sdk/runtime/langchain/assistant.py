@@ -314,7 +314,8 @@ class Assistant:
             memory=checkpointer,
             store=self.store,
             debug=False,
-            for_subgraph=False
+            for_subgraph=False,
+            alita_client=self.alita_client
         )
         
         return agent
@@ -328,7 +329,8 @@ class Assistant:
         #
         agent = create_graph(
             client=self.client, tools=self.tools,
-            yaml_schema=self.prompt, memory=memory
+            yaml_schema=self.prompt, memory=memory,
+            alita_client=self.alita_client
         )
         #
         return agent
