@@ -241,7 +241,7 @@ class Assistant:
             prompt_instructions = self.prompt
 
         # take the system message from the openai prompt as a prompt instructions
-        if self.app_type == "openai" and hasattr(self.prompt, 'messages') and self.prompt.messages:
+        if self.app_type == "openai" and hasattr(self.prompt, 'messages'):
             prompt_instructions = self.__take_prompt_from_openai_messages()
         
         # Create a unified YAML schema with conditional tool binding
