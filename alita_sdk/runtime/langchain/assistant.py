@@ -137,11 +137,9 @@ class Assistant:
     def runnable(self):
         if self.app_type == 'pipeline':
             return self.pipeline()
-        elif self.app_type == 'openai':
-            return self.getOpenAIToolsAgentExecutor()
         elif self.app_type == 'xml':
             return self.getXMLAgentExecutor()
-        elif self.app_type in ['predict', 'react']:
+        elif self.app_type in ['predict', 'react', 'openai']:
             return self.getLangGraphReactAgent()
         else:
             self.tools = [EchoTool()] + self.tools
@@ -241,6 +239,10 @@ class Assistant:
         # Only use prompt_instructions if explicitly specified (for predict app_type)
         if self.app_type == "predict" and isinstance(self.prompt, str):
             prompt_instructions = self.prompt
+
+        # take the system message from the openai prompt as a prompt instructions
+        if self.app_type == "openai" and hasattr(self.prompt, 'messages'):
+            prompt_instructions = self.__take_prompt_from_openai_messages()
         
         # Create a unified YAML schema with conditional tool binding
         # Build the base node configuration
@@ -341,3 +343,14 @@ class Assistant:
 
     def predict(self, messages: list[BaseMessage]):
         return self.client.invoke(messages)
+
+    def __take_prompt_from_openai_messages(self):
+        if self.prompt and self.prompt.messages:
+            for message in self.prompt.messages:
+                # we don't need any message placeholder from the openai agent prompt
+                if hasattr(message, 'variable_name'):
+                    continue
+                # take only the content of the system message from the openai prompt
+                if isinstance(message, SystemMessage):
+                    return message.content
+        return None
