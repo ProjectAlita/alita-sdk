@@ -48,7 +48,9 @@ class FunctionTool(BaseTool):
                     tool_result_converted[var] = tool_result[var]
                 else:
                     # handler in case user points to a var that is not in the output of the tool
-                    tool_result_converted[var] = tool_result.get('result', 'Execution result is missing')
+                    tool_result_converted[var] = tool_result.get('result',
+                                                                 tool_result.get('error') if tool_result.get('error')
+                                                                 else 'Execution result is missing')
         else:
             tool_result_converted.update({"messages": [{"role": "assistant", "content": dumps(tool_result)}]})
 
