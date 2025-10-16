@@ -41,14 +41,21 @@ class FunctionTool(BaseTool):
         # add classes related to sandbox client
         # read the content of alita_sdk/runtime/cliens/sandbox_client.py
         try:
-            with open('alita_sdk/runtime/clients/sandbox_client.py', 'r') as f:
+            import os
+            from pathlib import Path
+
+            # Get the directory of the current file and construct the path to sandbox_client.py
+            current_dir = Path(__file__).parent
+            sandbox_client_path = current_dir.parent / 'clients' / 'sandbox_client.py'
+
+            with open(sandbox_client_path, 'r') as f:
                 sandbox_client_code = f.read()
             pyodide_predata += f"\n{sandbox_client_code}\n"
             pyodide_predata += (f"alita_client = SandboxClient(base_url='{self.alita_client.base_url}',"
                                 f"project_id={self.alita_client.project_id},"
                                 f"auth_token='{self.alita_client.auth_token}')")
         except FileNotFoundError:
-            logger.error("sandbox_client.py not found. Ensure 'alita_sdk/runtime/clients/sandbox_client.py' exists.")
+            logger.error(f"sandbox_client.py not found at {sandbox_client_path}. Ensure the file exists.")
         return pyodide_predata
 
     def _handle_pyodide_output(self, tool_result: Any) -> dict:
@@ -71,8 +78,14 @@ class FunctionTool(BaseTool):
             # execute code tool and update state variables
             try:
                 result_value = tool_result.get('result', {})
-                tool_result_converted.update(result_value if isinstance(result_value, dict)
-                                           else json.loads(result_value))
+                if isinstance(result_value, dict):
+                    tool_result_converted.update(result_value)
+                elif isinstance(result_value, list):
+                    # Handle list case - could wrap in a key or handle differently based on requirements
+                    tool_result_converted.update({"result": result_value})
+                else:
+                    # Handle JSON string case
+                    tool_result_converted.update(json.loads(result_value))
             except json.JSONDecodeError:
                 logger.error(f"JSONDecodeError: {tool_result}")
 
