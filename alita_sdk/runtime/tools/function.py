@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool, ToolException
 from typing import Any, Optional, Union, Annotated
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
+
 from ..langchain.utils import propagate_the_input_mapping
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class FunctionTool(BaseTool):
     input_mapping: Optional[dict[str, dict]] = None
     output_variables: Optional[list[str]] = None
     structured_output: Optional[bool] = False
+    alita_client: Optional[Any] = None
 
     def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> str:
         """Prepare input for PyodideSandboxTool by injecting state into the code block."""
@@ -42,6 +44,9 @@ class FunctionTool(BaseTool):
             with open('alita_sdk/runtime/clients/sandbox_client.py', 'r') as f:
                 sandbox_client_code = f.read()
             pyodide_predata += f"\n{sandbox_client_code}\n"
+            pyodide_predata += (f"alita_client = SandboxClient(base_url='{self.alita_client.base_url}',"
+                                f"project_id={self.alita_client.project_id},"
+                                f"auth_token='{self.alita_client.auth_token}')")
         except FileNotFoundError:
             logger.error("sandbox_client.py not found. Ensure 'alita_sdk/runtime/clients/sandbox_client.py' exists.")
         return pyodide_predata
@@ -93,6 +98,8 @@ class FunctionTool(BaseTool):
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
             code = func_args['code']
+            # code = func_args['code']
+            code = "alita_client.get_list_of_apps()"
             func_args['code'] = f"{self._prepare_pyodide_input(state)}\n{code}"
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)

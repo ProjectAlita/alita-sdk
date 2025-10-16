@@ -562,7 +562,8 @@ def create_graph(
                     output_variables=node.get('output', []),
                     input_mapping={'code': {'type': 'fixed', 'value': code}},
                     input_variables=node.get('input', ['messages']),
-                    structured_output=node.get('structured_output', False)
+                    structured_output=node.get('structured_output', False),
+                    alita_client=kwargs.get('alita_client', None)
                 ))
             elif node_type == 'llm':
                 output_vars = node.get('output', [])
