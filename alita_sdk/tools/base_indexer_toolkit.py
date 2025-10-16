@@ -343,7 +343,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """Cleans the indexed data in the collection."""
         super()._clean_collection(index_name=index_name)
         return (f"Collection '{index_name}' has been removed from the vector store.\n"
-                f"Available collections: {self.list_indexes()}") if index_name \
+                f"Available collections: {self.list_collections()}") if index_name \
             else "All collections have been removed from the vector store." 
 
     def _build_collection_filter(self, filter: dict | str, index_name: str = "") -> dict:
@@ -385,7 +385,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """ Searches indexed documents in the vector store."""
         # build filter on top of index_name
 
-        available_collections = super().list_indexes()
+        available_collections = super().list_collections()
         if index_name and index_name not in available_collections:
             return f"Collection '{index_name}' not found. Available collections: {available_collections}"
 
@@ -547,10 +547,10 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "args_schema": RemoveIndexParams
             },
             {
-                "name": "list_indexes",
-                "mode": "list_indexes",
-                "ref": self.list_indexes,
-                "description": self.list_indexes.__doc__,
+                "name": "list_collections",
+                "mode": "list_collections",
+                "ref": self.list_collections,
+                "description": self.list_collections.__doc__,
                 "args_schema": create_model("ListCollectionsParams")  # No parameters
             },
         ]

@@ -215,7 +215,7 @@ class VectorStoreWrapper(BaseToolApiWrapper):
         """List all collections in the vectorstore.
         Returns a list of collection names, or if no collections exist,
         returns a dict with an empty list and a message."""
-        raw = self.vector_adapter.list_indexes(self)
+        raw = self.vector_adapter.list_collections(self)
         # Normalize raw result to a list of names
         if not raw:
             # No collections found

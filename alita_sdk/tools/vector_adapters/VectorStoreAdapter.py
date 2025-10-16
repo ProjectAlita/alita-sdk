@@ -307,7 +307,7 @@ class ChromaAdapter(VectorStoreAdapter):
 
     def list_collections(self, vectorstore_wrapper) -> str:
         vector_client = vectorstore_wrapper.vectorstore._client
-        return ','.join([collection.name for collection in vector_client.list_indexes()])
+        return ','.join([collection.name for collection in vector_client.list_collections()])
 
     def remove_collection(self, vectorstore_wrapper, collection_name: str):
         vectorstore_wrapper.vectorstore.delete_collection()

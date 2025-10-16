@@ -208,10 +208,10 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             logger.error(f"Error during similarity search: {str(e)}")
             raise ToolException(f"Search failed: {str(e)}")
 
-    def list_indexes(self) -> List[str]:
+    def list_collections(self) -> List[str]:
         """List all collections in the vectorstore."""
 
-        collections = self.vector_adapter.list_indexes(self)
+        collections = self.vector_adapter.list_collections(self)
         if not collections:
             return "No indexed collections"
         return collections
