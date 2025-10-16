@@ -537,7 +537,7 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
                 "args_schema": RemoveIndexParams
             },
             {
-                "name": "list_indexes",
+                "name": "list_collections",
                 "mode": "list_collections",
                 "ref": self.list_collections,
                 "description": self.list_collections.__doc__,
