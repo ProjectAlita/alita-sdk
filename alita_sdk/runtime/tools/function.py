@@ -31,13 +31,10 @@ class FunctionTool(BaseTool):
         """Prepare input for PyodideSandboxTool by injecting state into the code block."""
         # add state into the code block here since it might be changed during the execution of the code
         state_copy = deepcopy(state)
-        # pickle state
-        import pickle
 
         del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
-        serialized_state = pickle.dumps(state_copy)
         # inject state into the code block as alita_state variable
-        pyodide_predata = f"""import pickle\nalita_state = pickle.loads({serialized_state})\n"""
+        pyodide_predata = f"alita_state = {state_copy}"
         # add classes related to sandbox client
         # read the content of alita_sdk/runtime/cliens/sandbox_client.py
         try:
@@ -64,6 +61,10 @@ class FunctionTool(BaseTool):
 
         if self.output_variables:
             for var in self.output_variables:
+                if var == "messages":
+                    tool_result_converted.update(
+                        {"messages": [{"role": "assistant", "content": dumps(tool_result)}]})
+                    continue
                 if isinstance(tool_result, dict) and var in tool_result:
                     tool_result_converted[var] = tool_result[var]
                 else:

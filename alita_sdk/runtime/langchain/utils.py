@@ -177,7 +177,11 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
             var_dict = create_params(input_variables, source)
 
         if value['type'] == 'fstring':
-            input_data[key] = value['value'].format(**var_dict)
+            try:
+                input_data[key] = value['value'].format(**var_dict)
+            except KeyError as e:
+                logger.error(f"KeyError in fstring formatting for key '{key}'. Attempt to find proper data in state.\n{e}")
+                input_data[key] = value['value'].format(**state)
         elif value['type'] == 'fixed':
             input_data[key] = value['value']
         else:
