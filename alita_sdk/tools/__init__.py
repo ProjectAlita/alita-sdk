@@ -97,7 +97,9 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
         for tool_name in tool.get('settings', {}).get('selected_tools', []):
             if isinstance(tool_name, str) and tool_name.startswith('_'):
                 raise ValueError(f"Tool name '{tool_name}' from toolkit '{tool.get('type', '')}' cannot start with '_'")
-
+        if not tool.get('settings'):
+            logger.warning(f"Tool '{tool.get('type', '')}' has no settings, skipping...")
+            continue
         tool['settings']['alita'] = alita
         tool['settings']['llm'] = llm
         tool['settings']['store'] = store

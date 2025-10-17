@@ -12,6 +12,7 @@ from .prompt import PromptToolkit
 from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from ..tools.mcp_server_tool import McpServerTool
+from ..tools.sandbox import SandboxToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
@@ -24,7 +25,8 @@ def get_toolkits():
     core_toolkits = [
         ArtifactToolkit.toolkit_config_schema(),
         MemoryToolkit.toolkit_config_schema(),
-        VectorStoreToolkit.toolkit_config_schema()
+        VectorStoreToolkit.toolkit_config_schema(),
+        SandboxToolkit.toolkit_config_schema()
     ]
 
     return core_toolkits + community_toolkits() + alita_toolkits()
@@ -65,6 +67,13 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
                 store=memory_store,
             ).get_tools()
+        # TODO: update configuration of internal tools
+        elif tool['type'] == 'internal_tool':
+            if tool['name'] == 'pyodide':
+                tools += SandboxToolkit.get_toolkit(
+                    stateful=False,
+                    allow_net=True,
+                ).get_tools()
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
                 client=alita_client,

@@ -2,21 +2,56 @@ import asyncio
 import logging
 import subprocess
 import os
-from typing import Any, Type, Optional, Dict
-from langchain_core.tools import BaseTool
-from pydantic import BaseModel, create_model
+from typing import Any, Type, Optional, Dict, List, Literal
+
+from langchain_core.tools import BaseTool, BaseToolkit
+from pydantic import BaseModel, create_model, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
 logger = logging.getLogger(__name__)
+
+name = "pyodide"
+
+
+def get_tools(tools_list: list, alita_client=None, llm=None, memory_store=None):
+    """
+    Get sandbox tools for the provided tool configurations.
+
+    Args:
+        tools_list: List of tool configurations
+        alita_client: Alita client instance (unused for sandbox)
+        llm: LLM client instance (unused for sandbox)
+        memory_store: Optional memory store instance (unused for sandbox)
+
+    Returns:
+        List of sandbox tools
+    """
+    all_tools = []
+
+    for tool in tools_list:
+        if tool.get('type') == 'sandbox' or tool.get('toolkit_name') == 'sandbox':
+            try:
+                toolkit_instance = SandboxToolkit.get_toolkit(
+                    stateful=tool['settings'].get('stateful', False),
+                    allow_net=tool['settings'].get('allow_net', True),
+                    toolkit_name=tool.get('toolkit_name', '')
+                )
+                all_tools.extend(toolkit_instance.get_tools())
+            except Exception as e:
+                logger.error(f"Error in sandbox toolkit get_tools: {e}")
+                logger.error(f"Tool config: {tool}")
+                raise
+
+    return all_tools
 
 
 def _is_deno_available() -> bool:
     """Check if Deno is available in the PATH"""
     try:
         result = subprocess.run(
-            ["deno", "--version"], 
-            capture_output=True, 
-            text=True, 
+            ["deno", "--version"],
+            capture_output=True,
+            text=True,
             timeout=10
         )
         return result.returncode == 0
@@ -42,26 +77,26 @@ def _setup_pyodide_cache_env() -> None:
                             value = value.strip('"').strip("'")
                             os.environ[key] = value
                             logger.debug(f"Set Pyodide cache env: {key}={value}")
-        
+
         # Set default caching environment variables if not already set
         cache_defaults = {
             'PYODIDE_PACKAGES_PATH': os.path.expanduser('~/.cache/pyodide'),
             'DENO_DIR': os.path.expanduser('~/.cache/deno'),
             'PYODIDE_CACHE_DIR': os.path.expanduser('~/.cache/pyodide'),
         }
-        
+
         for key, default_value in cache_defaults.items():
             if key not in os.environ:
                 os.environ[key] = default_value
                 logger.debug(f"Set default Pyodide env: {key}={default_value}")
-                
+
     except Exception as e:
         logger.warning(f"Could not setup Pyodide cache environment: {e}")
 
 
 # Create input schema for the sandbox tool
 sandbox_tool_input = create_model(
-    "SandboxToolInput", 
+    "SandboxToolInput",
     code=(str, FieldInfo(description="Python code to execute in the sandbox environment"))
 )
 
@@ -72,7 +107,7 @@ class PyodideSandboxTool(BaseTool):
     This tool leverages langchain-sandbox to provide a safe environment for running untrusted Python code.
     Optimized for performance with caching and stateless execution by default.
     """
-    
+
     name: str = "pyodide_sandbox"
     description: str = """Execute Python code in a secure sandbox environment using Pyodide.
     This tool allows safe execution of Python code without access to the host system.
@@ -81,7 +116,7 @@ class PyodideSandboxTool(BaseTool):
     - Perform calculations or data analysis
     - Test Python algorithms
     - Run code that requires isolation from the host system
-    
+
     The sandbox supports most Python standard library modules and can install additional packages.
     Note: File access and some system operations are restricted for security.
     Optimized for performance with local caching (stateless by default for faster execution).
@@ -91,14 +126,14 @@ class PyodideSandboxTool(BaseTool):
     allow_net: bool = True
     session_bytes: Optional[bytes] = None
     session_metadata: Optional[Dict] = None
-    
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._sandbox = None
         # Setup caching environment for optimal performance
         _setup_pyodide_cache_env()
         self._initialize_sandbox()
-    
+
     def _initialize_sandbox(self) -> None:
         """Initialize the PyodideSandbox instance with optimized settings"""
         try:
@@ -110,9 +145,9 @@ class PyodideSandboxTool(BaseTool):
                 )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
-            
+
             from langchain_sandbox import PyodideSandbox
-            
+
             # Configure sandbox with performance optimizations
             self._sandbox = PyodideSandbox(
                 stateful=self.stateful,
@@ -135,7 +170,7 @@ class PyodideSandboxTool(BaseTool):
         except Exception as e:
             logger.error(f"Failed to initialize PyodideSandbox: {e}")
             raise
-    
+
     def _run(self, code: str) -> str:
         """
         Synchronous version - runs the async method in a new event loop
@@ -144,7 +179,7 @@ class PyodideSandboxTool(BaseTool):
             # Check if sandbox is initialized, if not try to initialize
             if self._sandbox is None:
                 self._initialize_sandbox()
-            
+
             # Check if we're already in an async context
             try:
                 loop = asyncio.get_running_loop()
@@ -169,7 +204,7 @@ class PyodideSandboxTool(BaseTool):
         except Exception as e:
             logger.error(f"Error executing code in sandbox: {e}")
             return f"Error executing code: {str(e)}"
-    
+
     async def _arun(self, code: str) -> str:
         """
         Execute Python code in the Pyodide sandbox
@@ -177,19 +212,19 @@ class PyodideSandboxTool(BaseTool):
         try:
             if self._sandbox is None:
                 self._initialize_sandbox()
-            
+
             # Execute the code with session state if available
             result = await self._sandbox.execute(
                 code,
                 session_bytes=self.session_bytes,
                 session_metadata=self.session_metadata
             )
-            
+
             # Update session state for stateful execution
             if self.stateful:
                 self.session_bytes = result.session_bytes
                 self.session_metadata = result.session_metadata
-            
+
             result_dict = {}
 
             if result.result is not None:
@@ -212,7 +247,7 @@ class PyodideSandboxTool(BaseTool):
 
             result_dict["execution_info"] = execution_info
             return result_dict
-            
+
         except Exception as e:
             logger.error(f"Error executing code in sandbox: {e}")
             return f"Error executing code: {str(e)}"
@@ -223,7 +258,7 @@ class StatefulPyodideSandboxTool(PyodideSandboxTool):
     A stateful version of the PyodideSandboxTool that maintains state between executions.
     This version preserves variables, imports, and function definitions across multiple tool calls.
     """
-    
+
     name: str = "stateful_pyodide_sandbox"
     description: str = """Execute Python code in a stateful sandbox environment using Pyodide.
     This tool maintains state between executions, preserving variables, imports, and function definitions.
@@ -232,11 +267,11 @@ class StatefulPyodideSandboxTool(PyodideSandboxTool):
     - Maintain variables across multiple calls
     - Develop complex programs step by step
     - Preserve imported libraries and defined functions
-    
+
     The sandbox supports most Python standard library modules and can install additional packages.
     Note: File access and some system operations are restricted for security.
     """
-    
+
     def __init__(self, **kwargs: Any) -> None:
         kwargs['stateful'] = True  # Force stateful mode
         super().__init__(**kwargs)
@@ -246,21 +281,21 @@ class StatefulPyodideSandboxTool(PyodideSandboxTool):
 def create_sandbox_tool(stateful: bool = False, allow_net: bool = True) -> BaseTool:
     """
     Factory function to create sandbox tools with specified configuration.
-    
+
     Note: This tool requires Deno to be installed and available in PATH.
     For installation and optimization, run the bootstrap.sh script.
-    
+
     Args:
         stateful: Whether to maintain state between executions (default: False for better performance)
         allow_net: Whether to allow network access (for package installation)
-    
+
     Returns:
         Configured sandbox tool instance
-        
+
     Raises:
         ImportError: If langchain-sandbox is not installed
         RuntimeError: If Deno is not found in PATH
-        
+
     Performance Notes:
         - Stateless mode (default) is faster and avoids session state overhead
         - Run bootstrap.sh script to enable local caching and reduce initialization time
@@ -270,3 +305,57 @@ def create_sandbox_tool(stateful: bool = False, allow_net: bool = True) -> BaseT
         return StatefulPyodideSandboxTool(allow_net=allow_net)
     else:
         return PyodideSandboxTool(stateful=False, allow_net=allow_net)
+
+
+class SandboxToolkit(BaseToolkit):
+    tools: List[BaseTool] = []
+
+    @staticmethod
+    def toolkit_config_schema() -> BaseModel:
+        # Create sample tools to get their schemas
+        sample_tools = [
+            PyodideSandboxTool(),
+            StatefulPyodideSandboxTool()
+        ]
+        selected_tools = {x.name: x.args_schema.schema() for x in sample_tools}
+
+        return create_model(
+            'sandbox',
+            stateful=(bool, Field(default=False, description="Whether to maintain state between executions")),
+            allow_net=(bool, Field(default=True, description="Whether to allow network access for package installation")),
+            selected_tools=(List[Literal[tuple(selected_tools)]],
+                            Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+
+            __config__=ConfigDict(json_schema_extra={
+                'metadata': {
+                    "label": "Python Sandbox",
+                    "icon_url": "sandbox.svg",
+                    "hidden": False,
+                    "categories": ["code", "execution", "internal_tool"],
+                    "extra_categories": ["python", "pyodide", "sandbox", "code execution"],
+                }
+            })
+        )
+
+    @classmethod
+    def get_toolkit(cls, stateful: bool = False, allow_net: bool = True, **kwargs):
+        """
+        Get toolkit with sandbox tools.
+
+        Args:
+            stateful: Whether to maintain state between executions
+            allow_net: Whether to allow network access
+            **kwargs: Additional arguments
+        """
+        tools = []
+
+        if stateful:
+            tools.append(StatefulPyodideSandboxTool(allow_net=allow_net))
+        else:
+            tools.append(PyodideSandboxTool(stateful=False, allow_net=allow_net))
+
+        return cls(tools=tools)
+
+    def get_tools(self):
+        return self.tools
+
