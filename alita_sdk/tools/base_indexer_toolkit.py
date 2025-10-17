@@ -152,39 +152,43 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     def index_data(self, **kwargs):
         index_name = kwargs.get("index_name")
-        progress_step = kwargs.get("progress_step")
         clean_index = kwargs.get("clean_index")
         chunking_tool = kwargs.get("chunking_tool")
         chunking_config = kwargs.get("chunking_config")
+        result = {"count": 0}
         #
-        if clean_index:
-            self._clean_index(index_name)
-        #
-        self.index_meta_init(index_name, kwargs)
-        #
-        self._log_tool_event(f"Indexing data into collection with suffix '{index_name}'. It can take some time...")
-        self._log_tool_event(f"Loading the documents to index...{kwargs}")
-        documents = self._base_loader(**kwargs)
-        documents = list(documents) # consume/exhaust generator to count items
-        documents_count = len(documents)
-        documents = (doc for doc in documents)
-        self._log_tool_event(f"Base documents were pre-loaded. "
-                             f"Search for possible document duplicates and remove them from the indexing list...")
-        documents = self._reduce_duplicates(documents, index_name)
-        self._log_tool_event(f"Duplicates were removed. "
-                             f"Processing documents to collect dependencies and prepare them for indexing...")
-        result = self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, index_name=index_name, progress_step=progress_step)
-        #
-        self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, result)
-        #
-        return {"status": "ok", "message": f"successfully indexed {result} documents"}
+        try:
+            if clean_index:
+                self._clean_index(index_name)
+            #
+            self.index_meta_init(index_name, kwargs)
+            #
+            self._log_tool_event(f"Indexing data into collection with suffix '{index_name}'. It can take some time...")
+            self._log_tool_event(f"Loading the documents to index...{kwargs}")
+            documents = self._base_loader(**kwargs)
+            documents = list(documents) # consume/exhaust generator to count items
+            documents_count = len(documents)
+            documents = (doc for doc in documents)
+            self._log_tool_event(f"Base documents were pre-loaded. "
+                                 f"Search for possible document duplicates and remove them from the indexing list...")
+            documents = self._reduce_duplicates(documents, index_name)
+            self._log_tool_event(f"Duplicates were removed. "
+                                 f"Processing documents to collect dependencies and prepare them for indexing...")
+            self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, index_name=index_name, result=result)
+            #
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, result["count"])
+            #
+            return {"status": "ok", "message": f"successfully indexed {result["count"]} documents"}
+        except Exception as e:
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"])
+            raise e
+            
 
-    def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, index_name: Optional[str] = None, progress_step: int = 20):
+    def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, result, index_name: Optional[str] = None):
         self._log_tool_event(f"Base documents are ready for indexing. {base_total} base documents in total to index.")
         from ..runtime.langchain.interfaces.llm_processor import add_documents
         #
         base_doc_counter = 0
-        total_counter = 0
         pg_vector_add_docs_chunk = []
         for base_doc in base_documents:
             base_doc_counter += 1
@@ -232,10 +236,9 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             msg = f"Indexed base document #{base_doc_counter} out of {base_total} (with {dependent_docs_counter} dependencies)."
             logger.debug(msg)
             self._log_tool_event(msg)
-            total_counter += dependent_docs_counter
+            result["count"] += dependent_docs_counter
         if pg_vector_add_docs_chunk:
             add_documents(vectorstore=self.vectorstore, documents=pg_vector_add_docs_chunk)
-        return total_counter
 
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
         from ..tools.chunkers import __all__ as chunkers
