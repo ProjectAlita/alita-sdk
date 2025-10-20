@@ -74,7 +74,6 @@ class GraphTool(BaseTool):
         # Default to None is safe because it will be checked also on the langchain side.
         if args:
             config = args[0]
-        # Get the config for invocation from args. It may be empty or real value from parent node/graph
         response = self.graph.invoke(formulate_query(kwargs), config=config)
         if self.return_type == "str":
             return response["output"]
