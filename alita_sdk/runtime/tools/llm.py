@@ -177,7 +177,9 @@ class LLMNode(BaseTool):
                             if tool_to_execute:
                                 try:
                                     logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
-                                    tool_result = tool_to_execute.invoke(tool_args)
+                                    # Pass the underlying config to the tool execution invoke method
+                                    # since it may be another agent, graph, etc. to see it properly in thinking steps
+                                    tool_result = tool_to_execute.invoke(tool_args, config=config)
 
                                     # Create tool message with result - preserve structured content
                                     from langchain_core.messages import ToolMessage
