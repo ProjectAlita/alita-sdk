@@ -186,7 +186,7 @@ class ImageGenerationToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Image Generation",
                     "icon_url": "image_generation.svg",
-                    "hidden": False,
+                    "hidden": True,
                     "categories": ["internal_tool"],
                     "extra_categories": ["image generation"],
                 }
