@@ -161,8 +161,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             if clean_index:
                 self._clean_index(index_name)
             #
-            self.index_meta_init(index_name, kwargs)
-            #
             self._log_tool_event(f"Indexing data into collection with suffix '{index_name}'. It can take some time...")
             self._log_tool_event(f"Loading the documents to index...{kwargs}")
             documents = self._base_loader(**kwargs)
@@ -455,39 +453,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             reranking_config=reranking_config, 
             extended_search=extended_search
         )
-    
-    def index_meta_init(self, index_name: str, index_configuration: dict[str, Any]):
-        index_meta_raw = super().get_index_meta(index_name)
-        from ..runtime.langchain.interfaces.llm_processor import add_documents
-        created_on = time.time()
-        metadata = {
-            "collection": index_name,
-            "type": IndexerKeywords.INDEX_META_TYPE.value,
-            "indexed": 0,
-            "state": IndexerKeywords.INDEX_META_IN_PROGRESS.value,
-            "index_configuration": index_configuration,
-            "created_on": created_on,
-            "updated_on": created_on,
-            "history": "[]",
-        }
-        index_meta_ids = None
-        #
-        if index_meta_raw:
-            history_raw = index_meta_raw.get("metadata", {}).get("history", "[]")
-            if isinstance(history_raw, str) and history_raw.strip():
-                try:
-                    history = json.loads(history_raw)
-                except (json.JSONDecodeError, TypeError):
-                    history = []
-            else:
-                history = []
-            new_history_item = {k: v for k, v in index_meta_raw.get("metadata", {}).items() if k != "history"}
-            history.append(new_history_item)
-            metadata["history"] = json.dumps(history)
-            index_meta_ids = [index_meta_raw.get("id")]
-        #
-        index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)
-        add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=index_meta_ids)
 
     def index_meta_update(self, index_name: str, state: str, result: int):
         index_meta_raw = super().get_index_meta(index_name)
