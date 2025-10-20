@@ -174,11 +174,13 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                                  f"Processing documents to collect dependencies and prepare them for indexing...")
             self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, index_name=index_name, result=result)
             #
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, result["count"])
+            results_count = result["count"]
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count)
             #
-            return {"status": "ok", "message": f"successfully indexed {result["count"]} documents"}
+            return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
+            else "no new documents to index"}
         except Exception as e:
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"])
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, results_count)
             raise e
             
 

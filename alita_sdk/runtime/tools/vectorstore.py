@@ -414,7 +414,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 return {"status": "error", "message": f"Error: {format_exc()}"}
         if _documents:
             add_documents(vectorstore=self.vectorstore, documents=_documents)
-        return {"status": "ok", "message": f"successfully indexed {documents_count} documents"}
+        return {"status": "ok", "message": f"successfully indexed {documents_count} documents" if documents_count > 0
+        else "No new documents to index."}
 
     def search_documents(self, query:str, doctype: str = 'code', 
                          filter:dict|str={}, cut_off: float=0.5,
