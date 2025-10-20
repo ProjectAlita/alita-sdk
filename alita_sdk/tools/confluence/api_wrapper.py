@@ -7,12 +7,14 @@ from json import JSONDecodeError
 from typing import Optional, List, Any, Dict, Callable, Generator, Literal
 
 import requests
+from atlassian.errors import ApiError
 from langchain_community.document_loaders.confluence import ContentFormat
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import ToolException
 from markdownify import markdownify
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
+from requests import HTTPError
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
 from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
@@ -194,6 +196,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
     keep_markdown_format: Optional[bool] = True
     ocr_languages: Optional[str] = None
     keep_newlines: Optional[bool] = True
+    _errors: Optional[list[str]] = None
     _image_cache: ImageDescriptionCache = PrivateAttr(default_factory=ImageDescriptionCache)
 
     @model_validator(mode='before')
@@ -498,7 +501,9 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         restrictions = self.client.get_all_restrictions_for_content(page["id"])
 
         return (
-                page["status"] == "current"
+                (page["status"] == "current"
+                # allow user to see archived content if needed
+                 or page["status"] == "archived")
                 and not restrictions["read"]["restrictions"]["user"]["results"]
                 and not restrictions["read"]["restrictions"]["group"]["results"]
         )
@@ -518,18 +523,34 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 ),
                 before_sleep=before_sleep_log(logger, logging.WARNING),
             )(self.client.get_page_by_id)
-            page = get_page(
-                page_id=page_id, expand=f"{self.content_format.value},version"
-            )
+            try:
+                page = get_page(
+                    page_id=page_id, expand=f"{self.content_format.value},version"
+                )
+            except (ApiError, HTTPError) as e:
+                logger.error(f"Error fetching page with ID {page_id}: {e}")
+                page_content_temp = f"Confluence API Error: cannot fetch the page with ID {page_id}: {e}"
+                # store errors
+                if self._errors is None:
+                    self._errors = []
+                self._errors.append(page_content_temp)
+                return Document(page_content=page_content_temp,
+                                metadata={})
             if not self.include_restricted_content and not self.is_public_page(page):
                 continue
             yield self.process_page(page, skip_images)
+
+    def _log_errors(self):
+        """ Log errors encountered during toolkit execution. """
+        if self._errors:
+            logger.info(f"Errors encountered during toolkit execution: {self._errors}")
 
     def read_page_by_id(self, page_id: str, skip_images: bool = False):
         """Reads a page by its id in the Confluence space. If id is not available, but there is a title - use get_page_id first."""
         result = list(self.get_pages_by_id([page_id], skip_images))
         if not result:
-            "Page not found"
+            return f"Pages not found. Errors: {self._errors}" if self._errors \
+                else "Pages not found or you do not have access to them."
         return result[0].page_content
         # return self._strip_base64_images(result[0].page_content) if skip_images else result[0].page_content
 
