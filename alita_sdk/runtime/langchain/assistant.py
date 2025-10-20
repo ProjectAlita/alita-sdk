@@ -77,11 +77,17 @@ class Assistant:
         else:
             # For predict agents, initialize memory store to None since they don't use memory
             self.store = None
-        
+
         # Lazy import to avoid circular dependency
         from ..toolkits.tools import get_tools
-        
-        self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client, memory_store=self.store)
+        version_tools = data['tools']
+        # Handle internal tools
+        meta = data.get('meta', {})
+        if meta.get("internal_tools"):
+            for internal_tool_name in meta.get("internal_tools"):
+                version_tools.append({"type": "internal_tool", "name": internal_tool_name})
+
+        self.tools = get_tools(version_tools, alita_client=alita, llm=self.client, memory_store=self.store)
         if tools:
             self.tools += tools
         # Handle prompt setup
@@ -118,9 +124,11 @@ class Assistant:
             if variables:
                 self.prompt.partial_variables = variables
             try:
-                logger.info(f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
+                logger.info(
+                    f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
             except Exception as e:
-                logger.info(f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
+                logger.info(
+                    f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
 
     def _configure_store(self, memory_tool: dict | None) -> None:
         """
@@ -157,7 +165,6 @@ class Assistant:
         agent = create_json_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
 
-
     def getXMLAgentExecutor(self):
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
@@ -177,23 +184,6 @@ class Assistant:
         """
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        
-        # Add sandbox tool by default for react agents
-        try:
-            from ..tools.sandbox import create_sandbox_tool
-            sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
-            simple_tools.append(sandbox_tool)
-            logger.info("Added PyodideSandboxTool to react agent")
-        except ImportError as e:
-            logger.warning(f"Failed to add PyodideSandboxTool: {e}. Install langchain-sandbox to enable this feature.")
-        except RuntimeError as e:
-            if "Deno" in str(e):
-                logger.warning("Failed to add PyodideSandboxTool: Deno is required. Install from https://docs.deno.com/runtime/getting_started/installation/")
-            else:
-                logger.warning(f"Failed to add PyodideSandboxTool: {e}")
-        except Exception as e:
-            logger.error(f"Error adding PyodideSandboxTool: {e}")
-        
         # Add image generation tool if model is configured
         if self.alita_client.model_image_generation is not None:
             try:
