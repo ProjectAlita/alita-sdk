@@ -69,8 +69,13 @@ class GraphTool(BaseTool):
         return self._run(config, **all_kwargs)
 
     def _run(self, *args, **kwargs):
+        config = None
+        # From invoke method we are passing only 1 arg so it is safe to do this condition and config assignment.
+        # Default to None is safe because it will be checked also on the langchain side.
+        if args:
+            config = args[0]
         # Get the config for invocation from args. It may be empty or real value from parent node/graph
-        response = self.graph.invoke(formulate_query(kwargs), config=args[0] if args else None)
+        response = self.graph.invoke(formulate_query(kwargs), config=config)
         if self.return_type == "str":
             return response["output"]
         else:
