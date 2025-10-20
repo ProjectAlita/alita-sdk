@@ -184,17 +184,6 @@ class Assistant:
         """
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        # Add image generation tool if model is configured
-        if self.alita_client.model_image_generation is not None:
-            try:
-                from ..tools.image_generation import (
-                    create_image_generation_tool
-                )
-                image_tool = create_image_generation_tool(self.alita_client)
-                simple_tools.append(image_tool)
-                logger.info("Added ImageGenerationTool to react agent")
-            except Exception as e:
-                logger.error(f"Error adding ImageGenerationTool: {e}")
         
         # Set up memory/checkpointer if available
         checkpointer = None
