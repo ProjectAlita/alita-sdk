@@ -66,7 +66,7 @@ class GraphTool(BaseTool):
         if config is None:
             config = {}
         # Pass the config to the _run empty or the one passed from the parent executor.
-        return self._run(*[config], **all_kwargs)
+        return self._run(config, **all_kwargs)
 
     def _run(self, *args, **kwargs):
         # Get the config for invocation from args. It may be empty or real value from parent node/graph
