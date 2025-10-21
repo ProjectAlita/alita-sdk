@@ -43,7 +43,7 @@ DEFAULT_ALLOWED_WITH_LLM = {
     LoaderProperties.PROMPT.value: "",
 }
 
-# Image file loaders mapping
+# Image file loaders mapping - directly supported by LLM with image_url
 image_loaders_map = {
     '.png': {
         'class': AlitaImageLoader,
@@ -73,6 +73,17 @@ image_loaders_map = {
         'kwargs': {},
         'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
+    '.webp': {
+        'class': AlitaImageLoader,
+        'mime_type': 'image/webp',
+        'is_multimodal_processing': True,
+        'kwargs': {},
+        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
+    }
+}
+
+# Image file loaders mapping - require conversion before sending to LLM
+image_loaders_map_converted = {
     '.bmp': {
         'class': AlitaImageLoader,
         'mime_type': 'image/bmp',
@@ -292,7 +303,12 @@ default_loader_config = {
 code_loaders_map = {ext: default_loader_config for ext in code_extensions}
 
 # Combined mapping for backward compatibility
-loaders_map = {**image_loaders_map, **document_loaders_map, **code_loaders_map}
+loaders_map = {
+    **image_loaders_map,
+    **image_loaders_map_converted,
+    **document_loaders_map,
+    **code_loaders_map
+}
 
 loaders_allowed_to_override = {
     extension: config.get('allowed_to_override')
