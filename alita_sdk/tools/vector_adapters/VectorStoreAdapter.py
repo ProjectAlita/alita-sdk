@@ -119,7 +119,8 @@ class PGVectorAdapter(VectorStoreAdapter):
                 # Apply filter only if index_name is provided
                 if index_name:
                     query = query.filter(
-                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name
+                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name,
+                        store.EmbeddingStore.cmetadata['type'].astext != IndexerKeywords.INDEX_META_TYPE.value,
                     )
                 ids = query.all()
                 return [str(id_tuple[0]) for id_tuple in ids]
