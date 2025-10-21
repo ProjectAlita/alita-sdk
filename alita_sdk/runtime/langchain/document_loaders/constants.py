@@ -113,7 +113,7 @@ document_loaders_map = {
     },
     '.yml': {
         'class': AlitaTextLoader,
-        'mime_type': 'application/x-yaml',
+        'mime_type': 'application/yaml',
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
@@ -122,7 +122,7 @@ document_loaders_map = {
     },
     '.yaml': {
         'class': AlitaTextLoader,
-        'mime_type': 'application/x-yaml',
+        'mime_type': 'application/yaml',
         'is_multimodal_processing': False,
         'kwargs': {
             'autodetect_encoding': True
