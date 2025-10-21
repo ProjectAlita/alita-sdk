@@ -13,6 +13,7 @@ from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
+from ..tools.image_generation import ImageGenerationToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
@@ -26,7 +27,8 @@ def get_toolkits():
         ArtifactToolkit.toolkit_config_schema(),
         MemoryToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema(),
-        SandboxToolkit.toolkit_config_schema()
+        SandboxToolkit.toolkit_config_schema(),
+        ImageGenerationToolkit.toolkit_config_schema()
     ]
 
     return core_toolkits + community_toolkits() + alita_toolkits()
@@ -74,6 +76,14 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     stateful=False,
                     allow_net=True,
                 ).get_tools()
+            elif tool['name'] == 'image_generation':
+                if alita_client and alita_client.model_image_generation:
+                    tools += ImageGenerationToolkit.get_toolkit(
+                        client=alita_client,
+                    ).get_tools()
+                else:
+                    logger.warning("Image generation internal tool requested "
+                                   "but no image generation model configured")
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
                 client=alita_client,
