@@ -109,7 +109,7 @@ class PGVectorAdapter(VectorStoreAdapter):
     def get_indexed_ids(self, vectorstore_wrapper, index_name: Optional[str] = '') -> List[str]:
         """Get all indexed document IDs from PGVector"""
         from sqlalchemy.orm import Session
-        from sqlalchemy import func
+        from sqlalchemy import func, or_
 
         store = vectorstore_wrapper.vectorstore
         try:
@@ -120,7 +120,11 @@ class PGVectorAdapter(VectorStoreAdapter):
                 if index_name:
                     query = query.filter(
                         func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name,
-                        store.EmbeddingStore.cmetadata['type'].astext != IndexerKeywords.INDEX_META_TYPE.value,
+                        or_(
+                            func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'type').is_(None),
+                            func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata,
+                                                         'type') != IndexerKeywords.INDEX_META_TYPE.value
+                        )
                     )
                 ids = query.all()
                 return [str(id_tuple[0]) for id_tuple in ids]
