@@ -112,7 +112,9 @@ class FunctionTool(BaseTool):
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
             code = func_args['code']
-            func_args['code'] = f"{self._prepare_pyodide_input(state)}\n{code}"
+            func_args['code'] = (f"{self._prepare_pyodide_input(state)}\n{code}"
+                                # handle new lines in the code properly
+                                 .replace('\\n','\\\\n'))
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
             dispatch_custom_event(

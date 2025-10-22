@@ -127,12 +127,14 @@ With `structured_output: true`, return dictionaries to update state variables:
 ```yaml
 - id: "structured_code"
   type: "code"
-  code: |
-    return {
-      "user_name": "John Doe",
-      "user_score": 95,
-      "timestamp": "2024-01-01T00:00:00Z"
-    }
+  code: 
+    type: fixed
+    value: |
+        {
+          "user_name": "John Doe",
+          "user_score": 95,
+          "timestamp": "2024-01-01T00:00:00Z"
+        }
   output: ["user_name", "user_score", "timestamp"]
   structured_output: true
 ```
@@ -162,9 +164,11 @@ Specify which variables to extract from the code result:
 ```yaml
 - id: "mapped_output"
   type: "code"
-  code: |
-    data = {"result": 42, "status": "success", "debug": "internal"}
-    return data
+  code: 
+    type: fixed
+    value: |
+        data = {"result": 42, "status": "success", "debug": "internal"}
+        data
   output: ["result", "status"]  # Only these will be stored in state
   structured_output: true
 ```
@@ -176,23 +180,25 @@ Specify which variables to extract from the code result:
 ```yaml
 - id: "process_data"
   type: "code"
-  code: |
-    import json
-    
-    # Access input data from state
-    raw_data = alita_state.get('raw_data', [])
-    
-    # Process the data
-    processed = []
-    for item in raw_data:
-        if item.get('score', 0) > 50:
-            processed.append({
-                'id': item['id'],
-                'name': item['name'],
-                'grade': 'Pass'
-            })
-    
-    return {"processed_data": processed}
+  code: 
+    type: fixed
+    value: |
+        import json
+        
+        # Access input data from state
+        raw_data = alita_state.get('raw_data', [])
+        
+        # Process the data
+        processed = []
+        for item in raw_data:
+            if item.get('score', 0) > 50:
+                processed.append({
+                    'id': item['id'],
+                    'name': item['name'],
+                    'grade': 'Pass'
+                })
+        
+        {"processed_data": processed}
   input: ["raw_data"]
   output: ["processed_data"]
   structured_output: true
@@ -203,24 +209,26 @@ Specify which variables to extract from the code result:
 ```yaml
 - id: "calculate_metrics"
   type: "code"
-  code: |
-    import math
-    
-    values = alita_state.get('values', [])
-    
-    if not values:
-        return {"error": "No values provided"}
-    
-    mean = sum(values) / len(values)
-    variance = sum((x - mean) ** 2 for x in values) / len(values)
-    std_dev = math.sqrt(variance)
-    
-    return {
-        "mean": mean,
-        "variance": variance,
-        "standard_deviation": std_dev,
-        "count": len(values)
-    }
+  code: 
+    type: fixed
+    value: |
+        import math
+        
+        values = alita_state.get('values', [])
+        
+        if not values:
+            return {"error": "No values provided"}
+        
+        mean = sum(values) / len(values)
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
+        std_dev = math.sqrt(variance)
+        
+        {
+            "mean": mean,
+            "variance": variance,
+            "standard_deviation": std_dev,
+            "count": len(values)
+        }
   input: ["values"]
   output: ["mean", "variance", "standard_deviation", "count"]
   structured_output: true
@@ -231,26 +239,28 @@ Specify which variables to extract from the code result:
 ```yaml
 - id: "external_api_call"
   type: "code"
-  code: |
-    import requests
-    import json
-    
-    query = alita_state.get('search_query', '')
-    
-    try:
-        response = requests.get(f"https://api.example.com/search?q={query}")
-        data = response.json()
+  code: 
+    type: fixed
+    value: |
+        import requests
+        import json
         
-        return {
-            "api_results": data,
-            "status": "success",
-            "result_count": len(data.get('results', []))
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "status": "failed"
-        }
+        query = alita_state.get('search_query', '')
+        
+        try:
+            response = requests.get(f"https://api.example.com/search?q={query}")
+            data = response.json()
+            
+            {
+                "api_results": data,
+                "status": "success",
+                "result_count": len(data.get('results', []))
+            }
+        except Exception as e:
+            {
+                "error": str(e),
+                "status": "failed"
+            }
   input: ["search_query"]
   output: ["api_results", "status", "result_count"]
   structured_output: true
@@ -261,26 +271,28 @@ Specify which variables to extract from the code result:
 ```yaml
 - id: "business_logic"
   type: "code"
-  code: |
-    user_age = alita_state.get('user_age', 0)
-    user_type = alita_state.get('user_type', 'guest')
-    
-    # Business logic
-    if user_age < 18:
-        category = "minor"
-        allowed_actions = ["read", "comment"]
-    elif user_type == "premium":
-        category = "premium_adult"
-        allowed_actions = ["read", "comment", "post", "moderate"]
-    else:
-        category = "standard_adult"
-        allowed_actions = ["read", "comment", "post"]
-    
-    return {
-        "user_category": category,
-        "allowed_actions": allowed_actions,
-        "access_level": len(allowed_actions)
-    }
+  code: 
+    type: fixed
+    value: |
+        user_age = alita_state.get('user_age', 0)
+        user_type = alita_state.get('user_type', 'guest')
+        
+        # Business logic
+        if user_age < 18:
+            category = "minor"
+            allowed_actions = ["read", "comment"]
+        elif user_type == "premium":
+            category = "premium_adult"
+            allowed_actions = ["read", "comment", "post", "moderate"]
+        else:
+            category = "standard_adult"
+            allowed_actions = ["read", "comment", "post"]
+        
+        {
+            "user_category": category,
+            "allowed_actions": allowed_actions,
+            "access_level": len(allowed_actions)
+        }
   input: ["user_age", "user_type"]
   output: ["user_category", "allowed_actions", "access_level"]
   structured_output: true
@@ -374,11 +386,13 @@ nodes:
     
   - id: "process_data"
     type: "code"
-    code: |
-      # Process the data from previous node
-      data = alita_state.get('extracted_data', [])
-      processed = [item.upper() for item in data]
-      return {"processed_items": processed}
+    code: 
+      type: fixed
+      value: |
+          # Process the data from previous node
+          data = alita_state.get('extracted_data', [])
+          processed = [item.upper() for item in data]
+          {"processed_items": processed}
     output: ["processed_items"]
     structured_output: true
     transition: "final_output"
