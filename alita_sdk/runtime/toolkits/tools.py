@@ -75,6 +75,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 tools += SandboxToolkit.get_toolkit(
                     stateful=False,
                     allow_net=True,
+                    alita_client=alita_client,
                 ).get_tools()
             elif tool['name'] == 'image_generation':
                 if alita_client and alita_client.model_image_generation:
