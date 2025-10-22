@@ -7,7 +7,6 @@ from typing import Any, Optional, List, Dict, Generator
 from langchain_core.documents import Document
 from pydantic import create_model, Field, SecretStr
 
-from .utils import make_json_serializable
 from .utils.content_parser import file_extension_by_chunker, process_document_by_type
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.langchain.document_loaders.constants import loaders_allowed_to_override

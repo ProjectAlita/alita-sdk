@@ -536,8 +536,9 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 self._errors.append(page_content_temp)
                 return Document(page_content=page_content_temp,
                                 metadata={})
-            if not self.include_restricted_content and not self.is_public_page(page):
-                continue
+            # TODO: update on toolkit advanced settings level as a separate feature
+            # if not self.include_restricted_content and not self.is_public_page(page):
+            #     continue
             yield self.process_page(page, skip_images)
 
     def _log_errors(self):
