@@ -6,7 +6,7 @@ Feature: Delete file from Azure DevOps repository
   # Tool: delete_file
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   File Path: "{{file_path}}"
   #   Branch Name: "{{base_branch}}"
 
@@ -17,7 +17,7 @@ Feature: Delete file from Azure DevOps repository
   @positive @delete-file
   Scenario: User successfully deletes a file
     When I select the "delete_file" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify file path "{{file_path}}"
     And I specify branch name "{{base_branch}}"
     And I click run

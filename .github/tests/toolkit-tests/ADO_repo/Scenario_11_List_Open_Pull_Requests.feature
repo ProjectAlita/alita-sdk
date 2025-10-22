@@ -6,7 +6,7 @@ Feature: List open pull requests in Azure DevOps repository
   # Tool: list_open_pull_requests
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
 
   Background:
     Given I am an authenticated Azure DevOps user with repository access
@@ -15,7 +15,7 @@ Feature: List open pull requests in Azure DevOps repository
   @positive @list-open-pull-requests
   Scenario: User successfully lists open pull requests
     When I select the "list_open_pull_requests" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I click run
     Then I should see a list of all open pull requests
     And each pull request should display title, author, and status

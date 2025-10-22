@@ -6,7 +6,7 @@ Feature: Comment on pull request in Azure DevOps repository
   # Tool: comment_pull_request
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Pull Request ID: "{{pull_request_id}}"
   #   Comment Text: "{{comment_text}}"
 
@@ -17,7 +17,7 @@ Feature: Comment on pull request in Azure DevOps repository
   @positive @comment-pull-request
   Scenario: User successfully adds comment to pull request
     When I select the "comment_pull_request" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify pull request ID "{{pull_request_id}}"
     And I enter comment text "{{comment_text}}"
     And I click run

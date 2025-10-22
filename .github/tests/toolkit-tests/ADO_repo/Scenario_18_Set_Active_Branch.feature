@@ -6,7 +6,7 @@ Feature: Set active branch in Azure DevOps repository
   # Tool: set_active_branch
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Branch Name: "{{base_branch}}"
 
   Background:
@@ -16,7 +16,7 @@ Feature: Set active branch in Azure DevOps repository
   @positive @set-active-branch
   Scenario: User successfully sets active branch
     When I select the "set_active_branch" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify branch name "{{base_branch}}"
     And I click run
     Then the specified branch should be set as active

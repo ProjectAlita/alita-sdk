@@ -6,7 +6,7 @@ Feature: Update file content in Azure DevOps repository
   # Tool: update_file
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   File Path: "{{file_path}}"
   #   New Content: "{{new_content}}"
   #   Branch Name: "{{base_branch}}"
@@ -18,7 +18,7 @@ Feature: Update file content in Azure DevOps repository
   @positive @update-file
   Scenario: User successfully updates file content
     When I select the "update_file" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify file path "{{file_path}}"
     And I enter new content "{{new_content}}"
     And I specify branch name "{{base_branch}}"

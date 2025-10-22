@@ -6,7 +6,7 @@ Feature: Get commits from Azure DevOps repository
   # Tool: get_commits
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Branch Name: "{{base_branch}}" (optional)
   #   Commit Count: "{{commit_count}}" (optional)
 
@@ -17,7 +17,7 @@ Feature: Get commits from Azure DevOps repository
   @positive @get-commits
   Scenario: User successfully retrieves commit information
     When I select the "get_commits" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify branch name "{{base_branch}}"
     And I specify commit count "{{commit_count}}"
     And I click run

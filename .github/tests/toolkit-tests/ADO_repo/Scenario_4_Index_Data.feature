@@ -6,7 +6,7 @@ Feature: Index data in Azure DevOps repository
   # Tool: index_data
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Data Source: "{{data_source}}"
   #   Collection Suffix: "{{collection_suffix}}"
 
@@ -17,7 +17,7 @@ Feature: Index data in Azure DevOps repository
   @positive @index-data
   Scenario: User successfully indexes repository data
     When I select the "index_data" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify data source "{{data_source}}"
     And I specify collection suffix "{{collection_suffix}}"
     And I click run

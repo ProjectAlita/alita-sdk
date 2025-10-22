@@ -6,7 +6,7 @@ Feature: Get pull request details from Azure DevOps repository
   # Tool: get_pull_request
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Pull Request ID: "{{pull_request_id}}"
 
   Background:
@@ -16,7 +16,7 @@ Feature: Get pull request details from Azure DevOps repository
   @positive @get-pull-request
   Scenario: User successfully retrieves pull request details
     When I select the "get_pull_request" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify pull request ID "{{pull_request_id}}"
     And I click run
     Then I should see detailed pull request information

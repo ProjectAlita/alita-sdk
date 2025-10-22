@@ -6,7 +6,7 @@ Feature: Create pull request in Azure DevOps repository
   # Tool: create_pull_request
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Source Branch: "{{source_branch}}"
   #   Target Branch: "{{target_branch}}"
   #   Title: "{{pr_title}}"
@@ -20,7 +20,7 @@ Feature: Create pull request in Azure DevOps repository
   @positive @create-pull-request
   Scenario: User successfully creates a pull request
     When I select the "create_pull_request" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify source branch "{{source_branch}}"
     And I specify target branch "{{target_branch}}"
     And I enter title "{{pr_title}}"

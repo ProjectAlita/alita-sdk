@@ -6,7 +6,7 @@ Feature: List files changed in Azure DevOps pull request
   # Tool: list_pull_request_files
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Pull Request ID: "{{pull_request_id}}"
 
   Background:
@@ -17,7 +17,7 @@ Feature: List files changed in Azure DevOps pull request
   @positive @list-pull-request-files
   Scenario: User successfully lists pull request file changes
     When I select the "list_pull_request_files" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify pull request ID "{{pull_request_id}}"
     And I click run
     Then I should see a list of all changed files in the pull request

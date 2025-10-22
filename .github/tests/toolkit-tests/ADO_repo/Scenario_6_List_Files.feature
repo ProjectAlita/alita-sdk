@@ -6,7 +6,7 @@ Feature: List files in active branch of Azure DevOps repository
   # Tool: list_files
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   Active Branch: Current active branch context
 
   Background:
@@ -17,7 +17,7 @@ Feature: List files in active branch of Azure DevOps repository
   @positive @list-files
   Scenario: User successfully lists files in active branch
     When I select the "list_files" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I click run
     Then I should see a list of all files in the active branch
     And each file should display path and basic information

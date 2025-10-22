@@ -6,7 +6,7 @@ Feature: Create new branch in Azure DevOps repository
   # Tool: create_branch
   # Test type: functional
   # Test Data:
-  #   Repository Name: "{{repository_name}}"
+  #   Repository Name: "27e65563-62b8-4834-9259-88bb56f47146"
   #   New Branch Name: "{{new_branch_name}}"
   #   Base Branch: "{{base_branch}}"
 
@@ -17,7 +17,7 @@ Feature: Create new branch in Azure DevOps repository
   @positive @create-branch
   Scenario: User successfully creates a new branch
     When I select the "create_branch" tool
-    And I specify repository "{{repository_name}}"
+    And I specify repository "27e65563-62b8-4834-9259-88bb56f47146"
     And I specify new branch name "{{new_branch_name}}"
     And I specify base branch "{{base_branch}}"
     And I click run
