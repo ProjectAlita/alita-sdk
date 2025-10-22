@@ -7,7 +7,7 @@ from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import ToolCall
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
-from typing import Any, Optional, Union, Annotated
+from typing import Any, Optional, Union
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
@@ -34,25 +34,7 @@ class FunctionTool(BaseTool):
 
         del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
         # inject state into the code block as alita_state variable
-        pyodide_predata = f"alita_state = {state_copy}"
-        # add classes related to sandbox client
-        # read the content of alita_sdk/runtime/cliens/sandbox_client.py
-        try:
-            import os
-            from pathlib import Path
-
-            # Get the directory of the current file and construct the path to sandbox_client.py
-            current_dir = Path(__file__).parent
-            sandbox_client_path = current_dir.parent / 'clients' / 'sandbox_client.py'
-
-            with open(sandbox_client_path, 'r') as f:
-                sandbox_client_code = f.read()
-            pyodide_predata += f"\n{sandbox_client_code}\n"
-            pyodide_predata += (f"alita_client = SandboxClient(base_url='{self.alita_client.base_url}',"
-                                f"project_id={self.alita_client.project_id},"
-                                f"auth_token='{self.alita_client.auth_token}')")
-        except FileNotFoundError:
-            logger.error(f"sandbox_client.py not found at {sandbox_client_path}. Ensure the file exists.")
+        pyodide_predata = f"#state dict\nalita_state = {state_copy}\n"
         return pyodide_predata
 
     def _handle_pyodide_output(self, tool_result: Any) -> dict:

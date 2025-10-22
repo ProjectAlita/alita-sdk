@@ -2,9 +2,12 @@ import asyncio
 import logging
 import subprocess
 import os
-from typing import Any, Type, Optional, Dict, List, Literal
+from typing import Any, Type, Optional, Dict, List, Literal, Union
+from copy import deepcopy
+from pathlib import Path
 
 from langchain_core.tools import BaseTool, BaseToolkit
+from langchain_core.messages import ToolCall
 from pydantic import BaseModel, create_model, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
@@ -19,7 +22,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store=None):
 
     Args:
         tools_list: List of tool configurations
-        alita_client: Alita client instance (unused for sandbox)
+        alita_client: Alita client instance for sandbox tools
         llm: LLM client instance (unused for sandbox)
         memory_store: Optional memory store instance (unused for sandbox)
 
@@ -34,6 +37,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store=None):
                 toolkit_instance = SandboxToolkit.get_toolkit(
                     stateful=tool['settings'].get('stateful', False),
                     allow_net=tool['settings'].get('allow_net', True),
+                    alita_client=alita_client,
                     toolkit_name=tool.get('toolkit_name', '')
                 )
                 all_tools.extend(toolkit_instance.get_tools())
@@ -126,6 +130,7 @@ class PyodideSandboxTool(BaseTool):
     allow_net: bool = True
     session_bytes: Optional[bytes] = None
     session_metadata: Optional[Dict] = None
+    alita_client: Optional[Any] = None
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -133,6 +138,28 @@ class PyodideSandboxTool(BaseTool):
         # Setup caching environment for optimal performance
         _setup_pyodide_cache_env()
         self._initialize_sandbox()
+
+    def _prepare_pyodide_input(self, code: str) -> str:
+        """Prepare input for PyodideSandboxTool by injecting state and alita_client into the code block."""
+        pyodide_predata = ""
+        
+        # Add alita_client if available
+        if self.alita_client:
+            try:
+                # Get the directory of the current file and construct the path to sandbox_client.py
+                current_dir = Path(__file__).parent
+                sandbox_client_path = current_dir.parent / 'clients' / 'sandbox_client.py'
+
+                with open(sandbox_client_path, 'r') as f:
+                    sandbox_client_code = f.read()
+                pyodide_predata += f"{sandbox_client_code}\n"
+                pyodide_predata += (f"alita_client = SandboxClient(base_url='{self.alita_client.base_url}',"
+                                    f"project_id={self.alita_client.project_id},"
+                                    f"auth_token='{self.alita_client.auth_token}')\n")
+            except FileNotFoundError:
+                logger.error(f"sandbox_client.py not found. Ensure the file exists.")
+        
+        return f"#elitea simplified client\n{pyodide_predata}{code}"
 
     def _initialize_sandbox(self) -> None:
         """Initialize the PyodideSandbox instance with optimized settings"""
@@ -180,6 +207,9 @@ class PyodideSandboxTool(BaseTool):
             if self._sandbox is None:
                 self._initialize_sandbox()
 
+            # Prepare code with state and client injection
+            prepared_code = self._prepare_pyodide_input(code)
+
             # Check if we're already in an async context
             try:
                 loop = asyncio.get_running_loop()
@@ -187,11 +217,11 @@ class PyodideSandboxTool(BaseTool):
                 # We'll need to use a different approach
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, self._arun(code))
+                    future = executor.submit(asyncio.run, self._arun(prepared_code))
                     return future.result()
             except RuntimeError:
                 # No running loop, safe to use asyncio.run
-                return asyncio.run(self._arun(code))
+                return asyncio.run(self._arun(prepared_code))
         except (ImportError, RuntimeError) as e:
             # Handle specific dependency errors gracefully
             error_msg = str(e)
@@ -250,7 +280,7 @@ class PyodideSandboxTool(BaseTool):
 
         except Exception as e:
             logger.error(f"Error executing code in sandbox: {e}")
-            return f"Error executing code: {str(e)}"
+            return {"error": f"Error executing code: {str(e)}"}
 
 
 class StatefulPyodideSandboxTool(PyodideSandboxTool):
@@ -278,7 +308,7 @@ class StatefulPyodideSandboxTool(PyodideSandboxTool):
 
 
 # Factory function for creating sandbox tools
-def create_sandbox_tool(stateful: bool = False, allow_net: bool = True) -> BaseTool:
+def create_sandbox_tool(stateful: bool = False, allow_net: bool = True, alita_client: Optional[Any] = None) -> BaseTool:
     """
     Factory function to create sandbox tools with specified configuration.
 
@@ -302,22 +332,22 @@ def create_sandbox_tool(stateful: bool = False, allow_net: bool = True) -> BaseT
         - Cached wheels reduce package download time from ~4.76s to near-instant
     """
     if stateful:
-        return StatefulPyodideSandboxTool(allow_net=allow_net)
+        return StatefulPyodideSandboxTool(allow_net=allow_net, alita_client=alita_client)
     else:
-        return PyodideSandboxTool(stateful=False, allow_net=allow_net)
+        return PyodideSandboxTool(stateful=False, allow_net=allow_net, alita_client=alita_client)
 
 
 class SandboxToolkit(BaseToolkit):
     tools: List[BaseTool] = []
 
     @staticmethod
-    def toolkit_config_schema() -> BaseModel:
+    def toolkit_config_schema() -> Type[BaseModel]:
         # Create sample tools to get their schemas
         sample_tools = [
             PyodideSandboxTool(),
             StatefulPyodideSandboxTool()
         ]
-        selected_tools = {x.name: x.args_schema.schema() for x in sample_tools}
+        selected_tools = {x.name: x.args_schema.model_json_schema() for x in sample_tools}
 
         return create_model(
             'sandbox',
@@ -338,24 +368,24 @@ class SandboxToolkit(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, stateful: bool = False, allow_net: bool = True, **kwargs):
+    def get_toolkit(cls, stateful: bool = False, allow_net: bool = True, alita_client=None, **kwargs):
         """
         Get toolkit with sandbox tools.
 
         Args:
             stateful: Whether to maintain state between executions
             allow_net: Whether to allow network access
+            alita_client: Alita client instance for sandbox tools
             **kwargs: Additional arguments
         """
         tools = []
 
         if stateful:
-            tools.append(StatefulPyodideSandboxTool(allow_net=allow_net))
+            tools.append(StatefulPyodideSandboxTool(allow_net=allow_net, alita_client=alita_client))
         else:
-            tools.append(PyodideSandboxTool(stateful=False, allow_net=allow_net))
+            tools.append(PyodideSandboxTool(stateful=False, allow_net=allow_net, alita_client=alita_client))
 
         return cls(tools=tools)
 
     def get_tools(self):
         return self.tools
-

@@ -555,7 +555,7 @@ def create_graph(
                         break
             elif node_type == 'code':
                 from ..tools.sandbox import create_sandbox_tool
-                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
+                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True, alita_client=kwargs.get('alita_client', None))
                 code_data = node.get('code', {'type': 'fixed', 'value': "return 'Code block is empty'"})
                 lg_builder.add_node(node_id, FunctionTool(
                     tool=sandbox_tool, name=node['id'], return_type='dict',
