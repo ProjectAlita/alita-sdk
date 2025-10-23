@@ -123,9 +123,17 @@ class LLMNode(BaseTool):
                     for key, value in (self.structured_output_dict or {}).items()
                 }
                 struct_model = create_pydantic_model(f"LLMOutput", struct_params)
-                llm = llm_client.with_structured_output(struct_model)
-                completion = llm.invoke(messages, config=config)
-                result = completion.model_dump()
+                # llm = llm_client.with_structured_output(struct_model)
+                completion = llm_client.invoke(messages, config=config)
+                if hasattr(completion, 'tool_calls') and completion.tool_calls:
+                    new_messages, _ = self.__perform_tool_calling(completion, messages, llm_client, config)
+                    llm = self.__get_struct_output_model(llm_client, struct_model)
+                    completion = llm.invoke(new_messages, config=config)
+                    result = completion.model_dump()
+                else:
+                    llm = self.__get_struct_output_model(llm_client, struct_model)
+                    completion = llm.invoke(messages, config=config)
+                    result = completion.model_dump()
 
                 # Ensure messages are properly formatted
                 if result.get('messages') and isinstance(result['messages'], list):
@@ -139,115 +147,7 @@ class LLMNode(BaseTool):
                 # Handle both tool-calling and regular responses
                 if hasattr(completion, 'tool_calls') and completion.tool_calls:
                     # Handle iterative tool-calling and execution
-                    new_messages = messages + [completion]
-                    max_iterations = 15
-                    iteration = 0
-
-                    # Continue executing tools until no more tool calls or max iterations reached
-                    current_completion = completion
-                    while (hasattr(current_completion, 'tool_calls') and
-                           current_completion.tool_calls and
-                           iteration < max_iterations):
-
-                        iteration += 1
-                        logger.info(f"Tool execution iteration {iteration}/{max_iterations}")
-
-                        # Execute each tool call in the current completion
-                        tool_calls = current_completion.tool_calls if hasattr(current_completion.tool_calls,
-                                                                              '__iter__') else []
-
-                        for tool_call in tool_calls:
-                            tool_name = tool_call.get('name', '') if isinstance(tool_call, dict) else getattr(tool_call,
-                                                                                                              'name',
-                                                                                                              '')
-                            tool_args = tool_call.get('args', {}) if isinstance(tool_call, dict) else getattr(tool_call,
-                                                                                                              'args',
-                                                                                                              {})
-                            tool_call_id = tool_call.get('id', '') if isinstance(tool_call, dict) else getattr(
-                                tool_call, 'id', '')
-
-                            # Find the tool in filtered tools
-                            filtered_tools = self.get_filtered_tools()
-                            tool_to_execute = None
-                            for tool in filtered_tools:
-                                if tool.name == tool_name:
-                                    tool_to_execute = tool
-                                    break
-
-                            if tool_to_execute:
-                                try:
-                                    logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
-                                    # Pass the underlying config to the tool execution invoke method
-                                    # since it may be another agent, graph, etc. to see it properly in thinking steps
-                                    tool_result = tool_to_execute.invoke(tool_args, config=config)
-
-                                    # Create tool message with result - preserve structured content
-                                    from langchain_core.messages import ToolMessage
-                                    
-                                    # Check if tool_result is structured content (list of dicts)
-                                    # TODO: need solid check for being compatible with ToolMessage content format
-                                    if isinstance(tool_result, list) and all(
-                                        isinstance(item, dict) and 'type' in item for item in tool_result
-                                    ):
-                                        # Use structured content directly for multimodal support
-                                        tool_message = ToolMessage(
-                                            content=tool_result,
-                                            tool_call_id=tool_call_id
-                                        )
-                                    else:
-                                        # Fallback to string conversion for other tool results
-                                        tool_message = ToolMessage(
-                                            content=str(tool_result),
-                                            tool_call_id=tool_call_id
-                                        )
-                                    new_messages.append(tool_message)
-
-                                except Exception as e:
-                                    logger.error(f"Error executing tool '{tool_name}': {e}")
-                                    # Create error tool message
-                                    from langchain_core.messages import ToolMessage
-                                    tool_message = ToolMessage(
-                                        content=f"Error executing {tool_name}: {str(e)}",
-                                        tool_call_id=tool_call_id
-                                    )
-                                    new_messages.append(tool_message)
-                            else:
-                                logger.warning(f"Tool '{tool_name}' not found in available tools")
-                                # Create error tool message for missing tool
-                                from langchain_core.messages import ToolMessage
-                                tool_message = ToolMessage(
-                                    content=f"Tool '{tool_name}' not available",
-                                    tool_call_id=tool_call_id
-                                )
-                                new_messages.append(tool_message)
-
-                        # Call LLM again with tool results to get next response
-                        try:
-                            current_completion = llm_client.invoke(new_messages, config=config)
-                            new_messages.append(current_completion)
-
-                            # Check if we still have tool calls
-                            if hasattr(current_completion, 'tool_calls') and current_completion.tool_calls:
-                                logger.info(f"LLM requested {len(current_completion.tool_calls)} more tool calls")
-                            else:
-                                logger.info("LLM completed without requesting more tools")
-                                break
-
-                        except Exception as e:
-                            logger.error(f"Error in LLM call during iteration {iteration}: {e}")
-                            # Add error message and break the loop
-                            error_msg = f"Error processing tool results in iteration {iteration}: {str(e)}"
-                            new_messages.append(AIMessage(content=error_msg))
-                            break
-
-                    # Log completion status
-                    if iteration >= max_iterations:
-                        logger.warning(f"Reached maximum iterations ({max_iterations}) for tool execution")
-                        # Add a warning message to the chat
-                        warning_msg = f"Maximum tool execution iterations ({max_iterations}) reached. Stopping tool execution."
-                        new_messages.append(AIMessage(content=warning_msg))
-                    else:
-                        logger.info(f"Tool execution completed after {iteration} iterations")
+                    new_messages, current_completion = self.__perform_tool_calling(completion, messages, llm_client, config)
 
                     output_msgs = {"messages": new_messages}
                     if self.output_variables:
@@ -280,3 +180,120 @@ class LLMNode(BaseTool):
     def _run(self, *args, **kwargs):
         # Legacy support for old interface
         return self.invoke(kwargs, **kwargs)
+
+    def __perform_tool_calling(self, completion, messages, llm_client, config):
+        # Handle iterative tool-calling and execution
+        new_messages = messages + [completion]
+        max_iterations = 15
+        iteration = 0
+
+        # Continue executing tools until no more tool calls or max iterations reached
+        current_completion = completion
+        while (hasattr(current_completion, 'tool_calls') and
+               current_completion.tool_calls and
+               iteration < max_iterations):
+
+            iteration += 1
+            logger.info(f"Tool execution iteration {iteration}/{max_iterations}")
+
+            # Execute each tool call in the current completion
+            tool_calls = current_completion.tool_calls if hasattr(current_completion.tool_calls,
+                                                                  '__iter__') else []
+
+            for tool_call in tool_calls:
+                tool_name = tool_call.get('name', '') if isinstance(tool_call, dict) else getattr(tool_call,
+                                                                                                  'name',
+                                                                                                  '')
+                tool_args = tool_call.get('args', {}) if isinstance(tool_call, dict) else getattr(tool_call,
+                                                                                                  'args',
+                                                                                                  {})
+                tool_call_id = tool_call.get('id', '') if isinstance(tool_call, dict) else getattr(
+                    tool_call, 'id', '')
+
+                # Find the tool in filtered tools
+                filtered_tools = self.get_filtered_tools()
+                tool_to_execute = None
+                for tool in filtered_tools:
+                    if tool.name == tool_name:
+                        tool_to_execute = tool
+                        break
+
+                if tool_to_execute:
+                    try:
+                        logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
+                        # Pass the underlying config to the tool execution invoke method
+                        # since it may be another agent, graph, etc. to see it properly in thinking steps
+                        tool_result = tool_to_execute.invoke(tool_args, config=config)
+
+                        # Create tool message with result - preserve structured content
+                        from langchain_core.messages import ToolMessage
+
+                        # Check if tool_result is structured content (list of dicts)
+                        # TODO: need solid check for being compatible with ToolMessage content format
+                        if isinstance(tool_result, list) and all(
+                                isinstance(item, dict) and 'type' in item for item in tool_result
+                        ):
+                            # Use structured content directly for multimodal support
+                            tool_message = ToolMessage(
+                                content=tool_result,
+                                tool_call_id=tool_call_id
+                            )
+                        else:
+                            # Fallback to string conversion for other tool results
+                            tool_message = ToolMessage(
+                                content=str(tool_result),
+                                tool_call_id=tool_call_id
+                            )
+                        new_messages.append(tool_message)
+
+                    except Exception as e:
+                        logger.error(f"Error executing tool '{tool_name}': {e}")
+                        # Create error tool message
+                        from langchain_core.messages import ToolMessage
+                        tool_message = ToolMessage(
+                            content=f"Error executing {tool_name}: {str(e)}",
+                            tool_call_id=tool_call_id
+                        )
+                        new_messages.append(tool_message)
+                else:
+                    logger.warning(f"Tool '{tool_name}' not found in available tools")
+                    # Create error tool message for missing tool
+                    from langchain_core.messages import ToolMessage
+                    tool_message = ToolMessage(
+                        content=f"Tool '{tool_name}' not available",
+                        tool_call_id=tool_call_id
+                    )
+                    new_messages.append(tool_message)
+
+            # Call LLM again with tool results to get next response
+            try:
+                current_completion = llm_client.invoke(new_messages, config=config)
+                new_messages.append(current_completion)
+
+                # Check if we still have tool calls
+                if hasattr(current_completion, 'tool_calls') and current_completion.tool_calls:
+                    logger.info(f"LLM requested {len(current_completion.tool_calls)} more tool calls")
+                else:
+                    logger.info("LLM completed without requesting more tools")
+                    break
+
+            except Exception as e:
+                logger.error(f"Error in LLM call during iteration {iteration}: {e}")
+                # Add error message and break the loop
+                error_msg = f"Error processing tool results in iteration {iteration}: {str(e)}"
+                new_messages.append(AIMessage(content=error_msg))
+                break
+
+        # Log completion status
+        if iteration >= max_iterations:
+            logger.warning(f"Reached maximum iterations ({max_iterations}) for tool execution")
+            # Add a warning message to the chat
+            warning_msg = f"Maximum tool execution iterations ({max_iterations}) reached. Stopping tool execution."
+            new_messages.append(AIMessage(content=warning_msg))
+        else:
+            logger.info(f"Tool execution completed after {iteration} iterations")
+
+        return new_messages, current_completion
+
+    def __get_struct_output_model(self, llm_client, pydantic_model):
+        return llm_client.with_structured_output(pydantic_model)
