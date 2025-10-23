@@ -181,7 +181,13 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
                 input_data[key] = value['value'].format(**var_dict)
             except KeyError as e:
                 logger.error(f"KeyError in fstring formatting for key '{key}'. Attempt to find proper data in state.\n{e}")
-                input_data[key] = value['value'].format(**state)
+                try:
+                    # search for variables in state if not found in var_dict
+                    input_data[key] = value['value'].format(**state)
+                except KeyError as no_var_exception:
+                    logger.error(f"KeyError in fstring formatting for key '{key}' with state data.\n{no_var_exception}")
+                    # leave value as is if still not found (could be a constant string marked as fstring by mistake)
+                    input_data[key] = value['value']
         elif value['type'] == 'fixed':
             input_data[key] = value['value']
         else:
