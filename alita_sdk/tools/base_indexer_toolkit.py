@@ -179,7 +179,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
             else "no new documents to index"}
         except Exception as e:
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, results_count)
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"])
             raise e
             
 
