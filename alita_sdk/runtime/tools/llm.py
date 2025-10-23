@@ -123,7 +123,6 @@ class LLMNode(BaseTool):
                     for key, value in (self.structured_output_dict or {}).items()
                 }
                 struct_model = create_pydantic_model(f"LLMOutput", struct_params)
-                # llm = llm_client.with_structured_output(struct_model)
                 completion = llm_client.invoke(messages, config=config)
                 if hasattr(completion, 'tool_calls') and completion.tool_calls:
                     new_messages, _ = self.__perform_tool_calling(completion, messages, llm_client, config)
