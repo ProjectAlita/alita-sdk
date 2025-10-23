@@ -199,7 +199,7 @@ class PGVectorAdapter(VectorStoreAdapter):
 
         result = {}
         try:
-            vectorstore_wrapper._log_data("Retrieving already indexed code data from PGVector vectorstore",
+            vectorstore_wrapper._log_tool_event(message="Retrieving already indexed code data from PGVector vectorstore",
                            tool_name="index_code_data")
             store = vectorstore_wrapper.vectorstore
             with (Session(store.session_maker.bind) as session):
