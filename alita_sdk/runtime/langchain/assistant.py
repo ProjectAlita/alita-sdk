@@ -263,6 +263,9 @@ class Assistant:
         schema_dict = {
             'name': 'react_agent',
             'state': {
+                'input': {
+                    'type': 'str'
+                },
                 'messages': state_messages_config
             },
             'nodes': [{
@@ -270,6 +273,16 @@ class Assistant:
                 'type': 'llm',
                 'prompt': {
                     'template': escaped_prompt
+                },
+                'input_mapping': {
+                    'system': {
+                        'type': 'fixed',
+                        'value': escaped_prompt
+                    },
+                    'task': {
+                        'type': 'variable',
+                        'value': 'input'
+                    }
                 },
                 'input': ['messages'],
                 'output': ['messages'],
