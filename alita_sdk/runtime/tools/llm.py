@@ -249,7 +249,11 @@ class LLMNode(BaseTool):
                     else:
                         logger.info(f"Tool execution completed after {iteration} iterations")
 
-                    return {"messages": new_messages}
+                    output_msgs = {"messages": new_messages}
+                    if self.output_variables:
+                        output_msgs[self.output_variables[0]] = current_completion.content if current_completion else None
+
+                    return output_msgs
                 else:
                     # Regular text response
                     content = completion.content.strip() if hasattr(completion, 'content') else str(completion)
