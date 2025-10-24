@@ -348,8 +348,8 @@ class StateModifierNode(Runnable):
         return result
 
 
-
-def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None, state_class=None, output_variables=None):
+def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None,
+                          state_class=None, output_variables=None):
     # prepare output channels
     if interrupt_after is None:
         interrupt_after = []
@@ -466,7 +466,7 @@ def create_graph(
                         elif node_type == 'agent':
                             input_params = node.get('input', ['messages'])
                             input_mapping = node.get('input_mapping',
-                                                       {'messages': {'type': 'variable', 'value': 'messages'}})
+                                                     {'messages': {'type': 'variable', 'value': 'messages'}})
                             lg_builder.add_node(node_id, FunctionTool(
                                 client=client, tool=tool,
                                 name=node_id, return_type='str',
@@ -481,7 +481,8 @@ def create_graph(
                             # wrap with mappings
                             pipeline_name = node.get('tool', None)
                             if not pipeline_name:
-                                raise ValueError("Subgraph must have a 'tool' node: add required tool to the subgraph node")
+                                raise ValueError(
+                                    "Subgraph must have a 'tool' node: add required tool to the subgraph node")
                             node_fn = SubgraphRunnable(
                                 inner=tool.graph,
                                 name=pipeline_name,
@@ -520,7 +521,8 @@ def create_graph(
                             loop_toolkit_name = node.get('loop_toolkit_name')
                             loop_tool_name = node.get('loop_tool')
                             if (loop_toolkit_name and loop_tool_name) or loop_tool_name:
-                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{loop_tool_name}" if loop_toolkit_name else clean_string(loop_tool_name)
+                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{loop_tool_name}" if loop_toolkit_name else clean_string(
+                                    loop_tool_name)
                                 for t in tools:
                                     if t.name == loop_tool_name:
                                         logger.debug(f"Loop tool discovered: {t}")
@@ -555,7 +557,8 @@ def create_graph(
                         break
             elif node_type == 'code':
                 from ..tools.sandbox import create_sandbox_tool
-                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True, alita_client=kwargs.get('alita_client', None))
+                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
+                                                   alita_client=kwargs.get('alita_client', None))
                 code_data = node.get('code', {'type': 'fixed', 'value': "return 'Code block is empty'"})
                 lg_builder.add_node(node_id, FunctionTool(
                     tool=sandbox_tool, name=node['id'], return_type='dict',
@@ -777,7 +780,13 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             # Convert chat history dict messages to LangChain message objects
             chat_history = input.pop('chat_history')
             input['messages'] = [convert_dict_to_message(msg) for msg in chat_history]
-        
+
+        # handler for LLM node: if no input (Chat perspective), then take last human message
+        if not input.get('input'):
+            if input.get('messages'):
+                input['input'] = [next((msg for msg in reversed(input['messages']) if isinstance(msg, HumanMessage)),
+                                          None)]
+
         # Append current input to existing messages instead of overwriting
         if input.get('input'):
             if isinstance(input['input'], str):
@@ -801,15 +810,14 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)), result['messages'][-1].content)
+            output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)),
+                          result['messages'][-1].content)
         except:
             output = list(result.values())[-1]
         config_state = self.get_state(config)
         is_execution_finished = not config_state.next
         if is_execution_finished:
             thread_id = None
-
-
 
         result_with_state = {
             "output": output,
