@@ -136,7 +136,15 @@ class PGVectorAdapter(VectorStoreAdapter):
         """Clean the vectorstore collection by deleting all indexed data."""
         # This logic deletes all data from the vectorstore collection without removal of collection.
         # Collection itself remains available for future indexing.
-        vectorstore_wrapper.vectorstore.delete(ids=self.get_indexed_ids(vectorstore_wrapper, index_name))
+        from sqlalchemy.orm import Session
+        from sqlalchemy import func
+
+        store = vectorstore_wrapper.vectorstore
+        with Session(store.session_maker.bind) as session:
+            session.query(store.EmbeddingStore).filter(
+                func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name
+            ).delete(synchronize_session=False)
+            session.commit()
 
     def is_vectorstore_type(self, vectorstore) -> bool:
         """Check if the vectorstore is a PGVector store."""
