@@ -160,6 +160,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             if clean_index:
                 self._clean_index(index_name)
             #
+            self.index_meta_init(index_name, kwargs)
+            #
             self._log_tool_event(f"Indexing data into collection with suffix '{index_name}'. It can take some time...")
             self._log_tool_event(f"Loading the documents to index...{kwargs}")
             documents = self._base_loader(**kwargs)
@@ -454,6 +456,29 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             reranking_config=reranking_config, 
             extended_search=extended_search
         )
+    
+    def index_meta_init(self, index_name: str, index_configuration: dict[str, Any]):
+        index_meta = super().get_index_meta(index_name)
+        if not index_meta:
+            self._log_tool_event(
+                f"There is no existing index_meta for collection '{index_name}'. Initializing it.",
+                tool_name="index_data"
+            )
+            from ..runtime.langchain.interfaces.llm_processor import add_documents
+            created_on = time.time()
+            metadata = {
+                "collection": index_name,
+                "type": IndexerKeywords.INDEX_META_TYPE.value,
+                "indexed": 0,
+                "state": IndexerKeywords.INDEX_META_IN_PROGRESS.value,
+                "index_configuration": index_configuration,
+                "created_on": created_on,
+                "updated_on": created_on,
+                "history": "[]",
+                "task_id": None,
+            }
+            index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)
+            add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc])
 
     def index_meta_update(self, index_name: str, state: str, result: int):
         index_meta_raw = super().get_index_meta(index_name)
