@@ -799,7 +799,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # Ensure existing messages are LangChain objects
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]
                 # Append to existing messages
-                input['messages'].append(current_message)
+                # input['messages'].append(current_message)
             else:
                 # No existing messages, create new list
                 input['messages'] = [current_message]

@@ -282,6 +282,10 @@ class Assistant:
                     'task': {
                         'type': 'variable',
                         'value': 'input'
+                    },
+                    'chat_history': {
+                        'type': 'variable',
+                        'value': 'messages'
                     }
                 },
                 'input': ['messages'],
