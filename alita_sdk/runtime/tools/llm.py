@@ -88,8 +88,7 @@ class LLMNode(BaseTool):
                 raise ToolException(f"LLMNode requires 'system' and 'task' parameters in input mapping. "
                                     f"Actual params: {func_args}")
             # cast to str in case user passes variable different from str
-            messages = [SystemMessage(content=str(func_args.get('system'))), func_args.get('chat_history', []), HumanMessage(content=str(func_args.get('task')))]
-            messages.extend(func_args.get('chat_history', []))
+            messages = [SystemMessage(content=str(func_args.get('system'))), *func_args.get('chat_history', []), HumanMessage(content=str(func_args.get('task')))]
         else:
             # Flow for chat-based LLM node w/o prompt/task from pipeline but with messages in state
             # verify messages structure
