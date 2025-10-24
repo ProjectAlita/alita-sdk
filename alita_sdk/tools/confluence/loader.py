@@ -3,6 +3,7 @@ from typing import Optional, List
 from logging import getLogger
 
 import requests
+from langchain_core.documents import Document
 
 logger = getLogger(__name__)
 from PIL import Image
@@ -192,6 +193,15 @@ class AlitaConfluenceLoader(ConfluenceLoader):
             return result
         else:
             return super().process_image(link, ocr_languages)
+
+    def process_page(self, page: dict, include_attachments: bool, include_comments: bool, include_labels: bool,
+                     content_format: ContentFormat, ocr_languages: Optional[str] = None,
+                     keep_markdown_format: Optional[bool] = False, keep_newlines: bool = False) -> Document:
+        if not page.get("title"):
+            # if 'include_restricted_content' set to True, draft pages are loaded and can have no title
+            page["title"] = "Untitled"
+        return super().process_page(page, include_attachments, include_comments, include_labels, content_format,
+                                    ocr_languages, keep_markdown_format, keep_newlines)
 
     # TODO review usage
     # def process_svg(
