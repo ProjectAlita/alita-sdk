@@ -149,6 +149,8 @@ class LLMNode(BaseTool):
 
                     output_msgs = {"messages": new_messages}
                     if self.output_variables:
+                        if self.output_variables[0] == 'messages':
+                            return output_msgs
                         output_msgs[self.output_variables[0]] = current_completion.content if current_completion else None
 
                     return output_msgs
