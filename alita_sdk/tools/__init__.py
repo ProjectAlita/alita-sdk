@@ -113,6 +113,10 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
         elif tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
             try:
                 get_tools_func = AVAILABLE_TOOLS[tool_type]['get_tools']
+                if tool['settings'].get('pgvector_configuration'):
+                    # Set collection schema to toolkit_id and put it to pgvector configuration
+                    # to propagate it to the all toolkits level from single place
+                    tool['settings']['pgvector_configuration']['collection_schema'] = str(tool['id'])
                 tools.extend(get_tools_func(tool))
 
             except Exception as e:

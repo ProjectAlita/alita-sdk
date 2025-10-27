@@ -110,7 +110,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def __init__(self, **kwargs):
         conn = kwargs.get('connection_string', None)
         connection_string = conn.get_secret_value() if isinstance(conn, SecretStr) else conn
-        collection_name = kwargs.get('collection_name')
+        collection_name = kwargs.get('collection_schema')
         
         if 'vectorstore_type' not in kwargs:
             kwargs['vectorstore_type'] = 'PGVector'
