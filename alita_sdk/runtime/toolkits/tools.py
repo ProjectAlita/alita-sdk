@@ -14,6 +14,7 @@ from .vectorstore import VectorStoreToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
 from ..tools.image_generation import ImageGenerationToolkit
+from ..tools.todo import TodoToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
@@ -28,7 +29,9 @@ def get_toolkits():
         MemoryToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
-        ImageGenerationToolkit.toolkit_config_schema()
+        ImageGenerationToolkit.toolkit_config_schema(),
+        # TODO: review usage and uncomment
+        # TodoToolkit.toolkit_config_schema()
     ]
 
     return core_toolkits + community_toolkits() + alita_toolkits()
@@ -85,6 +88,8 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 else:
                     logger.warning("Image generation internal tool requested "
                                    "but no image generation model configured")
+            elif tool['name'] == 'todo':
+                tools += TodoToolkit.get_toolkit(memory_store=memory_store, toolkit_id = tool['id'], alita_client=alita_client).get_tools()
         elif tool['type'] == 'artifact':
             tools.extend(ArtifactToolkit.get_toolkit(
                 client=alita_client,
