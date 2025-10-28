@@ -21,7 +21,7 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
         return self.vector_adapter.get_code_indexed_data(self, index_name)
 
     def key_fn(self, document: Document):
-        return document.metadata.get('id')
+        return document.metadata.get("filename")
 
     def compare_fn(self, document: Document, idx_data):
         return (document.metadata.get('commit_hash') and
@@ -46,7 +46,7 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
         )
 
     def _extend_data(self, documents: Generator[Document, None, None]):
-        yield from parse_code_files_for_db(documents)
+        yield from documents
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
@@ -127,7 +127,7 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
                     self._log_tool_event(message=f"{idx} out of {total_files} files have been read", tool_name="loader")
             self._log_tool_event(message=f"{len(_files)} have been read", tool_name="loader")
     
-        return file_content_generator()
+        return parse_code_files_for_db(file_content_generator())
 
     def __handle_get_files(self, path: str, branch: str):
         """
