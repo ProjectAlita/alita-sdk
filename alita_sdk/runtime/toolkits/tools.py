@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from langchain_core.tools import ToolException
 from langgraph.store.base import BaseStore
