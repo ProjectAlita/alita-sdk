@@ -96,6 +96,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
                 embedding_model=tool['settings'].get('embedding_model'),
                 collection_name=f"{tool.get('toolkit_name')}",
+                collection_schema = str(tool['id'])
             ).get_tools())
         elif tool['type'] == 'vectorstore':
             tools.extend(VectorStoreToolkit.get_toolkit(
