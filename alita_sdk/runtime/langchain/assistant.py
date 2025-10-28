@@ -29,7 +29,8 @@ class Assistant:
                  app_type: str = "openai",
                  tools: Optional[list] = [],
                  memory: Optional[Any] = None,
-                 store: Optional[BaseStore] = None):
+                 store: Optional[BaseStore] = None,
+                 debug_mode: Optional[bool] = False):
 
         self.app_type = app_type
         self.memory = memory
@@ -87,7 +88,7 @@ class Assistant:
             for internal_tool_name in meta.get("internal_tools"):
                 version_tools.append({"type": "internal_tool", "name": internal_tool_name})
 
-        self.tools = get_tools(version_tools, alita_client=alita, llm=self.client, memory_store=self.store)
+        self.tools = get_tools(version_tools, alita_client=alita, llm=self.client, memory_store=self.store, debug_mode=debug_mode)
         if tools:
             self.tools += tools
         # Handle prompt setup

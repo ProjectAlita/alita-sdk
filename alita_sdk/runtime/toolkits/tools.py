@@ -34,75 +34,83 @@ def get_toolkits():
     return core_toolkits + community_toolkits() + alita_toolkits()
 
 
-def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = None) -> list:
+def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = None, debug_mode: Optional[bool] = False) -> list:
     prompts = []
     tools = []
 
     for tool in tools_list:
-        if tool['type'] == 'datasource':
-            tools.extend(DatasourcesToolkit.get_toolkit(
-                alita_client,
-                datasource_ids=[int(tool['settings']['datasource_id'])],
-                selected_tools=tool['settings']['selected_tools'],
-                toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
-            ).get_tools())
-        elif tool['type'] == 'application' and tool.get('agent_type', '') != 'pipeline' :
-            tools.extend(ApplicationToolkit.get_toolkit(
-                alita_client,
-                application_id=int(tool['settings']['application_id']),
-                application_version_id=int(tool['settings']['application_version_id']),
-                selected_tools=[]
-            ).get_tools())
-        elif tool['type'] == 'application' and tool.get('agent_type', '') == 'pipeline':
-            # static get_toolkit returns a list of CompiledStateGraph stubs
-            tools.extend(SubgraphToolkit.get_toolkit(
-                alita_client,
-                application_id=int(tool['settings']['application_id']),
-                application_version_id=int(tool['settings']['application_version_id']),
-                app_api_key=alita_client.auth_token,
-                selected_tools=[],
-                llm=llm
-            ))
-        elif tool['type'] == 'memory':
-            tools += MemoryToolkit.get_toolkit(
-                namespace=tool['settings'].get('namespace', str(tool['id'])),
-                pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-                store=memory_store,
-            ).get_tools()
-        # TODO: update configuration of internal tools
-        elif tool['type'] == 'internal_tool':
-            if tool['name'] == 'pyodide':
-                tools += SandboxToolkit.get_toolkit(
-                    stateful=False,
-                    allow_net=True,
-                    alita_client=alita_client,
+        try:
+            if tool['type'] == 'datasource':
+                tools.extend(DatasourcesToolkit.get_toolkit(
+                    alita_client,
+                    datasource_ids=[int(tool['settings']['datasource_id'])],
+                    selected_tools=tool['settings']['selected_tools'],
+                    toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
+                ).get_tools())
+            elif tool['type'] == 'application' and tool.get('agent_type', '') != 'pipeline' :
+                tools.extend(ApplicationToolkit.get_toolkit(
+                    alita_client,
+                    application_id=int(tool['settings']['application_id']),
+                    application_version_id=int(tool['settings']['application_version_id']),
+                    selected_tools=[]
+                ).get_tools())
+            elif tool['type'] == 'application' and tool.get('agent_type', '') == 'pipeline':
+                # static get_toolkit returns a list of CompiledStateGraph stubs
+                tools.extend(SubgraphToolkit.get_toolkit(
+                    alita_client,
+                    application_id=int(tool['settings']['application_id']),
+                    application_version_id=int(tool['settings']['application_version_id']),
+                    app_api_key=alita_client.auth_token,
+                    selected_tools=[],
+                    llm=llm
+                ))
+            elif tool['type'] == 'memory':
+                tools += MemoryToolkit.get_toolkit(
+                    namespace=tool['settings'].get('namespace', str(tool['id'])),
+                    pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+                    store=memory_store,
                 ).get_tools()
-            elif tool['name'] == 'image_generation':
-                if alita_client and alita_client.model_image_generation:
-                    tools += ImageGenerationToolkit.get_toolkit(
-                        client=alita_client,
+            # TODO: update configuration of internal tools
+            elif tool['type'] == 'internal_tool':
+                if tool['name'] == 'pyodide':
+                    tools += SandboxToolkit.get_toolkit(
+                        stateful=False,
+                        allow_net=True,
+                        alita_client=alita_client,
                     ).get_tools()
-                else:
-                    logger.warning("Image generation internal tool requested "
-                                   "but no image generation model configured")
-        elif tool['type'] == 'artifact':
-            tools.extend(ArtifactToolkit.get_toolkit(
-                client=alita_client,
-                bucket=tool['settings']['bucket'],
-                toolkit_name=tool.get('toolkit_name', ''),
-                selected_tools=tool['settings'].get('selected_tools', []),
-                llm=llm,
-                # indexer settings
-                pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
-                embedding_model=tool['settings'].get('embedding_model'),
-                collection_name=f"{tool.get('toolkit_name')}",
-                collection_schema = str(tool['id'])
-            ).get_tools())
-        elif tool['type'] == 'vectorstore':
-            tools.extend(VectorStoreToolkit.get_toolkit(
-                llm=llm,
-                toolkit_name=tool.get('toolkit_name', ''),
-                **tool['settings']).get_tools())
+                elif tool['name'] == 'image_generation':
+                    if alita_client and alita_client.model_image_generation:
+                        tools += ImageGenerationToolkit.get_toolkit(
+                            client=alita_client,
+                        ).get_tools()
+                    else:
+                        logger.warning("Image generation internal tool requested "
+                                       "but no image generation model configured")
+            elif tool['type'] == 'artifact':
+                tools.extend(ArtifactToolkit.get_toolkit(
+                    client=alita_client,
+                    bucket=tool['settings']['bucket'],
+                    toolkit_name=tool.get('toolkit_name', ''),
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    llm=llm,
+                    # indexer settings
+                    pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+                    embedding_model=tool['settings'].get('embedding_model'),
+                    collection_name=f"{tool.get('toolkit_name')}",
+                    collection_schema = str(tool['id'])
+                ).get_tools())
+            elif tool['type'] == 'vectorstore':
+                tools.extend(VectorStoreToolkit.get_toolkit(
+                    llm=llm,
+                    toolkit_name=tool.get('toolkit_name', ''),
+                    **tool['settings']).get_tools())
+        except Exception as e:
+            logger.error(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}", exc_info=True)
+            if debug_mode:
+                logger.info("Skipping tool initialization error due to debug mode.")
+                continue
+            else:
+                raise ToolException(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}")
     
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita_client, prompts).get_tools()

@@ -568,7 +568,7 @@ class AlitaClient:
     def predict_agent(self, llm: ChatOpenAI, instructions: str = "You are a helpful assistant.",
                       tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                       memory=None, runtime='langchain', variables: Optional[list] = None,
-                      store: Optional[BaseStore] = None):
+                      store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -581,6 +581,7 @@ class AlitaClient:
             runtime: Runtime type (default: 'langchain')
             variables: Optional list of variables for the agent
             store: Optional store for memory
+            debug_mode: Enable debug mode for cases when assistant can be initialized without tools
 
         Returns:
             Runnable agent ready for execution
@@ -600,7 +601,7 @@ class AlitaClient:
             'variables': variables
         }
         return LangChainAssistant(self, agent_data, llm,
-                                  chat_history, "predict", memory=memory, store=store).runnable()
+                                  chat_history, "predict", memory=memory, store=store, debug_mode=debug_mode).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,
                           runtime_config: dict = None, llm_model: str = None,
