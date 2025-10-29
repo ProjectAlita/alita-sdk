@@ -794,7 +794,13 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             else:
                 current_message = input.get('input')[-1]
             # TODO: add handler after we add 2+ inputs (filterByType, etc.)
-            input['input'] = current_message if isinstance(current_message, str) else str(current_message)
+            if isinstance(current_message, HumanMessage):
+                text_contents = [item['text'] for item in current_message.content if item.get('type') == 'text']
+                input['input'] = ". ".join(text_contents)
+            elif isinstance(current_message, str):
+                input['input'] = current_message
+            else:
+                input['input'] = str(current_message)
             if input.get('messages'):
                 # Ensure existing messages are LangChain objects
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]
