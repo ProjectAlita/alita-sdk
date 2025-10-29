@@ -793,16 +793,24 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 current_message = input['input']
             else:
                 current_message = input.get('input')[-1]
+
             # TODO: add handler after we add 2+ inputs (filterByType, etc.)
             if isinstance(current_message, HumanMessage):
-                text_contents = [
-                    item['text'] if isinstance(item, dict) and item.get('type') == 'text'
-                    else item if isinstance(item, str)
-                    else None
-                    for item in current_message.content
-                ]
-                text_contents = [text for text in text_contents if text is not None]
-                input['input'] = ". ".join(text_contents)
+                current_content = current_message.content
+                if isinstance(current_content, list):
+                    text_contents = [
+                        item['text'] if isinstance(item, dict) and item.get('type') == 'text'
+                        else item if isinstance(item, str)
+                        else None
+                        for item in current_content
+                    ]
+                    text_contents = [text for text in text_contents if text is not None]
+                    input['input'] = ". ".join(text_contents)
+                elif isinstance(current_content, str):
+                    # on regenerate case
+                    input['input'] = current_content
+                else:
+                    input['input'] = str(current_content)
             elif isinstance(current_message, str):
                 input['input'] = current_message
             else:
