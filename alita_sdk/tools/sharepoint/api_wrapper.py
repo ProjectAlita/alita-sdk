@@ -127,8 +127,23 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 result.append(temp_props)
             return result if result else ToolException("Can not get files or folder is empty. Please, double check folder name and read permissions.")
         except Exception as e:
-            logging.error(f"Failed to load files from sharepoint: {e}")
-            return ToolException("Can not get files. Please, double check folder name and read permissions.")
+            # attempt to get via graph api
+            try:
+                # attempt to get files via graph api
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value(),
+                    tenant="", # optional for graph api
+                    scope="", # optional for graph api
+                    token_json="", # optional for graph api
+                )
+                files = auth_helper.get_files_list(self.site_url, folder_name, limit_files)
+                return files
+            except Exception as graph_e:
+                logging.error(f"Failed to load files from sharepoint via base api: {e}")
+                logging.error(f"Failed to load files from sharepoint via graph api: {graph_e}")
+                return ToolException(f"Can not get files. Please, double check folder name and read permissions: {e} and {graph_e}")
 
     def read_file(self, path,
                   is_capture_image: bool = False,
