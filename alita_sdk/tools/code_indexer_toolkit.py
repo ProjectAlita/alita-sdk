@@ -1,5 +1,6 @@
 import ast
 import fnmatch
+import json
 import logging
 from typing import Optional, List, Generator
 
@@ -117,6 +118,15 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
                     if not file_content:
                         # empty file, skip
                         continue
+                    #
+                    # ensure file content is a string
+                    if isinstance(file_content, bytes):
+                        file_content = file_content.decode("utf-8", errors="ignore")
+                    elif isinstance(file_content, dict) and file.endswith('.json'):
+                        file_content = json.dumps(file_content)
+                    elif not isinstance(file_content, str):
+                        file_content = str(file_content)
+                    #
                     # hash the file content to ensure uniqueness
                     import hashlib
                     file_hash = hashlib.sha256(file_content.encode("utf-8")).hexdigest()
