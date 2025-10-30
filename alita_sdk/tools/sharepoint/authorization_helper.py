@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import jwt
 import requests
@@ -117,6 +117,7 @@ class SharepointAuthorizationHelper:
             if "value" not in drives_json or not drives_json["value"]:
                 raise KeyError("'value' missing or empty in drives response")
             drive_id = drives_json["value"][0].get("id")
+            drive_path = unquote(urlparse(drives_json["value"][0].get("webUrl")).path)
             if not drive_id:
                 raise KeyError("'id' missing in drive object")
             #
@@ -137,9 +138,12 @@ class SharepointAuthorizationHelper:
             #
             result = []
             for file in files_json["value"]:
+                file_name = file.get('name', '')
+                parts = [drive_path.strip('/'), folder_name.strip('/') if folder_name else '', file_name.strip('/')]
+                #
                 temp_props = {
-                    'Name': file.get('name'),
-                    'Path': file.get('webUrl'),
+                    'Name': file_name,
+                    'Path': '/'.join([part for part in parts if part]),
                     'Created': file.get('createdDateTime'),
                     'Modified': file.get('lastModifiedDateTime'),
                     'Link': file.get('webUrl'),
@@ -152,5 +156,30 @@ class SharepointAuthorizationHelper:
             if limit_files is not None:
                 result = result[:limit_files]
             return result
+        except Exception as e:
+            raise RuntimeError(f"Error in get_files_list: {e}")
+
+    def get_file_content(self, site_url: str, path: str):
+        try:
+            access_token, site_id = self.generate_token_and_site_id(site_url)
+            headers = {"Authorization": f"Bearer {access_token}"}
+            drives_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
+            drives_response = requests.get(drives_url, headers=headers)
+            if drives_response.status_code != 200:
+                raise RuntimeError(f"Failed to get drives: {drives_response.status_code} {drives_response.text}")
+            drives_json = drives_response.json()
+            if "value" not in drives_json or not drives_json["value"]:
+                raise KeyError("'value' missing or empty in drives response")
+            drive_id = drives_json["value"][0].get("id")
+            if not drive_id:
+                raise KeyError("'id' missing in drive object")
+            #
+            # Build the endpoint for file content
+            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/content"
+            response = requests.get(url, headers=headers)
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to get files list: {response.status_code} {response.text}")
+            #
+            return response.content
         except Exception as e:
             raise RuntimeError(f"Error in get_files_list: {e}")

@@ -156,11 +156,28 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             self._client.load(file).execute_query()
 
             file_content = file.read()
+            file_name = file.name
             self._client.execute_query()
         except Exception as e:
-            logging.error(f"Failed to load file from SharePoint: {e}. Path: {path}. Please, double check file name and path.")
-            return ToolException("File not found. Please, check file name and path.")
-        return parse_file_content(file_name=file.name,
+            # attempt to get via graph api
+            try:
+                # attempt to get files via graph api
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value(),
+                    tenant="",  # optional for graph api
+                    scope="",  # optional for graph api
+                    token_json="",  # optional for graph api
+                )
+                file_content = auth_helper.get_file_content(self.site_url, path)
+                file_name = path.split('/')[-1]
+            except Exception as graph_e:
+                logging.error(f"Failed to load file from SharePoint via base api: {e}. Path: {path}. Please, double check file name and path.")
+                logging.error(f"Failed to load file from SharePoint via graph api: {graph_e}. Path: {path}. Please, double check file name and path.")
+                return ToolException(f"File not found. Please, check file name and path: {e} and {graph_e}")
+        #
+        return parse_file_content(file_name=file_name,
                                   file_content=file_content,
                                   is_capture_image=is_capture_image,
                                   page_number=page_number,
