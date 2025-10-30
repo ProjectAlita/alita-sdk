@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, quote
 
 import jwt
 import requests
+from botocore.response import get_response
+
 
 class SharepointAuthorizationHelper:
 
@@ -57,6 +59,13 @@ class SharepointAuthorizationHelper:
         except jwt.InvalidTokenError:
             return False
 
+    def _validate_response(self, response, required_field, error_prefix=None):
+        if response.status_code != 200:
+            raise RuntimeError(f"{error_prefix or 'Request'} failed: {response.status_code} {response.text}")
+        json_data = response.json()
+        if required_field not in json_data:
+            raise KeyError(f"'{required_field}' missing in response")
+        return json_data[required_field]
 
     def generate_token_and_site_id(self, site_url: str) -> tuple[str, str]:
         try:
@@ -65,16 +74,10 @@ class SharepointAuthorizationHelper:
             site_path = parsed.path.strip('/')
             if not domain or not site_path:
                 raise ValueError(f"site_url missing domain or site path: {site_url}")
-            #
             app_name = domain.split('.')[0]
             openid_config_url = f"https://login.microsoftonline.com/{app_name}.onmicrosoft.com/v2.0/.well-known/openid-configuration"
             response = requests.get(openid_config_url)
-            if response.status_code != 200:
-                raise RuntimeError(f"Failed to get OpenID config: {response.status_code} {response.text}")
-            token_url = response.json().get("token_endpoint")
-            if not token_url:
-                raise KeyError("'token_endpoint' missing in OpenID config response")
-            #
+            token_url = self._validate_response(response, required_field="token_endpoint", error_prefix="OpenID config")
             token_data = {
                 "grant_type": "client_credentials",
                 "client_id": self.client_id,
@@ -82,21 +85,11 @@ class SharepointAuthorizationHelper:
                 "scope": "https://graph.microsoft.com/.default"
             }
             token_response = requests.post(token_url, data=token_data)
-            if token_response.status_code != 200:
-                raise RuntimeError(f"Failed to get access token: {token_response.status_code} {token_response.text}")
-            access_token = token_response.json().get("access_token")
-            if not access_token:
-                raise KeyError("'access_token' missing in token response")
-            #
+            access_token = self._validate_response(token_response, required_field="access_token", error_prefix="Token request")
             graph_site_url = f"https://graph.microsoft.com/v1.0/sites/{domain}:/{site_path}"
             headers = {"Authorization": f"Bearer {access_token}"}
             site_response = requests.get(graph_site_url, headers=headers)
-            if site_response.status_code != 200:
-                raise RuntimeError(f"Failed to get site info: {site_response.status_code} {site_response.text}")
-            site_id = site_response.json().get("id")
-            if not site_id:
-                raise KeyError("'id' missing in site response")
-            #
+            site_id = self._validate_response(site_response, required_field="id", error_prefix="Site info")
             return access_token, site_id
         except Exception as e:
             raise RuntimeError(f"Error while obtaining access_token and site_id: {e}")
@@ -111,50 +104,58 @@ class SharepointAuthorizationHelper:
             headers = {"Authorization": f"Bearer {access_token}"}
             drives_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
             drives_response = requests.get(drives_url, headers=headers)
-            if drives_response.status_code != 200:
-                raise RuntimeError(f"Failed to get drives: {drives_response.status_code} {drives_response.text}")
-            drives_json = drives_response.json()
-            if "value" not in drives_json or not drives_json["value"]:
-                raise KeyError("'value' missing or empty in drives response")
-            drive_id = drives_json["value"][0].get("id")
-            drive_path = unquote(urlparse(drives_json["value"][0].get("webUrl")).path)
-            if not drive_id:
-                raise KeyError("'id' missing in drive object")
-            #
-            # Build the correct endpoint for folder or root
-            if folder_name:
-                # Validate folder_name for safe URL usage
-                if any(c in folder_name for c in ['..', '//', '\\']):
-                    raise ValueError(f"Unsafe folder_name: {folder_name}")
-                url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root:/{folder_name}:/children?$top={limit_files}"
-            else:
-                url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root/children?$top={limit_files}"
-            response = requests.get(url, headers=headers)
-            if response.status_code != 200:
-                raise RuntimeError(f"Failed to get files list: {response.status_code} {response.text}")
-            files_json = response.json()
-            if "value" not in files_json:
-                raise KeyError("'value' missing in files response")
-            #
+            drives = self._validate_response(drives_response, required_field="value", error_prefix="Drives request")
             result = []
-            for file in files_json["value"]:
-                file_name = file.get('name', '')
-                parts = [drive_path.strip('/'), folder_name.strip('/') if folder_name else '', file_name.strip('/')]
-                #
-                temp_props = {
-                    'Name': file_name,
-                    'Path': '/'.join([part for part in parts if part]),
-                    'Created': file.get('createdDateTime'),
-                    'Modified': file.get('lastModifiedDateTime'),
-                    'Link': file.get('webUrl'),
-                    'id': file.get('id')
-                }
-                if not all([temp_props['Name'], temp_props['Path'], temp_props['id']]):
-                    raise KeyError(f"Missing required file fields in: {file}")
-                result.append(temp_props)
-            # If API doesn't respect $top, slice in Python
-            if limit_files is not None:
-                result = result[:limit_files]
+            def _recurse_drive(drive_id, drive_path, parent_folder, limit_files):
+                # Escape folder_name for URL safety if present
+                if parent_folder:
+                    safe_folder_name = quote(parent_folder.strip('/'), safe="/")
+                    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root:/{safe_folder_name}:/children?$top={limit_files}"
+                else:
+                    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root/children?$top={limit_files}"
+                response = requests.get(url, headers=headers)
+                if response.status_code != 200:
+                    return []
+                files_json = response.json()
+                if "value" not in files_json:
+                    return []
+                files = []
+                for file in files_json["value"]:
+                    file_name = file.get('name', '')
+                    # Build full path reflecting nested folders
+                    if parent_folder:
+                        full_path = '/' + '/'.join([drive_path.strip('/'), parent_folder.strip('/'), file_name.strip('/')])
+                    else:
+                        full_path = '/' + '/'.join([drive_path.strip('/'), file_name.strip('/')])
+                    temp_props = {
+                        'Name': file_name,
+                        'Path': full_path,
+                        'Created': file.get('createdDateTime'),
+                        'Modified': file.get('lastModifiedDateTime'),
+                        'Link': file.get('webUrl'),
+                        'id': file.get('id')
+                    }
+                    if not all([temp_props['Name'], temp_props['Path'], temp_props['id']]):
+                        continue  # skip files with missing required fields
+                    if 'folder' in file:
+                        # Recursively extract files from this folder
+                        inner_folder = parent_folder + '/' + file_name if parent_folder else file_name
+                        inner_files = _recurse_drive(drive_id, drive_path, inner_folder, limit_files)
+                        files.extend(inner_files)
+                    else:
+                        files.append(temp_props)
+                    if limit_files is not None and len(result) + len(files) >= limit_files:
+                        return files[:limit_files - len(result)]
+                return files
+            for drive in drives:
+                drive_id = drive.get("id")
+                drive_path = unquote(urlparse(drive.get("webUrl")).path) if drive.get("webUrl") else ""
+                if not drive_id:
+                    continue  # skip drives without id
+                files = _recurse_drive(drive_id, drive_path, folder_name, limit_files)
+                result.extend(files)
+                if limit_files is not None and len(result) >= limit_files:
+                    return result[:limit_files]
             return result
         except Exception as e:
             raise RuntimeError(f"Error in get_files_list: {e}")
@@ -165,21 +166,22 @@ class SharepointAuthorizationHelper:
             headers = {"Authorization": f"Bearer {access_token}"}
             drives_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
             drives_response = requests.get(drives_url, headers=headers)
-            if drives_response.status_code != 200:
-                raise RuntimeError(f"Failed to get drives: {drives_response.status_code} {drives_response.text}")
-            drives_json = drives_response.json()
-            if "value" not in drives_json or not drives_json["value"]:
-                raise KeyError("'value' missing or empty in drives response")
-            drive_id = drives_json["value"][0].get("id")
-            if not drive_id:
-                raise KeyError("'id' missing in drive object")
+            drives = self._validate_response(drives_response, required_field="value", error_prefix="Drives request")
+            path = path.strip('/')
             #
-            # Build the endpoint for file content
-            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/content"
-            response = requests.get(url, headers=headers)
-            if response.status_code != 200:
-                raise RuntimeError(f"Failed to get files list: {response.status_code} {response.text}")
-            #
-            return response.content
+            for drive in drives:
+                drive_path = unquote(urlparse(drive.get("webUrl")).path).strip('/')
+                if not drive_path or not path.startswith(drive_path):
+                    continue
+                drive_id = drive.get("id")
+                if not drive_id:
+                    continue
+                path = path.replace(drive_path, '').strip('/')
+                safe_path = quote(path, safe="")
+                url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{safe_path}:/content"
+                response = requests.get(url, headers=headers)
+                if response.status_code == 200:
+                    return response.content
+            raise RuntimeError(f"File '{path}' not found in any private or shared documents.")
         except Exception as e:
-            raise RuntimeError(f"Error in get_files_list: {e}")
+            raise RuntimeError(f"Error in get_file_content: {e}")
