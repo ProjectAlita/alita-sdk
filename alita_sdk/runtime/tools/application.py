@@ -50,6 +50,8 @@ class Application(BaseTool):
     application: Any
     args_schema: Type[BaseModel] = applicationToolSchema
     return_type: str = "str"
+    client: Any
+    args_runnable: dict = {}
     
     @field_validator('name', mode='before')
     @classmethod
@@ -66,6 +68,11 @@ class Application(BaseTool):
         return self._run(*config, **all_kwargs)
 
     def _run(self, *args, **kwargs):
+        if self.client and self.args_runnable:
+            # Recreate new LanggraphAgentRunnable in order to reflect the current input_mapping (it can be dynamic for pipelines).
+            # Actually, for pipelines agent toolkits LanggraphAgentRunnable is created (for LLMNode) before pipeline's schema parsing.
+            application_variables = {k: {"name": k, "value": v} for k, v in kwargs.items()}
+            self.application = self.client.application(**self.args_runnable, application_variables=application_variables)
         response = self.application.invoke(formulate_query(kwargs))
         if self.return_type == "str":
             return response["output"]

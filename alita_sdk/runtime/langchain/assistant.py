@@ -17,6 +17,7 @@ from .constants import REACT_ADDON, REACT_VARS, XML_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from langchain_core.tools import BaseTool, ToolException
+from jinja2 import Environment, DebugUndefined
 
 logger = logging.getLogger(__name__)
 
@@ -349,5 +350,7 @@ class Assistant:
                     continue
                 # take only the content of the system message from the openai prompt
                 if isinstance(message, SystemMessage):
-                    return message.content
+                    environment = Environment(undefined=DebugUndefined)
+                    template = environment.from_string(message.content)
+                    return template.render(self.prompt.partial_variables)
         return None
