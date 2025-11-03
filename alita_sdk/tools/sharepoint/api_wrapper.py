@@ -251,12 +251,24 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 yield document
 
     def _load_file_content_in_bytes(self, path):
-        file = self._client.web.get_file_by_server_relative_path(path)
-        self._client.load(file).execute_query()
-        file_content = file.read()
-        self._client.execute_query()
-        #
-        return file_content
+        try:
+            file = self._client.web.get_file_by_server_relative_path(path)
+            self._client.load(file).execute_query()
+            file_content = file.read()
+            self._client.execute_query()
+            #
+            return file_content
+        except Exception as e:
+            # attempt to get via graph api
+            from .authorization_helper import SharepointAuthorizationHelper
+            auth_helper = SharepointAuthorizationHelper(
+                client_id=self.client_id,
+                client_secret=self.client_secret.get_secret_value(),
+                tenant="",  # optional for graph api
+                scope="",  # optional for graph api
+                token_json="",  # optional for graph api
+            )
+            return auth_helper.get_file_content(self.site_url, path)
 
     def get_available_tools(self):
         return super().get_available_tools() + [
