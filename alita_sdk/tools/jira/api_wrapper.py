@@ -563,7 +563,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         Use the appropriate issue link type (e.g., "Test", "Relates", "Blocks").
         If we use "Test" linktype, the test is inward issue, the story/other issue is outward issue.."""
 
-        comment = "This test is linked to the story."
+        comment = f"Issue {inward_issue_key} was linked to {outward_issue_key}."
         comment_body = {"content": [{"content": [{"text": comment,"type": "text"}],"type": "paragraph"}],"type": "doc","version": 1} if self.api_version == "3" else comment
         link_data = {
             "type": {"name": f"{linktype}"},
