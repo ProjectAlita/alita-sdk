@@ -290,6 +290,7 @@ class Assistant:
                         'value': 'messages'
                     }
                 },
+                'step_limit': self.max_iterations,
                 'input': ['messages'],
                 'output': ['messages'],
                 'transition': 'END'
@@ -315,7 +316,8 @@ class Assistant:
             store=self.store,
             debug=False,
             for_subgraph=False,
-            alita_client=self.alita_client
+            alita_client=self.alita_client,
+            steps_limit=self.max_iterations
         )
         
         return agent
@@ -330,7 +332,8 @@ class Assistant:
         agent = create_graph(
             client=self.client, tools=self.tools,
             yaml_schema=self.prompt, memory=memory,
-            alita_client=self.alita_client
+            alita_client=self.alita_client,
+            steps_limit=self.max_iterations
         )
         #
         return agent

@@ -30,6 +30,7 @@ class LLMNode(BaseTool):
     structured_output: Optional[bool] = Field(default=False, description='Whether to use structured output')
     available_tools: Optional[List[BaseTool]] = Field(default=None, description='Available tools for binding')
     tool_names: Optional[List[str]] = Field(default=None, description='Specific tool names to filter')
+    steps_limit: Optional[int] = Field(default=25, description='Maximum steps for tool execution')
 
     def get_filtered_tools(self) -> List[BaseTool]:
         """
@@ -184,17 +185,16 @@ class LLMNode(BaseTool):
     def __perform_tool_calling(self, completion, messages, llm_client, config):
         # Handle iterative tool-calling and execution
         new_messages = messages + [completion]
-        max_iterations = 15
         iteration = 0
 
         # Continue executing tools until no more tool calls or max iterations reached
         current_completion = completion
         while (hasattr(current_completion, 'tool_calls') and
                current_completion.tool_calls and
-               iteration < max_iterations):
+               iteration < self.steps_limit):
 
             iteration += 1
-            logger.info(f"Tool execution iteration {iteration}/{max_iterations}")
+            logger.info(f"Tool execution iteration {iteration}/{self.steps_limit}")
 
             # Execute each tool call in the current completion
             tool_calls = current_completion.tool_calls if hasattr(current_completion.tool_calls,
@@ -285,10 +285,10 @@ class LLMNode(BaseTool):
                 break
 
         # Log completion status
-        if iteration >= max_iterations:
-            logger.warning(f"Reached maximum iterations ({max_iterations}) for tool execution")
+        if iteration >= self.steps_limit:
+            logger.warning(f"Reached maximum iterations ({self.steps_limit}) for tool execution")
             # Add a warning message to the chat
-            warning_msg = f"Maximum tool execution iterations ({max_iterations}) reached. Stopping tool execution."
+            warning_msg = f"Maximum tool execution iterations ({self.steps_limit}) reached. Stopping tool execution."
             new_messages.append(AIMessage(content=warning_msg))
         else:
             logger.info(f"Tool execution completed after {iteration} iterations")

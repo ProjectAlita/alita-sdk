@@ -596,7 +596,7 @@ def create_graph(
                 else:
                     # Use all available tools
                     available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
-                
+
                 lg_builder.add_node(node_id, LLMNode(
                     client=client,
                     input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
@@ -607,7 +607,9 @@ def create_graph(
                     input_variables=node.get('input', ['messages']),
                     structured_output=node.get('structured_output', False),
                     available_tools=available_tools,
-                    tool_names=tool_names))
+                    tool_names=tool_names,
+                    steps_limit=kwargs.get('steps_limit', 25)
+                ))
             elif node_type == 'router':
                 # Add a RouterNode as an independent node
                 lg_builder.add_node(node_id, RouterNode(
