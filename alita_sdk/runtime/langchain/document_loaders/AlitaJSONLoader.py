@@ -30,7 +30,10 @@ class AlitaJSONLoader(BaseLoader):
                 with open(self.file_path, encoding=self.encoding) as f:
                     return json.load(f)
             elif hasattr(self, 'file_content') and self.file_content:
-                return json.load(self.file_content)
+                if isinstance(self.file_content, bytes):
+                    return json.loads(self.file_content.decode(self.encoding))
+                else:
+                    return json.load(self.file_content)
             else:
                 raise ValueError("Neither file_path nor file_content is provided.")
 

@@ -255,17 +255,17 @@ document_loaders_map = {
             'extract_images': False,
         }
     },
-    '.py': {
-        'class': AlitaPythonLoader,
-        'mime_type': 'text/x-python',
-        'is_multimodal_processing': False,
-        'kwargs': {},
-        'allowed_to_override': DEFAULT_ALLOWED_BASE
-    }
+    # '.py': {
+    #     'class': AlitaPythonLoader,
+    #     'mime_type': 'text/x-python',
+    #     'is_multimodal_processing': False,
+    #     'kwargs': {},
+    #     'allowed_to_override': DEFAULT_ALLOWED_BASE
+    # }
 }
 
 code_extensions = [
-    # '.py',  # Python
+    '.py',  # Python
     '.js',  # JavaScript
     '.ts',  # TypeScript
     '.java',  # Java
