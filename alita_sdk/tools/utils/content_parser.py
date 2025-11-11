@@ -92,21 +92,24 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
         return ToolException(
             "Not supported type of files entered. Supported types are TXT, DOCX, PDF, PPTX, XLSX and XLS only.")
 
-    if hasattr(loader, 'get_content'):
-        return loader.get_content()
-    else:
-        extension = Path(file_path if file_path else file_name).suffix
-        loader_kwargs = get_loader_kwargs(loaders_map.get(extension), file_name, file_content, is_capture_image, page_number, sheet_name, llm, file_path, excel_by_sheets)
-        if file_content:
-            return load_content_from_bytes(file_content=file_content,
-                                           extension=extension,
-                                           loader_extra_config=loader_kwargs,
-                                           llm=llm)
+    try:
+        if hasattr(loader, 'get_content'):
+            return loader.get_content()
         else:
-            return load_content(file_path=file_path,
-                                extension=extension,
-                                loader_extra_config=loader_kwargs,
-                                llm=llm)
+            extension = Path(file_path if file_path else file_name).suffix
+            loader_kwargs = get_loader_kwargs(loaders_map.get(extension), file_name, file_content, is_capture_image, page_number, sheet_name, llm, file_path, excel_by_sheets)
+            if file_content:
+                return load_content_from_bytes(file_content=file_content,
+                                               extension=extension,
+                                               loader_extra_config=loader_kwargs,
+                                               llm=llm)
+            else:
+                return load_content(file_path=file_path,
+                                    extension=extension,
+                                    loader_extra_config=loader_kwargs,
+                                    llm=llm)
+    except Exception as e:
+        return ToolException(f"Error reading file ({file_name or file_path}) content. Make sure these types are supported: {str(e)}")
 
 def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                        sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False) -> List[Document] | ToolException:
@@ -153,7 +156,7 @@ def prepare_loader(file_name=None, file_content=None, is_capture_image: bool = F
 
         loader_object = loaders_map.get(extension)
         if not loader_object:
-            return None
+            loader_object = loaders_map.get('.txt')  # Default to text loader if no specific loader found
         loader_kwargs = get_loader_kwargs(loader_object, file_name, file_content, is_capture_image, page_number, sheet_name, llm, file_path, excel_by_sheets, prompt)
         loader = loader_object['class'](**loader_kwargs)
         return loader
