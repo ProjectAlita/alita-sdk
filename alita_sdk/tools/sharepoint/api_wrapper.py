@@ -8,6 +8,7 @@ from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
+from .utils import decode_sharepoint_string
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.content_parser import parse_file_content
 from ...runtime.utils.utils import IndexerKeywords
@@ -105,26 +106,34 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
     def get_files_list(self, folder_name: str = None, limit_files: int = 100):
         """ If folder name is specified, lists all files in this folder under Shared Documents path. If folder name is empty, lists all files under root catalog (Shared Documents). Number of files is limited by limit_files (default is 100)."""
         try:
+            # exclude default system libraries like 'Form Templates', 'Site Assets', 'Style Library'
+            all_libraries = self._client.web.lists.filter("BaseTemplate eq 101 and Title ne 'Form Templates' and Title ne 'Site Assets' and Title ne 'Style Library'").get().execute_query()
             result = []
             if not limit_files:
                 limit_files = 100
-            target_folder_url = f"Shared Documents/{folder_name}" if folder_name else "Shared Documents"
-            files = (self._client.web.get_folder_by_server_relative_path(target_folder_url)
-                     .get_files(True)
-                     .execute_query())
-
-            for file in files:
-                if len(result) >= limit_files:
-                    break
-                temp_props = {
-                    'Name': file.properties['Name'],
-                    'Path': file.properties['ServerRelativeUrl'],
-                    'Created': file.properties['TimeCreated'],
-                    'Modified': file.properties['TimeLastModified'],
-                    'Link': file.properties['LinkingUrl'],
-                    'id': file.properties['UniqueId']
-                }
-                result.append(temp_props)
+            #
+            for lib in all_libraries:
+                library_type = decode_sharepoint_string(lib.properties["EntityTypeName"])
+                target_folder_url = f"{library_type}/{folder_name}" if folder_name else library_type
+                files = (self._client.web.get_folder_by_server_relative_path(target_folder_url)
+                         .get_files(True)
+                         .execute_query())
+                #
+                for file in files:
+                    if f"{library_type}/Forms" in file.properties['ServerRelativeUrl']:
+                        # skip files from system folder "Forms"
+                        continue
+                    if len(result) >= limit_files:
+                        break
+                    temp_props = {
+                        'Name': file.properties['Name'],
+                        'Path': file.properties['ServerRelativeUrl'],
+                        'Created': file.properties['TimeCreated'],
+                        'Modified': file.properties['TimeLastModified'],
+                        'Link': file.properties['LinkingUrl'],
+                        'id': file.properties['UniqueId']
+                    }
+                    result.append(temp_props)
             return result if result else ToolException("Can not get files or folder is empty. Please, double check folder name and read permissions.")
         except Exception as e:
             # attempt to get via graph api
