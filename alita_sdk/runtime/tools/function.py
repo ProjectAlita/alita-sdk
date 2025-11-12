@@ -116,14 +116,21 @@ class FunctionTool(BaseTool):
             if not self.output_variables:
                 return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
             else:
-                if self.output_variables[0] == "messages":
-                    return {
+                if "messages" in self.output_variables:
+                    messages_dict = {
                         "messages": [{
                             "role": "assistant",
                             "content": dumps(tool_result) if not isinstance(tool_result, ToolException)
                             else str(tool_result)
                         }]
                     }
+                    for var in self.output_variables:
+                        if var != "messages":
+                            if isinstance(tool_result, dict) and var in tool_result:
+                                messages_dict[var] = tool_result[var]
+                            else:
+                                messages_dict[var] = tool_result
+                    return messages_dict
                 else:
                     return { self.output_variables[0]: tool_result }
         except ValidationError:
