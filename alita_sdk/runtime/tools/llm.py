@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import Field
 
+from ..langchain.constants import ELITEA_RS
 from ..langchain.utils import create_pydantic_model, propagate_the_input_mapping
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,8 @@ class LLMNode(BaseTool):
                     }
                     for key, value in (self.structured_output_dict or {}).items()
                 }
+                # Add default output field for proper response to user
+                struct_params['elitea_response'] = {'description': 'final output to user', 'type': 'str'}
                 struct_model = create_pydantic_model(f"LLMOutput", struct_params)
                 completion = llm_client.invoke(messages, config=config)
                 if hasattr(completion, 'tool_calls') and completion.tool_calls:
@@ -137,6 +140,8 @@ class LLMNode(BaseTool):
                 # Ensure messages are properly formatted
                 if result.get('messages') and isinstance(result['messages'], list):
                     result['messages'] = [{'role': 'assistant', 'content': '\n'.join(result['messages'])}]
+                else:
+                    result['messages'] = messages + [AIMessage(content=result.get(ELITEA_RS, ''))]
 
                 return result
             else:

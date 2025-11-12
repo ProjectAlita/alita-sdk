@@ -467,10 +467,11 @@ def create_graph(
                             input_params = node.get('input', ['messages'])
                             input_mapping = node.get('input_mapping',
                                                      {'messages': {'type': 'variable', 'value': 'messages'}})
+                            output_vars = node.get('output', [])
                             lg_builder.add_node(node_id, FunctionTool(
                                 client=client, tool=tool,
                                 name=node_id, return_type='str',
-                                output_variables=node.get('output', []),
+                                output_variables=output_vars + ['messages'] if 'messages' not in output_vars else output_vars,
                                 input_variables=input_params,
                                 input_mapping= input_mapping
                             ))
@@ -500,15 +501,6 @@ def create_graph(
                                 structured_output=node.get('structured_output', False),
                                 task=node.get('task')
                             ))
-                        # TODO: decide on struct output for agent nodes
-                        # elif node_type == 'agent':
-                        #     lg_builder.add_node(node_id, AgentNode(
-                        #         client=client, tool=tool,
-                        #         name=node['id'], return_type='dict',
-                        #         output_variables=node.get('output', []),
-                        #         input_variables=node.get('input', ['messages']),
-                        #         task=node.get('task')
-                        #     ))
                         elif node_type == 'loop':
                             lg_builder.add_node(node_id, LoopNode(
                                 client=client, tool=tool,

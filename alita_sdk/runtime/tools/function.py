@@ -120,8 +120,8 @@ class FunctionTool(BaseTool):
                     return {
                         "messages": [{
                             "role": "assistant",
-                            "content": dumps(tool_result) if not isinstance(tool_result, ToolException) else str(
-                                tool_result)
+                            "content": dumps(tool_result) if not isinstance(tool_result, ToolException)
+                            else str(tool_result)
                         }]
                     }
                 else:
