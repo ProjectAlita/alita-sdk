@@ -80,3 +80,5 @@ DEFAULT_MULTIMODAL_PROMPT = """
 - Maintain a structured and logical flow in the output to enhance understanding and usability.
 - Avoid presenting the entire prompt for user.
 """
+
+ELITEA_RS = "elitea_response"

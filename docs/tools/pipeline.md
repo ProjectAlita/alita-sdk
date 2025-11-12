@@ -31,7 +31,7 @@ nodes:
           # Your Python code here
           result = 2 + 2
           print(f"The result is: {result}")
-          return {"calculation": result}
+          {"calculation": result}
     input: ["messages"]
     output: ["calculation"]
     structured_output: true
@@ -43,7 +43,7 @@ nodes:
 |-----------|------|----------|---------|--------------------------------------------------------------------------------------------------------------------|
 | `id` | string | Yes | - | Unique identifier for the node                                                                                     |
 | `type` | string | Yes | - | Must be "code"                                                                                                     |
-| `code` | string | Yes | "return 'Code block is empty'" | Python code to execute                                                                                             |
+| `code` | string | Yes | "'Code block is empty'" | Python code to execute: 'Code block is empty' will be returned                                                     |
 | `output` | list[string] | No | [] | Output variables to store in pipeline state                                                                        |
 | `structured_output` | boolean | No | false | Whether to parse output as structured data. `true` - will update state variables that matches to return statement* |
 
@@ -150,7 +150,7 @@ user_score: 85
 ```
 code block:
 ```python
-return {
+{
   "user_name": "Bob",
   "user_score": 90,
   "timestamp": "2024-01-01T00:00:00Z"
@@ -308,9 +308,9 @@ The Code Node includes comprehensive error handling:
 try:
     # Your code here
     result = risky_operation()
-    return {"result": result}
+    {"result": result}
 except Exception as e:
-    return {"error": str(e), "status": "failed"}
+    error": str(e), "status": "failed"}
 ```
 
 #### Validation Errors
