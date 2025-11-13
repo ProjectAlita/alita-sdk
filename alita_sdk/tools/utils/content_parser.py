@@ -225,10 +225,18 @@ def process_document_by_type(content, extension_source: str, document: Document 
             metadata={**document.metadata, 'chunk_id': 1}
         )
         return
+    #
+    chunks_counter = 0
     for chunk in chunks:
+        chunks_counter += 1
+        metadata = {**document.metadata, **chunk.metadata}
+        #
+        # ensure each chunk has a unique chunk_id
+        metadata['chunk_id'] = chunks_counter
+        #
         yield Document(
             page_content=sanitize_for_postgres(chunk.page_content),
-            metadata={**document.metadata, **chunk.metadata}
+            metadata=metadata
         )
 
 
