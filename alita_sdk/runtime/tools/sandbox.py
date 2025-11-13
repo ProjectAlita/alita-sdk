@@ -64,36 +64,10 @@ def _is_deno_available() -> bool:
 
 
 def _setup_pyodide_cache_env() -> None:
-    """Setup Pyodide caching environment variables for performance optimization"""
+    """Setup Pyodide caching environment variables for performance optimization [NO-OP]"""
     try:
-        # Check if cache environment file exists and source it
-        cache_env_file = os.path.expanduser("~/.pyodide_cache_env")
-        if os.path.exists(cache_env_file):
-            with open(cache_env_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('export ') and '=' in line:
-                        # Parse export VAR=value format
-                        var_assignment = line[7:]  # Remove 'export '
-                        if '=' in var_assignment:
-                            key, value = var_assignment.split('=', 1)
-                            # Remove quotes if present
-                            value = value.strip('"').strip("'")
-                            os.environ[key] = value
-                            logger.debug(f"Set Pyodide cache env: {key}={value}")
-
-        # Set default caching environment variables if not already set
-        cache_defaults = {
-            'PYODIDE_PACKAGES_PATH': os.path.expanduser('~/.cache/pyodide'),
-            'DENO_DIR': os.path.expanduser('~/.cache/deno'),
-            'PYODIDE_CACHE_DIR': os.path.expanduser('~/.cache/pyodide'),
-        }
-
-        for key, default_value in cache_defaults.items():
-            if key not in os.environ:
-                os.environ[key] = default_value
-                logger.debug(f"Set default Pyodide env: {key}={default_value}")
-
+        for key in ["SANDBOX_BASE", "DENO_DIR"]:
+            logger.info("Sandbox env: %s -> %s", key, os.environ.get(key, "n/a"))
     except Exception as e:
         logger.warning(f"Could not setup Pyodide cache environment: {e}")
 
@@ -142,7 +116,7 @@ class PyodideSandboxTool(BaseTool):
     def _prepare_pyodide_input(self, code: str) -> str:
         """Prepare input for PyodideSandboxTool by injecting state and alita_client into the code block."""
         pyodide_predata = ""
-        
+
         # Add alita_client if available
         if self.alita_client:
             try:
@@ -158,7 +132,7 @@ class PyodideSandboxTool(BaseTool):
                                     f"auth_token='{self.alita_client.auth_token}')\n")
             except FileNotFoundError:
                 logger.error(f"sandbox_client.py not found. Ensure the file exists.")
-        
+
         return f"#elitea simplified client\n{pyodide_predata}{code}"
 
     def _initialize_sandbox(self) -> None:
@@ -175,9 +149,19 @@ class PyodideSandboxTool(BaseTool):
 
             from langchain_sandbox import PyodideSandbox
 
+            # Air-gapped settings
+            sandbox_base = os.environ.get("SANDBOX_BASE", os.path.expanduser('~/.cache/pyodide'))
+            sandbox_tmp = os.path.join(sandbox_base, "tmp")
+            deno_cache = os.environ.get("DENO_DIR", os.path.expanduser('~/.cache/deno'))
+
             # Configure sandbox with performance optimizations
             self._sandbox = PyodideSandbox(
                 stateful=self.stateful,
+                #
+                allow_env=["SANDBOX_BASE"],
+                allow_read=[sandbox_base, sandbox_tmp, deno_cache],
+                allow_write=[sandbox_tmp, deno_cache],
+                #
                 allow_net=self.allow_net,
                 # Use auto node_modules_dir for better caching
                 node_modules_dir="auto"
