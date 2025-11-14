@@ -48,23 +48,24 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     selected_tools=tool['settings']['selected_tools'],
                     toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
                 ).get_tools())
-            elif tool['type'] == 'application' and tool.get('agent_type', '') != 'pipeline' :
+            elif tool['type'] == 'application':
                 tools.extend(ApplicationToolkit.get_toolkit(
                     alita_client,
                     application_id=int(tool['settings']['application_id']),
                     application_version_id=int(tool['settings']['application_version_id']),
                     selected_tools=[]
                 ).get_tools())
-            elif tool['type'] == 'application' and tool.get('agent_type', '') == 'pipeline':
-                # static get_toolkit returns a list of CompiledStateGraph stubs
-                tools.extend(SubgraphToolkit.get_toolkit(
-                    alita_client,
-                    application_id=int(tool['settings']['application_id']),
-                    application_version_id=int(tool['settings']['application_version_id']),
-                    app_api_key=alita_client.auth_token,
-                    selected_tools=[],
-                    llm=llm
-                ))
+                # backward compatibility for pipeline application type as subgraph node
+                if tool.get('agent_type', '') == 'pipeline':
+                    # static get_toolkit returns a list of CompiledStateGraph stubs
+                    tools.extend(SubgraphToolkit.get_toolkit(
+                        alita_client,
+                        application_id=int(tool['settings']['application_id']),
+                        application_version_id=int(tool['settings']['application_version_id']),
+                        app_api_key=alita_client.auth_token,
+                        selected_tools=[],
+                        llm=llm
+                    ))
             elif tool['type'] == 'memory':
                 tools += MemoryToolkit.get_toolkit(
                     namespace=tool['settings'].get('namespace', str(tool['id'])),
