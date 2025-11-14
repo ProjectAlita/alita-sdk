@@ -135,9 +135,8 @@ class QtestApiWrapper(BaseToolApiWrapper):
             values['qtest_project_id'] = values.pop('project_id')
         return values
 
-    @model_validator(mode='before')
-    @classmethod
-    def validate_toolkit(cls, values):
+    @model_validator(mode='after')
+    def validate_toolkit(self):
         try:
             import swagger_client  # noqa: F401
         except ImportError:
@@ -146,15 +145,13 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 "`pip install git+https://github.com/Roman-Mitusov/qtest-api.git`"
             )
 
-        url = values['base_url']
-        api_token = values.get('qtest_api_token')
-        if api_token:
+        if self.qtest_api_token:
             configuration = swagger_client.Configuration()
-            configuration.host = url
-            configuration.api_key['Authorization'] = api_token
+            configuration.host = self.base_url
+            configuration.api_key['Authorization'] = self.qtest_api_token.get_secret_value()
             configuration.api_key_prefix['Authorization'] = 'Bearer'
-            cls._client = swagger_client.ApiClient(configuration)
-        return values
+            self._client = swagger_client.ApiClient(configuration)
+        return self
 
     def __instantiate_test_api_instance(self) -> TestCaseApi:
         # Instantiate the TestCaseApi instance according to the qtest api documentation and swagger client
