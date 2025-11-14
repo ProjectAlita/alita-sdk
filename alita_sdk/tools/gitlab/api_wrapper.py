@@ -115,9 +115,8 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         """Remove trailing slash from URL if present."""
         return url.rstrip('/') if url else url
 
-    @model_validator(mode='before')
-    @classmethod
-    def validate_toolkit(cls, values: Dict) -> Dict:
+    @model_validator(mode='after')
+    def validate_toolkit(self):
         try:
            import gitlab
         except ImportError:
@@ -125,17 +124,17 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
                 "python-gitlab is not installed. "
                 "Please install it with `pip install python-gitlab`"
             )
-        values['repository'] = cls._sanitize_url(values['repository'])
+        self.repository = self._sanitize_url(self.repository)
         g = gitlab.Gitlab(
-            url=cls._sanitize_url(values['url']),
-            private_token=values['private_token'],
+            url=self._sanitize_url(self.url),
+            private_token=self.private_token.get_secret_value(),
             keep_base_url=True,
         )
 
         g.auth()
-        cls._git = g
-        cls._active_branch = values.get('branch')
-        return super().validate_toolkit(values)
+        self._git = g
+        self._active_branch = self.branch
+        return self
 
     @property
     def repo_instance(self):
