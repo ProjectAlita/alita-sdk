@@ -143,6 +143,7 @@ class SandboxClient:
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.image_generation_url = f'{self.base_url}{self.llm_path}/images/generations'
+        self.auth_user_url = f'{self.base_url}{self.api_path}/auth/user'
         self.configurations: list = configurations or []
         self.model_timeout = kwargs.get('model_timeout', 120)
         self.model_image_generation = kwargs.get('model_image_generation')
@@ -363,3 +364,10 @@ class SandboxClient:
         url = f'{self.artifact_url}/{bucket_name}'
         data = requests.delete(url, headers=self.headers, verify=False, params={'filename': quote(artifact_name)})
         return self._process_requst(data)
+
+    def get_user_data(self) -> Dict[str, Any]:
+        resp = requests.get(self.auth_user_url, headers=self.headers, verify=False)
+        if resp.ok:
+            return resp.json()
+        logger.error(f'Failed to fetch user data: {resp.status_code} - {resp.text}')
+        raise ApiDetailsRequestError(f'Failed to fetch user data with status code {resp.status_code}.')
