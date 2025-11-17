@@ -474,9 +474,10 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "index_configuration": index_configuration,
                 "created_on": created_on,
                 "updated_on": created_on,
-                "history": "[]",
                 "task_id": None,
+                "conversation_id": None,
             }
+            metadata["history"] = json.dumps([metadata])
             index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)
             add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc])
 
@@ -489,6 +490,20 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             metadata["indexed"] = result
             metadata["state"] = state
             metadata["updated_on"] = time.time()
+            #
+            history_raw = metadata.pop("history", "[]")
+            try:
+                history = json.loads(history_raw) if history_raw.strip() else []
+                # replace the last history item with updated metadata
+                if history and isinstance(history, list):
+                    history[-1] = metadata
+                else:
+                    history = [metadata]
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"Failed to load index history: {history_raw}. Create new with only current item.")
+                history = [metadata]
+            #
+            metadata["history"] = json.dumps(history)
             index_meta_doc = Document(page_content=index_meta_raw.get("content", ""), metadata=metadata)
             add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=[index_meta_raw.get("id")])
 
