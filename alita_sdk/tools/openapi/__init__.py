@@ -1,6 +1,7 @@
 import json
 import re
 import logging
+import yaml
 from typing import List, Any, Optional, Dict
 from langchain_core.tools import BaseTool, BaseToolkit, ToolException
 from requests_openapi import Operation, Client, Server
@@ -101,7 +102,15 @@ class AlitaOpenAPIToolkit(BaseToolkit):
         else:
             tools_set = {}
         if isinstance(openapi_spec, str):
-            openapi_spec = json.loads(openapi_spec)
+            # Try to detect if it's YAML or JSON by attempting to parse as JSON first
+            try:
+                openapi_spec = json.loads(openapi_spec)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try YAML
+                try:
+                    openapi_spec = yaml.safe_load(openapi_spec)
+                except yaml.YAMLError as e:
+                    raise ToolException(f"Failed to parse OpenAPI spec as JSON or YAML: {e}")
         c = Client()
         c.load_spec(openapi_spec)
         if headers:
