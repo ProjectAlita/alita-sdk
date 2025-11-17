@@ -92,15 +92,33 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             target_list = self._client.web.lists.get_by_title(list_title)
             self._client.load(target_list)
             self._client.execute_query()
-            items = target_list.items.get().top(limit).execute_query()
-            logging.info("{0} items from sharepoint loaded successfully.".format(len(items)))
+            items = target_list.items.top(limit).get().execute_query()
+            logging.info("{0} items from sharepoint loaded successfully via SharePoint REST API.".format(len(items)))
             result = []
             for item in items:
                 result.append(item.properties)
             return result
-        except Exception as e:
-            logging.error(f"Failed to load items from sharepoint: {e}")
-            return ToolException("Can not list items. Please, double check List name and read permissions.")
+        except Exception as base_e:
+            logging.warning(f"Primary SharePoint REST list read failed: {base_e}. Attempting Graph API fallback.")
+            # Attempt Graph API fallback
+            try:
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value() if self.client_secret else None,
+                    tenant="",  # optional for graph api (derived inside helper)
+                    scope="",  # optional for graph api
+                    token_json="",  # not needed for client credentials flow here
+                )
+                graph_items = auth_helper.get_list_items(self.site_url, list_title, limit)
+                if graph_items:
+                    logging.info(f"{len(graph_items)} items from sharepoint loaded successfully via Graph API fallback.")
+                    return graph_items
+                else:
+                    return ToolException("List appears empty or inaccessible via both REST and Graph APIs.")
+            except Exception as graph_e:
+                logging.error(f"Graph API fallback failed: {graph_e}")
+                return ToolException(f"Cannot read list '{list_title}'. Check list name and permissions: {base_e} | {graph_e}")
 
 
     def get_files_list(self, folder_name: str = None, limit_files: int = 100):
