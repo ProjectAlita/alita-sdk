@@ -185,3 +185,47 @@ class SharepointAuthorizationHelper:
             raise RuntimeError(f"File '{path}' not found in any private or shared documents.")
         except Exception as e:
             raise RuntimeError(f"Error in get_file_content: {e}")
+
+    def get_list_items(self, site_url: str, list_title: str, limit: int = 1000):
+        """Fallback Graph API method to read SharePoint list items by list title.
+
+        Returns a list of dictionaries representing list item fields.
+        """
+        if not site_url or not site_url.startswith("https://"):
+            raise ValueError(f"Invalid site_url format: {site_url}")
+        try:
+            access_token, site_id = self.generate_token_and_site_id(site_url)
+            headers = {"Authorization": f"Bearer {access_token}"}
+            lists_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
+            response = requests.get(lists_url, headers=headers)
+            if response.status_code != 200:
+                raise RuntimeError(f"Lists request failed: {response.status_code} {response.text}")
+            lists_json = response.json()
+            lists = lists_json.get("value", [])
+            target_list = None
+            normalized_title = list_title.strip().lower()
+            for lst in lists:
+                # displayName is the user-visible title. name can differ (internal name)
+                display_name = (lst.get("displayName") or lst.get("name") or '').strip().lower()
+                if display_name == normalized_title:
+                    target_list = lst
+                    break
+            if not target_list:
+                raise RuntimeError(f"List '{list_title}' not found via Graph API.")
+            list_id = target_list.get('id')
+            if not list_id:
+                raise RuntimeError(f"List '{list_title}' missing id field.")
+            items_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items?expand=fields&$top={limit}"
+            items_response = requests.get(items_url, headers=headers)
+            if items_response.status_code != 200:
+                raise RuntimeError(f"List items request failed: {items_response.status_code} {items_response.text}")
+            items_json = items_response.json()
+            values = items_json.get('value', [])
+            result = []
+            for item in values:
+                fields = item.get('fields', {})
+                if fields:
+                    result.append(fields)
+            return result
+        except Exception as e:
+            raise RuntimeError(f"Error in get_list_items: {e}")
