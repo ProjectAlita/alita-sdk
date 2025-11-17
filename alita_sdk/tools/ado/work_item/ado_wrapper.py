@@ -329,11 +329,14 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 parsed_item.update(fields_data)
 
             # extract relations if any
-            relations_data = work_item.relations
+            relations_data = None
+            if expand and str(expand).lower() in ("relations", "all"):
+                try:
+                    relations_data = getattr(work_item, 'relations', None)
+                except KeyError:
+                    relations_data = None
             if relations_data:
-                parsed_item['relations'] = []
-                for relation in relations_data:
-                    parsed_item['relations'].append(relation.as_dict())
+                parsed_item['relations'] = [relation.as_dict() for relation in relations_data]
 
             if parse_attachments:
                 # describe images in work item fields if present
@@ -344,13 +347,19 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                         for img in images:
                             src = img.get('src')
                             if src:
-                                description = self.parse_attachment_by_url(src, image_description_prompt)
+                                description = self.parse_attachment_by_url(src, image_description_prompt=image_description_prompt)
                                 img['image-description'] = description
                         parsed_item[field_name] = str(soup)
                 # parse attached documents if present
-                if parsed_item['relations']:
-                    for attachment in parsed_item['relations']:
-                        attachment['content'] = self.parse_attachment_by_url(attachment['url'], attachment['attributes']['name'], image_description_prompt)
+                for relation in parsed_item.get('relations', []):
+                    # Only process actual file attachments
+                    if relation.get('rel') == 'AttachedFile':
+                        file_name = relation.get('attributes', {}).get('name')
+                        if file_name:
+                            try:
+                                relation['content'] = self.parse_attachment_by_url(relation['url'], file_name, image_description_prompt=image_description_prompt)
+                            except Exception as att_e:
+                                logger.warning(f"Failed to parse attachment {file_name}: {att_e}")
 
 
             return parsed_item
