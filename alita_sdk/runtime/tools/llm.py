@@ -91,6 +91,10 @@ class LLMNode(BaseTool):
                                     f"Actual params: {func_args}")
             # cast to str in case user passes variable different from str
             messages = [SystemMessage(content=str(func_args.get('system'))), *func_args.get('chat_history', []), HumanMessage(content=str(func_args.get('task')))]
+            # Remove pre-last item if last two messages are same type and content
+            if len(messages) >= 2 and type(messages[-1]) == type(messages[-2]) and messages[-1].content == messages[
+                -2].content:
+                messages.pop(-2)
         else:
             # Flow for chat-based LLM node w/o prompt/task from pipeline but with messages in state
             # verify messages structure
