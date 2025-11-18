@@ -82,3 +82,4 @@ DEFAULT_MULTIMODAL_PROMPT = """
 """
 
 ELITEA_RS = "elitea_response"
+PRINTER_NODE_RS = "printer_output"

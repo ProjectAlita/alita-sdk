@@ -7,7 +7,7 @@ from typing import Tuple, TypedDict, Any, Optional, Annotated
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
 
-from ...runtime.langchain.constants import ELITEA_RS
+from ...runtime.langchain.constants import ELITEA_RS, PRINTER_NODE_RS
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,8 @@ def parse_type(type_str):
 
 
 def create_state(data: Optional[dict] = None):
-    state_dict = {'input': str, 'router_output': str, ELITEA_RS: str}  # Always include router_output
+    state_dict = {'input': str, 'router_output': str,
+                  ELITEA_RS: str, PRINTER_NODE_RS: str}  # Always include router_output
     types_dict = {}
     if not data:
         data = {'messages': 'list[str]'}
