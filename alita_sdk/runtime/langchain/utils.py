@@ -138,6 +138,7 @@ def create_state(data: Optional[dict] = None):
     for key, value in data.items():
         # support of old & new UI
         value = value['type'] if isinstance(value, dict) else value
+        value = 'str' if value == 'string' else value  # normalize string type (old state support)
         if key == 'messages':
             state_dict[key] = Annotated[list[AnyMessage], add_messages]
         elif value in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number', 'dict']:
