@@ -185,7 +185,7 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
                 logger.error(f"KeyError in fstring formatting for key '{key}'. Attempt to find proper data in state.\n{e}")
                 try:
                     # search for variables in state if not found in var_dict
-                    input_data[key] = value['value'].format(**state)
+                    input_data[key] = safe_format(value['value'], state)
                 except KeyError as no_var_exception:
                     logger.error(f"KeyError in fstring formatting for key '{key}' with state data.\n{no_var_exception}")
                     # leave value as is if still not found (could be a constant string marked as fstring by mistake)
@@ -196,6 +196,13 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
             input_data[key] = source.get(value['value'], "")
     return input_data
 
+def safe_format(template, mapping):
+    """Format a template string using a mapping, leaving placeholders unchanged if keys are missing."""
+
+    def replacer(match):
+        key = match.group(1)
+        return str(mapping.get(key, f'{{{key}}}'))
+    return re.sub(r'\{(\w+)\}', replacer, template)
 
 def create_pydantic_model(model_name: str, variables: dict[str, dict]):
     fields = {}
