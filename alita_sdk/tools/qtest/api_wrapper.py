@@ -122,6 +122,13 @@ GetModules = create_model(
 
 )
 
+GetAllTestCasesFieldsForProject = create_model(
+    "GetAllTestCasesFieldsForProject",
+    force_refresh=(Optional[bool],
+                   Field(description="Set to true to reload field definitions from API if project configuration has changed (new fields added, dropdown values modified). Default: false (uses cached data).",
+                         default=False)),
+)
+
 NoInput = create_model(
     "NoInput"
 )
@@ -134,6 +141,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
     page: int = 1
     no_of_tests_shown_in_dql_search: int = 10
     _client: Any = PrivateAttr()
+    _field_definitions_cache: Optional[dict] = PrivateAttr(default=None)
     llm: Any
 
     @model_validator(mode='before')
@@ -170,6 +178,33 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def __instantiate_fields_api_instance(self) -> FieldApi:
         return swagger_client.FieldApi(self._client)
+
+    def __get_field_definitions_cached(self) -> dict:
+        """Get field definitions with session-level caching.
+        
+        Field definitions are cached for the lifetime of this wrapper instance.
+        If project field configuration changes, call refresh_field_definitions_cache()
+        to reload the definitions.
+        
+        Returns:
+            dict: Field definitions mapping
+        """
+        if self._field_definitions_cache is None:
+            self._field_definitions_cache = self.__get_project_field_definitions()
+        return self._field_definitions_cache
+
+    def refresh_field_definitions_cache(self) -> dict:
+        """Manually refresh the field definitions cache.
+        
+        Call this method if project field configuration has been updated
+        (new fields added, dropdown values changed, etc.) and you need to
+        reload the definitions within the same agent session.
+        
+        Returns:
+            dict: Freshly loaded field definitions
+        """
+        self._field_definitions_cache = None
+        return self.__get_field_definitions_cached()
 
     def __map_properties_to_api_format(self, test_case_data: dict, field_definitions: dict,
                                        base_properties: list = None) -> list:
@@ -276,8 +311,8 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def __build_body_for_create_test_case(self, test_cases_data: list[dict],
                                           folder_to_place_test_cases_to: str = '') -> list:
-        # Get field definitions for property mapping
-        field_definitions = self.__get_project_field_definitions()
+        # Get field definitions for property mapping (cached for session)
+        field_definitions = self.__get_field_definitions_cached()
         
         modules = self._parse_modules()
         parent_id = ''.join(str(module['module_id']) for module in modules if
@@ -404,15 +439,22 @@ class QtestApiWrapper(BaseToolApiWrapper):
         output.append("\n\nUse these exact value names when creating or updating test cases.")
         return ''.join(output)
 
-    def get_all_test_cases_fields_for_project(self) -> str:
+    def get_all_test_cases_fields_for_project(self, force_refresh: bool = False) -> str:
         """
         Get formatted information about available test case fields and their values.
         This method is exposed as a tool for LLM to query field information.
         
+        Args:
+            force_refresh: If True, reload field definitions from API instead of using cache.
+                          Use this if project configuration has changed (new fields added,
+                          dropdown values modified, etc.).
+        
         Returns:
             Formatted string with field names and allowed values
         """
-        field_defs = self.__get_project_field_definitions()
+        if force_refresh:
+            self.refresh_field_definitions_cache()
+        field_defs = self.__get_field_definitions_cached()
         return self.__format_field_info_for_display(field_defs)
 
     def _parse_modules(self) -> list[dict]:
@@ -710,8 +752,8 @@ class QtestApiWrapper(BaseToolApiWrapper):
             {
                 "name": "get_all_test_cases_fields_for_project",
                 "mode": "get_all_test_cases_fields_for_project",
-                "description": "Get information about available test case fields and their valid values for the project. Shows which property values are allowed (e.g., Status: 'New', 'In Progress', 'Completed') based on the project configuration.",
-                "args_schema": NoInput,
+                "description": "Get information about available test case fields and their valid values for the project. Shows which property values are allowed (e.g., Status: 'New', 'In Progress', 'Completed') based on the project configuration. Use force_refresh=true if project configuration has changed.",
+                "args_schema": GetAllTestCasesFieldsForProject,
                 "ref": self.get_all_test_cases_fields_for_project,
             }
         ]
