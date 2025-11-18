@@ -19,8 +19,9 @@ from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 
+from .constants import PRINTER_NODE_RS
 from .mixedAgentRenderes import convert_message_to_json
-from .utils import create_state, propagate_the_input_mapping
+from .utils import create_state, propagate_the_input_mapping, safe_format
 from ..tools.function import FunctionTool
 from ..tools.indexer_tool import IndexerNode
 from ..tools.llm import LLMNode
@@ -230,6 +231,22 @@ class StateDefaultNode(Runnable):
                 except:
                     logger.debug("Unable to evaluate value, using as is")
                     result[key] = temp_value
+        return result
+
+class PrinterNode(Runnable):
+    name = "PrinterNode"
+
+    def __init__(self, text_pattern: str, formatting_enabled: bool = True):
+        self.text = text_pattern
+        self.formatting_enabled = formatting_enabled
+
+    def invoke(self, state: BaseStore, config: Optional[RunnableConfig] = None) -> dict:
+        logger.info(f"Printer Node - Current state variables: {state}")
+        result = {}
+        logger.debug(f"Initial text pattern: {self.text}")
+        formatted_output = safe_format(self.text, state)
+        logger.debug(f"Formatted output: {formatted_output}")
+        result[PRINTER_NODE_RS] = formatted_output
         return result
 
 
@@ -628,6 +645,23 @@ def create_graph(
                     input_variables=node.get('input', ['messages']),
                     output_variables=node.get('output', [])
                 ))
+            elif node_type == 'printer':
+                lg_builder.add_node(node_id, PrinterNode(
+                    text_pattern=node.get('printer', ''),
+                    formatting_enabled=node.get('formatting_enabled', True)
+                ))
+
+                # add interrupts after printer node if specified
+                interrupt_after.append(clean_string(node_id))
+
+                # reset printer output variable to avoid carrying over
+                reset_node_id = f"{node_id}_reset"
+                lg_builder.add_node(reset_node_id, PrinterNode(
+                    text_pattern=''
+                ))
+                lg_builder.add_edge(node_id, reset_node_id)
+                lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
+                continue
             if node.get('transition'):
                 next_step = clean_string(node['transition'])
                 logger.info(f'Adding transition: {next_step}')
@@ -824,8 +858,12 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)),
-                          result['messages'][-1].content)
+            if not result.get(PRINTER_NODE_RS):
+                output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)),
+                              result['messages'][-1].content)
+            else:
+                # used for printer node output - it will be reset by next `reset` node
+                output = result.get(PRINTER_NODE_RS)
         except:
             output = list(result.values())[-1]
         config_state = self.get_state(config)
