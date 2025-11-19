@@ -44,6 +44,10 @@ Test Type: Category of test (e.g., 'Functional', 'Regression', 'Smoke').
 Precondition: Prerequisites for the test, formatted as: <Step1> <Step2> Leave blank if none.
 Steps: Array of test steps with Description and Expected Result.
 
+**Multi-select fields**: For fields that allow multiple values (e.g., Team, Assigned To etc.), you can provide:
+- Single value: "Team": "Epam"
+- Multiple values: "Team": ["Epam", "EJ"]
+
 **For Updates**: Include only the fields you want to modify. The system will validate property values against project configuration.
 
 ### EXAMPLE
@@ -57,6 +61,7 @@ Steps: Array of test steps with Description and Expected Result.
     "Priority": "",
     "Test Type": "Functional",
     "Precondition": "<ONLY provided by user precondition>",
+    "Team": ["Epam", "EJ"],
     "Steps": [
         {{ "Test Step Number": 1, "Test Step Description": "Navigate to url", "Test Step Expected Result": "Page content is loaded"}},
         {{ "Test Step Number": 2, "Test Step Description": "Click 'Login'", "Test Step Expected Result": "Form is expanded"}},
@@ -257,19 +262,57 @@ class QtestApiWrapper(BaseToolApiWrapper):
             
             field_def = field_definitions[field_name]
             field_id = field_def['field_id']
+            data_type = field_def.get('data_type')
+            is_multiple = field_def.get('multiple', False)
             
-            # Validate value for dropdown fields (only if field has allowed values)
+            # Normalize field_value to list for consistent processing
+            # Multi-select fields can receive: "value", ["value1", "value2"], or ["value1"]
+            # Single-select fields: "value" only
+            if is_multiple:
+                # Convert to list if not already
+                values_to_process = field_value if isinstance(field_value, list) else [field_value]
+            else:
+                # Single-select: keep as single value
+                values_to_process = [field_value]
+            
+            # Validate value(s) for dropdown fields (only if field has allowed values)
             if field_def['values']:
-                # Field has allowed values (dropdown/combobox) - validate strictly
-                if field_value not in field_def['values']:
-                    available = ", ".join(sorted(field_def['values'].keys()))
-                    validation_errors.append(
-                        f"❌ Invalid value '{field_value}' for field '{field_name}'. "
-                        f"Allowed values: {available}"
-                    )
-                    continue  # Skip to next field, keep collecting errors
-                field_value_id = field_def['values'][field_value]
-                field_value_name = field_value
+                # Field has allowed values (dropdown/combobox/user fields) - validate strictly
+                value_ids = []
+                value_names = []
+                
+                for single_value in values_to_process:
+                    if single_value not in field_def['values']:
+                        available = ", ".join(sorted(field_def['values'].keys()))
+                        validation_errors.append(
+                            f"❌ Invalid value '{single_value}' for field '{field_name}'. "
+                            f"Allowed values: {available}"
+                        )
+                        continue  # Skip this value, but continue validating others
+                    
+                    # Valid value - add to lists
+                    value_ids.append(field_def['values'][single_value])
+                    value_names.append(single_value)
+                
+                # If all values were invalid, skip this field
+                if not value_ids:
+                    continue
+                
+                # Format based on field type and value count
+                if is_multiple and len(value_ids) == 1:
+                    # Single value in multi-select field: bracketed string "[419950]"
+                    # This includes single user assignment: "[626983]"
+                    field_value_id = f"[{value_ids[0]}]"
+                    field_value_name = f"[{value_names[0]}]" if data_type == 5 else value_names[0]
+                elif is_multiple:
+                    # Multiple values in multi-select: bracketed string with comma-separated IDs
+                    ids_str = ",".join(str(vid) for vid in value_ids)
+                    field_value_id = f"[{ids_str}]"
+                    field_value_name = ", ".join(value_names)
+                else:
+                    # Regular single-select dropdown: plain ID
+                    field_value_id = value_ids[0]
+                    field_value_name = value_names[0]
             else:
                 # Text field or field without restricted values - use value directly
                 # No validation needed - users can write anything (by design)
@@ -400,14 +443,22 @@ class QtestApiWrapper(BaseToolApiWrapper):
             field_mapping[field_name] = {
                 'field_id': field.id,
                 'required': getattr(field, 'required', False),
+                'data_type': getattr(field, 'data_type', None),  # 5 = user field
+                'multiple': getattr(field, 'multiple', False),  # True = multi-select, needs array format
                 'values': {}
             }
             
-            # Map allowed values if field has them (dropdown/combobox fields)
+            # Map allowed values if field has them (dropdown/combobox/user fields)
+            # Only include active values (is_active=True)
             if hasattr(field, 'allowed_values') and field.allowed_values:
                 for allowed_value in field.allowed_values:
+                    # Skip inactive values (deleted/deprecated options)
+                    if hasattr(allowed_value, 'is_active') and not allowed_value.is_active:
+                        continue
+                    
                     # AllowedValueResource has 'label' for the display name and 'value' for the ID
                     # Note: 'value' is the field_value, not 'id'
+                    # For user fields (data_type=5), label is user name and value is user ID
                     value_label = allowed_value.label
                     value_id = allowed_value.value
                     field_mapping[field_name]['values'][value_label] = value_id
@@ -496,27 +547,49 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def __parse_data(self, response_to_parse: dict, parsed_data: list, extract_images: bool=False, prompt: str=None):
         import html
+        
+        # Get field definitions to ensure all fields are included (uses cached version)
+        field_definitions = self.__get_field_definitions_cached()
+        
         for item in response_to_parse['items']:
+            # Start with core fields (always present)
             parsed_data_row = {
                 'Id': item['pid'],
+                'Name': item['name'],
                 'Description': html.unescape(strip_tags(item['description'])),
                 'Precondition': html.unescape(strip_tags(item['precondition'])),
-                'Name': item['name'],
                 QTEST_ID: item['id'],
                 'Steps': list(map(lambda step: {
                     'Test Step Number': step[0] + 1,
                     'Test Step Description': self._process_image(step[1]['description'], extract_images, prompt),
                     'Test Step Expected Result':  self._process_image(step[1]['expected'], extract_images, prompt)
                 }, enumerate(item['test_steps']))),
-                'Status': ''.join([properties['field_value_name'] for properties in item['properties']
-                                   if properties['field_name'] == 'Status']),
-                'Automation': ''.join([properties['field_value_name'] for properties in item['properties']
-                                       if properties['field_name'] == 'Automation']),
-                'Type': ''.join([properties['field_value_name'] for properties in item['properties']
-                                 if properties['field_name'] == 'Type']),
-                'Priority': ''.join([properties['field_value_name'] for properties in item['properties']
-                                     if properties['field_name'] == 'Priority']),
             }
+            
+            # Dynamically add all custom fields from project configuration
+            # This ensures consistency and includes fields even if they have null/empty values
+            for field_name in field_definitions.keys():
+                field_def = field_definitions[field_name]
+                is_multiple = field_def.get('multiple', False)
+                
+                # Find the property value in the response (if exists)
+                field_value = None
+                for prop in item['properties']:
+                    if prop['field_name'] == field_name:
+                        # Use field_value_name if available (for dropdowns), otherwise field_value
+                        field_value = prop.get('field_value_name') or prop.get('field_value') or ''
+                        break
+                
+                # Format based on field type
+                if is_multiple and (field_value is None or field_value == ''):
+                    # Multi-select field with no value: show empty array with hint
+                    parsed_data_row[field_name] = '[] (multi-select)'
+                elif field_value is not None:
+                    parsed_data_row[field_name] = field_value
+                else:
+                    # Regular field with no value
+                    parsed_data_row[field_name] = ''
+            
             parsed_data.append(parsed_data_row)
 
     def _process_image(self, content: str, extract: bool=False, prompt: str=None):
