@@ -244,7 +244,7 @@ class PrinterNode(Runnable):
         result = {}
         logger.debug(f"Initial text pattern: {self.input_mapping}")
         mapping = propagate_the_input_mapping(self.input_mapping, [], state)
-        if not mapping.get(PRINTER):
+        if mapping.get(PRINTER) is None:
             raise ToolException(f"PrinterNode requires '{PRINTER}' field in input mapping")
         formatted_output = mapping[PRINTER]
         logger.debug(f"Formatted output: {formatted_output}")
