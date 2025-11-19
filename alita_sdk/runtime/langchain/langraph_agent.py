@@ -19,7 +19,7 @@ from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 
-from .constants import PRINTER_NODE_RS
+from .constants import PRINTER_NODE_RS, PRINTER
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping, safe_format
 from ..tools.function import FunctionTool
@@ -236,15 +236,17 @@ class StateDefaultNode(Runnable):
 class PrinterNode(Runnable):
     name = "PrinterNode"
 
-    def __init__(self, text_pattern: str, formatting_enabled: bool = True):
-        self.text = text_pattern
-        self.formatting_enabled = formatting_enabled
+    def __init__(self, input_mapping: Optional[dict[str, dict]]):
+        self.input_mapping = input_mapping
 
     def invoke(self, state: BaseStore, config: Optional[RunnableConfig] = None) -> dict:
         logger.info(f"Printer Node - Current state variables: {state}")
         result = {}
-        logger.debug(f"Initial text pattern: {self.text}")
-        formatted_output = safe_format(self.text, state)
+        logger.debug(f"Initial text pattern: {self.input_mapping}")
+        mapping = propagate_the_input_mapping(self.input_mapping, [], state)
+        if not mapping.get(PRINTER):
+            raise ToolException(f"PrinterNode requires '{PRINTER}' field in input mapping")
+        formatted_output = mapping[PRINTER]
         logger.debug(f"Formatted output: {formatted_output}")
         result[PRINTER_NODE_RS] = formatted_output
         return result
@@ -647,8 +649,7 @@ def create_graph(
                 ))
             elif node_type == 'printer':
                 lg_builder.add_node(node_id, PrinterNode(
-                    text_pattern=node.get('printer', ''),
-                    formatting_enabled=node.get('formatting_enabled', True)
+                    input_mapping=node.get('input_mapping', {'printer': {'type': 'fixed', 'value': ''}}),
                 ))
 
                 # add interrupts after printer node if specified
@@ -657,7 +658,7 @@ def create_graph(
                 # reset printer output variable to avoid carrying over
                 reset_node_id = f"{node_id}_reset"
                 lg_builder.add_node(reset_node_id, PrinterNode(
-                    text_pattern=''
+                    input_mapping={'printer': {'type': 'fixed', 'value': ''}}
                 ))
                 lg_builder.add_edge(node_id, reset_node_id)
                 lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
