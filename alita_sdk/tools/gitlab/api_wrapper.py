@@ -115,6 +115,11 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         """Remove trailing slash from URL if present."""
         return url.rstrip('/') if url else url
 
+    @model_validator(mode='before')
+    @classmethod
+    def validate_toolkit_before(cls, values: Dict) -> Dict:
+        return super().validate_toolkit(values)
+
     @model_validator(mode='after')
     def validate_toolkit(self):
         try:
