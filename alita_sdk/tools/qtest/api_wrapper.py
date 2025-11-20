@@ -91,16 +91,16 @@ QtestCreateTestCase = create_model(
 
 QtestLinkTestCaseToJiraRequirement = create_model(
     "QtestLinkTestCaseToJiraRequirement",
-    requirement_external_id=(str, Field("Qtest requirement external id which represent jira issue id linked to Qtest as a requirement e.g. SITEPOD-4038")),
-    json_list_of_test_case_ids=(str, Field("""List of the test case ids to be linked to particular requirement. 
+    requirement_external_id=(str, Field(description="Qtest requirement external id which represent jira issue id linked to Qtest as a requirement e.g. SITEPOD-4038")),
+    json_list_of_test_case_ids=(str, Field(description="""List of the test case ids to be linked to particular requirement. 
                                               Create a list of the test case ids in the following format '["TC-123", "TC-234", "TC-456"]' which represents json array as a string.
                                               It should be capable to be extracted directly by python json.loads method."""))
 )
 
 QtestLinkTestCaseToQtestRequirement = create_model(
     "QtestLinkTestCaseToQtestRequirement",
-    requirement_id=(str, Field("QTest internal requirement ID in format RQ-123")),
-    json_list_of_test_case_ids=(str, Field("""List of the test case ids to be linked to particular requirement. 
+    requirement_id=(str, Field(description="QTest internal requirement ID in format RQ-123")),
+    json_list_of_test_case_ids=(str, Field(description="""List of the test case ids to be linked to particular requirement. 
                                               Create a list of the test case ids in the following format '["TC-123", "TC-234", "TC-456"]' which represents json array as a string.
                                               It should be capable to be extracted directly by python json.loads method."""))
 )
