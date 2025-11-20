@@ -97,6 +97,14 @@ QtestLinkTestCaseToJiraRequirement = create_model(
                                               It should be capable to be extracted directly by python json.loads method."""))
 )
 
+QtestLinkTestCaseToQtestRequirement = create_model(
+    "QtestLinkTestCaseToQtestRequirement",
+    requirement_id=(str, Field("QTest internal requirement ID in format RQ-123")),
+    json_list_of_test_case_ids=(str, Field("""List of the test case ids to be linked to particular requirement. 
+                                              Create a list of the test case ids in the following format '["TC-123", "TC-234", "TC-456"]' which represents json array as a string.
+                                              It should be capable to be extracted directly by python json.loads method."""))
+)
+
 UpdateTestCase = create_model(
     "UpdateTestCase",
     test_id=(str, Field(description="Test ID e.g. TC-1234")),
@@ -647,6 +655,38 @@ class QtestApiWrapper(BaseToolApiWrapper):
         parsed_data = self.__perform_search_by_dql(dql)
         return parsed_data[0]['QTest Id']
 
+    def __find_qtest_requirement_id_by_id(self, requirement_id: str) -> int:
+        """Search for requirement's internal QTest ID using requirement ID (RQ-xxx format).
+        
+        Args:
+            requirement_id: Requirement ID in format RQ-123
+            
+        Returns:
+            int: Internal QTest ID for the requirement
+            
+        Raises:
+            ValueError: If requirement is not found
+        """
+        dql = f"Id = '{requirement_id}'"
+        search_instance: SearchApi = swagger_client.SearchApi(self._client)
+        body = swagger_client.ArtifactSearchParams(object_type='requirements', fields=['*'], query=dql)
+        
+        try:
+            response = search_instance.search_artifact(self.qtest_project_id, body)
+            if response['total'] == 0:
+                raise ValueError(
+                    f"Requirement '{requirement_id}' not found in project {self.qtest_project_id}. "
+                    f"Please verify the requirement ID exists."
+                )
+            return response['items'][0]['id']
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when searching for requirement: \n {stacktrace}")
+            raise ToolException(
+                f"Unable to search for requirement '{requirement_id}' in project {self.qtest_project_id}. "
+                f"Exception: \n{stacktrace}"
+            ) from e
+
     def __is_jira_requirement_present(self, jira_issue_id: str) -> tuple[bool, dict]:
         """ Define if particular Jira requirement is present in qtest or not """
         dql = f"'External Id' = '{jira_issue_id}'"
@@ -663,31 +703,112 @@ class QtestApiWrapper(BaseToolApiWrapper):
             logger.error(f"Error: {format_exc()}")
             raise e
 
-    def _get_jira_requirement_id(self, jira_issue_id: str) -> int | None:
-        """ Search for requirement id using the linked jira_issue_id. """
+    def _get_jira_requirement_id(self, jira_issue_id: str) -> int:
+        """Search for requirement id using the linked jira_issue_id.
+        
+        Args:
+            jira_issue_id: External Jira issue ID (e.g., PLAN-128)
+            
+        Returns:
+            int: Internal QTest ID for the Jira requirement
+            
+        Raises:
+            ValueError: If Jira requirement is not found in QTest
+        """
         is_present, response = self.__is_jira_requirement_present(jira_issue_id)
         if not is_present:
-            return None
+            raise ValueError(
+                f"Jira requirement '{jira_issue_id}' not found in QTest project {self.qtest_project_id}. "
+                f"Please ensure the Jira issue is linked to QTest as a requirement."
+            )
         return response['items'][0]['id']
 
 
     def link_tests_to_jira_requirement(self, requirement_external_id: str, json_list_of_test_case_ids: str) -> str:
-        """ Link the list of the test cases represented as string like this '["TC-123", "TC-234"]' to the Jira requirement represented as external id e.g. PLAN-128 which is the Jira Issue Id"""
+        """Link test cases to external Jira requirement.
+        
+        Args:
+            requirement_external_id: Jira issue ID (e.g., PLAN-128)
+            json_list_of_test_case_ids: JSON array string of test case IDs (e.g., '["TC-123", "TC-234"]')
+            
+        Returns:
+            Success message with linked test case IDs
+        """
         link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
         source_type = "requirements"
         linked_type = "test-cases"
-        list = [self.__find_qtest_id_by_test_id(test_case_id) for test_case_id in json.loads(json_list_of_test_case_ids)]
+        test_case_ids = json.loads(json_list_of_test_case_ids)
+        qtest_test_case_ids = [self.__find_qtest_id_by_test_id(tc_id) for tc_id in test_case_ids]
         requirement_id = self._get_jira_requirement_id(requirement_external_id)
 
         try:
-            response = link_object_api_instance.link_artifacts(self.qtest_project_id, object_id=requirement_id,
-                                                               type=linked_type,
-                                                               object_type=source_type, body=list)
-            return f"The test cases with the following id's - {[link.pid for link in response[0].objects]} have been linked in following project {self.qtest_project_id} under following requirement {requirement_external_id}"
-        except Exception as e:
-            from traceback import format_exc
-            logger.error(f"Error: {format_exc()}")
-            raise e
+            response = link_object_api_instance.link_artifacts(
+                self.qtest_project_id, 
+                object_id=requirement_id,
+                type=linked_type,
+                object_type=source_type, 
+                body=qtest_test_case_ids
+            )
+            linked_test_cases = [link.pid for link in response[0].objects]
+            return (
+                f"Successfully linked {len(linked_test_cases)} test case(s) to Jira requirement '{requirement_external_id}' "
+                f"in project {self.qtest_project_id}.\n"
+                f"Linked test cases: {', '.join(linked_test_cases)}"
+            )
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Error linking to Jira requirement: {stacktrace}")
+            raise ToolException(
+                f"Unable to link test cases to Jira requirement '{requirement_external_id}' "
+                f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
+            ) from e
+
+    def link_tests_to_qtest_requirement(self, requirement_id: str, json_list_of_test_case_ids: str) -> str:
+        """Link test cases to internal QTest requirement.
+        
+        Args:
+            requirement_id: QTest requirement ID in format RQ-123
+            json_list_of_test_case_ids: JSON array string of test case IDs (e.g., '["TC-123", "TC-234"]')
+            
+        Returns:
+            Success message with linked test case IDs
+            
+        Raises:
+            ValueError: If requirement or test cases are not found
+            ToolException: If linking fails
+        """
+        link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
+        source_type = "requirements"
+        linked_type = "test-cases"
+        
+        # Parse and convert test case IDs
+        test_case_ids = json.loads(json_list_of_test_case_ids)
+        qtest_test_case_ids = [self.__find_qtest_id_by_test_id(tc_id) for tc_id in test_case_ids]
+        
+        # Get internal QTest ID for the requirement
+        qtest_requirement_id = self.__find_qtest_requirement_id_by_id(requirement_id)
+
+        try:
+            response = link_object_api_instance.link_artifacts(
+                self.qtest_project_id,
+                object_id=qtest_requirement_id,
+                type=linked_type,
+                object_type=source_type,
+                body=qtest_test_case_ids
+            )
+            linked_test_cases = [link.pid for link in response[0].objects]
+            return (
+                f"Successfully linked {len(linked_test_cases)} test case(s) to QTest requirement '{requirement_id}' "
+                f"in project {self.qtest_project_id}.\n"
+                f"Linked test cases: {', '.join(linked_test_cases)}"
+            )
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Error linking to QTest requirement: {stacktrace}")
+            raise ToolException(
+                f"Unable to link test cases to QTest requirement '{requirement_id}' "
+                f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
+            ) from e
 
     def search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None):
         """Search for the test cases in qTest using Data Query Language """
@@ -809,11 +930,18 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 "ref": self.delete_test_case,
             },
             {
-                "name": "link_tests_to_requirement",
-                "mode": "link_tests_to_requirement",
-                "description": """Link tests to Jira requirements. The input is jira issue id and th list of test ids in format '["TC-123", "TC-234", "TC-345"]'""",
+                "name": "link_tests_to_jira_requirement",
+                "mode": "link_tests_to_jira_requirement",
+                "description": "Link test cases to external Jira requirement. Provide Jira issue ID (e.g., PLAN-128) and list of test case IDs in format '[\"TC-123\", \"TC-234\"]'",
                 "args_schema": QtestLinkTestCaseToJiraRequirement,
                 "ref": self.link_tests_to_jira_requirement,
+            },
+            {
+                "name": "link_tests_to_qtest_requirement",
+                "mode": "link_tests_to_qtest_requirement",
+                "description": "Link test cases to internal QTest requirement. Provide QTest requirement ID (e.g., RQ-15) and list of test case IDs in format '[\"TC-123\", \"TC-234\"]'",
+                "args_schema": QtestLinkTestCaseToQtestRequirement,
+                "ref": self.link_tests_to_qtest_requirement,
             },
             {
                 "name": "get_modules",
