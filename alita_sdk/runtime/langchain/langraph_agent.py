@@ -247,6 +247,9 @@ class PrinterNode(Runnable):
         if mapping.get(PRINTER) is None:
             raise ToolException(f"PrinterNode requires '{PRINTER}' field in input mapping")
         formatted_output = mapping[PRINTER]
+        # add info label to the printer's output
+        if formatted_output:
+            formatted_output += f"\n\n-----\n*How to proceed?*\n* - to resume the pipeline - type anything"
         logger.debug(f"Formatted output: {formatted_output}")
         result[PRINTER_NODE_RS] = formatted_output
         return result
