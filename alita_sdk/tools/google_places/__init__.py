@@ -38,6 +38,7 @@ class GooglePlacesToolkit(BaseToolkit):
                                       'metadata':
                                           {
                                               "label": "Google Places", "icon_url": "gplaces-icon.svg",
+                                              "max_length": GooglePlacesToolkit.toolkit_max_length,
                                               "categories": ["other"],
                                               "extra_categories": ["google", "places", "maps", "location",
                                                                    "geolocation"],

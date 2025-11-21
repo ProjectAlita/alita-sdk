@@ -57,6 +57,7 @@ class AlitaGitlabToolkit(BaseToolkit):
                 'metadata': {
                     "label": "GitLab",
                     "icon_url": None,
+                    "max_length": AlitaGitlabToolkit.toolkit_max_length,
                     "categories": ["code repositories"],
                     "extra_categories": ["gitlab", "git", "repository", "code", "version control"],
                 }

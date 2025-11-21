@@ -51,6 +51,7 @@ class PPTXToolkit(BaseToolkit):
                 'metadata': {
                     "label": "PPTX",
                     "icon_url": "pptx.svg",
+                    "max_length": TOOLKIT_MAX_LENGTH,
                     "categories": ["office"],
                     "extra_categories": ["presentation", "office automation", "document"]
                 }

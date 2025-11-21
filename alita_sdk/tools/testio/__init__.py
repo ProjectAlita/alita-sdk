@@ -33,6 +33,7 @@ class TestIOToolkit(BaseToolkit):
             testio_configuration=(TestIOConfiguration, Field(description="TestIO Configuration", json_schema_extra={'configuration_types': ['testio']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "TestIO", "icon_url": "testio-icon.svg",
+                                                                  "max_length": TOOLKIT_MAX_LENGTH,
                                                                   "categories": ["testing"],
                                                                   "extra_categories": ["test automation", "test case management", "test planning"]}})
         )

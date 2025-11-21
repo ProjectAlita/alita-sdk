@@ -24,11 +24,6 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
         AzureDevOpsWikiToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name_alias,
-            name=(str, Field(description="Toolkit name",
-                             json_schema_extra={
-                                 'toolkit_name': True,
-                                 'max_toolkit_length': AzureDevOpsWikiToolkit.toolkit_max_length})
-                  ),
             ado_configuration=(AdoConfiguration, Field(description="Ado configuration", json_schema_extra={'configuration_types': ['ado']})),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
@@ -42,6 +37,7 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
                     'metadata': {
                         "label": "ADO wiki",
                         "icon_url": "ado-wiki-icon.svg",
+                        "max_length": AzureDevOpsWikiToolkit.toolkit_max_length,
                         "categories": ["documentation"],
                         "extra_categories": ["knowledge base", "documentation management", "wiki"],
                         "sections": {

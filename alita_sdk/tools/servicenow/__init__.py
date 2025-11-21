@@ -47,6 +47,7 @@ class ServiceNowToolkit(BaseToolkit):
                 'metadata': {
                     "label": "ServiceNow",
                     "icon_url": "service-now.svg",
+                    "max_length": ServiceNowToolkit.toolkit_max_length,
                     "hidden": False,
                     "sections": {
                         "auth": {

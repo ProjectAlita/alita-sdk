@@ -94,6 +94,7 @@ class ConfluenceToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Confluence",
                     "icon_url": None,
+                    "max_length": ConfluenceToolkit.toolkit_max_length,
                     "categories": ["documentation"],
                     "extra_categories": ["confluence", "wiki", "knowledge base", "documentation", "atlassian"]
                 }

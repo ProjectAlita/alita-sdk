@@ -39,6 +39,7 @@ class QtestToolkit(BaseToolkit):
             selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "QTest", "icon_url": "qtest.svg",
+                                                                  "max_length": QtestToolkit.toolkit_max_length,
                                                                   "categories": ["test management"],
                                                                   "extra_categories": ["quality assurance",
                                                                                        "test case management",

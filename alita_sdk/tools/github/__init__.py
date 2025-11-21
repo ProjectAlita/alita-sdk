@@ -53,6 +53,7 @@ class AlitaGitHubToolkit(BaseToolkit):
                     'metadata': {
                         "label": "GitHub",
                         "icon_url": None,
+                        "max_length": AlitaGitHubToolkit.toolkit_max_length,
                         "categories": ["code repositories"],
                         "extra_categories": ["github", "git", "repository", "code", "version control"],
                     },

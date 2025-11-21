@@ -34,6 +34,7 @@ class ZephyrSquadToolkit(BaseToolkit):
             secret_key=(SecretStr, Field(description="Generated secret key", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Squad", "icon_url": "zephyr.svg",
+                                                           "max_length": ZephyrSquadToolkit.toolkit_max_length,
                             "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
                         }}}
