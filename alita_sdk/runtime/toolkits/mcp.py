@@ -346,15 +346,20 @@ class McpToolkit(BaseToolkit):
             if response.status_code != 200:
                 raise Exception(f"HTTP {response.status_code}: {response.text}")
 
-            # Check if response is actually JSON
+            # Check content type and parse accordingly
             content_type = response.headers.get('Content-Type', '')
-            if 'application/json' not in content_type:
-                raise Exception(f"Expected JSON response but got Content-Type: {content_type}. Response: {response.text[:200]}")
-
-            try:
-                data = response.json()
-            except ValueError as json_err:
-                raise Exception(f"Invalid JSON response: {json_err}. Response text: {response.text[:200]}")
+            
+            if 'text/event-stream' in content_type:
+                # Parse SSE (Server-Sent Events) format
+                data = cls._parse_sse_response(response.text)
+            elif 'application/json' in content_type:
+                # Parse regular JSON
+                try:
+                    data = response.json()
+                except ValueError as json_err:
+                    raise Exception(f"Invalid JSON response: {json_err}. Response text: {response.text[:200]}")
+            else:
+                raise Exception(f"Unexpected Content-Type: {content_type}. Response: {response.text[:200]}")
 
             if "error" in data:
                 raise Exception(f"MCP Error: {data['error']}")
@@ -368,6 +373,30 @@ class McpToolkit(BaseToolkit):
         except Exception as e:
             logger.error(f"Failed to discover tools from MCP toolkit '{toolkit_name}': {e}")
             raise
+
+    @staticmethod
+    def _parse_sse_response(sse_text: str) -> Dict[str, Any]:
+        """
+        Parse Server-Sent Events (SSE) format response.
+        SSE format: event: message\ndata: {json}\n\n
+        """
+        import json
+        
+        lines = sse_text.strip().split('\n')
+        data_line = None
+        
+        for line in lines:
+            if line.startswith('data:'):
+                data_line = line[5:].strip()  # Remove 'data:' prefix
+                break
+        
+        if not data_line:
+            raise Exception(f"No data found in SSE response: {sse_text[:200]}")
+        
+        try:
+            return json.loads(data_line)
+        except json.JSONDecodeError as e:
+            raise Exception(f"Failed to parse SSE data as JSON: {e}. Data: {data_line[:200]}")
 
     @classmethod
     def _create_tool_from_dict(

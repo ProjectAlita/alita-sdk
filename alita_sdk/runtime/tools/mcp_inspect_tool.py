@@ -119,6 +119,15 @@ class McpInspectTool(BaseTool):
 
         return self._format_results(results, resource_type)
 
+    def _parse_sse(self, text: str) -> Dict[str, Any]:
+        """Parse Server-Sent Events (SSE) format response."""
+        for line in text.split('\n'):
+            line = line.strip()
+            if line.startswith('data:'):
+                json_str = line[5:].strip()
+                return json.loads(json_str)
+        raise ValueError("No data found in SSE response")
+
     async def _list_tools(self, session: aiohttp.ClientSession) -> Dict[str, Any]:
         """List available tools from the MCP server."""
         request = {
@@ -138,7 +147,14 @@ class McpInspectTool(BaseTool):
             if response.status != 200:
                 raise Exception(f"HTTP {response.status}: {await response.text()}")
 
-            data = await response.json()
+            # Handle both JSON and SSE responses
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/event-stream' in content_type:
+                # Parse SSE format
+                text = await response.text()
+                data = self._parse_sse(text)
+            else:
+                data = await response.json()
 
             if "error" in data:
                 raise Exception(f"MCP Error: {data['error']}")
@@ -164,7 +180,13 @@ class McpInspectTool(BaseTool):
             if response.status != 200:
                 raise Exception(f"HTTP {response.status}: {await response.text()}")
 
-            data = await response.json()
+            # Handle both JSON and SSE responses
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/event-stream' in content_type:
+                text = await response.text()
+                data = self._parse_sse(text)
+            else:
+                data = await response.json()
 
             if "error" in data:
                 raise Exception(f"MCP Error: {data['error']}")
@@ -190,7 +212,13 @@ class McpInspectTool(BaseTool):
             if response.status != 200:
                 raise Exception(f"HTTP {response.status}: {await response.text()}")
 
-            data = await response.json()
+            # Handle both JSON and SSE responses
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/event-stream' in content_type:
+                text = await response.text()
+                data = self._parse_sse(text)
+            else:
+                data = await response.json()
 
             if "error" in data:
                 raise Exception(f"MCP Error: {data['error']}")
