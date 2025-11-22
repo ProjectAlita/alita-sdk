@@ -6,7 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.text_splitter import TokenTextSplitter
 
 from typing import Optional, List
-from langchain_core.pydantic_v1 import BaseModel
+from pydantic import BaseModel
 from ..utils import tiktoken_length
 
 logger = getLogger(__name__)

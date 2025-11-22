@@ -12,6 +12,7 @@ from .datasource import DatasourcesToolkit
 from .prompt import PromptToolkit
 from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
+from .mcp import McpToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
 from ..tools.image_generation import ImageGenerationToolkit
@@ -29,7 +30,8 @@ def get_toolkits():
         MemoryToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
-        ImageGenerationToolkit.toolkit_config_schema()
+        ImageGenerationToolkit.toolkit_config_schema(),
+        McpToolkit.toolkit_config_schema()
     ]
 
     return core_toolkits + community_toolkits() + alita_toolkits()
@@ -105,6 +107,11 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 tools.extend(VectorStoreToolkit.get_toolkit(
                     llm=llm,
                     toolkit_name=tool.get('toolkit_name', ''),
+                    **tool['settings']).get_tools())
+            elif tool['type'] == 'mcp':
+                tools.extend(McpToolkit.get_toolkit(
+                    toolkit_name=tool.get('toolkit_name', ''),
+                    client=alita_client,
                     **tool['settings']).get_tools())
         except Exception as e:
             logger.error(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}", exc_info=True)

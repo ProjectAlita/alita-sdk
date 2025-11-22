@@ -46,11 +46,14 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
         # Log the configuration being used
         logger.info(f"Instantiating toolkit {toolkit_name} with LLM client")
         logger.debug(f"Toolkit {toolkit_name} configuration: {toolkit_config}")
-        
+
+        # Use toolkit type from config, or fall back to lowercase toolkit name
+        toolkit_type = toolkit_config.get('type', toolkit_name.lower())
+
         # Create a tool configuration dict with required fields
         tool_config = {
             'id': toolkit_config.get('id', random.randint(1, 1000000)),
-            'type': toolkit_config.get('type', toolkit_name.lower()),
+            'type': toolkit_config.get('type', toolkit_type),
             'settings': settings,
             'toolkit_name': toolkit_name
         }

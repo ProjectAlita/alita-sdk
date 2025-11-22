@@ -131,6 +131,17 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
                 logger.error(f"Error getting ADO repos tools: {e}")
             continue
 
+        # Handle MCP toolkit (located in runtime/toolkits)
+        if tool_type == 'mcp':
+            try:
+                from alita_sdk.runtime.toolkits.mcp import get_tools as mcp_get_tools
+                tools.extend(mcp_get_tools(tool, alita, llm))
+                logger.debug(f"Successfully loaded MCP tools")
+            except Exception as e:
+                logger.error(f"Error getting MCP tools: {e}")
+                raise ToolException(f"Error getting MCP tools: {e}")
+            continue
+
         # Handle standard tools
         if tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
             try:
