@@ -18,6 +18,8 @@ class McpServerTool(BaseTool):
     client: Any = Field(default=None, exclude=True)  # Exclude from serialization
     server: str
     tool_timeout_sec: int = 60
+    is_prompt: bool = False  # Flag to indicate if this is a prompt tool
+    prompt_name: Optional[str] = None  # Original prompt name if this is a prompt
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -140,14 +142,31 @@ class McpServerTool(BaseTool):
         return create_model(model_name, **fields)
 
     def _run(self, *args, **kwargs):
-        call_data = {
-            "server": self.server,
-            "tool_timeout_sec": self.tool_timeout_sec,
-            "tool_call_id": str(uuid.uuid4()),
-            "params": {
-                "name": self.name.rsplit(TOOLKIT_SPLITTER)[1] if TOOLKIT_SPLITTER in self.name else self.name,
-                "arguments": kwargs
+        # Extract the actual tool/prompt name (remove toolkit prefix)
+        actual_name = self.name.rsplit(TOOLKIT_SPLITTER)[1] if TOOLKIT_SPLITTER in self.name else self.name
+        
+        if self.is_prompt:
+            # For prompts, use prompts/get endpoint
+            call_data = {
+                "server": self.server,
+                "tool_timeout_sec": self.tool_timeout_sec,
+                "tool_call_id": str(uuid.uuid4()),
+                "method": "prompts/get",
+                "params": {
+                    "name": self.prompt_name or actual_name.replace("prompt_", ""),
+                    "arguments": kwargs.get("arguments", kwargs)
+                }
             }
-        }
+        else:
+            # For regular tools, use tools/call endpoint
+            call_data = {
+                "server": self.server,
+                "tool_timeout_sec": self.tool_timeout_sec,
+                "tool_call_id": str(uuid.uuid4()),
+                "params": {
+                    "name": actual_name,
+                    "arguments": kwargs
+                }
+            }
         
         return self.client.mcp_tool_call(call_data)

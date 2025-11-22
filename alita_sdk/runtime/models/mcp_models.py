@@ -41,7 +41,7 @@ class McpToolkitConfig(BaseModel):
 
     server_name: str = Field(description="MCP server name/identifier")
     connection: McpConnectionConfig = Field(description="MCP connection configuration")
-    timeout: int = Field(default=60, description="Request timeout in seconds", ge=1, le=300)
+    timeout: int = Field(default=60, description="Request timeout in seconds", ge=1, le=3600)
     selected_tools: List[str] = Field(default_factory=list, description="Specific tools to enable (empty = all)")
     enable_caching: bool = Field(default=True, description="Enable tool schema caching")
     cache_ttl: int = Field(default=300, description="Cache TTL in seconds", ge=60, le=3600)

@@ -287,7 +287,8 @@ class McpToolkit(BaseToolkit):
             logger.info(f"Successfully created {len(tools)} MCP tools from toolkit '{toolkit_name}' via direct discovery")
 
         except Exception as e:
-            logger.error(f"Direct discovery failed for MCP toolkit '{toolkit_name}': {e}")
+            logger.error(f"Direct discovery failed for MCP toolkit '{toolkit_name}': {e}", exc_info=True)
+            logger.error(f"Discovery error details - URL: {connection_config.url}, Timeout: {timeout}s")
 
             # Fallback to static mode if available and not already static
             if client and discovery_mode != "static":
@@ -296,14 +297,19 @@ class McpToolkit(BaseToolkit):
             else:
                 logger.warning(f"No fallback available for toolkit '{toolkit_name}' - returning empty tools list")
 
-        # Always add the inspection tool (not subject to selected_tools filtering)
-        inspection_tool = cls._create_inspection_tool(
-            toolkit_name=toolkit_name,
-            connection_config=connection_config
-        )
-        if inspection_tool:
-            tools.append(inspection_tool)
-            logger.info(f"Added MCP inspection tool for toolkit '{toolkit_name}'")
+        # Don't add inspection tool to agent - it's only for internal use by toolkit
+        # inspection_tool = cls._create_inspection_tool(
+        #     toolkit_name=toolkit_name,
+        #     connection_config=connection_config
+        # )
+        # if inspection_tool:
+        #     tools.append(inspection_tool)
+        #     logger.info(f"Added MCP inspection tool for toolkit '{toolkit_name}'")
+
+        # Log final tool count before returning
+        logger.info(f"MCP toolkit '{toolkit_name}' will provide {len(tools)} tools to agent")
+        if len(tools) == 0:
+            logger.warning(f"MCP toolkit '{toolkit_name}' has no tools - discovery may have failed")
 
         return tools
 
@@ -315,16 +321,82 @@ class McpToolkit(BaseToolkit):
         timeout: int
     ) -> List[Dict[str, Any]]:
         """
-        Synchronously discover tools from MCP server using HTTP requests.
-        Returns list of tool dictionaries with name, description, and inputSchema.
+        Synchronously discover tools and prompts from MCP server using HTTP requests.
+        Returns list of tool/prompt dictionaries with name, description, and inputSchema.
+        Prompts are converted to tools that can be invoked.
+        """
+        all_tools = []
+        
+        # Discover regular tools
+        tools_data = cls._discover_mcp_endpoint(
+            endpoint="tools/list",
+            toolkit_name=toolkit_name,
+            connection_config=connection_config,
+            timeout=timeout
+        )
+        all_tools.extend(tools_data)
+        logger.info(f"Discovered {len(tools_data)} tools from MCP toolkit '{toolkit_name}'")
+        
+        # Discover prompts and convert them to tools
+        try:
+            prompts_data = cls._discover_mcp_endpoint(
+                endpoint="prompts/list",
+                toolkit_name=toolkit_name,
+                connection_config=connection_config,
+                timeout=timeout
+            )
+            # Convert prompts to tool format
+            for prompt in prompts_data:
+                prompt_tool = {
+                    "name": f"prompt_{prompt.get('name', 'unnamed')}",
+                    "description": prompt.get('description', f"Execute prompt: {prompt.get('name')}"),
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "arguments": {
+                                "type": "object",
+                                "description": "Arguments for the prompt template",
+                                "properties": {
+                                    arg.get("name"): {
+                                        "type": "string",
+                                        "description": arg.get("description", ""),
+                                        "required": arg.get("required", False)
+                                    }
+                                    for arg in prompt.get("arguments", [])
+                                }
+                            }
+                        }
+                    },
+                    "_mcp_type": "prompt",
+                    "_mcp_prompt_name": prompt.get('name')
+                }
+                all_tools.append(prompt_tool)
+            logger.info(f"Discovered {len(prompts_data)} prompts from MCP toolkit '{toolkit_name}'")
+        except Exception as e:
+            logger.warning(f"Failed to discover prompts from MCP toolkit '{toolkit_name}': {e}")
+        
+        logger.info(f"Total discovered {len(all_tools)} tools+prompts from MCP toolkit '{toolkit_name}'")
+        return all_tools
+
+    @classmethod
+    def _discover_mcp_endpoint(
+        cls,
+        endpoint: str,
+        toolkit_name: str,
+        connection_config: McpConnectionConfig,
+        timeout: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Discover items from a specific MCP endpoint (tools/list or prompts/list).
+        Returns list of dictionaries.
         """
         import time
 
-        # MCP protocol: list_tools request
+        # MCP protocol request
         mcp_request = {
             "jsonrpc": "2.0",
-            "id": f"discover_{int(time.time())}",
-            "method": "tools/list",
+            "id": f"discover_{endpoint.replace('/', '_')}_{int(time.time())}",
+            "method": endpoint,
             "params": {}
         }
 
@@ -336,6 +408,7 @@ class McpToolkit(BaseToolkit):
             headers.update(connection_config.headers)
 
         try:
+            logger.debug(f"Sending MCP {endpoint} request to {connection_config.url}")
             response = requests.post(
                 connection_config.url,
                 json=mcp_request,
@@ -344,6 +417,7 @@ class McpToolkit(BaseToolkit):
             )
 
             if response.status_code != 200:
+                logger.error(f"MCP server returned non-200 status: {response.status_code}")
                 raise Exception(f"HTTP {response.status_code}: {response.text}")
 
             # Check content type and parse accordingly
@@ -364,14 +438,17 @@ class McpToolkit(BaseToolkit):
             if "error" in data:
                 raise Exception(f"MCP Error: {data['error']}")
 
-            # Parse MCP response and extract tools
-            tools_data = data.get("result", {}).get("tools", [])
-            logger.info(f"Discovered {len(tools_data)} tools from MCP toolkit '{toolkit_name}'")
-
-            return tools_data
+            # Parse MCP response - different endpoints return different keys
+            result = data.get("result", {})
+            if endpoint == "tools/list":
+                return result.get("tools", [])
+            elif endpoint == "prompts/list":
+                return result.get("prompts", [])
+            else:
+                return result.get("items", [])
 
         except Exception as e:
-            logger.error(f"Failed to discover tools from MCP toolkit '{toolkit_name}': {e}")
+            logger.error(f"Failed to discover from {endpoint} on MCP toolkit '{toolkit_name}': {e}")
             raise
 
     @staticmethod
@@ -406,7 +483,7 @@ class McpToolkit(BaseToolkit):
         timeout: int,
         client
     ) -> Optional[BaseTool]:
-        """Create a BaseTool from a tool dictionary (from direct HTTP discovery)."""
+        """Create a BaseTool from a tool/prompt dictionary (from direct HTTP discovery)."""
         try:
             # Store toolkit_max_length in local variable to avoid contextual access issues
             max_length_value = cls.toolkit_max_length
@@ -415,16 +492,22 @@ class McpToolkit(BaseToolkit):
             clean_prefix = clean_string(toolkit_name, max_length_value)
 
             full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}{tool_dict.get("name", "unknown")}'
+            
+            # Check if this is a prompt (converted to tool)
+            is_prompt = tool_dict.get("_mcp_type") == "prompt"
+            item_type = "prompt" if is_prompt else "tool"
 
             return McpServerTool(
                 name=full_tool_name,
-                description=f"MCP tool '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {tool_dict.get('description', '')}",
+                description=f"MCP {item_type} '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {tool_dict.get('description', '')}",
                 args_schema=McpServerTool.create_pydantic_model_from_schema(
                     tool_dict.get("inputSchema", {})
                 ),
                 client=client,
                 server=toolkit_name,
-                tool_timeout_sec=timeout
+                tool_timeout_sec=timeout,
+                is_prompt=is_prompt,
+                prompt_name=tool_dict.get("_mcp_prompt_name") if is_prompt else None
             )
         except Exception as e:
             logger.error(f"Failed to create MCP tool '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {e}")
@@ -588,6 +671,10 @@ class McpToolkit(BaseToolkit):
 
     def get_tools(self) -> List[BaseTool]:
         """Get the list of tools provided by this toolkit."""
+        logger.info(f"MCP toolkit '{self.toolkit_name}' returning {len(self.tools)} tools")
+        if len(self.tools) > 0:
+            tool_names = [t.name if hasattr(t, 'name') else str(t) for t in self.tools]
+            logger.info(f"MCP toolkit '{self.toolkit_name}' tools: {tool_names}")
         return self.tools
 
     async def refresh_tools(self):
