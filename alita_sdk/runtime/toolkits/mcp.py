@@ -5,6 +5,7 @@ Following MCP specification: https://modelcontextprotocol.io/specification/2025-
 """
 
 import logging
+import re
 import requests
 from typing import List, Optional, Any, Dict, Literal, ClassVar
 
@@ -20,6 +21,119 @@ logger = logging.getLogger(__name__)
 
 name = "mcp"
 
+def safe_int(value, default):
+    """Convert value to int, handling string inputs."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid integer value '{value}', using default {default}")
+        return default
+
+def optimize_tool_name(prefix: str, tool_name: str, max_total_length: int = 64) -> str:
+    """
+    Optimize tool name to fit within max_total_length while preserving meaning.
+    
+    Args:
+        prefix: The toolkit prefix (already cleaned)
+        tool_name: The original tool name
+        max_total_length: Maximum total length for the full tool name (default: 64)
+    
+    Returns:
+        Optimized full tool name in format: prefix___tool_name
+    """
+    splitter = TOOLKIT_SPLITTER
+    splitter_len = len(splitter)
+    prefix_len = len(prefix)
+    
+    # Calculate available space for tool name
+    available_space = max_total_length - prefix_len - splitter_len
+    
+    if available_space <= 0:
+        logger.error(f"Prefix '{prefix}' is too long ({prefix_len} chars), cannot create valid tool name")
+        # Fallback: truncate prefix itself
+        prefix = prefix[:max_total_length - splitter_len - 10]  # Leave 10 chars for tool name
+        available_space = max_total_length - len(prefix) - splitter_len
+    
+    # If tool name fits, use it as-is
+    if len(tool_name) <= available_space:
+        return f'{prefix}{splitter}{tool_name}'
+    
+    # Tool name is too long, need to optimize
+    logger.debug(f"Tool name '{tool_name}' is too long ({len(tool_name)} chars), optimizing to fit {available_space} chars")
+    
+    # Split tool name into parts (handle camelCase, snake_case, and mixed)
+    # First, split by underscores and hyphens
+    parts = re.split(r'[_-]', tool_name)
+    
+    # Further split camelCase within each part
+    all_parts = []
+    for part in parts:
+        # Insert underscore before uppercase letters (camelCase to snake_case)
+        snake_case_part = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', part)
+        all_parts.extend(snake_case_part.split('_'))
+    
+    # Filter out empty parts
+    all_parts = [p for p in all_parts if p]
+    
+    # Remove redundant prefix words (case-insensitive comparison)
+    # Only remove if prefix is meaningful (>= 3 chars) to avoid over-filtering
+    prefix_lower = prefix.lower()
+    filtered_parts = []
+    for part in all_parts:
+        part_lower = part.lower()
+        # Skip if this part contains the prefix or the prefix contains this part
+        # But only if both are meaningful (>= 3 chars)
+        should_remove = False
+        if len(prefix_lower) >= 3 and len(part_lower) >= 3:
+            if part_lower in prefix_lower or prefix_lower in part_lower:
+                should_remove = True
+                logger.debug(f"Removing redundant part '{part}' (matches prefix '{prefix}')")
+        
+        if not should_remove:
+            filtered_parts.append(part)
+    
+    # If we removed all parts, keep the original parts
+    if not filtered_parts:
+        filtered_parts = all_parts
+    
+    # Reconstruct tool name with filtered parts
+    optimized_name = '_'.join(filtered_parts)
+    
+    # If still too long, truncate intelligently
+    if len(optimized_name) > available_space:
+        # Strategy: Keep beginning and end, as they often contain the most important info
+        # For example: "projectalita_github_io_list_branches" -> "projectalita_list_branches"
+        
+        # Try removing middle parts first
+        if len(filtered_parts) > 2:
+            # Keep first and last parts, remove middle
+            kept_parts = [filtered_parts[0], filtered_parts[-1]]
+            optimized_name = '_'.join(kept_parts)
+            
+            # If still too long, add parts from the end until we run out of space
+            if len(optimized_name) <= available_space and len(filtered_parts) > 2:
+                for i in range(len(filtered_parts) - 2, 0, -1):
+                    candidate = '_'.join([filtered_parts[0]] + filtered_parts[i:])
+                    if len(candidate) <= available_space:
+                        optimized_name = candidate
+                        break
+        
+        # If still too long, just truncate
+        if len(optimized_name) > available_space:
+            # Try to truncate at word boundary
+            truncated = optimized_name[:available_space]
+            last_underscore = truncated.rfind('_')
+            if last_underscore > available_space * 0.7:  # Keep if we're not losing too much
+                optimized_name = truncated[:last_underscore]
+            else:
+                optimized_name = truncated
+    
+    full_name = f'{prefix}{splitter}{optimized_name}'
+    logger.info(f"Optimized tool name: '{tool_name}' ({len(tool_name)} chars) -> '{optimized_name}' ({len(optimized_name)} chars), full: '{full_name}' ({len(full_name)} chars)")
+    
+    return full_name
 
 class McpToolkit(BaseToolkit):
     """
@@ -491,7 +605,8 @@ class McpToolkit(BaseToolkit):
             # Clean toolkit name for prefixing
             clean_prefix = clean_string(toolkit_name, max_length_value)
 
-            full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}{tool_dict.get("name", "unknown")}'
+            # Optimize tool name to fit within 64 character limit
+            full_tool_name = optimize_tool_name(clean_prefix, tool_dict.get("name", "unknown"))
             
             # Check if this is a prompt (converted to tool)
             is_prompt = tool_dict.get("_mcp_type") == "prompt"
@@ -596,7 +711,8 @@ class McpToolkit(BaseToolkit):
 
             # Clean server name for prefixing (use tool_metadata.server instead of toolkit_name)
             clean_prefix = clean_string(tool_metadata.server, max_length_value)
-            full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}{tool_metadata.name}'
+            # Optimize tool name to fit within 64 character limit
+            full_tool_name = optimize_tool_name(clean_prefix, tool_metadata.name)
 
             return McpServerTool(
                 name=full_tool_name,
@@ -626,7 +742,8 @@ class McpToolkit(BaseToolkit):
             # Clean toolkit name for prefixing
             clean_prefix = clean_string(toolkit_name, max_length_value)
 
-            full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}{available_tool["name"]}'
+            # Optimize tool name to fit within 64 character limit
+            full_tool_name = optimize_tool_name(clean_prefix, available_tool["name"])
 
             return McpServerTool(
                 name=full_tool_name,
@@ -736,16 +853,6 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None) -> L
         return []
 
     # Type conversion for numeric settings that may come as strings from config
-    def safe_int(value, default):
-        """Convert value to int, handling string inputs."""
-        if value is None:
-            return default
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            logger.warning(f"Invalid integer value '{value}', using default {default}")
-            return default
-
     return McpToolkit.get_toolkit(
         url=url,
         headers=headers,
