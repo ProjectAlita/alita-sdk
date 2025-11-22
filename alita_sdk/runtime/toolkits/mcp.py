@@ -13,6 +13,7 @@ from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..tools.mcp_server_tool import McpServerTool
+from ..tools.mcp_remote_tool import McpRemoteTool
 from ..tools.mcp_inspect_tool import McpInspectTool
 from ...tools.utils import TOOLKIT_SPLITTER, clean_string
 from ..models.mcp_models import McpConnectionConfig
@@ -391,6 +392,7 @@ class McpToolkit(BaseToolkit):
                 server_tool = cls._create_tool_from_dict(
                     tool_dict=tool_metadata,
                     toolkit_name=toolkit_name,
+                    connection_config=connection_config,
                     timeout=timeout,
                     client=client
                 )
@@ -594,6 +596,7 @@ class McpToolkit(BaseToolkit):
         cls,
         tool_dict: Dict[str, Any],
         toolkit_name: str,
+        connection_config: McpConnectionConfig,
         timeout: int,
         client
     ) -> Optional[BaseTool]:
@@ -612,17 +615,27 @@ class McpToolkit(BaseToolkit):
             is_prompt = tool_dict.get("_mcp_type") == "prompt"
             item_type = "prompt" if is_prompt else "tool"
 
-            return McpServerTool(
+            # Build description and ensure it doesn't exceed 1000 characters
+            description = f"MCP {item_type} '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {tool_dict.get('description', '')}"
+            if len(description) > 1000:
+                description = description[:997] + "..."
+                logger.debug(f"Trimmed description for tool '{tool_dict.get('name')}' from {len(description)} to 1000 chars")
+
+            # Use McpRemoteTool for remote MCP servers (HTTP/SSE)
+            return McpRemoteTool(
                 name=full_tool_name,
-                description=f"MCP {item_type} '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {tool_dict.get('description', '')}",
+                description=description,
                 args_schema=McpServerTool.create_pydantic_model_from_schema(
                     tool_dict.get("inputSchema", {})
                 ),
                 client=client,
                 server=toolkit_name,
+                server_url=connection_config.url,
+                server_headers=connection_config.headers,
                 tool_timeout_sec=timeout,
                 is_prompt=is_prompt,
-                prompt_name=tool_dict.get("_mcp_prompt_name") if is_prompt else None
+                prompt_name=tool_dict.get("_mcp_prompt_name") if is_prompt else None,
+                original_tool_name=tool_dict.get('name')  # Store original name for MCP server invocation
             )
         except Exception as e:
             logger.error(f"Failed to create MCP tool '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {e}")
@@ -714,9 +727,15 @@ class McpToolkit(BaseToolkit):
             # Optimize tool name to fit within 64 character limit
             full_tool_name = optimize_tool_name(clean_prefix, tool_metadata.name)
 
+            # Build description and ensure it doesn't exceed 1000 characters
+            description = f"MCP tool '{tool_metadata.name}' from server '{tool_metadata.server}': {tool_metadata.description}"
+            if len(description) > 1000:
+                description = description[:997] + "..."
+                logger.debug(f"Trimmed description for tool '{tool_metadata.name}' from {len(description)} to 1000 chars")
+
             return McpServerTool(
                 name=full_tool_name,
-                description=f"MCP tool '{tool_metadata.name}' from server '{tool_metadata.server}': {tool_metadata.description}",
+                description=description,
                 args_schema=McpServerTool.create_pydantic_model_from_schema(tool_metadata.input_schema),
                 client=client,
                 server=tool_metadata.server,
@@ -745,9 +764,15 @@ class McpToolkit(BaseToolkit):
             # Optimize tool name to fit within 64 character limit
             full_tool_name = optimize_tool_name(clean_prefix, available_tool["name"])
 
+            # Build description and ensure it doesn't exceed 1000 characters
+            description = f"MCP tool '{available_tool['name']}' from toolkit '{toolkit_name}': {available_tool.get('description', '')}"
+            if len(description) > 1000:
+                description = description[:997] + "..."
+                logger.debug(f"Trimmed description for tool '{available_tool['name']}' from {len(description)} to 1000 chars")
+
             return McpServerTool(
                 name=full_tool_name,
-                description=f"MCP tool '{available_tool['name']}' from toolkit '{toolkit_name}': {available_tool.get('description', '')}",
+                description=description,
                 args_schema=McpServerTool.create_pydantic_model_from_schema(
                     available_tool.get("inputSchema", {})
                 ),
