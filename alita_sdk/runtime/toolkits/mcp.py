@@ -7,7 +7,7 @@ Following MCP specification: https://modelcontextprotocol.io/specification/2025-
 import logging
 import re
 import requests
-from typing import List, Optional, Any, Dict, Literal, ClassVar
+from typing import List, Optional, Any, Dict, Literal, ClassVar, Union
 
 from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import BaseModel, ConfigDict, Field
@@ -200,11 +200,10 @@ class McpToolkit(BaseToolkit):
                 )
             ),
             timeout=(
-                int,
+                Union[int, str], # TODO: remove one I will figure out why UI sends str
                 Field(
-                    default=60,
-                    ge=1, le=300,
-                    description="Request timeout in seconds"
+                    default=300,
+                    description="Request timeout in seconds (1-3600)"
                 )
             ),
             discovery_mode=(
@@ -218,11 +217,10 @@ class McpToolkit(BaseToolkit):
                 )
             ),
             discovery_interval=(
-                int,
+                Union[int, str],
                 Field(
                     default=300,
-                    ge=60, le=3600,
-                    description="Discovery interval in seconds (for periodic discovery)"
+                    description="Discovery interval in seconds (60-3600, for periodic discovery)"
                 )
             ),
             selected_tools=(
@@ -243,11 +241,10 @@ class McpToolkit(BaseToolkit):
                 )
             ),
             cache_ttl=(
-                int,
+                Union[int, str],
                 Field(
                     default=300,
-                    ge=60, le=3600,
-                    description="Cache TTL in seconds"
+                    description="Cache TTL in seconds (60-3600)"
                 )
             ),
             __config__=ConfigDict(
@@ -308,6 +305,11 @@ class McpToolkit(BaseToolkit):
         
         if not toolkit_name:
             raise ValueError("toolkit_name is required")
+
+        # Convert numeric parameters that may come as strings from UI
+        timeout = safe_int(timeout, 60)
+        discovery_interval = safe_int(discovery_interval, 300)
+        cache_ttl = safe_int(cache_ttl, 300)
 
         logger.info(f"Creating MCP toolkit: {toolkit_name}")
 
