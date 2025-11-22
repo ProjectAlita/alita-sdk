@@ -128,7 +128,8 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
     tools += community_tools(tools_list, alita_client, llm)
     # Add alita tools
     tools += alita_tools(tools_list, alita_client, llm, memory_store)
-    # Add MCP tools
+    # Add MCP tools registered via alita-mcp CLI (static registry)
+    # Note: Tools with type='mcp' are already handled in main loop above
     tools += _mcp_tools(tools_list, alita_client)
     
     # Sanitize tool names to meet OpenAI's function naming requirements
@@ -183,6 +184,10 @@ def _sanitize_tool_names(tools: list) -> list:
 
 
 def _mcp_tools(tools_list, alita):
+    """
+    Handle MCP tools registered via alita-mcp CLI (static registry).
+    Skips tools with type='mcp' as those are handled by dynamic discovery.
+    """
     try:
         all_available_toolkits = alita.get_mcp_toolkits()
         toolkit_lookup = {tk["name"]: tk for tk in all_available_toolkits}
@@ -190,6 +195,11 @@ def _mcp_tools(tools_list, alita):
         #
         for selected_toolkit in tools_list:
             server_toolkit_name = selected_toolkit['type']
+            
+            # Skip tools with type='mcp' - they're handled by dynamic discovery
+            if server_toolkit_name == 'mcp':
+                continue
+            
             toolkit_conf = toolkit_lookup.get(server_toolkit_name)
             #
             if not toolkit_conf:

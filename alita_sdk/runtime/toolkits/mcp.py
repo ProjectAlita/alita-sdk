@@ -28,7 +28,7 @@ class McpToolkit(BaseToolkit):
     """
 
     tools: List[BaseTool] = []
-    server_name: Optional[str] = None
+    toolkit_name: Optional[str] = None
 
     # Class variable (not Pydantic field) for tool name length limit
     toolkit_max_length: ClassVar[int] = 0  # No limit for MCP tool names
@@ -63,15 +63,6 @@ class McpToolkit(BaseToolkit):
 
         return create_model(
             'mcp',
-            server_name=(
-                str,
-                Field(
-                    description="MCP server name/identifier",
-                    json_schema_extra={
-                        'tooltip': 'Unique identifier for this MCP server'
-                    }
-                )
-            ),
             url=(
                 str,
                 Field(
@@ -160,7 +151,6 @@ class McpToolkit(BaseToolkit):
     @classmethod
     def get_toolkit(
         cls,
-        server_name: str,
         url: str,
         headers: Optional[Dict[str, str]] = None,
         timeout: int = 60,
@@ -169,7 +159,7 @@ class McpToolkit(BaseToolkit):
         selected_tools: List[str] = None,
         enable_caching: bool = True,
         cache_ttl: int = 300,
-        toolkit_name: Optional[str] = None,
+        toolkit_name: str = None,
         client = None,
         **kwargs
     ) -> 'McpToolkit':
@@ -183,7 +173,6 @@ class McpToolkit(BaseToolkit):
         4. Return all tools via get_tools() method
 
         Args:
-            server_name: MCP server name/identifier
             url: MCP server HTTP URL
             headers: HTTP headers for authentication
             timeout: Request timeout in seconds
@@ -192,7 +181,7 @@ class McpToolkit(BaseToolkit):
             selected_tools: List of specific tools to enable (empty = all tools)
             enable_caching: Whether to enable caching
             cache_ttl: Cache TTL in seconds
-            toolkit_name: Optional name prefix for tools
+            toolkit_name: Toolkit name/identifier and prefix for tools
             client: Alita client for MCP communication
             **kwargs: Additional configuration options
 
@@ -201,8 +190,11 @@ class McpToolkit(BaseToolkit):
         """
         if selected_tools is None:
             selected_tools = []
+        
+        if not toolkit_name:
+            raise ValueError("toolkit_name is required")
 
-        logger.info(f"Creating MCP toolkit for server: {server_name}")
+        logger.info(f"Creating MCP toolkit: {toolkit_name}")
 
         # Parse headers if they're provided as a JSON string
         parsed_headers = headers
@@ -232,15 +224,14 @@ class McpToolkit(BaseToolkit):
             raise ValueError(f"Invalid MCP connection configuration: {e}")
 
         # Create toolkit instance
-        toolkit = cls(server_name=server_name)
+        toolkit = cls(toolkit_name=toolkit_name)
 
         # Generate tools from the MCP server
         toolkit.tools = cls._create_tools_from_server(
-            server_name=server_name,
+            toolkit_name=toolkit_name,
             connection_config=connection_config,
             timeout=timeout,
             selected_tools=selected_tools,
-            toolkit_name=toolkit_name,
             client=client,
             discovery_mode=discovery_mode
         )
@@ -250,11 +241,10 @@ class McpToolkit(BaseToolkit):
     @classmethod
     def _create_tools_from_server(
         cls,
-        server_name: str,
+        toolkit_name: str,
         connection_config: McpConnectionConfig,
         timeout: int,
         selected_tools: List[str],
-        toolkit_name: Optional[str],
         client,
         discovery_mode: str = "dynamic"
     ) -> List[BaseTool]:
@@ -265,11 +255,11 @@ class McpToolkit(BaseToolkit):
 
         # First, try direct HTTP discovery since we have valid connection config
         try:
-            logger.info(f"Discovering tools from MCP server '{server_name}' at {connection_config.url}")
+            logger.info(f"Discovering tools from MCP toolkit '{toolkit_name}' at {connection_config.url}")
 
             # Use synchronous HTTP discovery for toolkit initialization
             tool_metadata_list = cls._discover_tools_sync(
-                server_name=server_name,
+                toolkit_name=toolkit_name,
                 connection_config=connection_config,
                 timeout=timeout
             )
@@ -286,8 +276,7 @@ class McpToolkit(BaseToolkit):
             for tool_metadata in tool_metadata_list:
                 server_tool = cls._create_tool_from_dict(
                     tool_dict=tool_metadata,
-                    server_name=server_name,
-                    toolkit_name=toolkit_name or server_name,
+                    toolkit_name=toolkit_name,
                     timeout=timeout,
                     client=client
                 )
@@ -295,34 +284,33 @@ class McpToolkit(BaseToolkit):
                 if server_tool:
                     tools.append(server_tool)
 
-            logger.info(f"Successfully created {len(tools)} MCP tools from server '{server_name}' via direct discovery")
+            logger.info(f"Successfully created {len(tools)} MCP tools from toolkit '{toolkit_name}' via direct discovery")
 
         except Exception as e:
-            logger.error(f"Direct discovery failed for MCP server '{server_name}': {e}")
+            logger.error(f"Direct discovery failed for MCP toolkit '{toolkit_name}': {e}")
 
             # Fallback to static mode if available and not already static
             if client and discovery_mode != "static":
-                logger.info(f"Falling back to static discovery for server '{server_name}'")
-                tools = cls._create_tools_static(server_name, selected_tools, toolkit_name, timeout, client)
+                logger.info(f"Falling back to static discovery for toolkit '{toolkit_name}'")
+                tools = cls._create_tools_static(toolkit_name, selected_tools, timeout, client)
             else:
-                logger.warning(f"No fallback available for server '{server_name}' - returning empty tools list")
+                logger.warning(f"No fallback available for toolkit '{toolkit_name}' - returning empty tools list")
 
         # Always add the inspection tool (not subject to selected_tools filtering)
         inspection_tool = cls._create_inspection_tool(
-            server_name=server_name,
-            connection_config=connection_config,
-            toolkit_name=toolkit_name or server_name
+            toolkit_name=toolkit_name,
+            connection_config=connection_config
         )
         if inspection_tool:
             tools.append(inspection_tool)
-            logger.info(f"Added MCP inspection tool for server '{server_name}'")
+            logger.info(f"Added MCP inspection tool for toolkit '{toolkit_name}'")
 
         return tools
 
     @classmethod
     def _discover_tools_sync(
         cls,
-        server_name: str,
+        toolkit_name: str,
         connection_config: McpConnectionConfig,
         timeout: int
     ) -> List[Dict[str, Any]]:
@@ -340,7 +328,10 @@ class McpToolkit(BaseToolkit):
             "params": {}
         }
 
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        }
         if connection_config.headers:
             headers.update(connection_config.headers)
 
@@ -362,19 +353,18 @@ class McpToolkit(BaseToolkit):
 
             # Parse MCP response and extract tools
             tools_data = data.get("result", {}).get("tools", [])
-            logger.info(f"Discovered {len(tools_data)} tools from MCP server '{server_name}'")
+            logger.info(f"Discovered {len(tools_data)} tools from MCP toolkit '{toolkit_name}'")
 
             return tools_data
 
         except Exception as e:
-            logger.error(f"Failed to discover tools from MCP server '{server_name}': {e}")
+            logger.error(f"Failed to discover tools from MCP toolkit '{toolkit_name}': {e}")
             raise
 
     @classmethod
     def _create_tool_from_dict(
         cls,
         tool_dict: Dict[str, Any],
-        server_name: str,
         toolkit_name: str,
         timeout: int,
         client
@@ -384,31 +374,30 @@ class McpToolkit(BaseToolkit):
             # Store toolkit_max_length in local variable to avoid contextual access issues
             max_length_value = cls.toolkit_max_length
 
-            # Clean server name for prefixing (use server_name instead of toolkit_name)
-            clean_prefix = clean_string(server_name, max_length_value)
+            # Clean toolkit name for prefixing
+            clean_prefix = clean_string(toolkit_name, max_length_value)
 
             full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}{tool_dict.get("name", "unknown")}'
 
             return McpServerTool(
                 name=full_tool_name,
-                description=f"MCP tool '{tool_dict.get('name')}' from server '{server_name}': {tool_dict.get('description', '')}",
+                description=f"MCP tool '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {tool_dict.get('description', '')}",
                 args_schema=McpServerTool.create_pydantic_model_from_schema(
                     tool_dict.get("inputSchema", {})
                 ),
                 client=client,
-                server=server_name,
+                server=toolkit_name,
                 tool_timeout_sec=timeout
             )
         except Exception as e:
-            logger.error(f"Failed to create MCP tool '{tool_dict.get('name')}' from server '{server_name}': {e}")
+            logger.error(f"Failed to create MCP tool '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {e}")
             return None
 
     @classmethod
     def _create_tools_static(
         cls,
-        server_name: str,
+        toolkit_name: str,
         selected_tools: List[str],
-        toolkit_name: Optional[str],
         timeout: int,
         client
     ) -> List[BaseTool]:
@@ -421,10 +410,10 @@ class McpToolkit(BaseToolkit):
 
         try:
             all_toolkits = client.get_mcp_toolkits()
-            server_toolkit = next((tk for tk in all_toolkits if tk.get('name') == server_name), None)
+            server_toolkit = next((tk for tk in all_toolkits if tk.get('name') == toolkit_name), None)
 
             if not server_toolkit:
-                logger.warning(f"MCP server '{server_name}' not found in available toolkits")
+                logger.warning(f"MCP toolkit '{toolkit_name}' not found in available toolkits")
                 return tools
 
             # Extract tools from the toolkit
@@ -440,8 +429,7 @@ class McpToolkit(BaseToolkit):
 
                 # Create the tool
                 server_tool = cls._create_single_tool(
-                    server_name=server_name,
-                    toolkit_name=toolkit_name or server_name,
+                    toolkit_name=toolkit_name,
                     available_tool=available_tool,
                     timeout=timeout,
                     client=client
@@ -450,7 +438,7 @@ class McpToolkit(BaseToolkit):
                 if server_tool:
                     tools.append(server_tool)
 
-            logger.info(f"Successfully created {len(tools)} MCP tools from server '{server_name}' using static mode")
+            logger.info(f"Successfully created {len(tools)} MCP tools from toolkit '{toolkit_name}' using static mode")
 
         except Exception as e:
             logger.error(f"Error in static tool creation: {e}")
@@ -461,15 +449,15 @@ class McpToolkit(BaseToolkit):
             # We don't have full connection config in static mode, so create a basic one
             # The inspection tool will work as long as the server is accessible
             inspection_tool = McpInspectTool(
-                name=f"{clean_string(server_name, 50)}{TOOLKIT_SPLITTER}mcp_inspect",
-                server_name=server_name,
+                name=f"{clean_string(toolkit_name, 50)}{TOOLKIT_SPLITTER}mcp_inspect",
+                server_name=toolkit_name,
                 server_url="",  # Will be populated by the client if available
-                description=f"Inspect available tools, prompts, and resources from MCP server '{server_name}'"
+                description=f"Inspect available tools, prompts, and resources from MCP toolkit '{toolkit_name}'"
             )
             tools.append(inspection_tool)
-            logger.info(f"Added MCP inspection tool for server '{server_name}' (static mode)")
+            logger.info(f"Added MCP inspection tool for toolkit '{toolkit_name}' (static mode)")
         except Exception as e:
-            logger.warning(f"Failed to create inspection tool for {server_name}: {e}")
+            logger.warning(f"Failed to create inspection tool for {toolkit_name}: {e}")
 
         return tools
 
@@ -505,7 +493,6 @@ class McpToolkit(BaseToolkit):
     @classmethod
     def _create_single_tool(
         cls,
-        server_name: str,
         toolkit_name: str,
         available_tool: Dict[str, Any],
         timeout: int,
@@ -516,51 +503,50 @@ class McpToolkit(BaseToolkit):
             # Store toolkit_max_length in local variable to avoid contextual access issues
             max_length_value = cls.toolkit_max_length
 
-            # Clean server name for prefixing (use server_name instead of toolkit_name)
-            clean_prefix = clean_string(server_name, max_length_value)
+            # Clean toolkit name for prefixing
+            clean_prefix = clean_string(toolkit_name, max_length_value)
 
             full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}{available_tool["name"]}'
 
             return McpServerTool(
                 name=full_tool_name,
-                description=f"MCP tool '{available_tool['name']}' from server '{server_name}': {available_tool.get('description', '')}",
+                description=f"MCP tool '{available_tool['name']}' from toolkit '{toolkit_name}': {available_tool.get('description', '')}",
                 args_schema=McpServerTool.create_pydantic_model_from_schema(
                     available_tool.get("inputSchema", {})
                 ),
                 client=client,
-                server=server_name,
+                server=toolkit_name,
                 tool_timeout_sec=timeout
             )
         except Exception as e:
-            logger.error(f"Failed to create MCP tool '{available_tool.get('name')}' from server '{server_name}': {e}")
+            logger.error(f"Failed to create MCP tool '{available_tool.get('name')}' from toolkit '{toolkit_name}': {e}")
             return None
 
     @classmethod
     def _create_inspection_tool(
         cls,
-        server_name: str,
-        connection_config: McpConnectionConfig,
-        toolkit_name: str
+        toolkit_name: str,
+        connection_config: McpConnectionConfig
     ) -> Optional[BaseTool]:
-        """Create the inspection tool for the MCP server."""
+        """Create the inspection tool for the MCP toolkit."""
         try:
             # Store toolkit_max_length in local variable to avoid contextual access issues
             max_length_value = cls.toolkit_max_length
 
-            # Clean server name for prefixing (use server_name instead of toolkit_name)
-            clean_prefix = clean_string(server_name, max_length_value)
+            # Clean toolkit name for prefixing
+            clean_prefix = clean_string(toolkit_name, max_length_value)
 
             full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}mcp_inspect'
 
             return McpInspectTool(
                 name=full_tool_name,
-                server_name=server_name,
+                server_name=toolkit_name,
                 server_url=connection_config.url,
                 server_headers=connection_config.headers,
-                description=f"Inspect available tools, prompts, and resources from MCP server '{server_name}'"
+                description=f"Inspect available tools, prompts, and resources from MCP toolkit '{toolkit_name}'"
             )
         except Exception as e:
-            logger.error(f"Failed to create MCP inspection tool for server '{server_name}': {e}")
+            logger.error(f"Failed to create MCP inspection tool for toolkit '{toolkit_name}': {e}")
             return None
 
     def get_tools(self) -> List[BaseTool]:
@@ -568,31 +554,31 @@ class McpToolkit(BaseToolkit):
         return self.tools
 
     async def refresh_tools(self):
-        """Manually refresh tools from the MCP server."""
-        if not self.server_name:
-            logger.warning("Cannot refresh tools: server_name not set")
+        """Manually refresh tools from the MCP toolkit."""
+        if not self.toolkit_name:
+            logger.warning("Cannot refresh tools: toolkit_name not set")
             return
 
         try:
             from ..clients.mcp_manager import get_mcp_manager
             manager = get_mcp_manager()
-            await manager.refresh_server(self.server_name)
-            logger.info(f"Successfully refreshed tools for server {self.server_name}")
+            await manager.refresh_server(self.toolkit_name)
+            logger.info(f"Successfully refreshed tools for toolkit {self.toolkit_name}")
         except Exception as e:
-            logger.error(f"Failed to refresh tools for server {self.server_name}: {e}")
+            logger.error(f"Failed to refresh tools for toolkit {self.toolkit_name}: {e}")
 
     async def get_server_health(self) -> Dict[str, Any]:
-        """Get health status of the configured MCP server."""
-        if not self.server_name:
+        """Get health status of the configured MCP toolkit."""
+        if not self.toolkit_name:
             return {"status": "not_configured"}
 
         try:
             from ..clients.mcp_manager import get_mcp_manager
             manager = get_mcp_manager()
-            health_info = await manager.get_server_health(self.server_name)
+            health_info = await manager.get_server_health(self.toolkit_name)
             return health_info
         except Exception as e:
-            logger.error(f"Failed to get server health for {self.server_name}: {e}")
+            logger.error(f"Failed to get server health for {self.toolkit_name}: {e}")
             return {"status": "error", "error": str(e)}
 
 
@@ -611,14 +597,14 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None) -> L
         List of configured MCP tools
     """
     settings = tool_config.get('settings', {})
+    toolkit_name = tool_config.get('toolkit_name')
 
     # Extract required fields
-    server_name = settings.get('server_name')
     url = settings.get('url')
     headers = settings.get('headers')
 
-    if not server_name:
-        logger.error("MCP toolkit configuration missing required 'server_name'")
+    if not toolkit_name:
+        logger.error("MCP toolkit configuration missing required 'toolkit_name'")
         return []
 
     if not url:
@@ -626,16 +612,15 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None) -> L
         return []
 
     return McpToolkit.get_toolkit(
-        server_name=server_name,
         url=url,
         headers=headers,
         timeout=settings.get('timeout', 60),
-        discovery_mode=settings.get('discovery_mode', 'hybrid'),
+        discovery_mode=settings.get('discovery_mode', 'dynamic'),
         discovery_interval=settings.get('discovery_interval', 300),
         selected_tools=settings.get('selected_tools', []),
         enable_caching=settings.get('enable_caching', True),
         cache_ttl=settings.get('cache_ttl', 300),
-        toolkit_name=tool_config.get('toolkit_name'),
+        toolkit_name=toolkit_name,
         client=alita_client
     ).get_tools()
 
@@ -653,11 +638,11 @@ async def stop_global_discovery():
     await shutdown_discovery_service()
 
 
-async def register_mcp_server_for_discovery(server_name: str, connection_config):
+async def register_mcp_server_for_discovery(toolkit_name: str, connection_config):
     """Register an MCP server for global discovery."""
     from ..clients.mcp_discovery import get_discovery_service
     service = get_discovery_service()
-    await service.register_server(server_name, connection_config)
+    await service.register_server(toolkit_name, connection_config)
 
 
 def get_all_discovered_servers():
