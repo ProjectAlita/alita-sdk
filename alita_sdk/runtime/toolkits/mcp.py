@@ -735,15 +735,26 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None) -> L
         logger.error("MCP toolkit configuration missing required 'url'")
         return []
 
+    # Type conversion for numeric settings that may come as strings from config
+    def safe_int(value, default):
+        """Convert value to int, handling string inputs."""
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid integer value '{value}', using default {default}")
+            return default
+
     return McpToolkit.get_toolkit(
         url=url,
         headers=headers,
-        timeout=settings.get('timeout', 60),
+        timeout=safe_int(settings.get('timeout'), 60),
         discovery_mode=settings.get('discovery_mode', 'dynamic'),
-        discovery_interval=settings.get('discovery_interval', 300),
+        discovery_interval=safe_int(settings.get('discovery_interval'), 300),
         selected_tools=settings.get('selected_tools', []),
         enable_caching=settings.get('enable_caching', True),
-        cache_ttl=settings.get('cache_ttl', 300),
+        cache_ttl=safe_int(settings.get('cache_ttl'), 300),
         toolkit_name=toolkit_name,
         client=alita_client
     ).get_tools()

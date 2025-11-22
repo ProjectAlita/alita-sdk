@@ -575,7 +575,9 @@ class AlitaClient:
         Args:
             llm: The LLM to use
             instructions: System instructions for the agent
-            tools: Optional list of tools to provide to the agent
+            tools: Optional list of tool configurations (not tool instances) to provide to the agent.
+                   Tool configs will be processed through get_tools() to create tool instances.
+                   Each tool config should have 'type', 'settings', etc.
             chat_history: Optional chat history
             memory: Optional memory/checkpointer
             runtime: Runtime type (default: 'langchain')
@@ -595,9 +597,11 @@ class AlitaClient:
 
         # Create a minimal data structure for predict agent
         # All LLM settings are taken from the passed client instance
+        # Note: 'tools' here are tool CONFIGURATIONS, not tool instances
+        # They will be converted to tool instances by LangChainAssistant via get_tools()
         agent_data = {
             'instructions': instructions,
-            'tools': tools,  # Tools are handled separately in predict agents
+            'tools': tools,  # Tool configs that will be processed by get_tools()
             'variables': variables
         }
         return LangChainAssistant(self, agent_data, llm,
