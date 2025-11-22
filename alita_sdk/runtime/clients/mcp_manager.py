@@ -119,7 +119,7 @@ class McpManager:
                     name=tool_info.get('name', ''),
                     description=tool_info.get('description', ''),
                     server=server_name,
-                    schema=tool_info.get('inputSchema', {}),
+                    input_schema=tool_info.get('inputSchema', {}),
                     enabled=True
                 )
                 tools.append(metadata)

@@ -104,7 +104,7 @@ class McpToolkit(BaseToolkit):
             discovery_mode=(
                 Literal['static', 'dynamic', 'hybrid'],
                 Field(
-                    default="hybrid",
+                    default="dynamic",
                     description="Discovery mode",
                     json_schema_extra={
                         'tooltip': 'static: use registry, dynamic: live discovery, hybrid: try dynamic first'
@@ -147,10 +147,10 @@ class McpToolkit(BaseToolkit):
             __config__=ConfigDict(
                 json_schema_extra={
                     'metadata': {
-                        "label": "mcp",
-                        "icon_url": "mcp-icon.svg",
-                        "categories": ["integration", "tools"],
-                        "extra_categories": ["mcp", "remote tools", "protocol", "http"],
+                        "label": "Remove MCP",
+                        "icon_url": None,
+                        "categories": ["other"],
+                        "extra_categories": ["remote tools", "sse", "http"],
                         "description": "Connect to a remote Model Context Protocol (MCP) server via HTTP to access tools"
                     }
                 }
@@ -256,7 +256,7 @@ class McpToolkit(BaseToolkit):
         selected_tools: List[str],
         toolkit_name: Optional[str],
         client,
-        discovery_mode: str = "hybrid"
+        discovery_mode: str = "dynamic"
     ) -> List[BaseTool]:
         """
         Create tools from a single MCP server. Always performs live discovery when connection config is provided.
@@ -493,7 +493,7 @@ class McpToolkit(BaseToolkit):
             return McpServerTool(
                 name=full_tool_name,
                 description=f"MCP tool '{tool_metadata.name}' from server '{tool_metadata.server}': {tool_metadata.description}",
-                args_schema=McpServerTool.create_pydantic_model_from_schema(tool_metadata.schema),
+                args_schema=McpServerTool.create_pydantic_model_from_schema(tool_metadata.input_schema),
                 client=client,
                 server=tool_metadata.server,
                 tool_timeout_sec=timeout

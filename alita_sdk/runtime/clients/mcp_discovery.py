@@ -232,7 +232,7 @@ class McpDiscoveryClient:
                         name=tool_data.get("name", ""),
                         description=tool_data.get("description", ""),
                         server=server_info.name,
-                        schema=tool_data.get("inputSchema", {}),
+                        input_schema=tool_data.get("inputSchema", {}),
                         enabled=True
                     )
                     tools.append(tool_metadata)

@@ -53,5 +53,5 @@ class McpToolMetadata(BaseModel):
     name: str = Field(description="Tool name")
     description: str = Field(description="Tool description")
     server: str = Field(description="Source server name")
-    schema: Dict[str, Any] = Field(description="Tool input schema")
+    input_schema: Dict[str, Any] = Field(description="Tool input schema")
     enabled: bool = Field(default=True, description="Whether tool is enabled")
