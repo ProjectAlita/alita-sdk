@@ -346,7 +346,15 @@ class McpToolkit(BaseToolkit):
             if response.status_code != 200:
                 raise Exception(f"HTTP {response.status_code}: {response.text}")
 
-            data = response.json()
+            # Check if response is actually JSON
+            content_type = response.headers.get('Content-Type', '')
+            if 'application/json' not in content_type:
+                raise Exception(f"Expected JSON response but got Content-Type: {content_type}. Response: {response.text[:200]}")
+
+            try:
+                data = response.json()
+            except ValueError as json_err:
+                raise Exception(f"Invalid JSON response: {json_err}. Response text: {response.text[:200]}")
 
             if "error" in data:
                 raise Exception(f"MCP Error: {data['error']}")

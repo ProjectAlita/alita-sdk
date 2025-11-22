@@ -65,21 +65,17 @@ class McpInspectTool(BaseTool):
     def _run(self, resource_type: str = "all") -> str:
         """Inspect the MCP server for available resources."""
         try:
-            # Run the async inspection
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're in an async context, we need to create a new event loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(self._run_async_inspection, resource_type)
-                    return future.result(timeout=self.timeout)
-            else:
-                return loop.run_until_complete(self._run_async_inspection(resource_type))
+            # Always create a new event loop for sync context
+            # This avoids issues with existing event loops in threads
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self._run_in_new_loop, resource_type)
+                return future.result(timeout=self.timeout)
         except Exception as e:
             logger.error(f"Error inspecting MCP server '{self.server_name}': {e}")
             return f"Error inspecting MCP server: {e}"
 
-    def _run_async_inspection(self, resource_type: str) -> str:
+    def _run_in_new_loop(self, resource_type: str) -> str:
         """Run the async inspection in a new event loop."""
         return asyncio.run(self._inspect_server(resource_type))
 
@@ -132,7 +128,11 @@ class McpInspectTool(BaseTool):
             "params": {}
         }
 
-        headers = {"Content-Type": "application/json", **self.server_headers}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            **self.server_headers
+        }
 
         async with session.post(self.server_url, json=request, headers=headers) as response:
             if response.status != 200:
@@ -154,7 +154,11 @@ class McpInspectTool(BaseTool):
             "params": {}
         }
 
-        headers = {"Content-Type": "application/json", **self.server_headers}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            **self.server_headers
+        }
 
         async with session.post(self.server_url, json=request, headers=headers) as response:
             if response.status != 200:
@@ -176,7 +180,11 @@ class McpInspectTool(BaseTool):
             "params": {}
         }
 
-        headers = {"Content-Type": "application/json", **self.server_headers}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            **self.server_headers
+        }
 
         async with session.post(self.server_url, json=request, headers=headers) as response:
             if response.status != 200:
