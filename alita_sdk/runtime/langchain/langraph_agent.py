@@ -814,35 +814,59 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             input['messages'] = [convert_dict_to_message(msg) for msg in chat_history]
 
         # handler for LLM node: if no input (Chat perspective), then take last human message
+        # Track if input came from messages to handle content extraction properly
+        input_from_messages = False
         if not input.get('input'):
             if input.get('messages'):
-                input['input'] = [next((msg for msg in reversed(input['messages']) if isinstance(msg, HumanMessage)),
-                                          None)]
+                input['input'] = next((msg for msg in reversed(input['messages']) if isinstance(msg, HumanMessage)),
+                                      None)
+                if input['input'] is not None:
+                    input_from_messages = True
 
         # Append current input to existing messages instead of overwriting
         if input.get('input'):
-            if isinstance(input['input'], str):
-                current_message = input['input']
-            else:
-                current_message = input.get('input')[-1]
+            current_message = input['input']
 
             # TODO: add handler after we add 2+ inputs (filterByType, etc.)
             if isinstance(current_message, HumanMessage):
                 current_content = current_message.content
                 if isinstance(current_content, list):
-                    text_contents = [
-                        item['text'] if isinstance(item, dict) and item.get('type') == 'text'
-                        else item if isinstance(item, str)
-                        else None
-                        for item in current_content
-                    ]
-                    text_contents = [text for text in text_contents if text is not None]
-                    input['input'] = ". ".join(text_contents)
+                    # Extract text parts and keep non-text parts (images, etc.)
+                    text_contents = []
+                    non_text_parts = []
+                    
+                    for item in current_content:
+                        if isinstance(item, dict) and item.get('type') == 'text':
+                            text_contents.append(item['text'])
+                        elif isinstance(item, str):
+                            text_contents.append(item)
+                        else:
+                            # Keep image_url and other non-text content
+                            non_text_parts.append(item)
+                    
+                    # Set input to the joined text
+                    input['input'] = ". ".join(text_contents) if text_contents else ""
+                    
+                    # If this message came from input['messages'], update or remove it
+                    if input_from_messages:
+                        if non_text_parts:
+                            # Keep the message but only with non-text content (images, etc.)
+                            current_message.content = non_text_parts
+                        else:
+                            # All content was text, remove this message from the list
+                            input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
+                
                 elif isinstance(current_content, str):
                     # on regenerate case
                     input['input'] = current_content
+                    # If from messages and all content is text, remove the message
+                    if input_from_messages:
+                        input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
                 else:
                     input['input'] = str(current_content)
+                    # If from messages, remove since we extracted the content
+                    if input_from_messages:
+                        input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
             elif isinstance(current_message, str):
                 input['input'] = current_message
             else:
@@ -852,9 +876,18 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]
                 # Append to existing messages
                 # input['messages'].append(current_message)
-            else:
-                # No existing messages, create new list
-                input['messages'] = [current_message]
+            # else:
+                # NOTE: Commented out to prevent duplicates with input['input']
+                # input['messages'] = [current_message]
+        
+        # Validate that input is not empty after all processing
+        if not input.get('input'):
+            raise RuntimeError(
+                "Empty input after processing. Cannot send empty string to LLM. "
+                "This likely means the message contained only non-text content "
+                "with no accompanying text."
+            )
+        
         logging.info(f"Input: {thread_id} - {input}")
         if self.checkpointer and self.checkpointer.get_tuple(config):
             self.update_state(config, input)
