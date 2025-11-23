@@ -65,6 +65,53 @@ class McpSseClient:
             
             logger.info(f"[MCP SSE Client] Stream opened: status={self._stream_response.status}")
             
+            # Handle 401 Unauthorized - need OAuth
+            if self._stream_response.status == 401:
+                from ..utils.mcp_oauth import (
+                    McpAuthorizationRequired,
+                    canonical_resource,
+                    extract_resource_metadata_url,
+                    fetch_resource_metadata_async,
+                    infer_authorization_servers_from_realm,
+                    fetch_oauth_authorization_server_metadata
+                )
+                
+                auth_header = self._stream_response.headers.get('WWW-Authenticate', '')
+                resource_metadata_url = extract_resource_metadata_url(auth_header, self.url)
+                
+                metadata = None
+                if resource_metadata_url:
+                    metadata = await fetch_resource_metadata_async(
+                        resource_metadata_url,
+                        session=self._stream_session,
+                        timeout=30
+                    )
+                
+                # Infer authorization servers if not in metadata
+                if not metadata or not metadata.get('authorization_servers'):
+                    inferred_servers = infer_authorization_servers_from_realm(auth_header, self.url)
+                    if inferred_servers:
+                        if not metadata:
+                            metadata = {}
+                        metadata['authorization_servers'] = inferred_servers
+                        logger.info(f"[MCP SSE Client] Inferred authorization servers: {inferred_servers}")
+                        
+                        # Fetch OAuth metadata
+                        auth_server_metadata = fetch_oauth_authorization_server_metadata(inferred_servers[0], timeout=30)
+                        if auth_server_metadata:
+                            metadata['oauth_authorization_server'] = auth_server_metadata
+                            logger.info(f"[MCP SSE Client] Fetched OAuth metadata")
+                
+                raise McpAuthorizationRequired(
+                    message=f"MCP server {self.url} requires OAuth authorization",
+                    server_url=canonical_resource(self.url),
+                    resource_metadata_url=resource_metadata_url,
+                    www_authenticate=auth_header,
+                    resource_metadata=metadata,
+                    status=self._stream_response.status,
+                    tool_name=self.url,
+                )
+            
             if self._stream_response.status != 200:
                 error_text = await self._stream_response.text()
                 raise Exception(f"Failed to open SSE stream: HTTP {self._stream_response.status}: {error_text}")
@@ -248,18 +295,29 @@ class McpSseClient:
         """Close the persistent SSE stream."""
         logger.info(f"[MCP SSE Client] Closing connection...")
         
+        # Cancel background stream reader task
         if self._stream_task and not self._stream_task.done():
             self._stream_task.cancel()
             try:
                 await self._stream_task
-            except asyncio.CancelledError:
-                pass
+            except (asyncio.CancelledError, Exception) as e:
+                logger.debug(f"[MCP SSE Client] Stream task cleanup: {e}")
         
-        if self._stream_response:
-            self._stream_response.close()
+        # Close response stream
+        if self._stream_response and not self._stream_response.closed:
+            try:
+                self._stream_response.close()
+            except Exception as e:
+                logger.debug(f"[MCP SSE Client] Response close error: {e}")
         
-        if self._stream_session:
-            await self._stream_session.close()
+        # Close session
+        if self._stream_session and not self._stream_session.closed:
+            try:
+                await self._stream_session.close()
+                # Give aiohttp time to cleanup
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.debug(f"[MCP SSE Client] Session close error: {e}")
         
         logger.info(f"[MCP SSE Client] Connection closed")
     

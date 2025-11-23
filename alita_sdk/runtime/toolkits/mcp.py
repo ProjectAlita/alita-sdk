@@ -498,9 +498,12 @@ class McpToolkit(BaseToolkit):
         all_tools = []
         session_id = connection_config.session_id
         
+        # Generate temporary session_id if not provided (for OAuth flow)
+        # The real session_id should come from frontend after OAuth completes
         if not session_id:
-            logger.error(f"[MCP SSE] session_id is required for SSE servers")
-            raise ValueError("session_id is required. Frontend must generate UUID.")
+            import uuid
+            session_id = str(uuid.uuid4())
+            logger.info(f"[MCP SSE] Generated temporary session_id for OAuth: {session_id}")
         
         logger.info(f"[MCP SSE] Discovering from {connection_config.url} with session {session_id}")
         
