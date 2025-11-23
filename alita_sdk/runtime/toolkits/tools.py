@@ -19,7 +19,7 @@ from ..tools.image_generation import ImageGenerationToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
-from ..utils.mcp_oauth import canonical_resource
+from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
 from ...tools.utils import TOOLKIT_SPLITTER
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,8 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     client=alita_client,
                     **settings).get_tools())
         except Exception as e:
+            if isinstance(e, McpAuthorizationRequired):
+                raise
             logger.error(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}", exc_info=True)
             if debug_mode:
                 logger.info("Skipping tool initialization error due to debug mode.")
