@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [ "Programming Language :: Python :: 3", "Operating System :: OS Independent",]
 license = "Apache-2.0"
-dependencies = [ "sqlalchemy<2.0.36", "tiktoken>=0.7.0", "openai>=1.55.0", "python-dotenv~=1.0.1", "jinja2~=3.1.3", "pillow~=11.1.0", "requests~=2.3", "pydantic~=2.10.0", "chardet==5.2.0", "fastapi==0.115.9", "httpcore==1.0.7", "urllib3>=2", "certifi==2024.8.30",]
+dependencies = [ "sqlalchemy<2.0.36", "tiktoken>=0.7.0", "openai>=1.55.0", "python-dotenv~=1.0.1", "jinja2~=3.1.3", "pillow~=11.1.0", "requests~=2.3", "pydantic~=2.10.0", "chardet==5.2.0", "fastapi==0.115.9", "httpcore==1.0.7", "urllib3>=2", "certifi==2024.8.30", "aiohttp>=3.9.0",]
 [[project.authors]]
 name = "Artem Rozumenko"
 email = "artyom.rozumenko@gmail.com"

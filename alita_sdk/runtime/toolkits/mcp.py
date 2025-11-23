@@ -7,6 +7,7 @@ Following MCP specification: https://modelcontextprotocol.io/specification/2025-
 import logging
 import re
 import requests
+import asyncio
 from typing import List, Optional, Any, Dict, Literal, ClassVar, Union
 
 from langchain_core.tools import BaseToolkit, BaseTool
@@ -17,6 +18,7 @@ from ..tools.mcp_remote_tool import McpRemoteTool
 from ..tools.mcp_inspect_tool import McpInspectTool
 from ...tools.utils import TOOLKIT_SPLITTER, clean_string
 from ..models.mcp_models import McpConnectionConfig
+from ..utils.mcp_sse_client import McpSseClient
 from ..utils.mcp_oauth import (
     McpAuthorizationRequired,
     canonical_resource,
@@ -459,42 +461,76 @@ class McpToolkit(BaseToolkit):
         timeout: int
     ) -> List[Dict[str, Any]]:
         """
-        Synchronously discover tools and prompts from MCP server using HTTP requests.
+        Discover tools and prompts from MCP server using SSE client.
         Returns list of tool/prompt dictionaries with name, description, and inputSchema.
         Prompts are converted to tools that can be invoked.
         """
-        all_tools = []
-        
-        # Use session_id from UI (passed via connection_config)
-        # For SSE-based MCP servers, frontend generates a UUID and sends it with the OAuth token
         session_id = connection_config.session_id
         
         if not session_id:
             logger.warning(f"[MCP Session] No session_id provided for '{toolkit_name}' - server may require it")
             logger.warning(f"[MCP Session] Frontend should generate a UUID and include it with mcp_tokens")
         
-        # Discover regular tools
-        tools_data = cls._discover_mcp_endpoint(
-            endpoint="tools/list",
-            toolkit_name=toolkit_name,
-            connection_config=connection_config,
-            timeout=timeout,
-            session_id=session_id
-        )
-        all_tools.extend(tools_data)
-        logger.info(f"Discovered {len(tools_data)} tools from MCP toolkit '{toolkit_name}'")
-        
-        # Discover prompts and convert them to tools
+        # Run async discovery in sync context
         try:
-            prompts_data = cls._discover_mcp_endpoint(
-                endpoint="prompts/list",
-                toolkit_name=toolkit_name,
-                connection_config=connection_config,
-                timeout=timeout,
-                session_id=session_id
+            all_tools = asyncio.run(
+                cls._discover_tools_async(
+                    toolkit_name=toolkit_name,
+                    connection_config=connection_config,
+                    timeout=timeout
+                )
             )
+            return all_tools, session_id
+        except Exception as e:
+            logger.error(f"[MCP SSE] Discovery failed for '{toolkit_name}': {e}")
+            raise
+    
+    @classmethod
+    async def _discover_tools_async(
+        cls,
+        toolkit_name: str,
+        connection_config: McpConnectionConfig,
+        timeout: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Async implementation of tool discovery using SSE client.
+        """
+        all_tools = []
+        session_id = connection_config.session_id
+        
+        if not session_id:
+            logger.error(f"[MCP SSE] session_id is required for SSE servers")
+            raise ValueError("session_id is required. Frontend must generate UUID.")
+        
+        logger.info(f"[MCP SSE] Discovering from {connection_config.url} with session {session_id}")
+        
+        # Prepare headers
+        headers = {}
+        if connection_config.headers:
+            headers.update(connection_config.headers)
+        
+        # Create SSE client
+        client = McpSseClient(
+            url=connection_config.url,
+            session_id=session_id,
+            headers=headers,
+            timeout=timeout
+        )
+        
+        # Initialize MCP session
+        await client.initialize()
+        logger.info(f"[MCP SSE] Session initialized for '{toolkit_name}'")
+        
+        # Discover tools
+        tools = await client.list_tools()
+        all_tools.extend(tools)
+        logger.info(f"[MCP SSE] Discovered {len(tools)} tools from '{toolkit_name}'")
+        
+        # Discover prompts
+        try:
+            prompts = await client.list_prompts()
             # Convert prompts to tool format
-            for prompt in prompts_data:
+            for prompt in prompts:
                 prompt_tool = {
                     "name": f"prompt_{prompt.get('name', 'unnamed')}",
                     "description": prompt.get('description', f"Execute prompt: {prompt.get('name')}"),
@@ -519,152 +555,12 @@ class McpToolkit(BaseToolkit):
                     "_mcp_prompt_name": prompt.get('name')
                 }
                 all_tools.append(prompt_tool)
-            logger.info(f"Discovered {len(prompts_data)} prompts from MCP toolkit '{toolkit_name}'")
+            logger.info(f"[MCP SSE] Discovered {len(prompts)} prompts from '{toolkit_name}'")
         except Exception as e:
-            logger.warning(f"Failed to discover prompts from MCP toolkit '{toolkit_name}': {e}")
+            logger.warning(f"[MCP SSE] Failed to discover prompts: {e}")
         
-        logger.info(f"Total discovered {len(all_tools)} tools+prompts from MCP toolkit '{toolkit_name}'")
-        return all_tools, session_id
-
-    @classmethod
-    def _discover_mcp_endpoint(
-        cls,
-        endpoint: str,
-        toolkit_name: str,
-        connection_config: McpConnectionConfig,
-        timeout: int,
-        session_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Discover items from a specific MCP endpoint (tools/list or prompts/list).
-        Returns list of dictionaries.
-        """
-        import time
-
-        # MCP protocol request
-        mcp_request = {
-            "jsonrpc": "2.0",
-            "id": f"discover_{endpoint.replace('/', '_')}_{int(time.time())}",
-            "method": endpoint,
-            "params": {}
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream"
-        }
-        if connection_config.headers:
-            headers.update(connection_config.headers)
-
-        # Add sessionId to URL if provided (for stateful SSE servers)
-        url = connection_config.url
-        if session_id:
-            separator = '&' if '?' in url else '?'
-            url = f"{url}{separator}sessionId={session_id}"
-            logger.info(f"[MCP Session] Using session {session_id} for {endpoint} request")
-        else:
-            logger.debug(f"[MCP Session] No session ID available for {endpoint} request - server may not require sessions")
-
-        try:
-            logger.debug(f"Sending MCP {endpoint} request to {url}")
-            response = requests.post(
-                url,
-                json=mcp_request,
-                headers=headers,
-                timeout=timeout
-            )
-
-            auth_header = response.headers.get('WWW-Authenticate', '')
-            if response.status_code == 401:
-                resource_metadata_url = extract_resource_metadata_url(auth_header, connection_config.url)
-                metadata = fetch_resource_metadata(resource_metadata_url, timeout=timeout) if resource_metadata_url else None
-                
-                # If we couldn't get metadata from the resource_metadata endpoint,
-                # infer authorization servers from the WWW-Authenticate header and server URL
-                if not metadata or not metadata.get('authorization_servers'):
-                    inferred_servers = infer_authorization_servers_from_realm(auth_header, connection_config.url)
-                    if inferred_servers:
-                        if not metadata:
-                            metadata = {}
-                        metadata['authorization_servers'] = inferred_servers
-                        logger.info(f"Inferred authorization servers for {connection_config.url}: {inferred_servers}")
-                        
-                        # Fetch OAuth authorization server metadata from the inferred server
-                        # This avoids CORS issues in the frontend
-                        from alita_sdk.runtime.utils.mcp_oauth import fetch_oauth_authorization_server_metadata
-                        auth_server_metadata = fetch_oauth_authorization_server_metadata(inferred_servers[0], timeout=timeout)
-                        if auth_server_metadata:
-                            metadata['oauth_authorization_server'] = auth_server_metadata
-                            logger.info(f"Fetched OAuth metadata for {inferred_servers[0]}")
-                
-                raise McpAuthorizationRequired(
-                    message=f"MCP server {connection_config.url} requires OAuth authorization",
-                    server_url=canonical_resource(connection_config.url),
-                    resource_metadata_url=resource_metadata_url,
-                    www_authenticate=auth_header,
-                    resource_metadata=metadata,
-                    status=response.status_code,
-                    tool_name=toolkit_name,
-                )
-
-            if response.status_code != 200:
-                logger.error(f"MCP server returned non-200 status: {response.status_code}")
-                raise Exception(f"HTTP {response.status_code}: {response.text}")
-
-            # Check content type and parse accordingly
-            content_type = response.headers.get('Content-Type', '')
-            
-            if 'text/event-stream' in content_type:
-                # Parse SSE (Server-Sent Events) format
-                data = cls._parse_sse_response(response.text)
-            elif 'application/json' in content_type:
-                # Parse regular JSON
-                try:
-                    data = response.json()
-                except ValueError as json_err:
-                    raise Exception(f"Invalid JSON response: {json_err}. Response text: {response.text[:200]}")
-            else:
-                raise Exception(f"Unexpected Content-Type: {content_type}. Response: {response.text[:200]}")
-
-            if "error" in data:
-                raise Exception(f"MCP Error: {data['error']}")
-
-            # Parse MCP response - different endpoints return different keys
-            result = data.get("result", {})
-            if endpoint == "tools/list":
-                return result.get("tools", [])
-            elif endpoint == "prompts/list":
-                return result.get("prompts", [])
-            else:
-                return result.get("items", [])
-
-        except Exception as e:
-            logger.error(f"Failed to discover from {endpoint} on MCP toolkit '{toolkit_name}': {e}")
-            raise
-
-    @staticmethod
-    def _parse_sse_response(sse_text: str) -> Dict[str, Any]:
-        """
-        Parse Server-Sent Events (SSE) format response.
-        SSE format: event: message\ndata: {json}\n\n
-        """
-        import json
-        
-        lines = sse_text.strip().split('\n')
-        data_line = None
-        
-        for line in lines:
-            if line.startswith('data:'):
-                data_line = line[5:].strip()  # Remove 'data:' prefix
-                break
-        
-        if not data_line:
-            raise Exception(f"No data found in SSE response: {sse_text[:200]}")
-        
-        try:
-            return json.loads(data_line)
-        except json.JSONDecodeError as e:
-            raise Exception(f"Failed to parse SSE data as JSON: {e}. Data: {data_line[:200]}")
+        logger.info(f"[MCP SSE] Total discovered {len(all_tools)} items from '{toolkit_name}'")
+        return all_tools
 
     @classmethod
     def _create_tool_from_dict(

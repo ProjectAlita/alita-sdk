@@ -20,6 +20,7 @@ from ..utils.mcp_oauth import (
     fetch_resource_metadata_async,
     infer_authorization_servers_from_realm,
 )
+from ..utils.mcp_sse_client import McpSseClient
 
 logger = logging.getLogger(__name__)
 
@@ -83,172 +84,68 @@ class McpRemoteTool(McpServerTool):
         return asyncio.run(self._execute_remote_tool(kwargs))
 
     async def _execute_remote_tool(self, kwargs: Dict[str, Any]) -> str:
-        """Execute the actual remote MCP tool call."""
-        import aiohttp
+        """Execute the actual remote MCP tool call using SSE client."""
         from ...tools.utils import TOOLKIT_SPLITTER
         
-        # Use the original tool name from discovery for MCP server invocation
-        # The MCP server doesn't know about our optimized names
-        tool_name_for_server = self.original_tool_name
+        # Check for session_id requirement
+        if not self.session_id:
+            logger.error(f"[MCP Session] Missing session_id for tool '{self.name}'")
+            raise Exception("sessionId required. Frontend must generate UUID and send with mcp_tokens.")
         
-        # Fallback: extract from optimized name if original not stored (backwards compatibility)
+        # Use the original tool name from discovery for MCP server invocation
+        tool_name_for_server = self.original_tool_name
         if not tool_name_for_server:
             tool_name_for_server = self.name.rsplit(TOOLKIT_SPLITTER, 1)[-1] if TOOLKIT_SPLITTER in self.name else self.name
-            logger.warning(f"original_tool_name not set for '{self.name}', using extracted name: {tool_name_for_server}")
+            logger.warning(f"original_tool_name not set for '{self.name}', using extracted: {tool_name_for_server}")
         
-        # Build the MCP request based on whether this is a prompt or tool
-        if self.is_prompt:
-            # For prompts, use prompts/get endpoint
-            mcp_request = {
-                "jsonrpc": "2.0",
-                "id": f"prompt_get_{int(time.time())}_{uuid.uuid4().hex[:8]}",
-                "method": "prompts/get",
-                "params": {
-                    "name": self.prompt_name or tool_name_for_server.replace("prompt_", ""),
-                    "arguments": kwargs.get("arguments", kwargs)
-                }
-            }
-        else:
-            # For regular tools, use tools/call endpoint
-            mcp_request = {
-                "jsonrpc": "2.0",
-                "id": f"tool_call_{int(time.time())}_{uuid.uuid4().hex[:8]}",
-                "method": "tools/call",
-                "params": {
-                    "name": tool_name_for_server,
-                    "arguments": kwargs
-                }
-            }
-
-        # Set up headers
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream"
-        }
-        if self.server_headers:
-            headers.update(self.server_headers)
-
-        # Add sessionId to URL if this is a stateful SSE server
-        url = self.server_url
-        if self.session_id:
-            separator = '&' if '?' in url else '?'
-            url = f"{url}{separator}sessionId={self.session_id}"
-            logger.debug(f"Using session URL: {url}")
-
-        # Execute the HTTP request
-        timeout = aiohttp.ClientTimeout(total=self.tool_timeout_sec)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            try:
-                logger.debug(f"Calling remote MCP tool '{tool_name_for_server}' (optimized name: '{self.name}') at {url}")
-                logger.debug(f"Request: {json.dumps(mcp_request, indent=2)}")
+        logger.info(f"[MCP SSE] Executing tool '{tool_name_for_server}' with session {self.session_id}")
+        
+        try:
+            # Prepare headers
+            headers = {}
+            if self.server_headers:
+                headers.update(self.server_headers)
+            
+            # Create SSE client
+            client = McpSseClient(
+                url=self.server_url,
+                session_id=self.session_id,
+                headers=headers,
+                timeout=self.tool_timeout_sec
+            )
+            
+            # Execute tool call via SSE
+            result = await client.call_tool(tool_name_for_server, kwargs)
+            
+            # Format the result
+            if isinstance(result, dict):
+                # Check for content array (common in MCP responses)
+                if "content" in result:
+                    content_items = result["content"]
+                    if isinstance(content_items, list):
+                        # Extract text from content items
+                        text_parts = []
+                        for item in content_items:
+                            if isinstance(item, dict):
+                                if item.get("type") == "text" and "text" in item:
+                                    text_parts.append(item["text"])
+                                elif "text" in item:
+                                    text_parts.append(item["text"])
+                                else:
+                                    text_parts.append(json.dumps(item))
+                            else:
+                                text_parts.append(str(item))
+                        return "\n".join(text_parts)
                 
-                async with session.post(url, json=mcp_request, headers=headers) as response:
-                    auth_header = response.headers.get('WWW-Authenticate') or response.headers.get('Www-Authenticate')
-                    if response.status == 401:
-                        resource_metadata_url = extract_resource_metadata_url(auth_header, self.server_url)
-                        metadata = None
-                        if resource_metadata_url:
-                            metadata = await fetch_resource_metadata_async(
-                                resource_metadata_url,
-                                session=session,
-                                timeout=self.tool_timeout_sec,
-                            )
-                        
-                        # If we couldn't get metadata from the resource_metadata endpoint,
-                        # infer authorization servers from the WWW-Authenticate header and server URL
-                        if not metadata or not metadata.get('authorization_servers'):
-                            inferred_servers = infer_authorization_servers_from_realm(auth_header, self.server_url)
-                            if inferred_servers:
-                                if not metadata:
-                                    metadata = {}
-                                metadata['authorization_servers'] = inferred_servers
-                                logger.info(f"Inferred authorization servers for {self.server_url}: {inferred_servers}")
-                                
-                                # Fetch OAuth authorization server metadata from the inferred server
-                                # This avoids CORS issues in the frontend
-                                from alita_sdk.runtime.utils.mcp_oauth import fetch_oauth_authorization_server_metadata
-                                auth_server_metadata = fetch_oauth_authorization_server_metadata(inferred_servers[0], timeout=self.tool_timeout_sec)
-                                if auth_server_metadata:
-                                    metadata['oauth_authorization_server'] = auth_server_metadata
-                                    logger.info(f"Fetched OAuth metadata for {inferred_servers[0]}")
-                        
-                        raise McpAuthorizationRequired(
-                            message=f"MCP server {self.server_url} requires OAuth authorization",
-                            server_url=canonical_resource(self.server_url),
-                            resource_metadata_url=resource_metadata_url,
-                            www_authenticate=auth_header,
-                            resource_metadata=metadata,
-                            status=response.status,
-                            tool_name=self.name,
-                        )
-
-                    # Check for errors first
-                    data = None
-                    if response.status != 200:
-                        error_text = await response.text()
-                        
-                        # Check if this is a "Missing sessionId" error
-                        if response.status == 404 and "sessionId" in error_text:
-                            logger.error(f"[MCP Session] Server requires session but none provided")
-                            logger.error(f"[MCP Session] Frontend must generate a UUID and send it with mcp_tokens")
-                            logger.error(f"[MCP Session] Example: mcp_tokens = {{'server_url': {{'access_token': '...', 'session_id': crypto.randomUUID()}}}}")
-                            raise Exception(f"HTTP {response.status}: {error_text} - sessionId required but not provided by frontend")
-                        else:
-                            raise Exception(f"HTTP {response.status}: {error_text}")
-                    
-                    # Parse response if not already done in retry logic
-                    if data is None:
-                        content_type = response.headers.get('Content-Type', '')
-                        if 'text/event-stream' in content_type:
-                            # Parse SSE format
-                            text = await response.text()
-                            data = self._parse_sse(text)
-                        else:
-                            # Parse regular JSON
-                            data = await response.json()
-
-                    logger.debug(f"Response: {json.dumps(data, indent=2)}")
-
-                    # Check for MCP error
-                    if "error" in data:
-                        error = data["error"]
-                        error_msg = error.get("message", str(error))
-                        raise Exception(f"MCP Error: {error_msg}")
-
-                    # Extract result
-                    result = data.get("result", {})
-                    
-                    # Format the result based on content type
-                    if isinstance(result, dict):
-                        # Check for content array (common in MCP responses)
-                        if "content" in result:
-                            content_items = result["content"]
-                            if isinstance(content_items, list):
-                                # Extract text from content items
-                                text_parts = []
-                                for item in content_items:
-                                    if isinstance(item, dict):
-                                        if item.get("type") == "text" and "text" in item:
-                                            text_parts.append(item["text"])
-                                        elif "text" in item:
-                                            text_parts.append(item["text"])
-                                        else:
-                                            text_parts.append(json.dumps(item))
-                                    else:
-                                        text_parts.append(str(item))
-                                return "\n".join(text_parts)
-                        
-                        # Return formatted JSON if no content field
-                        return json.dumps(result, indent=2)
-                    
-                    # Return as string for other types
-                    return str(result)
-
-            except asyncio.TimeoutError:
-                raise Exception(f"Tool execution timed out after {self.tool_timeout_sec}s")
-            except Exception as e:
-                logger.error(f"Error calling remote MCP tool '{tool_name_for_server}': {e}", exc_info=True)
-                raise
+                # Return formatted JSON if no content field
+                return json.dumps(result, indent=2)
+            
+            # Return as string for other types
+            return str(result)
+            
+        except Exception as e:
+            logger.error(f"[MCP SSE] Tool execution failed: {e}", exc_info=True)
+            raise
 
     def _parse_sse(self, text: str) -> Dict[str, Any]:
         """Parse Server-Sent Events (SSE) format response."""
