@@ -21,6 +21,7 @@ class McpAuthorizationRequired(ToolException):
         www_authenticate: Optional[str] = None,
         resource_metadata: Optional[Dict[str, Any]] = None,
         status: Optional[int] = None,
+        tool_name: Optional[str] = None,
     ):
         super().__init__(message)
         self.server_url = server_url
@@ -28,6 +29,7 @@ class McpAuthorizationRequired(ToolException):
         self.www_authenticate = www_authenticate
         self.resource_metadata = resource_metadata
         self.status = status
+        self.tool_name = tool_name
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -37,18 +39,31 @@ class McpAuthorizationRequired(ToolException):
             "www_authenticate": self.www_authenticate,
             "resource_metadata": self.resource_metadata,
             "status": self.status,
+            "tool_name": self.tool_name,
         }
 
 
-def extract_resource_metadata_url(www_authenticate: Optional[str]) -> Optional[str]:
-    """Pull the resource_metadata URL from a WWW-Authenticate header if present."""
-    if not www_authenticate:
+def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: Optional[str] = None) -> Optional[str]:
+    """
+    Pull the resource_metadata URL from a WWW-Authenticate header if present.
+    If not found and server_url is provided, construct the standard .well-known URL.
+    """
+    if not www_authenticate and not server_url:
         return None
 
     # RFC9728 returns `resource_metadata="<url>"` inside the header value
-    match = re.search(r'resource_metadata\s*=\s*\"?([^\", ]+)\"?', www_authenticate)
-    if match:
-        return match.group(1)
+    if www_authenticate:
+        match = re.search(r'resource_metadata\s*=\s*\"?([^\", ]+)\"?', www_authenticate)
+        if match:
+            return match.group(1)
+    
+    # Fallback: construct standard .well-known URL if server_url provided
+    if server_url:
+        parsed = urlparse(server_url)
+        # Build the standard resource metadata URL
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        return f"{base_url}/.well-known/resource-metadata"
+    
     return None
 
 

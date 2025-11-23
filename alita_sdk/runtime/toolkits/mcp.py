@@ -545,7 +545,7 @@ class McpToolkit(BaseToolkit):
 
             auth_header = response.headers.get('WWW-Authenticate', '')
             if response.status_code == 401:
-                resource_metadata_url = extract_resource_metadata_url(auth_header)
+                resource_metadata_url = extract_resource_metadata_url(auth_header, connection_config.url)
                 metadata = fetch_resource_metadata(resource_metadata_url, timeout=timeout) if resource_metadata_url else None
                 raise McpAuthorizationRequired(
                     message=f"MCP server {connection_config.url} requires OAuth authorization",
@@ -554,6 +554,7 @@ class McpToolkit(BaseToolkit):
                     www_authenticate=auth_header,
                     resource_metadata=metadata,
                     status=response.status_code,
+                    tool_name=toolkit_name,
                 )
 
             if response.status_code != 200:

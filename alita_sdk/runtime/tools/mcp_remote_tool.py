@@ -121,7 +121,7 @@ class McpRemoteTool(McpServerTool):
                 async with session.post(self.server_url, json=mcp_request, headers=headers) as response:
                     auth_header = response.headers.get('WWW-Authenticate') or response.headers.get('Www-Authenticate')
                     if response.status == 401:
-                        resource_metadata_url = extract_resource_metadata_url(auth_header)
+                        resource_metadata_url = extract_resource_metadata_url(auth_header, self.server_url)
                         metadata = None
                         if resource_metadata_url:
                             metadata = await fetch_resource_metadata_async(
@@ -136,6 +136,7 @@ class McpRemoteTool(McpServerTool):
                             www_authenticate=auth_header,
                             resource_metadata=metadata,
                             status=response.status,
+                            tool_name=self.name,
                         )
 
                     if response.status != 200:

@@ -342,6 +342,9 @@ class AlitaClient:
             app_type = "react"
         elif app_type == 'autogen':
             app_type = "react"
+        
+        # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
+        # The exception will propagate naturally to the indexer worker's outer handler
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens)
@@ -605,6 +608,9 @@ class AlitaClient:
             'tools': tools,  # Tool configs that will be processed by get_tools()
             'variables': variables
         }
+        
+        # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
+        # The exception will propagate naturally to the indexer worker's outer handler
         return LangChainAssistant(
             self,
             agent_data,
