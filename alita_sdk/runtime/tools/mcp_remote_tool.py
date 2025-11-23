@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
 from .mcp_server_tool import McpServerTool
-from pydantic import Field
+from pydantic import Field, computed_field
 from ..utils.mcp_oauth import (
     McpAuthorizationRequired,
     canonical_resource,
@@ -36,6 +36,13 @@ class McpRemoteTool(McpServerTool):
     original_tool_name: Optional[str] = Field(default=None, description="Original tool name from MCP server (before optimization)")
     is_prompt: bool = False  # Flag to indicate if this is a prompt tool
     prompt_name: Optional[str] = None  # Original prompt name if this is a prompt
+    session_id: Optional[str] = Field(default=None, description="MCP session ID for stateful SSE servers")
+    
+    @computed_field
+    @property
+    def metadata(self) -> dict:
+        """Return tool metadata including session information for UI."""
+        return self.get_session_metadata()
     
     def __getstate__(self):
         """Custom serialization for pickle compatibility."""
@@ -112,14 +119,21 @@ class McpRemoteTool(McpServerTool):
         if self.server_headers:
             headers.update(self.server_headers)
 
+        # Add sessionId to URL if this is a stateful SSE server
+        url = self.server_url
+        if self.session_id:
+            separator = '&' if '?' in url else '?'
+            url = f"{url}{separator}sessionId={self.session_id}"
+            logger.debug(f"Using session URL: {url}")
+
         # Execute the HTTP request
         timeout = aiohttp.ClientTimeout(total=self.tool_timeout_sec)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
-                logger.debug(f"Calling remote MCP tool '{tool_name_for_server}' (optimized name: '{self.name}') at {self.server_url}")
+                logger.debug(f"Calling remote MCP tool '{tool_name_for_server}' (optimized name: '{self.name}') at {url}")
                 logger.debug(f"Request: {json.dumps(mcp_request, indent=2)}")
                 
-                async with session.post(self.server_url, json=mcp_request, headers=headers) as response:
+                async with session.post(url, json=mcp_request, headers=headers) as response:
                     auth_header = response.headers.get('WWW-Authenticate') or response.headers.get('Www-Authenticate')
                     if response.status == 401:
                         resource_metadata_url = extract_resource_metadata_url(auth_header, self.server_url)
@@ -159,19 +173,66 @@ class McpRemoteTool(McpServerTool):
                             tool_name=self.name,
                         )
 
+                    # Check for errors first
+                    data = None
                     if response.status != 200:
                         error_text = await response.text()
-                        raise Exception(f"HTTP {response.status}: {error_text}")
-
-                    # Handle both JSON and SSE responses
-                    content_type = response.headers.get('Content-Type', '')
-                    if 'text/event-stream' in content_type:
-                        # Parse SSE format
-                        text = await response.text()
-                        data = self._parse_sse(text)
-                    else:
-                        # Parse regular JSON
-                        data = await response.json()
+                        
+                        # Check if this is a "Missing sessionId" error
+                        if response.status == 404 and "sessionId" in error_text and not self.session_id:
+                            logger.info(f"[MCP Session] Server requires session but none provided - attempting to initialize")
+                            # Try to initialize session with current auth headers
+                            from ..toolkits.mcp import McpToolkit
+                            from ..models.mcp_models import McpConnectionConfig
+                            
+                            connection_config = McpConnectionConfig(
+                                url=self.server_url,
+                                headers=self.server_headers
+                            )
+                            
+                            # Initialize session with auth headers
+                            session_id = McpToolkit._initialize_mcp_session(
+                                toolkit_name=self.server,
+                                connection_config=connection_config,
+                                timeout=self.tool_timeout_sec,
+                                extra_headers=headers  # Include Authorization header
+                            )
+                            
+                            if session_id:
+                                # Retry the request with session
+                                self.session_id = session_id
+                                separator = '&' if '?' in self.server_url else '?'
+                                retry_url = f"{self.server_url}{separator}sessionId={session_id}"
+                                logger.info(f"[MCP Session] Retrying tool call with new session: {session_id}")
+                                logger.info(f"[MCP Session] Created session - server: {canonical_resource(self.server_url)}, session_id: {session_id}")
+                                
+                                async with session.post(retry_url, json=mcp_request, headers=headers) as retry_response:
+                                    if retry_response.status != 200:
+                                        retry_error = await retry_response.text()
+                                        raise Exception(f"HTTP {retry_response.status} (after session init): {retry_error}")
+                                    
+                                    # Process successful retry response
+                                    content_type = retry_response.headers.get('Content-Type', '')
+                                    if 'text/event-stream' in content_type:
+                                        text = await retry_response.text()
+                                        data = self._parse_sse(text)
+                                    else:
+                                        data = await retry_response.json()
+                            else:
+                                raise Exception(f"HTTP {response.status}: {error_text} (session initialization failed)")
+                        else:
+                            raise Exception(f"HTTP {response.status}: {error_text}")
+                    
+                    # Parse response if not already done in retry logic
+                    if data is None:
+                        content_type = response.headers.get('Content-Type', '')
+                        if 'text/event-stream' in content_type:
+                            # Parse SSE format
+                            text = await response.text()
+                            data = self._parse_sse(text)
+                        else:
+                            # Parse regular JSON
+                            data = await response.json()
 
                     logger.debug(f"Response: {json.dumps(data, indent=2)}")
 
@@ -224,3 +285,12 @@ class McpRemoteTool(McpServerTool):
                 json_str = line[5:].strip()
                 return json.loads(json_str)
         raise ValueError("No data found in SSE response")
+    
+    def get_session_metadata(self) -> dict:
+        """Return session metadata to be included in tool responses."""
+        if self.session_id:
+            return {
+                'mcp_session_id': self.session_id,
+                'mcp_server_url': canonical_resource(self.server_url)
+            }
+        return {}

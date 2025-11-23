@@ -340,9 +340,14 @@ class McpToolkit(BaseToolkit):
             logger.error(f"Headers must be a dictionary or JSON string, got: {type(headers)}")
             raise ValueError(f"Headers must be a dictionary or JSON string, got: {type(headers)}")
 
+        # Extract session_id from kwargs if provided
+        session_id = kwargs.get('session_id')
+        if session_id:
+            logger.info(f"[MCP Session] Using provided session ID for toolkit '{toolkit_name}': {session_id}")
+        
         # Create MCP connection configuration
         try:
-            connection_config = McpConnectionConfig(url=url, headers=parsed_headers)
+            connection_config = McpConnectionConfig(url=url, headers=parsed_headers, session_id=session_id)
         except Exception as e:
             logger.error(f"Invalid MCP connection configuration: {e}")
             raise ValueError(f"Invalid MCP connection configuration: {e}")
@@ -382,7 +387,7 @@ class McpToolkit(BaseToolkit):
             logger.info(f"Discovering tools from MCP toolkit '{toolkit_name}' at {connection_config.url}")
 
             # Use synchronous HTTP discovery for toolkit initialization
-            tool_metadata_list = cls._discover_tools_sync(
+            tool_metadata_list, session_id = cls._discover_tools_sync(
                 toolkit_name=toolkit_name,
                 connection_config=connection_config,
                 timeout=timeout
@@ -397,13 +402,15 @@ class McpToolkit(BaseToolkit):
                 ]
 
             # Create BaseTool instances from discovered metadata
+            # Use session_id from connection_config (passed from UI) instead of discovery
             for tool_metadata in tool_metadata_list:
                 server_tool = cls._create_tool_from_dict(
                     tool_dict=tool_metadata,
                     toolkit_name=toolkit_name,
                     connection_config=connection_config,
                     timeout=timeout,
-                    client=client
+                    client=client,
+                    session_id=connection_config.session_id  # Use session from connection config
                 )
 
                 if server_tool:
@@ -455,12 +462,19 @@ class McpToolkit(BaseToolkit):
         """
         all_tools = []
         
+        # Note: We don't initialize MCP session here because:
+        # 1. Discovery happens before we have OAuth tokens
+        # 2. Sessions are initialized on-demand during first tool call (when we have auth)
+        # 3. Sessions are stored in UI sessionStorage and passed back via mcp_tokens
+        session_id = None
+        
         # Discover regular tools
         tools_data = cls._discover_mcp_endpoint(
             endpoint="tools/list",
             toolkit_name=toolkit_name,
             connection_config=connection_config,
-            timeout=timeout
+            timeout=timeout,
+            session_id=session_id
         )
         all_tools.extend(tools_data)
         logger.info(f"Discovered {len(tools_data)} tools from MCP toolkit '{toolkit_name}'")
@@ -471,7 +485,8 @@ class McpToolkit(BaseToolkit):
                 endpoint="prompts/list",
                 toolkit_name=toolkit_name,
                 connection_config=connection_config,
-                timeout=timeout
+                timeout=timeout,
+                session_id=session_id
             )
             # Convert prompts to tool format
             for prompt in prompts_data:
@@ -504,7 +519,107 @@ class McpToolkit(BaseToolkit):
             logger.warning(f"Failed to discover prompts from MCP toolkit '{toolkit_name}': {e}")
         
         logger.info(f"Total discovered {len(all_tools)} tools+prompts from MCP toolkit '{toolkit_name}'")
-        return all_tools
+        return all_tools, session_id
+
+    @classmethod
+    def _initialize_mcp_session(
+        cls,
+        toolkit_name: str,
+        connection_config: McpConnectionConfig,
+        timeout: int,
+        extra_headers: Optional[Dict[str, str]] = None
+    ) -> Optional[str]:
+        """
+        Initialize an MCP session for stateful SSE servers.
+        Returns sessionId if successful, None if server doesn't require sessions.
+        
+        Note: This session should be stored by the caller (e.g., UI sessionStorage)
+        and passed back for subsequent requests. Sessions should NOT be cached
+        on the backend for security reasons (multi-tenant environment).
+        
+        Args:
+            toolkit_name: Name of the toolkit
+            connection_config: MCP connection configuration
+            timeout: Request timeout in seconds
+            extra_headers: Additional headers (e.g., Authorization) to include
+        """
+        import time
+
+        mcp_request = {
+            "jsonrpc": "2.0",
+            "id": f"initialize_{int(time.time())}",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "roots": {"listChanged": True},
+                    "sampling": {}
+                },
+                "clientInfo": {
+                    "name": "Alita MCP Client",
+                    "version": "1.0.0"
+                }
+            }
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        }
+        if connection_config.headers:
+            headers.update(connection_config.headers)
+        if extra_headers:
+            headers.update(extra_headers)
+            logger.debug(f"[MCP Session] Added extra headers: {list(extra_headers.keys())}")
+
+        try:
+            logger.info(f"[MCP Session] Attempting to initialize session for {connection_config.url}")
+            logger.debug(f"[MCP Session] Initialize request: {mcp_request}")
+            response = requests.post(
+                connection_config.url,
+                json=mcp_request,
+                headers=headers,
+                timeout=timeout
+            )
+
+            logger.info(f"[MCP Session] Initialize response status: {response.status_code}")
+            if response.status_code == 200:
+                # Parse the response to extract sessionId
+                content_type = response.headers.get('Content-Type', '')
+                logger.debug(f"[MCP Session] Response Content-Type: {content_type}")
+                
+                if 'text/event-stream' in content_type:
+                    data = cls._parse_sse_response(response.text)
+                elif 'application/json' in content_type:
+                    data = response.json()
+                else:
+                    logger.warning(f"[MCP Session] Unexpected Content-Type during initialize: {content_type}")
+                    logger.debug(f"[MCP Session] Response text: {response.text[:500]}")
+                    return None
+
+                logger.debug(f"[MCP Session] Parsed response: {data}")
+                
+                # Extract sessionId from response
+                result = data.get("result", {})
+                session_id = result.get("sessionId")
+                if session_id:
+                    logger.info(f"[MCP Session] ✓ Session initialized for '{toolkit_name}': {session_id}")
+                    logger.info(f"[MCP Session] This sessionId should be stored by the caller and sent back for subsequent requests")
+                    return session_id
+                else:
+                    logger.info(f"[MCP Session] No sessionId in initialize response for '{toolkit_name}' - server may not require sessions")
+                    logger.debug(f"[MCP Session] Full result: {result}")
+                    return None
+            else:
+                logger.warning(f"[MCP Session] Initialize returned {response.status_code} for '{toolkit_name}' - server may not support sessions")
+                logger.debug(f"[MCP Session] Response: {response.text[:500]}")
+                return None
+
+        except Exception as e:
+            logger.warning(f"[MCP Session] Failed to initialize MCP session for '{toolkit_name}': {e} - proceeding without session")
+            import traceback
+            logger.debug(f"[MCP Session] Traceback: {traceback.format_exc()}")
+            return None
 
     @classmethod
     def _discover_mcp_endpoint(
@@ -512,7 +627,8 @@ class McpToolkit(BaseToolkit):
         endpoint: str,
         toolkit_name: str,
         connection_config: McpConnectionConfig,
-        timeout: int
+        timeout: int,
+        session_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Discover items from a specific MCP endpoint (tools/list or prompts/list).
@@ -535,10 +651,19 @@ class McpToolkit(BaseToolkit):
         if connection_config.headers:
             headers.update(connection_config.headers)
 
+        # Add sessionId to URL if provided (for stateful SSE servers)
+        url = connection_config.url
+        if session_id:
+            separator = '&' if '?' in url else '?'
+            url = f"{url}{separator}sessionId={session_id}"
+            logger.info(f"[MCP Session] Using session {session_id} for {endpoint} request")
+        else:
+            logger.debug(f"[MCP Session] No session ID available for {endpoint} request - server may not require sessions")
+
         try:
-            logger.debug(f"Sending MCP {endpoint} request to {connection_config.url}")
+            logger.debug(f"Sending MCP {endpoint} request to {url}")
             response = requests.post(
-                connection_config.url,
+                url,
                 json=mcp_request,
                 headers=headers,
                 timeout=timeout
@@ -643,7 +768,8 @@ class McpToolkit(BaseToolkit):
         toolkit_name: str,
         connection_config: McpConnectionConfig,
         timeout: int,
-        client
+        client,
+        session_id: Optional[str] = None
     ) -> Optional[BaseTool]:
         """Create a BaseTool from a tool/prompt dictionary (from direct HTTP discovery)."""
         try:
@@ -680,7 +806,8 @@ class McpToolkit(BaseToolkit):
                 tool_timeout_sec=timeout,
                 is_prompt=is_prompt,
                 prompt_name=tool_dict.get("_mcp_prompt_name") if is_prompt else None,
-                original_tool_name=tool_dict.get('name')  # Store original name for MCP server invocation
+                original_tool_name=tool_dict.get('name'),  # Store original name for MCP server invocation
+                session_id=session_id  # Pass session ID for stateful SSE servers
             )
         except Exception as e:
             logger.error(f"Failed to create MCP tool '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {e}")

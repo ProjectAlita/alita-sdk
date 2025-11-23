@@ -113,13 +113,41 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 settings = dict(tool['settings'])
                 url = settings.get('url')
                 headers = settings.get('headers')
-                token = None
+                token_data = None
+                session_id = None
                 if mcp_tokens and url:
-                    token = mcp_tokens.get(canonical_resource(url))
-                if token:
+                    canonical_url = canonical_resource(url)
+                    logger.info(f"[MCP Auth] Looking for token for URL: {url}")
+                    logger.info(f"[MCP Auth] Canonical URL: {canonical_url}")
+                    logger.info(f"[MCP Auth] Available tokens: {list(mcp_tokens.keys())}")
+                    token_data = mcp_tokens.get(canonical_url)
+                    if token_data:
+                        logger.info(f"[MCP Auth] Found token data for {canonical_url}")
+                        # Handle both old format (string) and new format (dict with access_token and session_id)
+                        if isinstance(token_data, dict):
+                            access_token = token_data.get('access_token')
+                            session_id = token_data.get('session_id')
+                            logger.info(f"[MCP Auth] Token data: access_token={'present' if access_token else 'missing'}, session_id={session_id or 'none'}")
+                        else:
+                            # Backward compatibility: treat as plain token string
+                            access_token = token_data
+                            logger.info(f"[MCP Auth] Using legacy token format (string)")
+                    else:
+                        access_token = None
+                        logger.warning(f"[MCP Auth] No token found for {canonical_url}")
+                else:
+                    access_token = None
+                    
+                if access_token:
                     merged_headers = dict(headers) if headers else {}
-                    merged_headers.setdefault('Authorization', f'Bearer {token}')
+                    merged_headers.setdefault('Authorization', f'Bearer {access_token}')
                     settings['headers'] = merged_headers
+                    logger.info(f"[MCP Auth] Added Authorization header for {url}")
+                    
+                # Pass session_id to MCP toolkit if available
+                if session_id:
+                    settings['session_id'] = session_id
+                    logger.info(f"[MCP Auth] Passing session_id to toolkit: {session_id}")
                 tools.extend(McpToolkit.get_toolkit(
                     toolkit_name=tool.get('toolkit_name', ''),
                     client=alita_client,

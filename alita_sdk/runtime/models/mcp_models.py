@@ -19,6 +19,10 @@ class McpConnectionConfig(BaseModel):
         default=None,
         description="HTTP headers for the connection (JSON object)"
     )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="MCP session ID for stateful SSE servers (managed by client)"
+    )
 
     @validator('url')
     def validate_url(cls, v):
