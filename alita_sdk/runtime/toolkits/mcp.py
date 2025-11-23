@@ -402,7 +402,13 @@ class McpToolkit(BaseToolkit):
                 ]
 
             # Create BaseTool instances from discovered metadata
-            # Use session_id from connection_config (passed from UI) instead of discovery
+            # Use session_id from discovery (which may have been created if server requires it)
+            # If discovery returned a session_id, it means a new session was created
+            # Log it so UI can capture and store it
+            if session_id:
+                logger.info(f"[MCP Session] Using session from discovery: {session_id}")
+                logger.info(f"[MCP Session] Session created - server: {canonical_resource(connection_config.url)}, session_id: {session_id}")
+            
             for tool_metadata in tool_metadata_list:
                 server_tool = cls._create_tool_from_dict(
                     tool_dict=tool_metadata,
@@ -410,7 +416,7 @@ class McpToolkit(BaseToolkit):
                     connection_config=connection_config,
                     timeout=timeout,
                     client=client,
-                    session_id=connection_config.session_id  # Use session from connection config
+                    session_id=session_id  # Use session from discovery
                 )
 
                 if server_tool:
@@ -462,20 +468,47 @@ class McpToolkit(BaseToolkit):
         """
         all_tools = []
         
-        # Note: We don't initialize MCP session here because:
-        # 1. Discovery happens before we have OAuth tokens
-        # 2. Sessions are initialized on-demand during first tool call (when we have auth)
-        # 3. Sessions are stored in UI sessionStorage and passed back via mcp_tokens
-        session_id = None
+        # Check if we have a session_id from UI (passed via connection_config)
+        # If not, we'll try discovery without session first, and create one if needed
+        session_id = connection_config.session_id
         
-        # Discover regular tools
-        tools_data = cls._discover_mcp_endpoint(
-            endpoint="tools/list",
-            toolkit_name=toolkit_name,
-            connection_config=connection_config,
-            timeout=timeout,
-            session_id=session_id
-        )
+        # Discover regular tools - if server requires session and we don't have one, this will fail
+        # and we'll catch it below to initialize a session
+        try:
+            tools_data = cls._discover_mcp_endpoint(
+                endpoint="tools/list",
+                toolkit_name=toolkit_name,
+                connection_config=connection_config,
+                timeout=timeout,
+                session_id=session_id
+            )
+        except Exception as discovery_error:
+            # Check if error is due to missing session
+            if "Missing sessionId" in str(discovery_error) and not session_id:
+                logger.info(f"[MCP Session] Server requires session for discovery, initializing...")
+                # Try to initialize session if we have OAuth headers
+                session_id = cls._initialize_mcp_session(
+                    toolkit_name=toolkit_name,
+                    connection_config=connection_config,
+                    timeout=timeout,
+                    extra_headers=connection_config.headers  # Use headers from connection_config
+                )
+                
+                if session_id:
+                    logger.info(f"[MCP Session] Created session for discovery: {session_id}")
+                    # Retry discovery with session
+                    tools_data = cls._discover_mcp_endpoint(
+                        endpoint="tools/list",
+                        toolkit_name=toolkit_name,
+                        connection_config=connection_config,
+                        timeout=timeout,
+                        session_id=session_id
+                    )
+                else:
+                    logger.error(f"[MCP Session] Failed to create session for discovery")
+                    raise discovery_error
+            else:
+                raise
         all_tools.extend(tools_data)
         logger.info(f"Discovered {len(tools_data)} tools from MCP toolkit '{toolkit_name}'")
         
