@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
 from .mcp_server_tool import McpServerTool
-from pydantic import Field, computed_field
+from pydantic import Field
 from ..utils.mcp_oauth import (
     McpAuthorizationRequired,
     canonical_resource,
@@ -38,11 +38,20 @@ class McpRemoteTool(McpServerTool):
     prompt_name: Optional[str] = None  # Original prompt name if this is a prompt
     session_id: Optional[str] = Field(default=None, description="MCP session ID for stateful SSE servers")
     
-    @computed_field
-    @property
-    def metadata(self) -> dict:
-        """Return tool metadata including session information for UI."""
-        return self.get_session_metadata()
+    def model_post_init(self, __context: Any) -> None:
+        """Update metadata with session info after model initialization."""
+        super().model_post_init(__context)
+        self._update_metadata_with_session()
+    
+    def _update_metadata_with_session(self):
+        """Update the metadata dict with current session information."""
+        if self.session_id:
+            if self.metadata is None:
+                self.metadata = {}
+            self.metadata.update({
+                'mcp_session_id': self.session_id,
+                'mcp_server_url': canonical_resource(self.server_url)
+            })
     
     def __getstate__(self):
         """Custom serialization for pickle compatibility."""
@@ -201,6 +210,8 @@ class McpRemoteTool(McpServerTool):
                             if session_id:
                                 # Retry the request with session
                                 self.session_id = session_id
+                                # Update metadata so callbacks can access session info
+                                self._update_metadata_with_session()
                                 separator = '&' if '?' in self.server_url else '?'
                                 retry_url = f"{self.server_url}{separator}sessionId={session_id}"
                                 logger.info(f"[MCP Session] Retrying tool call with new session: {session_id}")
