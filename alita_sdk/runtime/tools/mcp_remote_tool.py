@@ -188,49 +188,11 @@ class McpRemoteTool(McpServerTool):
                         error_text = await response.text()
                         
                         # Check if this is a "Missing sessionId" error
-                        if response.status == 404 and "sessionId" in error_text and not self.session_id:
-                            logger.info(f"[MCP Session] Server requires session but none provided - attempting to initialize")
-                            # Try to initialize session with current auth headers
-                            from ..toolkits.mcp import McpToolkit
-                            from ..models.mcp_models import McpConnectionConfig
-                            
-                            connection_config = McpConnectionConfig(
-                                url=self.server_url,
-                                headers=self.server_headers
-                            )
-                            
-                            # Initialize session with auth headers
-                            session_id = McpToolkit._initialize_mcp_session(
-                                toolkit_name=self.server,
-                                connection_config=connection_config,
-                                timeout=self.tool_timeout_sec,
-                                extra_headers=headers  # Include Authorization header
-                            )
-                            
-                            if session_id:
-                                # Retry the request with session
-                                self.session_id = session_id
-                                # Update metadata so callbacks can access session info
-                                self._update_metadata_with_session()
-                                separator = '&' if '?' in self.server_url else '?'
-                                retry_url = f"{self.server_url}{separator}sessionId={session_id}"
-                                logger.info(f"[MCP Session] Retrying tool call with new session: {session_id}")
-                                logger.info(f"[MCP Session] Created session - server: {canonical_resource(self.server_url)}, session_id: {session_id}")
-                                
-                                async with session.post(retry_url, json=mcp_request, headers=headers) as retry_response:
-                                    if retry_response.status != 200:
-                                        retry_error = await retry_response.text()
-                                        raise Exception(f"HTTP {retry_response.status} (after session init): {retry_error}")
-                                    
-                                    # Process successful retry response
-                                    content_type = retry_response.headers.get('Content-Type', '')
-                                    if 'text/event-stream' in content_type:
-                                        text = await retry_response.text()
-                                        data = self._parse_sse(text)
-                                    else:
-                                        data = await retry_response.json()
-                            else:
-                                raise Exception(f"HTTP {response.status}: {error_text} (session initialization failed)")
+                        if response.status == 404 and "sessionId" in error_text:
+                            logger.error(f"[MCP Session] Server requires session but none provided")
+                            logger.error(f"[MCP Session] Frontend must generate a UUID and send it with mcp_tokens")
+                            logger.error(f"[MCP Session] Example: mcp_tokens = {{'server_url': {{'access_token': '...', 'session_id': crypto.randomUUID()}}}}")
+                            raise Exception(f"HTTP {response.status}: {error_text} - sessionId required but not provided by frontend")
                         else:
                             raise Exception(f"HTTP {response.status}: {error_text}")
                     
