@@ -18,6 +18,7 @@ from ..utils.mcp_oauth import (
     canonical_resource,
     extract_resource_metadata_url,
     fetch_resource_metadata_async,
+    infer_authorization_servers_from_realm,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,17 @@ class McpRemoteTool(McpServerTool):
                                 session=session,
                                 timeout=self.tool_timeout_sec,
                             )
+                        
+                        # If we couldn't get metadata from the resource_metadata endpoint,
+                        # infer authorization servers from the WWW-Authenticate header and server URL
+                        if not metadata or not metadata.get('authorization_servers'):
+                            inferred_servers = infer_authorization_servers_from_realm(auth_header, self.server_url)
+                            if inferred_servers:
+                                if not metadata:
+                                    metadata = {}
+                                metadata['authorization_servers'] = inferred_servers
+                                logger.info(f"Inferred authorization servers for {self.server_url}: {inferred_servers}")
+                        
                         raise McpAuthorizationRequired(
                             message=f"MCP server {self.server_url} requires OAuth authorization",
                             server_url=canonical_resource(self.server_url),

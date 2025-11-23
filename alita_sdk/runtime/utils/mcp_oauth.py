@@ -46,7 +46,7 @@ class McpAuthorizationRequired(ToolException):
 def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: Optional[str] = None) -> Optional[str]:
     """
     Pull the resource_metadata URL from a WWW-Authenticate header if present.
-    If not found and server_url is provided, construct the standard .well-known URL.
+    If not found and server_url is provided, try to construct resource metadata URLs.
     """
     if not www_authenticate and not server_url:
         return None
@@ -57,14 +57,45 @@ def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: O
         if match:
             return match.group(1)
     
-    # Fallback: construct standard .well-known URL if server_url provided
-    if server_url:
-        parsed = urlparse(server_url)
-        # Build the standard resource metadata URL
-        base_url = f"{parsed.scheme}://{parsed.netloc}"
-        return f"{base_url}/.well-known/resource-metadata"
-    
+    # For servers that don't provide resource_metadata in WWW-Authenticate,
+    # we'll return None and rely on inferring authorization servers from the realm
+    # or using well-known OAuth discovery endpoints directly
     return None
+
+
+def infer_authorization_servers_from_realm(www_authenticate: Optional[str], server_url: str) -> Optional[list]:
+    """
+    Infer authorization server URLs from WWW-Authenticate realm or server URL.
+    This is used when the server doesn't provide resource_metadata endpoint.
+    """
+    if not www_authenticate and not server_url:
+        return None
+    
+    authorization_servers = []
+    
+    # Try to extract realm from WWW-Authenticate header
+    realm = None
+    if www_authenticate:
+        realm_match = re.search(r'realm\s*=\s*\"([^\"]+)\"', www_authenticate)
+        if realm_match:
+            realm = realm_match.group(1)
+    
+    # Parse the server URL to get base domain
+    parsed = urlparse(server_url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    
+    # For OAuth 2.1 / OpenID Connect, try standard well-known endpoints
+    # These are the most common discovery endpoints
+    if realm and realm.lower() == "oauth":
+        # Standard OAuth 2.0 / 2.1 discovery endpoints
+        authorization_servers.append(f"{base_url}/.well-known/oauth-authorization-server")
+        authorization_servers.append(f"{base_url}/.well-known/openid-configuration")
+    else:
+        # If no realm or different realm, still try standard endpoints
+        authorization_servers.append(f"{base_url}/.well-known/oauth-authorization-server")
+        authorization_servers.append(f"{base_url}/.well-known/openid-configuration")
+    
+    return authorization_servers if authorization_servers else None
 
 
 def fetch_resource_metadata(resource_metadata_url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
