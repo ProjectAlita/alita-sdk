@@ -29,13 +29,14 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
         
     Raises:
         ValueError: If required configuration or client is missing
+        McpAuthorizationRequired: If MCP server requires OAuth authorization
         Exception: If toolkit instantiation fails
     """
+    toolkit_name = toolkit_config.get('toolkit_name', 'unknown')
     try:
         from ..toolkits.tools import get_tools
         
-        toolkit_name = toolkit_config.get('toolkit_name')
-        if not toolkit_name:
+        if not toolkit_name or toolkit_name == 'unknown':
             raise ValueError("toolkit_name is required in configuration")
         
         if not llm_client:
@@ -70,6 +71,12 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
         return tools
             
     except Exception as e:
+        # Re-raise McpAuthorizationRequired without logging as error
+        from ..utils.mcp_oauth import McpAuthorizationRequired
+        if isinstance(e, McpAuthorizationRequired):
+            logger.info(f"Toolkit {toolkit_name} requires MCP OAuth authorization")
+            raise
+        # Log and re-raise other errors
         logger.error(f"Error instantiating toolkit {toolkit_name} with client: {str(e)}")
         raise
 

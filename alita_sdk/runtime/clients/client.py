@@ -756,7 +756,23 @@ class AlitaClient:
                 }
 
             # Instantiate the toolkit with client and LLM support
-            tools = instantiate_toolkit_with_client(toolkit_config, llm, self)
+            try:
+                tools = instantiate_toolkit_with_client(toolkit_config, llm, self)
+            except Exception as toolkit_error:
+                # Re-raise McpAuthorizationRequired to allow proper handling upstream
+                from ..utils.mcp_oauth import McpAuthorizationRequired
+                if isinstance(toolkit_error, McpAuthorizationRequired):
+                    raise
+                # For other errors, return error response
+                return {
+                    "success": False,
+                    "error": f"Failed to instantiate toolkit '{toolkit_config.get('toolkit_name')}': {str(toolkit_error)}",
+                    "tool_name": tool_name,
+                    "toolkit_config": toolkit_config_parsed_json,
+                    "llm_model": llm_model,
+                    "events_dispatched": events_dispatched,
+                    "execution_time_seconds": 0.0
+                }
 
             if not tools:
                 return {
