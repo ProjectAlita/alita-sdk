@@ -558,6 +558,14 @@ class McpToolkit(BaseToolkit):
                             metadata = {}
                         metadata['authorization_servers'] = inferred_servers
                         logger.info(f"Inferred authorization servers for {connection_config.url}: {inferred_servers}")
+                        
+                        # Fetch OAuth authorization server metadata from the inferred server
+                        # This avoids CORS issues in the frontend
+                        from alita_sdk.runtime.utils.mcp_oauth import fetch_oauth_authorization_server_metadata
+                        auth_server_metadata = fetch_oauth_authorization_server_metadata(inferred_servers[0], timeout=timeout)
+                        if auth_server_metadata:
+                            metadata['oauth_authorization_server'] = auth_server_metadata
+                            logger.info(f"Fetched OAuth metadata for {inferred_servers[0]}")
                 
                 raise McpAuthorizationRequired(
                     message=f"MCP server {connection_config.url} requires OAuth authorization",

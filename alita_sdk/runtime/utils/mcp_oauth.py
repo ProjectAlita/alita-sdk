@@ -63,6 +63,28 @@ def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: O
     return None
 
 
+def fetch_oauth_authorization_server_metadata(base_url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+    """
+    Fetch OAuth authorization server metadata from well-known endpoints.
+    Tries both oauth-authorization-server and openid-configuration discovery endpoints.
+    """
+    discovery_endpoints = [
+        f"{base_url}/.well-known/oauth-authorization-server",
+        f"{base_url}/.well-known/openid-configuration",
+    ]
+    
+    for endpoint in discovery_endpoints:
+        try:
+            resp = requests.get(endpoint, timeout=timeout)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as exc:
+            logger.debug(f"Failed to fetch OAuth metadata from {endpoint}: {exc}")
+            continue
+    
+    return None
+
+
 def infer_authorization_servers_from_realm(www_authenticate: Optional[str], server_url: str) -> Optional[list]:
     """
     Infer authorization server URLs from WWW-Authenticate realm or server URL.
@@ -84,16 +106,9 @@ def infer_authorization_servers_from_realm(www_authenticate: Optional[str], serv
     parsed = urlparse(server_url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     
-    # For OAuth 2.1 / OpenID Connect, try standard well-known endpoints
-    # These are the most common discovery endpoints
-    if realm and realm.lower() == "oauth":
-        # Standard OAuth 2.0 / 2.1 discovery endpoints
-        authorization_servers.append(f"{base_url}/.well-known/oauth-authorization-server")
-        authorization_servers.append(f"{base_url}/.well-known/openid-configuration")
-    else:
-        # If no realm or different realm, still try standard endpoints
-        authorization_servers.append(f"{base_url}/.well-known/oauth-authorization-server")
-        authorization_servers.append(f"{base_url}/.well-known/openid-configuration")
+    # Return the base authorization server URL (not the discovery endpoint)
+    # The client will append .well-known paths when fetching metadata
+    authorization_servers.append(base_url)
     
     return authorization_servers if authorization_servers else None
 

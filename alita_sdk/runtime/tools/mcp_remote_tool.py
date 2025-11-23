@@ -140,6 +140,14 @@ class McpRemoteTool(McpServerTool):
                                     metadata = {}
                                 metadata['authorization_servers'] = inferred_servers
                                 logger.info(f"Inferred authorization servers for {self.server_url}: {inferred_servers}")
+                                
+                                # Fetch OAuth authorization server metadata from the inferred server
+                                # This avoids CORS issues in the frontend
+                                from alita_sdk.runtime.utils.mcp_oauth import fetch_oauth_authorization_server_metadata
+                                auth_server_metadata = fetch_oauth_authorization_server_metadata(inferred_servers[0], timeout=self.tool_timeout_sec)
+                                if auth_server_metadata:
+                                    metadata['oauth_authorization_server'] = auth_server_metadata
+                                    logger.info(f"Fetched OAuth metadata for {inferred_servers[0]}")
                         
                         raise McpAuthorizationRequired(
                             message=f"MCP server {self.server_url} requires OAuth authorization",
