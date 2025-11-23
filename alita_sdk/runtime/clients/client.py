@@ -303,7 +303,7 @@ class AlitaClient:
                     app_type=None, memory=None, runtime='langchain',
                     application_variables: Optional[dict] = None,
                     version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
-                    llm: Optional[ChatOpenAI] = None):
+                    llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -344,11 +344,11 @@ class AlitaClient:
             app_type = "react"
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
-                                      tools=tools, memory=memory, store=store)
+                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
-                                      tools=tools, memory=memory, store=store).runnable()
+                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 
@@ -568,7 +568,8 @@ class AlitaClient:
     def predict_agent(self, llm: ChatOpenAI, instructions: str = "You are a helpful assistant.",
                       tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                       memory=None, runtime='langchain', variables: Optional[list] = None,
-                      store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False):
+                      store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False,
+                      mcp_tokens: Optional[dict] = None):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -604,8 +605,17 @@ class AlitaClient:
             'tools': tools,  # Tool configs that will be processed by get_tools()
             'variables': variables
         }
-        return LangChainAssistant(self, agent_data, llm,
-                                  chat_history, "predict", memory=memory, store=store, debug_mode=debug_mode).runnable()
+        return LangChainAssistant(
+            self,
+            agent_data,
+            llm,
+            chat_history,
+            "predict",
+            memory=memory,
+            store=store,
+            debug_mode=debug_mode,
+            mcp_tokens=mcp_tokens
+        ).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,
                           runtime_config: dict = None, llm_model: str = None,

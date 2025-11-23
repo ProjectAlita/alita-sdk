@@ -17,6 +17,12 @@ from ..tools.mcp_remote_tool import McpRemoteTool
 from ..tools.mcp_inspect_tool import McpInspectTool
 from ...tools.utils import TOOLKIT_SPLITTER, clean_string
 from ..models.mcp_models import McpConnectionConfig
+from ..utils.mcp_oauth import (
+    McpAuthorizationRequired,
+    canonical_resource,
+    extract_resource_metadata_url,
+    fetch_resource_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -409,6 +415,9 @@ class McpToolkit(BaseToolkit):
             logger.error(f"Discovery error details - URL: {connection_config.url}, Timeout: {timeout}s")
 
             # Fallback to static mode if available and not already static
+            if isinstance(e, McpAuthorizationRequired):
+                # Authorization is required; surface upstream so the caller can prompt the user
+                raise
             if client and discovery_mode != "static":
                 logger.info(f"Falling back to static discovery for toolkit '{toolkit_name}'")
                 tools = cls._create_tools_static(toolkit_name, selected_tools, timeout, client)
@@ -533,6 +542,19 @@ class McpToolkit(BaseToolkit):
                 headers=headers,
                 timeout=timeout
             )
+
+            auth_header = response.headers.get('WWW-Authenticate', '')
+            if response.status_code == 401:
+                resource_metadata_url = extract_resource_metadata_url(auth_header)
+                metadata = fetch_resource_metadata(resource_metadata_url, timeout=timeout) if resource_metadata_url else None
+                raise McpAuthorizationRequired(
+                    message=f"MCP server {connection_config.url} requires OAuth authorization",
+                    server_url=canonical_resource(connection_config.url),
+                    resource_metadata_url=resource_metadata_url,
+                    www_authenticate=auth_header,
+                    resource_metadata=metadata,
+                    status=response.status_code,
+                )
 
             if response.status_code != 200:
                 logger.error(f"MCP server returned non-200 status: {response.status_code}")

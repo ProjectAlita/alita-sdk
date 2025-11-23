@@ -19,6 +19,7 @@ from ..tools.image_generation import ImageGenerationToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
+from ..utils.mcp_oauth import canonical_resource
 from ...tools.utils import TOOLKIT_SPLITTER
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ def get_toolkits():
     return core_toolkits + community_toolkits() + alita_toolkits()
 
 
-def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = None, debug_mode: Optional[bool] = False) -> list:
+def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None) -> list:
     prompts = []
     tools = []
 
@@ -109,10 +110,20 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     toolkit_name=tool.get('toolkit_name', ''),
                     **tool['settings']).get_tools())
             elif tool['type'] == 'mcp':
+                settings = dict(tool['settings'])
+                url = settings.get('url')
+                headers = settings.get('headers')
+                token = None
+                if mcp_tokens and url:
+                    token = mcp_tokens.get(canonical_resource(url))
+                if token:
+                    merged_headers = dict(headers) if headers else {}
+                    merged_headers.setdefault('Authorization', f'Bearer {token}')
+                    settings['headers'] = merged_headers
                 tools.extend(McpToolkit.get_toolkit(
                     toolkit_name=tool.get('toolkit_name', ''),
                     client=alita_client,
-                    **tool['settings']).get_tools())
+                    **settings).get_tools())
         except Exception as e:
             logger.error(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}", exc_info=True)
             if debug_mode:

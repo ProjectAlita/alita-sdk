@@ -13,6 +13,12 @@ from typing import Any, Dict, Optional
 
 from .mcp_server_tool import McpServerTool
 from pydantic import Field
+from ..utils.mcp_oauth import (
+    McpAuthorizationRequired,
+    canonical_resource,
+    extract_resource_metadata_url,
+    fetch_resource_metadata_async,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +54,9 @@ class McpRemoteTool(McpServerTool):
             with ThreadPoolExecutor() as executor:
                 future = executor.submit(self._run_in_new_loop, kwargs)
                 return future.result(timeout=self.tool_timeout_sec)
+        except McpAuthorizationRequired:
+            # Bubble up so LangChain can surface a tool error with useful metadata
+            raise
         except Exception as e:
             logger.error(f"Error executing remote MCP tool '{self.name}': {e}")
             return f"Error executing tool: {e}"
@@ -110,6 +119,25 @@ class McpRemoteTool(McpServerTool):
                 logger.debug(f"Request: {json.dumps(mcp_request, indent=2)}")
                 
                 async with session.post(self.server_url, json=mcp_request, headers=headers) as response:
+                    auth_header = response.headers.get('WWW-Authenticate') or response.headers.get('Www-Authenticate')
+                    if response.status == 401:
+                        resource_metadata_url = extract_resource_metadata_url(auth_header)
+                        metadata = None
+                        if resource_metadata_url:
+                            metadata = await fetch_resource_metadata_async(
+                                resource_metadata_url,
+                                session=session,
+                                timeout=self.tool_timeout_sec,
+                            )
+                        raise McpAuthorizationRequired(
+                            message=f"MCP server {self.server_url} requires OAuth authorization",
+                            server_url=canonical_resource(self.server_url),
+                            resource_metadata_url=resource_metadata_url,
+                            www_authenticate=auth_header,
+                            resource_metadata=metadata,
+                            status=response.status,
+                        )
+
                     if response.status != 200:
                         error_text = await response.text()
                         raise Exception(f"HTTP {response.status}: {error_text}")
