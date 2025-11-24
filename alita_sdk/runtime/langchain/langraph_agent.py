@@ -475,10 +475,10 @@ def create_graph(
             if toolkit_name:
                 tool_name = f"{clean_string(toolkit_name)}{TOOLKIT_SPLITTER}{tool_name}"
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-            if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
+            if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
                 for tool in tools:
                     if tool.name == tool_name:
-                        if node_type == 'function':
+                        if node_type in ['function', 'toolkit', 'mcp']:
                             lg_builder.add_node(node_id, FunctionTool(
                                 tool=tool, name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
