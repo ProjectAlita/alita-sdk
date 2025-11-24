@@ -470,6 +470,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "collection": index_name,
                 "type": IndexerKeywords.INDEX_META_TYPE.value,
                 "indexed": 0,
+                "updated": 0,
                 "state": IndexerKeywords.INDEX_META_IN_PROGRESS.value,
                 "index_configuration": index_configuration,
                 "created_on": created_on,
@@ -487,7 +488,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         #
         if index_meta_raw:
             metadata = copy.deepcopy(index_meta_raw.get("metadata", {}))
-            metadata["indexed"] = result
+            metadata["indexed"] = self.get_indexed_count(index_name)
+            metadata["updated"] = result
             metadata["state"] = state
             metadata["updated_on"] = time.time()
             #

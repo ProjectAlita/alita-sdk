@@ -1,9 +1,9 @@
 import json
-import math
 from collections import OrderedDict
 from logging import getLogger
 from typing import Any, Optional, List, Dict, Generator
 
+import math
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import ToolException
@@ -12,7 +12,7 @@ from pydantic import BaseModel, model_validator, Field
 
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from alita_sdk.tools.vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
-from ..utils.logging import dispatch_custom_event
+from ...runtime.utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
 
@@ -221,6 +221,21 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         if len(index_metas) > 1:
             raise RuntimeError(f"Multiple index_meta documents found: {index_metas}")
         return index_metas[0] if index_metas else None
+
+    def get_indexed_count(self, index_name: str) -> int:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import func, or_
+
+        with Session(self.vectorstore.session_maker.bind) as session:
+            return session.query(
+                self.vectorstore.EmbeddingStore.id,
+            ).filter(
+                func.jsonb_extract_path_text(self.vectorstore.EmbeddingStore.cmetadata, 'collection') == index_name,
+                or_(
+                    func.jsonb_extract_path_text(self.vectorstore.EmbeddingStore.cmetadata, 'type').is_(None),
+                    func.jsonb_extract_path_text(self.vectorstore.EmbeddingStore.cmetadata, 'type') != IndexerKeywords.INDEX_META_TYPE.value
+                )
+            ).count()
 
     def _clean_collection(self, index_name: str = ''):
         """
