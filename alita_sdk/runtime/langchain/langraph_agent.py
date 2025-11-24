@@ -663,7 +663,7 @@ def create_graph(
                 lg_builder.add_node(reset_node_id, PrinterNode(
                     input_mapping={'printer': {'type': 'fixed', 'value': ''}}
                 ))
-                lg_builder.add_edge(node_id, reset_node_id)
+                lg_builder.add_conditional_edges(node_id, TransitionalEdge(reset_node_id))
                 lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
                 continue
             if node.get('transition'):
