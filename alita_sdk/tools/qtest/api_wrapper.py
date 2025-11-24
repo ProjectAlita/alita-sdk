@@ -5,6 +5,7 @@ import re
 from traceback import format_exc
 from typing import Any, Optional
 
+import requests
 import swagger_client
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
@@ -194,11 +195,11 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def __get_field_definitions_cached(self) -> dict:
         """Get field definitions with session-level caching.
-        
+
         Field definitions are cached for the lifetime of this wrapper instance.
         If project field configuration changes, call refresh_field_definitions_cache()
         to reload the definitions.
-        
+
         Returns:
             dict: Field definitions mapping
         """
@@ -208,11 +209,11 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def refresh_field_definitions_cache(self) -> dict:
         """Manually refresh the field definitions cache.
-        
+
         Call this method if project field configuration has been updated
         (new fields added, dropdown values changed, etc.) and you need to
         reload the definitions within the same agent session.
-        
+
         Returns:
             dict: Freshly loaded field definitions
         """
@@ -223,15 +224,15 @@ class QtestApiWrapper(BaseToolApiWrapper):
                                        base_properties: list = None) -> list:
         """
         Convert user-friendly property names/values to QTest API PropertyResource format.
-        
+
         Args:
             test_case_data: Dict with property names as keys (e.g., {"Status": "New", "Priority": "High"})
             field_definitions: Output from __get_project_field_definitions()
             base_properties: Existing properties from a test case (for updates, optional)
-            
+
         Returns:
             list[PropertyResource]: Properties ready for API submission
-            
+
         Raises:
             ValueError: If any field names are unknown or values are invalid (shows ALL errors)
         """
@@ -247,32 +248,32 @@ class QtestApiWrapper(BaseToolApiWrapper):
                         'field_value': prop['field_value'],
                         'field_value_name': prop.get('field_value_name')
                     }
-        
+
         # Collect ALL validation errors before raising
         validation_errors = []
-        
+
         # Map incoming properties from test_case_data
         for field_name, field_value in test_case_data.items():
             # Skip non-property fields (these are handled separately)
             if field_name in ['Name', 'Description', 'Precondition', 'Steps', 'Id', QTEST_ID]:
                 continue
-            
+
             # Skip None or empty string values (don't update these fields)
             if field_value is None or field_value == '':
                 continue
-            
+
             # Validate field exists in project - STRICT validation
             if field_name not in field_definitions:
                 validation_errors.append(
                     f"❌ Unknown field '{field_name}' - not defined in project configuration"
                 )
                 continue  # Skip to next field, keep collecting errors
-            
+
             field_def = field_definitions[field_name]
             field_id = field_def['field_id']
             data_type = field_def.get('data_type')
             is_multiple = field_def.get('multiple', False)
-            
+
             # Normalize field_value to list for consistent processing
             # Multi-select fields can receive: "value", ["value1", "value2"], or ["value1"]
             # Single-select fields: "value" only
@@ -282,13 +283,13 @@ class QtestApiWrapper(BaseToolApiWrapper):
             else:
                 # Single-select: keep as single value
                 values_to_process = [field_value]
-            
+
             # Validate value(s) for dropdown fields (only if field has allowed values)
             if field_def['values']:
                 # Field has allowed values (dropdown/combobox/user fields) - validate strictly
                 value_ids = []
                 value_names = []
-                
+
                 for single_value in values_to_process:
                     if single_value not in field_def['values']:
                         available = ", ".join(sorted(field_def['values'].keys()))
@@ -297,15 +298,15 @@ class QtestApiWrapper(BaseToolApiWrapper):
                             f"Allowed values: {available}"
                         )
                         continue  # Skip this value, but continue validating others
-                    
+
                     # Valid value - add to lists
                     value_ids.append(field_def['values'][single_value])
                     value_names.append(single_value)
-                
+
                 # If all values were invalid, skip this field
                 if not value_ids:
                     continue
-                
+
                 # Format based on field type and value count
                 if is_multiple and len(value_ids) == 1:
                     # Single value in multi-select field: bracketed string "[419950]"
@@ -326,7 +327,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 # No validation needed - users can write anything (by design)
                 field_value_id = field_value
                 field_value_name = field_value if isinstance(field_value, str) else None
-            
+
             # Update or add property (only if no errors for this field)
             props_dict[field_name] = {
                 'field_id': field_id,
@@ -334,7 +335,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 'field_value': field_value_id,
                 'field_value_name': field_value_name
             }
-        
+
         # If ANY validation errors found, raise comprehensive error with all issues
         if validation_errors:
             available_fields = ", ".join(sorted(field_definitions.keys()))
@@ -345,7 +346,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 f"💡 Tip: Use 'get_all_test_cases_fields_for_project' tool to see all fields with their allowed values."
             )
             raise ValueError(error_msg)
-        
+
         # Convert to PropertyResource list, filtering out special fields
         result = []
         for field_name, prop_data in props_dict.items():
@@ -357,25 +358,25 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 field_value=prop_data['field_value'],
                 field_value_name=prop_data.get('field_value_name')
             ))
-        
+
         return result
 
     def __build_body_for_create_test_case(self, test_cases_data: list[dict],
                                           folder_to_place_test_cases_to: str = '') -> list:
         # Get field definitions for property mapping (cached for session)
         field_definitions = self.__get_field_definitions_cached()
-        
+
         modules = self._parse_modules()
         parent_id = ''.join(str(module['module_id']) for module in modules if
                             folder_to_place_test_cases_to and module['full_module_name'] == folder_to_place_test_cases_to)
-        
+
         bodies = []
         for test_case in test_cases_data:
             # Map properties from user format to API format
             props = self.__map_properties_to_api_format(test_case, field_definitions)
-            
+
             body = swagger_client.TestCaseWithCustomFieldResource(properties=props)
-            
+
             # Only set fields if they are explicitly provided in the input
             # This prevents overwriting existing values with None during partial updates
             if 'Name' in test_case:
@@ -384,10 +385,10 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 body.precondition = test_case['Precondition']
             if 'Description' in test_case:
                 body.description = test_case['Description']
-            
+
             if parent_id:
                 body.parent_id = parent_id
-            
+
             # Only set test_steps if Steps are provided in the input
             # This prevents overwriting existing steps during partial updates
             if 'Steps' in test_case and test_case['Steps'] is not None:
@@ -397,7 +398,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
                         swagger_client.TestStepResource(description=step.get('Test Step Description'),
                                                         expected=step.get('Test Step Expected Result')))
                 body.test_steps = test_steps_resources
-            
+
             bodies.append(body)
         return bodies
 
@@ -414,10 +415,147 @@ class QtestApiWrapper(BaseToolApiWrapper):
                                 Exception: \n {stacktrace}""")
         return modules
 
+    def __get_field_definitions_from_properties_api(self) -> dict:
+        """
+        Fallback method: Get field definitions using /properties and /properties-info APIs.
+
+        These APIs don't require Field Management permission and are available to all users.
+        Requires 2 API calls + 1 search to get a test case ID.
+
+        Returns:
+            dict: Same structure as __get_project_field_definitions()
+        """
+        logger.info(
+            "Using properties API fallback (no Field Management permission). "
+            "This requires getting a template test case first."
+        )
+
+        # Step 1: Get any test case ID to query properties
+        search_instance = swagger_client.SearchApi(self._client)
+        body = swagger_client.ArtifactSearchParams(
+            object_type='test-cases',
+            fields=['*'],
+            query=''  # Empty query returns all test cases
+        )
+
+        try:
+            # Search for any test case - just need one
+            response = search_instance.search_artifact(
+                self.qtest_project_id,
+                body,
+                page_size=1,
+                page=1
+            )
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Failed to find test case for properties API: {stacktrace}")
+            raise ValueError(
+                f"Cannot find any test case to query field definitions. "
+                f"Please create at least one test case in project {self.qtest_project_id}"
+            ) from e
+
+        if not response or not response.get('items') or len(response['items']) == 0:
+            raise ValueError(
+                f"No test cases found in project {self.qtest_project_id}. "
+                f"Please create at least one test case to retrieve field definitions."
+            )
+
+        test_case_id = response['items'][0]['id']
+        logger.info(f"Using test case ID {test_case_id} to retrieve field definitions")
+
+        # Step 2: Call /properties API
+        headers = {
+            "Authorization": f"Bearer {self.qtest_api_token.get_secret_value()}"
+        }
+
+        properties_url = f"{self.base_url}/api/v3/projects/{self.qtest_project_id}/test-cases/{test_case_id}/properties"
+        properties_info_url = f"{self.base_url}/api/v3/projects/{self.qtest_project_id}/test-cases/{test_case_id}/properties-info"
+
+        try:
+            # Get properties with current values and field metadata
+            props_response = requests.get(
+                properties_url,
+                headers=headers,
+                params={'calledBy': 'testcase_properties'}
+            )
+            props_response.raise_for_status()
+            properties_data = props_response.json()
+
+            # Get properties-info with data types and allowed values
+            info_response = requests.get(properties_info_url, headers=headers)
+            info_response.raise_for_status()
+            info_data = info_response.json()
+
+        except requests.exceptions.RequestException as e:
+            stacktrace = format_exc()
+            logger.error(f"Failed to call properties API: {stacktrace}")
+            raise ValueError(
+                f"Unable to retrieve field definitions using properties API. "
+                f"Error: {stacktrace}"
+            ) from e
+
+        # Step 3: Build field mapping by merging both responses
+        field_mapping = {}
+
+        # Create lookup by field ID from properties-info
+        metadata_by_id = {item['id']: item for item in info_data['metadata']}
+
+        # Data type mapping to determine 'multiple' flag
+        MULTI_SELECT_TYPES = {
+            'UserListDataType',
+            'MultiSelectionDataType',
+            'CheckListDataType'
+        }
+
+        USER_FIELD_TYPES = {'UserListDataType'}
+
+        # System fields to exclude (same as in property mapping)
+        excluded_fields = {'Shared', 'Projects Shared to'}
+
+        for prop in properties_data:
+            field_name = prop.get('name')
+            field_id = prop.get('id')
+
+            if not field_name or field_name in excluded_fields:
+                continue
+
+            # Get metadata for this field
+            metadata = metadata_by_id.get(field_id, {})
+            data_type_str = metadata.get('data_type')
+
+            # Determine data_type number (5 for user fields, None for others)
+            data_type = 5 if data_type_str in USER_FIELD_TYPES else None
+
+            # Determine if multi-select
+            is_multiple = data_type_str in MULTI_SELECT_TYPES
+
+            field_mapping[field_name] = {
+                'field_id': field_id,
+                'required': prop.get('required', False),
+                'data_type': data_type,
+                'multiple': is_multiple,
+                'values': {}
+            }
+
+            # Map allowed values from metadata
+            allowed_values = metadata.get('allowed_values', [])
+            for allowed_val in allowed_values:
+                value_text = allowed_val.get('value_text')
+                value_id = allowed_val.get('id')
+                if value_text and value_id:
+                    field_mapping[field_name]['values'][value_text] = value_id
+
+        logger.info(
+            f"Retrieved {len(field_mapping)} field definitions using properties API. "
+            f"This method works for all users without Field Management permission."
+        )
+
+        return field_mapping
+
     def __get_project_field_definitions(self) -> dict:
         """
         Get structured field definitions for test cases in the project.
-        
+
         Returns:
             dict: Mapping of field names to their IDs and allowed values.
                   Example: {
@@ -435,15 +573,24 @@ class QtestApiWrapper(BaseToolApiWrapper):
         """
         fields_api = self.__instantiate_fields_api_instance()
         qtest_object = 'test-cases'
-        
+
         try:
             fields = fields_api.get_fields(self.qtest_project_id, qtest_object)
         except ApiException as e:
+            # Check if permission denied (403) - use fallback
+            if e.status == 403:
+                logger.warning(
+                    "get_fields permission denied (Field Management permission required). "
+                    "Using properties API fallback..."
+                )
+                return self.__get_field_definitions_from_properties_api()
+
+            # Other API errors
             stacktrace = format_exc()
             logger.error(f"Exception when calling FieldAPI->get_fields:\n {stacktrace}")
             raise ValueError(
                 f"Unable to get test case fields for project {self.qtest_project_id}. Exception: \n {stacktrace}")
-        
+
         # Build structured mapping
         field_mapping = {}
         for field in fields:
@@ -455,7 +602,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 'multiple': getattr(field, 'multiple', False),  # True = multi-select, needs array format
                 'values': {}
             }
-            
+
             # Map allowed values if field has them (dropdown/combobox/user fields)
             # Only include active values (is_active=True)
             if hasattr(field, 'allowed_values') and field.allowed_values:
@@ -463,38 +610,38 @@ class QtestApiWrapper(BaseToolApiWrapper):
                     # Skip inactive values (deleted/deprecated options)
                     if hasattr(allowed_value, 'is_active') and not allowed_value.is_active:
                         continue
-                    
+
                     # AllowedValueResource has 'label' for the display name and 'value' for the ID
                     # Note: 'value' is the field_value, not 'id'
                     # For user fields (data_type=5), label is user name and value is user ID
                     value_label = allowed_value.label
                     value_id = allowed_value.value
                     field_mapping[field_name]['values'][value_label] = value_id
-        
+
         return field_mapping
 
     def __format_field_info_for_display(self, field_definitions: dict) -> str:
         """
         Format field definitions in human-readable format for LLM.
-        
+
         Args:
             field_definitions: Output from __get_project_field_definitions()
-            
+
         Returns:
             Formatted string with field information
         """
         output = [f"Available Test Case Fields for Project {self.qtest_project_id}:\n"]
-        
+
         for field_name, field_info in sorted(field_definitions.items()):
             required_marker = " (Required)" if field_info.get('required') else ""
             output.append(f"\n{field_name}{required_marker}:")
-            
+
             if field_info.get('values'):
                 for value_name, value_id in sorted(field_info['values'].items()):
                     output.append(f"  - {value_name} (id: {value_id})")
             else:
                 output.append("  Type: text")
-        
+
         output.append("\n\nUse these exact value names when creating or updating test cases.")
         return ''.join(output)
 
@@ -502,12 +649,12 @@ class QtestApiWrapper(BaseToolApiWrapper):
         """
         Get formatted information about available test case fields and their values.
         This method is exposed as a tool for LLM to query field information.
-        
+
         Args:
             force_refresh: If True, reload field definitions from API instead of using cache.
                           Use this if project configuration has changed (new fields added,
                           dropdown values modified, etc.).
-        
+
         Returns:
             Formatted string with field names and allowed values
         """
@@ -555,10 +702,10 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def __parse_data(self, response_to_parse: dict, parsed_data: list, extract_images: bool=False, prompt: str=None):
         import html
-        
-        # Get field definitions to ensure all fields are included (uses cached version)
-        field_definitions = self.__get_field_definitions_cached()
-        
+
+        # PERMISSION-FREE: Parse properties directly from API response
+        # No get_fields call needed - works for all users
+
         for item in response_to_parse['items']:
             # Start with core fields (always present)
             parsed_data_row = {
@@ -573,31 +720,17 @@ class QtestApiWrapper(BaseToolApiWrapper):
                     'Test Step Expected Result':  self._process_image(step[1]['expected'], extract_images, prompt)
                 }, enumerate(item['test_steps']))),
             }
-            
-            # Dynamically add all custom fields from project configuration
-            # This ensures consistency and includes fields even if they have null/empty values
-            for field_name in field_definitions.keys():
-                field_def = field_definitions[field_name]
-                is_multiple = field_def.get('multiple', False)
-                
-                # Find the property value in the response (if exists)
-                field_value = None
-                for prop in item['properties']:
-                    if prop['field_name'] == field_name:
-                        # Use field_value_name if available (for dropdowns), otherwise field_value
-                        field_value = prop.get('field_value_name') or prop.get('field_value') or ''
-                        break
-                
-                # Format based on field type
-                if is_multiple and (field_value is None or field_value == ''):
-                    # Multi-select field with no value: show empty array with hint
-                    parsed_data_row[field_name] = '[] (multi-select)'
-                elif field_value is not None:
-                    parsed_data_row[field_name] = field_value
-                else:
-                    # Regular field with no value
-                    parsed_data_row[field_name] = ''
-            
+
+            # Add custom fields directly from API response properties
+            for prop in item['properties']:
+                field_name = prop.get('field_name')
+                if not field_name:
+                    continue
+
+                # Use field_value_name if available (for dropdowns/users), otherwise field_value
+                field_value = prop.get('field_value_name') or prop.get('field_value') or ''
+                parsed_data_row[field_name] = field_value
+
             parsed_data.append(parsed_data_row)
 
     def _process_image(self, content: str, extract: bool=False, prompt: str=None):
@@ -657,20 +790,20 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def __find_qtest_requirement_id_by_id(self, requirement_id: str) -> int:
         """Search for requirement's internal QTest ID using requirement ID (RQ-xxx format).
-        
+
         Args:
             requirement_id: Requirement ID in format RQ-123
-            
+
         Returns:
             int: Internal QTest ID for the requirement
-            
+
         Raises:
             ValueError: If requirement is not found
         """
         dql = f"Id = '{requirement_id}'"
         search_instance: SearchApi = swagger_client.SearchApi(self._client)
         body = swagger_client.ArtifactSearchParams(object_type='requirements', fields=['*'], query=dql)
-        
+
         try:
             response = search_instance.search_artifact(self.qtest_project_id, body)
             if response['total'] == 0:
@@ -705,13 +838,13 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def _get_jira_requirement_id(self, jira_issue_id: str) -> int:
         """Search for requirement id using the linked jira_issue_id.
-        
+
         Args:
             jira_issue_id: External Jira issue ID (e.g., PLAN-128)
-            
+
         Returns:
             int: Internal QTest ID for the Jira requirement
-            
+
         Raises:
             ValueError: If Jira requirement is not found in QTest
         """
@@ -726,11 +859,11 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def link_tests_to_jira_requirement(self, requirement_external_id: str, json_list_of_test_case_ids: str) -> str:
         """Link test cases to external Jira requirement.
-        
+
         Args:
             requirement_external_id: Jira issue ID (e.g., PLAN-128)
             json_list_of_test_case_ids: JSON array string of test case IDs (e.g., '["TC-123", "TC-234"]')
-            
+
         Returns:
             Success message with linked test case IDs
         """
@@ -743,10 +876,10 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
         try:
             response = link_object_api_instance.link_artifacts(
-                self.qtest_project_id, 
+                self.qtest_project_id,
                 object_id=requirement_id,
                 type=linked_type,
-                object_type=source_type, 
+                object_type=source_type,
                 body=qtest_test_case_ids
             )
             linked_test_cases = [link.pid for link in response[0].objects]
@@ -765,14 +898,14 @@ class QtestApiWrapper(BaseToolApiWrapper):
 
     def link_tests_to_qtest_requirement(self, requirement_id: str, json_list_of_test_case_ids: str) -> str:
         """Link test cases to internal QTest requirement.
-        
+
         Args:
             requirement_id: QTest requirement ID in format RQ-123
             json_list_of_test_case_ids: JSON array string of test case IDs (e.g., '["TC-123", "TC-234"]')
-            
+
         Returns:
             Success message with linked test case IDs
-            
+
         Raises:
             ValueError: If requirement or test cases are not found
             ToolException: If linking fails
@@ -780,11 +913,11 @@ class QtestApiWrapper(BaseToolApiWrapper):
         link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
         source_type = "requirements"
         linked_type = "test-cases"
-        
+
         # Parse and convert test case IDs
         test_case_ids = json.loads(json_list_of_test_case_ids)
         qtest_test_case_ids = [self.__find_qtest_id_by_test_id(tc_id) for tc_id in test_case_ids]
-        
+
         # Get internal QTest ID for the requirement
         qtest_requirement_id = self.__find_qtest_requirement_id_by_id(requirement_id)
 
