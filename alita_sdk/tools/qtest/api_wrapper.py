@@ -5,6 +5,7 @@ import re
 from traceback import format_exc
 from typing import Any, Optional
 
+import requests
 import swagger_client
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
@@ -414,6 +415,143 @@ class QtestApiWrapper(BaseToolApiWrapper):
                                 Exception: \n {stacktrace}""")
         return modules
 
+    def __get_field_definitions_from_properties_api(self) -> dict:
+        """
+        Fallback method: Get field definitions using /properties and /properties-info APIs.
+        
+        These APIs don't require Field Management permission and are available to all users.
+        Requires 2 API calls + 1 search to get a test case ID.
+        
+        Returns:
+            dict: Same structure as __get_project_field_definitions()
+        """
+        logger.info(
+            "Using properties API fallback (no Field Management permission). "
+            "This requires getting a template test case first."
+        )
+        
+        # Step 1: Get any test case ID to query properties
+        search_instance = swagger_client.SearchApi(self._client)
+        body = swagger_client.ArtifactSearchParams(
+            object_type='test-cases',
+            fields=['*'],
+            query=''  # Empty query returns all test cases
+        )
+        
+        try:
+            # Search for any test case - just need one
+            response = search_instance.search_artifact(
+                self.qtest_project_id,
+                body,
+                page_size=1,
+                page=1
+            )
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Failed to find test case for properties API: {stacktrace}")
+            raise ValueError(
+                f"Cannot find any test case to query field definitions. "
+                f"Please create at least one test case in project {self.qtest_project_id}"
+            ) from e
+        
+        if not response or not response.get('items') or len(response['items']) == 0:
+            raise ValueError(
+                f"No test cases found in project {self.qtest_project_id}. "
+                f"Please create at least one test case to retrieve field definitions."
+            )
+        
+        test_case_id = response['items'][0]['id']
+        logger.info(f"Using test case ID {test_case_id} to retrieve field definitions")
+        
+        # Step 2: Call /properties API
+        headers = {
+            "Authorization": f"Bearer {self.qtest_api_token.get_secret_value()}"
+        }
+        
+        properties_url = f"{self.base_url}/api/v3/projects/{self.qtest_project_id}/test-cases/{test_case_id}/properties"
+        properties_info_url = f"{self.base_url}/api/v3/projects/{self.qtest_project_id}/test-cases/{test_case_id}/properties-info"
+        
+        try:
+            # Get properties with current values and field metadata
+            props_response = requests.get(
+                properties_url,
+                headers=headers,
+                params={'calledBy': 'testcase_properties'}
+            )
+            props_response.raise_for_status()
+            properties_data = props_response.json()
+            
+            # Get properties-info with data types and allowed values
+            info_response = requests.get(properties_info_url, headers=headers)
+            info_response.raise_for_status()
+            info_data = info_response.json()
+            
+        except requests.exceptions.RequestException as e:
+            stacktrace = format_exc()
+            logger.error(f"Failed to call properties API: {stacktrace}")
+            raise ValueError(
+                f"Unable to retrieve field definitions using properties API. "
+                f"Error: {stacktrace}"
+            ) from e
+        
+        # Step 3: Build field mapping by merging both responses
+        field_mapping = {}
+        
+        # Create lookup by field ID from properties-info
+        metadata_by_id = {item['id']: item for item in info_data['metadata']}
+        
+        # Data type mapping to determine 'multiple' flag
+        MULTI_SELECT_TYPES = {
+            'UserListDataType',
+            'MultiSelectionDataType',
+            'CheckListDataType'
+        }
+        
+        USER_FIELD_TYPES = {'UserListDataType'}
+        
+        # System fields to exclude (same as in property mapping)
+        excluded_fields = {'Shared', 'Projects Shared to'}
+        
+        for prop in properties_data:
+            field_name = prop.get('name')
+            field_id = prop.get('id')
+            
+            if not field_name or field_name in excluded_fields:
+                continue
+            
+            # Get metadata for this field
+            metadata = metadata_by_id.get(field_id, {})
+            data_type_str = metadata.get('data_type')
+            
+            # Determine data_type number (5 for user fields, None for others)
+            data_type = 5 if data_type_str in USER_FIELD_TYPES else None
+            
+            # Determine if multi-select
+            is_multiple = data_type_str in MULTI_SELECT_TYPES
+            
+            field_mapping[field_name] = {
+                'field_id': field_id,
+                'required': prop.get('required', False),
+                'data_type': data_type,
+                'multiple': is_multiple,
+                'values': {}
+            }
+            
+            # Map allowed values from metadata
+            allowed_values = metadata.get('allowed_values', [])
+            for allowed_val in allowed_values:
+                value_text = allowed_val.get('value_text')
+                value_id = allowed_val.get('id')
+                if value_text and value_id:
+                    field_mapping[field_name]['values'][value_text] = value_id
+        
+        logger.info(
+            f"Retrieved {len(field_mapping)} field definitions using properties API. "
+            f"This method works for all users without Field Management permission."
+        )
+        
+        return field_mapping
+
     def __get_project_field_definitions(self) -> dict:
         """
         Get structured field definitions for test cases in the project.
@@ -439,6 +577,15 @@ class QtestApiWrapper(BaseToolApiWrapper):
         try:
             fields = fields_api.get_fields(self.qtest_project_id, qtest_object)
         except ApiException as e:
+            # Check if permission denied (403) - use fallback
+            if e.status == 403:
+                logger.warning(
+                    "get_fields permission denied (Field Management permission required). "
+                    "Using properties API fallback..."
+                )
+                return self.__get_field_definitions_from_properties_api()
+            
+            # Other API errors
             stacktrace = format_exc()
             logger.error(f"Exception when calling FieldAPI->get_fields:\n {stacktrace}")
             raise ValueError(
@@ -556,8 +703,8 @@ class QtestApiWrapper(BaseToolApiWrapper):
     def __parse_data(self, response_to_parse: dict, parsed_data: list, extract_images: bool=False, prompt: str=None):
         import html
         
-        # Get field definitions to ensure all fields are included (uses cached version)
-        field_definitions = self.__get_field_definitions_cached()
+        # PERMISSION-FREE: Parse properties directly from API response
+        # No get_fields call needed - works for all users
         
         for item in response_to_parse['items']:
             # Start with core fields (always present)
@@ -574,29 +721,15 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 }, enumerate(item['test_steps']))),
             }
             
-            # Dynamically add all custom fields from project configuration
-            # This ensures consistency and includes fields even if they have null/empty values
-            for field_name in field_definitions.keys():
-                field_def = field_definitions[field_name]
-                is_multiple = field_def.get('multiple', False)
-                
-                # Find the property value in the response (if exists)
-                field_value = None
-                for prop in item['properties']:
-                    if prop['field_name'] == field_name:
-                        # Use field_value_name if available (for dropdowns), otherwise field_value
-                        field_value = prop.get('field_value_name') or prop.get('field_value') or ''
-                        break
-                
-                # Format based on field type
-                if is_multiple and (field_value is None or field_value == ''):
-                    # Multi-select field with no value: show empty array with hint
-                    parsed_data_row[field_name] = '[] (multi-select)'
-                elif field_value is not None:
-                    parsed_data_row[field_name] = field_value
-                else:
-                    # Regular field with no value
-                    parsed_data_row[field_name] = ''
+            # Add custom fields directly from API response properties
+            for prop in item['properties']:
+                field_name = prop.get('field_name')
+                if not field_name:
+                    continue
+                    
+                # Use field_value_name if available (for dropdowns/users), otherwise field_value
+                field_value = prop.get('field_value_name') or prop.get('field_value') or ''
+                parsed_data_row[field_name] = field_value
             
             parsed_data.append(parsed_data_row)
 
