@@ -647,6 +647,7 @@ def create_graph(
                         default_output=node.get('default_output', 'END')
                     )
                 )
+                continue
             elif node_type == 'state_modifier':
                 lg_builder.add_node(node_id, StateModifierNode(
                     template=node.get('template', ''),
