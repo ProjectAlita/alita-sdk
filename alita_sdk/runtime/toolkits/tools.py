@@ -110,6 +110,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     toolkit_name=tool.get('toolkit_name', ''),
                     **tool['settings']).get_tools())
             elif tool['type'] == 'mcp':
+                # remote mcp tool initialization with token injection
                 settings = dict(tool['settings'])
                 url = settings.get('url')
                 headers = settings.get('headers')

@@ -476,6 +476,10 @@ def create_graph(
                 tool_name = f"{clean_string(toolkit_name)}{TOOLKIT_SPLITTER}{tool_name}"
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
             if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
+                if node_type == 'mcp' and tool_name not in [tool.name for tool in tools]:
+                    # MCP is not connected and node cannot be added
+                    raise ToolException(f"MCP tool '{tool_name}' not found in the provided tools. "
+                                        f"Make sure it is connected properly. Available tools: {[tool.name for tool in tools]}")
                 for tool in tools:
                     if tool.name == tool_name:
                         if node_type in ['function', 'toolkit', 'mcp']:

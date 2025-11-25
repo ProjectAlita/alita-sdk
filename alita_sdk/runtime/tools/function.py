@@ -120,7 +120,8 @@ class FunctionTool(BaseTool):
                     messages_dict = {
                         "messages": [{
                             "role": "assistant",
-                            "content": dumps(tool_result) if not isinstance(tool_result, ToolException)
+                            "content": dumps(tool_result)
+                            if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
                             else str(tool_result)
                         }]
                     }
