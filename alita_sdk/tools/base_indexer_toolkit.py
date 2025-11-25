@@ -15,6 +15,8 @@ from ..runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CUT_OFF = 0.2
+
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
     "BaseIndexParams",
@@ -37,7 +39,7 @@ BaseSearchParams = create_model(
         default={},
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5, ge=0, le=1)),
+    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=DEFAULT_CUT_OFF, ge=0, le=1)),
     search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
@@ -67,7 +69,7 @@ BaseStepbackSearchParams = create_model(
         default={},
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
-    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=0.5, ge=0, le=1)),
+    cut_off=(Optional[float], Field(description="Cut-off score for search results", default=DEFAULT_CUT_OFF, ge=0, le=1)),
     search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
@@ -380,7 +382,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def search_index(self,
                      query: str,
                      index_name: str = "",
-                     filter: dict | str = {}, cut_off: float = 0.5,
+                     filter: dict | str = {}, cut_off: float = DEFAULT_CUT_OFF,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
                      reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -411,7 +413,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      query: str,
                      messages: List[Dict[str, Any]] = [],
                      index_name: str = "",
-                     filter: dict | str = {}, cut_off: float = 0.5,
+                     filter: dict | str = {}, cut_off: float = DEFAULT_CUT_OFF,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
                      reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -436,7 +438,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                      query: str,
                      messages: List[Dict[str, Any]] = [],
                      index_name: str = "",
-                     filter: dict | str = {}, cut_off: float = 0.5,
+                     filter: dict | str = {}, cut_off: float = DEFAULT_CUT_OFF,
                      search_top: int = 10, reranker: dict = {},
                      full_text_search: Optional[Dict[str, Any]] = None,
                      reranking_config: Optional[Dict[str, Dict[str, Any]]] = None,
