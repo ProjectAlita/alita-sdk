@@ -146,7 +146,7 @@ GetAllTestCasesFieldsForProject = create_model(
 FindTestCasesByRequirementId = create_model(
     "FindTestCasesByRequirementId",
     requirement_id=(str, Field(description="QTest requirement ID in format RQ-123. This will find all test cases linked to this requirement.")),
-    include_details=(Optional[bool], Field(description="If true, returns full test case details. If false (default), returns only test case IDs (TC-xxx format).", default=False)),
+    include_details=(Optional[bool], Field(description="If true, returns full test case details. If false (default), returns Id, QTest Id, Name, and Description fields.", default=False)),
 )
 
 NoInput = create_model(
