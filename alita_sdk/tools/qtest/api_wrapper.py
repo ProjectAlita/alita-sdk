@@ -143,6 +143,12 @@ GetAllTestCasesFieldsForProject = create_model(
                          default=False)),
 )
 
+FindTestCasesByRequirementId = create_model(
+    "FindTestCasesByRequirementId",
+    requirement_id=(str, Field(description="QTest requirement ID in format RQ-123. This will find all test cases linked to this requirement.")),
+    include_details=(Optional[bool], Field(description="If true, returns full test case details. If false (default), returns only test case IDs (TC-xxx format).", default=False)),
+)
+
 NoInput = create_model(
     "NoInput"
 )
@@ -156,6 +162,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
     no_of_tests_shown_in_dql_search: int = 10
     _client: Any = PrivateAttr()
     _field_definitions_cache: Optional[dict] = PrivateAttr(default=None)
+    _modules_cache: Optional[list] = PrivateAttr(default=None)
     llm: Any
 
     @model_validator(mode='before')
@@ -664,6 +671,10 @@ class QtestApiWrapper(BaseToolApiWrapper):
         return self.__format_field_info_for_display(field_defs)
 
     def _parse_modules(self) -> list[dict]:
+        """Get parsed modules list with caching for the session."""
+        if self._modules_cache is not None:
+            return self._modules_cache
+        
         modules = self.__get_all_modules_for_project()
         result = []
 
@@ -684,6 +695,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
         for module in modules:
             parse_module(module)
 
+        self._modules_cache = result
         return result
 
     def __execute_single_create_test_case_request(self, test_case_api_instance: TestCaseApi, body,
@@ -943,6 +955,120 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
             ) from e
 
+    def find_test_cases_by_requirement_id(self, requirement_id: str, include_details: bool = False) -> dict:
+        """Find all test cases linked to a QTest requirement.
+        
+        This method uses the ObjectLinkApi.find() to discover test cases that are 
+        linked to a specific requirement. This is the correct way to find linked 
+        test cases - DQL queries cannot search test cases by linked requirement.
+        
+        Args:
+            requirement_id: QTest requirement ID in format RQ-123
+            include_details: If True, fetches full test case details. If False, returns summary with Id, Name, Description.
+            
+        Returns:
+            dict with requirement_id, total count, and test_cases list
+            
+        Raises:
+            ValueError: If requirement is not found
+            ToolException: If API call fails
+        """
+        # Get internal QTest ID for the requirement
+        qtest_requirement_id = self.__find_qtest_requirement_id_by_id(requirement_id)
+        
+        link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
+        
+        try:
+            # Use ObjectLinkApi.find() to get linked artifacts
+            # type='requirements' means we're searching from requirements
+            # ids=[qtest_requirement_id] specifies which requirement(s) to check
+            response = link_object_api_instance.find(
+                self.qtest_project_id,
+                type='requirements',
+                ids=[qtest_requirement_id]
+            )
+            
+            # Parse the response to extract linked test cases
+            # Response structure: [{id: req_internal_id, pid: 'RQ-15', objects: [{id: tc_internal_id, pid: 'TC-123'}, ...]}]
+            linked_test_cases = []
+            if response and len(response) > 0:
+                for container in response:
+                    # Convert to dict if it's an object
+                    container_data = container.to_dict() if hasattr(container, 'to_dict') else container
+                    objects = container_data.get('objects', []) if isinstance(container_data, dict) else []
+                    
+                    for obj in objects:
+                        obj_data = obj.to_dict() if hasattr(obj, 'to_dict') else obj
+                        if isinstance(obj_data, dict):
+                            pid = obj_data.get('pid', '')
+                            internal_id = obj_data.get('id')
+                            if pid and pid.startswith('TC-'):
+                                linked_test_cases.append({
+                                    'Id': pid,
+                                    QTEST_ID: internal_id
+                                })
+            
+            if not linked_test_cases:
+                return {
+                    'requirement_id': requirement_id,
+                    'total': 0,
+                    'test_cases': [],
+                    'message': f"No test cases are linked to requirement '{requirement_id}'"
+                }
+            
+            # Build result based on detail level
+            test_cases_result = []
+            
+            if not include_details:
+                # Short view: fetch Name, Description via DQL for each test case
+                for tc in linked_test_cases:
+                    try:
+                        parsed_data = self.__perform_search_by_dql(f"Id = '{tc['Id']}'")
+                        if parsed_data:
+                            tc_data = parsed_data[0]
+                            test_cases_result.append({
+                                'Id': tc['Id'],
+                                QTEST_ID: tc[QTEST_ID],
+                                'Name': tc_data.get('Name'),
+                                'Description': tc_data.get('Description', '')
+                            })
+                    except Exception as e:
+                        logger.warning(f"Could not fetch details for {tc['Id']}: {e}")
+                        test_cases_result.append({
+                            'Id': tc['Id'],
+                            QTEST_ID: tc[QTEST_ID],
+                            'Name': 'Unable to fetch',
+                            'Description': ''
+                        })
+            else:
+                # Full details: fetch complete test case data
+                for tc in linked_test_cases:
+                    try:
+                        parsed_data = self.__perform_search_by_dql(f"Id = '{tc['Id']}'")
+                        if parsed_data:
+                            test_cases_result.append(parsed_data[0])
+                    except Exception as e:
+                        logger.warning(f"Could not fetch details for {tc['Id']}: {e}")
+                        test_cases_result.append({
+                            'Id': tc['Id'],
+                            QTEST_ID: tc[QTEST_ID],
+                            'error': f'Unable to fetch details: {str(e)}'
+                        })
+            
+            return {
+                'requirement_id': requirement_id,
+                'total': len(test_cases_result),
+                'test_cases': test_cases_result
+            }
+            
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Error finding test cases by requirement: {stacktrace}")
+            raise ToolException(
+                f"Unable to find test cases linked to requirement '{requirement_id}' "
+                f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
+            ) from e
+
     def search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None):
         """Search for the test cases in qTest using Data Query Language """
         parsed_data = self.__perform_search_by_dql(dql, extract_images, prompt)
@@ -1030,7 +1156,33 @@ class QtestApiWrapper(BaseToolApiWrapper):
             {
                 "name": "search_by_dql",
                 "mode": "search_by_dql",
-                "description": 'Search the test cases in qTest using Data Query Language. The input of the tool will be in following format - Module in \'MD-78 Master Test Suite\' and Type = \'Automation - UTAF\'. If keyword or value to check against has 2 words in it it should be surrounded with single quotes',
+                "description": """Search test cases in qTest using Data Query Language (DQL).
+
+LIMITATION - CANNOT SEARCH BY LINKED OBJECTS:
+- ✗ 'Requirement Id' = 'RQ-15' will fail - use 'find_test_cases_by_requirement_id' tool instead
+- ✗ Linked defects or other relationship queries are not supported
+
+SEARCHABLE FIELDS:
+- Direct fields: Id, Name, Description, Status, Type, Priority, Automation, etc.
+- Module: Use 'Module in' syntax
+- Custom fields: Use exact field name from project configuration
+- Date fields: Use ISO DateTime format (e.g., 'Created Date' > '2021-05-07T03:15:37.652Z')
+
+SYNTAX RULES:
+1. Field names with spaces MUST be in single quotes: 'Created Date' > '2024-01-01'
+2. Values with spaces MUST be in single quotes: Type = 'Manual Test'
+3. Use ~ for 'contains', !~ for 'not contains': Name ~ "login"
+4. Use 'is not empty' for non-empty check: Name is 'not empty'
+5. Operators: =, !=, <, >, <=, >=, in, ~, !~
+
+EXAMPLES:
+- Id = 'TC-123'
+- Status = 'New' and Priority = 'High'
+- Module in 'MD-78 Master Test Suite'
+- Type = 'Automation - UTAF'
+- Name ~ "login"
+- 'Created Date' > '2024-01-01T00:00:00.000Z'
+""",
                 "args_schema": QtestDataQuerySearch,
                 "ref": self.search_by_dql,
             },
@@ -1089,5 +1241,24 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 "description": "Get information about available test case fields and their valid values for the project. Shows which property values are allowed (e.g., Status: 'New', 'In Progress', 'Completed') based on the project configuration. Use force_refresh=true if project configuration has changed.",
                 "args_schema": GetAllTestCasesFieldsForProject,
                 "ref": self.get_all_test_cases_fields_for_project,
+            },
+            {
+                "name": "find_test_cases_by_requirement_id",
+                "mode": "find_test_cases_by_requirement_id",
+                "description": """Find all test cases linked to a QTest requirement.
+
+Use this tool to find test cases associated with a specific requirement.
+DQL search cannot query by linked requirement - use this tool instead.
+
+Parameters:
+- requirement_id: QTest requirement ID in format RQ-123
+- include_details: If true, returns full test case data. If false (default), returns only test case IDs.
+
+Examples:
+- Find test cases for RQ-15: requirement_id='RQ-15'
+- Get full details: requirement_id='RQ-15', include_details=true
+""",
+                "args_schema": FindTestCasesByRequirementId,
+                "ref": self.find_test_cases_by_requirement_id,
             }
         ]
