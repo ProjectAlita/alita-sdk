@@ -1252,7 +1252,7 @@ DQL search cannot query by linked requirement - use this tool instead.
 
 Parameters:
 - requirement_id: QTest requirement ID in format RQ-123
-- include_details: If true, returns full test case data. If false (default), returns only test case IDs.
+- include_details: If true, returns full test case data. If false (default), returns Id, QTest Id, Name, and Description.
 
 Examples:
 - Find test cases for RQ-15: requirement_id='RQ-15'
