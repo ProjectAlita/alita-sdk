@@ -829,7 +829,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
 
         # Append current input to existing messages instead of overwriting
         if input.get('input'):
-            current_message = input['input']
+            if isinstance(input['input'], str):
+                current_message = input['input']
+            else:
+                # input can be a list of messages or a single message object
+                current_message = input.get('input')[-1]
 
             # TODO: add handler after we add 2+ inputs (filterByType, etc.)
             if isinstance(current_message, HumanMessage):
