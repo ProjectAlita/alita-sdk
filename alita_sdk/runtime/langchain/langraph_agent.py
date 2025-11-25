@@ -822,8 +822,8 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         input_from_messages = False
         if not input.get('input'):
             if input.get('messages'):
-                input['input'] = next((msg for msg in reversed(input['messages']) if isinstance(msg, HumanMessage)),
-                                      None)
+                input['input'] = [next((msg for msg in reversed(input['messages']) if isinstance(msg, HumanMessage)),
+                                      None)]
                 if input['input'] is not None:
                     input_from_messages = True
 
