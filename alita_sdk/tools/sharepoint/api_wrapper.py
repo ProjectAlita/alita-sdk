@@ -130,9 +130,24 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             if not limit_files:
                 limit_files = 100
             #
+            site_segments = [seg for seg in self.site_url.strip('/').split('/') if seg][-2:]
+            full_path_prefix = '/'.join(site_segments)
+            #
             for lib in all_libraries:
                 library_type = decode_sharepoint_string(lib.properties["EntityTypeName"])
-                target_folder_url = f"{library_type}/{folder_name}" if folder_name else library_type
+                target_folder_url = library_type
+                if folder_name:
+                    folder_path = folder_name.strip('/')
+                    expected_prefix = f'{full_path_prefix}/{library_type}'
+                    if folder_path.startswith(full_path_prefix):
+                        if folder_path.startswith(expected_prefix):
+                            target_folder_url = folder_path.removeprefix(f'{full_path_prefix}/')
+                        else:
+                            # ignore full path folder which is not targeted to current library
+                            continue
+                    else:
+                        target_folder_url = f"{library_type}/{folder_name}"
+                #
                 files = (self._client.web.get_folder_by_server_relative_path(target_folder_url)
                          .get_files(True)
                          .execute_query())
@@ -226,13 +241,18 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             'skip_extensions': (Optional[List[str]], Field(
                 description="List of file extensions to skip when processing: i.e. ['*.png', '*.jpg']",
                 default=[])),
+            'path': (Optional[str], Field(
+                description="Folder path. "
+                            "Accepts either a full server-relative path (e.g., '/sites/SiteName/...') or a relative path. "
+                            "If a relative path is provided, the search will be performed recursively under 'Shared Documents' and other private libraries.",
+                default=None)),
         }
 
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
 
         self._log_tool_event(message="Starting SharePoint files extraction", tool_name="loader")
         try:
-            all_files = self.get_files_list(limit_files=kwargs.get('limit_files', 10000))
+            all_files = self.get_files_list(kwargs.get('path'), kwargs.get('limit_files', 10000))
             self._log_tool_event(message="List of the files has been extracted", tool_name="loader")
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
