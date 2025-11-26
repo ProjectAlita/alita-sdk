@@ -46,6 +46,7 @@ class ZephyrEssentialToolkit(BaseToolkit):
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Essential", "icon_url": "zephyr.svg",
+                                                           "max_length": ZephyrEssentialToolkit.toolkit_max_length,
                             "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
                         }}}

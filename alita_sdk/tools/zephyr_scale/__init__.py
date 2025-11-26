@@ -56,6 +56,7 @@ class ZephyrScaleToolkit(BaseToolkit):
                     'metadata': {
                         "label": "Zephyr Scale",
                         "icon_url": "zephyr.svg",
+                        "max_length": ZephyrScaleToolkit.toolkit_max_length,
                         "categories": ["test management"],
                         "extra_categories": ["test automation", "test case management", "test planning"],
                     }

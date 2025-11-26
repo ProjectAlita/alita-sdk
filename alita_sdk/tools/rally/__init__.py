@@ -29,8 +29,6 @@ class RallyToolkit(BaseToolkit):
         RallyToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True,
-                                                                            'max_toolkit_length': RallyToolkit.toolkit_max_length})),
             rally_configuration=(RallyConfiguration, Field(description="Rally configuration", json_schema_extra={'configuration_types': ['rally']})),
             workspace=(Optional[str], Field(default=None, description="Rally workspace")),
             project=(Optional[str], Field(default=None, description="Rally project")),
@@ -39,6 +37,7 @@ class RallyToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Rally",
                     "icon_url": "rally.svg",
+                    "max_length": RallyToolkit.toolkit_max_length,
                     "categories": ["project management"],
                     "extra_categories": ["agile management", "test management", "scrum", "kanban"]
                 }

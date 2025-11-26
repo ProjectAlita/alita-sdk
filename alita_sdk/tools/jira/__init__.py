@@ -89,6 +89,7 @@ class JiraToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Jira",
                     "icon_url": "jira-icon.svg",
+                    "max_length": JiraToolkit.toolkit_max_length,
                     "categories": ["project management"],
                     "extra_categories": ["jira", "atlassian", "issue tracking", "project management", "task management"],
                 }

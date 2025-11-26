@@ -53,6 +53,7 @@ class AlitaGitHubToolkit(BaseToolkit):
                     'metadata': {
                         "label": "GitHub",
                         "icon_url": None,
+                        "max_length": AlitaGitHubToolkit.toolkit_max_length,
                         "categories": ["code repositories"],
                         "extra_categories": ["github", "git", "repository", "code", "version control"],
                     },
@@ -62,8 +63,7 @@ class AlitaGitHubToolkit(BaseToolkit):
                                                              json_schema_extra={'configuration_types': ['github']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(description="PgVector configuration", default=None,
                                                                      json_schema_extra={'configuration_types': ['pgvector']})),
-            repository=(str, Field(description="Github repository", json_schema_extra={'toolkit_name': True,
-                                                                                       'max_toolkit_length': AlitaGitHubToolkit.toolkit_max_length})),
+            repository=(str, Field(description="Github repository")),
             active_branch=(Optional[str], Field(description="Active branch", default="main")),
             base_branch=(Optional[str], Field(description="Github Base branch", default="main")),
             # embedder settings

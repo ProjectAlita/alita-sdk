@@ -29,7 +29,7 @@ class SonarToolkit(BaseToolkit):
         SonarToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            sonar_project_name=(str, Field(description="Project name of the desired repository", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': SonarToolkit.toolkit_max_length})),
+            sonar_project_name=(str, Field(description="Project name of the desired repository")),
             sonar_configuration=(SonarConfiguration, Field(description="Sonar Configuration", json_schema_extra={'configuration_types': ['sonar']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=

@@ -23,11 +23,6 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
         AzureDevOpsWorkItemsToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
-            name=(str, Field(description="Toolkit name",
-                             json_schema_extra={
-                                 'toolkit_name': True,
-                                 'max_toolkit_length': AzureDevOpsWorkItemsToolkit.toolkit_max_length})
-                  ),
             ado_configuration=(AdoConfiguration, Field(description="Ado Work Item configuration", json_schema_extra={'configuration_types': ['ado']})),
             limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
@@ -42,6 +37,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                     'metadata': {
                         "label": "ADO boards",
                         "icon_url": "ado-boards-icon.svg",
+                        "max_length": AzureDevOpsWorkItemsToolkit.toolkit_max_length,
                         "categories": ["project management"],
                         "extra_categories": ["work item management", "issue tracking", "agile boards"],
                         "sections": {

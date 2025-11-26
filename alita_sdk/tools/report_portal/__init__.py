@@ -33,6 +33,7 @@ class ReportPortalToolkit(BaseToolkit):
             report_portal_configuration=(ReportPortalConfiguration, Field(description="Report Portal Configuration", json_schema_extra={'configuration_types': ['report_portal']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Report Portal", "icon_url": "reportportal-icon.svg",
+                                                                  "max_length": ReportPortalToolkit.toolkit_max_length,
                                                                   "categories": ["testing"],
                                                                   "extra_categories": ["test reporting", "test automation"]}})
         )

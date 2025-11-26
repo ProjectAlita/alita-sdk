@@ -37,14 +37,14 @@ class QtestToolkit(BaseToolkit):
             name,
             qtest_configuration=(QtestConfiguration, Field(description="QTest API token", json_schema_extra={
                 'configuration_types': ['qtest']})),
-            qtest_project_id=(int, Field(default=None, description="QTest project id", json_schema_extra={'toolkit_name': True,
-                                                                                            'max_toolkit_length': QtestToolkit.toolkit_max_length})),
+            qtest_project_id=(int, Field(default=None, description="QTest project id")),
             no_of_tests_shown_in_dql_search=(Optional[int], Field(description="Max number of items returned by dql search",
                                                                   default=10)),
 
         selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "QTest", "icon_url": "qtest.svg",
+                                                                  "max_length": QtestToolkit.toolkit_max_length,
                                                                   "categories": ["test management"],
                                                                   "extra_categories": ["quality assurance",
                                                                                        "test case management",
