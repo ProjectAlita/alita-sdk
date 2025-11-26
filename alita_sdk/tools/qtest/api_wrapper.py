@@ -932,6 +932,42 @@ class QtestApiWrapper(BaseToolApiWrapper):
         parsed_data = self.__perform_search_by_dql(dql)
         return parsed_data[0]['QTest Id']
 
+    def __find_qtest_internal_id(self, object_type: str, entity_id: str) -> int:
+        """Generic search for an entity's internal QTest ID using its external ID (e.g., TR-xxx, DF-xxx, RQ-xxx).
+        
+        This is the unified method for looking up internal IDs. Use this instead of 
+        the entity-specific methods (__find_qtest_requirement_id_by_id, etc.).
+        
+        Args:
+            object_type: QTest object type ('test-runs', 'defects', 'requirements', etc.)
+            entity_id: Entity ID in format TR-123, DF-456, etc.
+            
+        Returns:
+            int: Internal QTest ID for the entity
+            
+        Raises:
+            ValueError: If entity is not found
+        """
+        dql = f"Id = '{entity_id}'"
+        search_instance: SearchApi = swagger_client.SearchApi(self._client)
+        body = swagger_client.ArtifactSearchParams(object_type=object_type, fields=['*'], query=dql)
+        
+        try:
+            response = search_instance.search_artifact(self.qtest_project_id, body)
+            if response['total'] == 0:
+                raise ValueError(
+                    f"{object_type.capitalize()} '{entity_id}' not found in project {self.qtest_project_id}. "
+                    f"Please verify the {entity_id} ID exists."
+                )
+            return response['items'][0]['id']
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when searching for '{object_type}': '{entity_id}': \n {stacktrace}")
+            raise ToolException(
+                f"Unable to search for {object_type} '{entity_id}' in project {self.qtest_project_id}. "
+                f"Exception: \n{stacktrace}"
+            ) from e
+
     def __find_qtest_requirement_id_by_id(self, requirement_id: str) -> int:
         """Search for requirement's internal QTest ID using requirement ID (RQ-xxx format).
         
@@ -944,25 +980,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
         Raises:
             ValueError: If requirement is not found
         """
-        dql = f"Id = '{requirement_id}'"
-        search_instance: SearchApi = swagger_client.SearchApi(self._client)
-        body = swagger_client.ArtifactSearchParams(object_type='requirements', fields=['*'], query=dql)
-        
-        try:
-            response = search_instance.search_artifact(self.qtest_project_id, body)
-            if response['total'] == 0:
-                raise ValueError(
-                    f"Requirement '{requirement_id}' not found in project {self.qtest_project_id}. "
-                    f"Please verify the requirement ID exists."
-                )
-            return response['items'][0]['id']
-        except ApiException as e:
-            stacktrace = format_exc()
-            logger.error(f"Exception when searching for requirement: \n {stacktrace}")
-            raise ToolException(
-                f"Unable to search for requirement '{requirement_id}' in project {self.qtest_project_id}. "
-                f"Exception: \n{stacktrace}"
-            ) from e
+        return self.__find_qtest_internal_id('requirements', requirement_id)
 
     def __find_qtest_defect_id_by_id(self, defect_id: str) -> int:
         """Search for defect's internal QTest ID using defect ID (DF-xxx format).
@@ -976,25 +994,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
         Raises:
             ValueError: If defect is not found
         """
-        dql = f"Id = '{defect_id}'"
-        search_instance: SearchApi = swagger_client.SearchApi(self._client)
-        body = swagger_client.ArtifactSearchParams(object_type='defects', fields=['*'], query=dql)
-        
-        try:
-            response = search_instance.search_artifact(self.qtest_project_id, body)
-            if response['total'] == 0:
-                raise ValueError(
-                    f"Defect '{defect_id}' not found in project {self.qtest_project_id}. "
-                    f"Please verify the defect ID exists."
-                )
-            return response['items'][0]['id']
-        except ApiException as e:
-            stacktrace = format_exc()
-            logger.error(f"Exception when searching for defect: \n {stacktrace}")
-            raise ToolException(
-                f"Unable to search for defect '{defect_id}' in project {self.qtest_project_id}. "
-                f"Exception: \n{stacktrace}"
-            ) from e
+        return self.__find_qtest_internal_id('defects', defect_id)
 
     def __search_entity_by_id(self, object_type: str, entity_id: str) -> dict:
         """Generic search for any entity by its ID (RQ-xxx, DF-xxx, etc.).
@@ -1063,25 +1063,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
         Raises:
             ValueError: If test run is not found
         """
-        dql = f"Id = '{test_run_id}'"
-        search_instance: SearchApi = swagger_client.SearchApi(self._client)
-        body = swagger_client.ArtifactSearchParams(object_type='test-runs', fields=['*'], query=dql)
-        
-        try:
-            response = search_instance.search_artifact(self.qtest_project_id, body)
-            if response['total'] == 0:
-                raise ValueError(
-                    f"Test run '{test_run_id}' not found in project {self.qtest_project_id}. "
-                    f"Please verify the test run ID exists."
-                )
-            return response['items'][0]['id']
-        except ApiException as e:
-            stacktrace = format_exc()
-            logger.error(f"Exception when searching for test run: \n {stacktrace}")
-            raise ToolException(
-                f"Unable to search for test run '{test_run_id}' in project {self.qtest_project_id}. "
-                f"Exception: \n{stacktrace}"
-            ) from e
+        return self.__find_qtest_internal_id('test-runs', test_run_id)
 
     def __is_jira_requirement_present(self, jira_issue_id: str) -> tuple[bool, dict]:
         """ Define if particular Jira requirement is present in qtest or not """
