@@ -2,7 +2,7 @@ import builtins
 import json
 import logging
 import re
-from pydantic import create_model, Field
+from pydantic import create_model, Field, Json
 from typing import Tuple, TypedDict, Any, Optional, Annotated
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
@@ -208,5 +208,21 @@ def safe_format(template, mapping):
 def create_pydantic_model(model_name: str, variables: dict[str, dict]):
     fields = {}
     for var_name, var_data in variables.items():
-        fields[var_name] = (parse_type(var_data['type']), Field(description=var_data.get('description', None)))
+        fields[var_name] = (parse_pydantic_type(var_data['type']), Field(description=var_data.get('description', None)))
     return create_model(model_name, **fields)
+
+def parse_pydantic_type(type_name: str):
+    """
+    Helper function to parse type names into Python types.
+    Extend this function to handle custom types like 'dict' -> Json[Any].
+    """
+    type_mapping = {
+        'str': str,
+        'int': int,
+        'float': float,
+        'bool': bool,
+        'dict': Json[Any],  # Map 'dict' to Pydantic's Json type
+        'list': list,
+        'any': Any
+    }
+    return type_mapping.get(type_name, Any)
