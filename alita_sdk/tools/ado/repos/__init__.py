@@ -63,6 +63,7 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                     "icon_url": "ado-repos-icon.svg",
                     "categories": ["code repositories"],
                     "extra_categories": ["code", "repository", "version control"],
+                    "max_length": AzureDevOpsReposToolkit.toolkit_max_length
                 }}}
         )
 

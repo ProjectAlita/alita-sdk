@@ -35,9 +35,7 @@ class ServiceNowToolkit(BaseToolkit):
         ServiceNowToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            name=(str, Field(description="Toolkit name",
-                             json_schema_extra={
-                                 'toolkit_name': True, 'max_toolkit_length': ServiceNowToolkit.toolkit_max_length})),
+            name=(str, Field(description="Toolkit name")),
             response_fields=(Optional[str], Field(description="Response fields", default=None)),
             servicenow_configuration=(ServiceNowConfiguration, Field(description="ServiceNow Configuration",
                                                                                json_schema_extra={
@@ -49,6 +47,7 @@ class ServiceNowToolkit(BaseToolkit):
                 'metadata': {
                     "label": "ServiceNow",
                     "icon_url": "service-now.svg",
+                    "max_length": ServiceNowToolkit.toolkit_max_length,
                     "hidden": False,
                     "sections": {
                         "auth": {

@@ -27,7 +27,6 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
         AzureDevOpsPlansToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name_alias,
-            name=(str, Field(description="Toolkit name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': AzureDevOpsPlansToolkit.toolkit_max_length})),
             ado_configuration=(AdoConfiguration, Field(description="Ado configuration", json_schema_extra={'configuration_types': ['ado']})),
             limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
             # indexer settings
@@ -40,6 +39,7 @@ class AzureDevOpsPlansToolkit(BaseToolkit):
                 {
                     "label": "ADO plans",
                     "icon_url": "ado-plans.svg",
+                    "max_length": AzureDevOpsPlansToolkit.toolkit_max_length,
                     "categories": ["test management"],
                     "extra_categories": ["test case management", "qa"],
                     "sections": {

@@ -31,7 +31,7 @@ class ZephyrToolkit(BaseToolkit):
         ZephyrToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            base_url=(str, Field(description="Base URL", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ZephyrToolkit.toolkit_max_length})),
+            base_url=(str, Field(description="Base URL")),
             username=(str, Field(description="Username")),
             password=(SecretStr, Field(description="Password", json_schema_extra={'secret': True})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
@@ -40,6 +40,7 @@ class ZephyrToolkit(BaseToolkit):
                     {
                         'metadata': {
                             "label": "Zephyr", "icon_url": "zephyr.svg", "hidden": True,
+                            "max_length": ZephyrToolkit.toolkit_max_length,
                             "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
                         }}}

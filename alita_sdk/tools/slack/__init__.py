@@ -59,6 +59,7 @@ class SlackToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Slack",
                     "icon_url": "slack-icon.svg",
+                    "max_length": SlackToolkit.toolkit_max_length,
                     "categories": ["communication"],
                     "extra_categories": ["slack", "chat", "messaging", "collaboration"],
                 }

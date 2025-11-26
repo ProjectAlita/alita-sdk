@@ -34,7 +34,7 @@ class SQLToolkit(BaseToolkit):
         return create_model(
             name,
             dialect=(Literal[tuple(supported_dialects)], Field(description="Database dialect (mysql or postgres)")),
-            database_name=(str, Field(description="Database name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': SQLToolkit.toolkit_max_length})),
+            database_name=(str, Field(description="Database name")),
             sql_configuration=(SqlConfiguration, Field(description="SQL Configuration", json_schema_extra={'configuration_types': ['sql']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra=
@@ -42,6 +42,7 @@ class SQLToolkit(BaseToolkit):
                                       'metadata':
                                           {
                                               "label": "SQL", "icon_url": "sql-icon.svg",
+                                              "max_length": SQLToolkit.toolkit_max_length,
                                               "categories": ["development"],
                                               "extra_categories": ["sql", "data management", "data analysis"]}})
         )

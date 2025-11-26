@@ -45,13 +45,13 @@ class PPTXToolkit(BaseToolkit):
         
         return create_model(
             name,
-            bucket_name=(str, Field(description="Bucket name where PPTX files are stored", 
-                                   json_schema_extra={'toolkit_name': True, 'max_toolkit_length': TOOLKIT_MAX_LENGTH})),
+            bucket_name=(str, Field(description="Bucket name where PPTX files are stored")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={
                 'metadata': {
                     "label": "PPTX",
                     "icon_url": "pptx.svg",
+                    "max_length": TOOLKIT_MAX_LENGTH,
                     "categories": ["office"],
                     "extra_categories": ["presentation", "office automation", "document"]
                 }
