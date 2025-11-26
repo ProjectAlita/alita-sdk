@@ -51,7 +51,7 @@ Steps: Array of test steps with Description and Expected Result.
 
 **Clearing/Unsetting fields**: To clear a field value (unassign, set to empty/blank):
 - Use `null` in JSON: "Priority": null
-- Works for all field types: dropdowns, multi-select, user assignments, etc.
+- Works for multi-select fields, user assignments, etc. (Note: single-select dropdowns have API limitations)
 - Example: {{"QTest Id": "4626964", "Assigned To": null, "Review status": null}}
 
 **For Updates**: Include only the fields you want to modify. The system will validate property values against project configuration.
