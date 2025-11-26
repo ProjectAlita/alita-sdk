@@ -1660,7 +1660,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
         The entity type is automatically determined from the ID prefix.
         
         Args:
-            entity_id: Entity ID with prefix (TC-123, RQ-15, DF-100, TR-39, MD-78, etc.)
+            entity_id: Entity ID with prefix (TC-123, RQ-15, DF-100, TR-39, etc.)
             
         Returns:
             dict with full entity details including all properties
