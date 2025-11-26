@@ -49,6 +49,11 @@ Steps: Array of test steps with Description and Expected Result.
 - Single value: "Team": "Epam"
 - Multiple values: "Team": ["Epam", "EJ"]
 
+**Clearing/Unsetting fields**: To clear a field value (unassign, set to empty/blank):
+- Use `null` in JSON: "Priority": null
+- Works for multi-select fields, user assignments, etc. (Note: single-select dropdowns have API limitations)
+- Example: {{"QTest Id": "4626964", "Assigned To": null, "Review status": null}}
+
 **For Updates**: Include only the fields you want to modify. The system will validate property values against project configuration.
 
 ### EXAMPLE
@@ -264,9 +269,41 @@ class QtestApiWrapper(BaseToolApiWrapper):
             # Skip non-property fields (these are handled separately)
             if field_name in ['Name', 'Description', 'Precondition', 'Steps', 'Id', QTEST_ID]:
                 continue
-            
-            # Skip None or empty string values (don't update these fields)
-            if field_value is None or field_value == '':
+
+            # Skip empty string values (don't update these fields)
+            if field_value == '':
+                continue
+
+            # Handle None value - this means "clear/unset this field"
+            if field_value is None:
+                # Validate field exists before attempting to clear
+                if field_name not in field_definitions:
+                    validation_errors.append(
+                        f"❌ Unknown field '{field_name}' - not defined in project configuration"
+                    )
+                    continue
+
+                field_def = field_definitions[field_name]
+                field_id = field_def['field_id']
+                is_multiple = field_def.get('multiple', False)
+
+                if is_multiple:
+                    # Multi-select/user fields: can clear using empty array "[]"
+                    props_dict[field_name] = {
+                        'field_id': field_id,
+                        'field_name': field_name,
+                        'field_value': "[]",
+                        'field_value_name': None
+                    }
+                else:
+                    # Single-select fields: QTest API limitation - cannot clear to empty
+                    # Note: Users CAN clear these fields from UI, but API doesn't expose this capability
+                    validation_errors.append(
+                        f"⚠️ Cannot clear single-select field '{field_name}' - this is a QTest API limitation "
+                        f"(clearing is possible from UI but not exposed via API). "
+                        f"Please select an alternative value instead. "
+                        f"Available values: {', '.join(field_def.get('values', {}).keys()) or 'none'}"
+                    )
                 continue
             
             # Validate field exists in project - STRICT validation
@@ -1158,6 +1195,10 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 "mode": "search_by_dql",
                 "description": """Search test cases in qTest using Data Query Language (DQL).
 
+CRITICAL: USE SINGLE QUOTES ONLY - DQL does not support double quotes!
+- ✓ CORRECT: Description ~ 'Forgot Password'
+- ✗ WRONG: Description ~ "Forgot Password"
+
 LIMITATION - CANNOT SEARCH BY LINKED OBJECTS:
 - ✗ 'Requirement Id' = 'RQ-15' will fail - use 'find_test_cases_by_requirement_id' tool instead
 - ✗ Linked defects or other relationship queries are not supported
@@ -1169,18 +1210,18 @@ SEARCHABLE FIELDS:
 - Date fields: Use ISO DateTime format (e.g., 'Created Date' > '2021-05-07T03:15:37.652Z')
 
 SYNTAX RULES:
-1. Field names with spaces MUST be in single quotes: 'Created Date' > '2024-01-01'
-2. Values with spaces MUST be in single quotes: Type = 'Manual Test'
-3. Use ~ for 'contains', !~ for 'not contains': Name ~ "login"
+1. ALL string values MUST use single quotes (never double quotes)
+2. Field names with spaces MUST be in single quotes: 'Created Date' > '2024-01-01'
+3. Use ~ for 'contains', !~ for 'not contains': Description ~ 'login'
 4. Use 'is not empty' for non-empty check: Name is 'not empty'
 5. Operators: =, !=, <, >, <=, >=, in, ~, !~
 
 EXAMPLES:
 - Id = 'TC-123'
+- Description ~ 'Forgot Password'
 - Status = 'New' and Priority = 'High'
 - Module in 'MD-78 Master Test Suite'
-- Type = 'Automation - UTAF'
-- Name ~ "login"
+- Name ~ 'login'
 - 'Created Date' > '2024-01-01T00:00:00.000Z'
 """,
                 "args_schema": QtestDataQuerySearch,
