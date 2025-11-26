@@ -11,7 +11,8 @@ from .bitbucket_constants import create_pr_data
 from .cloud_api_wrapper import BitbucketCloudApi, BitbucketServerApi
 from pydantic.fields import PrivateAttr
 
-from ..elitea_base import BaseCodeToolApiWrapper
+from ..code_indexer_toolkit import CodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ CommentOnIssueModel = create_model(
 )
 
 
-class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
+class BitbucketAPIWrapper(CodeIndexerToolkit):
     """Wrapper for Bitbucket API."""
 
     _bitbucket: Any = PrivateAttr()
@@ -167,7 +168,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
             repository=values['repository']
         )
         cls._active_branch = values.get('branch')
-        return values
+        return super().validate_toolkit(values)
 
     def set_active_branch(self, branch_name: str) -> str:
         """Set the active branch for the bot."""
@@ -399,6 +400,7 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
         except Exception as e:
             return f"Failed to read file {file_path}: {str(e)}"
 
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {
@@ -473,4 +475,4 @@ class BitbucketAPIWrapper(BaseCodeToolApiWrapper):
                 "description": self.add_pull_request_comment.__doc__ or "Add a comment to a pull request in the repository.",
                 "args_schema": AddPullRequestCommentModel,
             }
-        ] + self._get_vector_search_tools()
+        ]

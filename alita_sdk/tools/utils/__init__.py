@@ -97,3 +97,20 @@ def check_connection_response(check_fun):
         else:
             return f"Service Unreachable: return code {response.status_code}"
     return _wrapper
+
+
+def make_json_serializable(obj):
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [make_json_serializable(i) for i in obj]
+    if isinstance(obj, bool):
+        return bool(obj)
+    if isinstance(obj, (str, int, float)) or obj is None:
+        return obj
+    # Fallback: handle objects that look like booleans but were not caught above
+    if str(obj) in ("True", "False"):
+        return str(obj) == "True"
+    return str(obj)

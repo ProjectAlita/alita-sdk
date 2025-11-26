@@ -27,7 +27,7 @@ Use this if you want to respond directly to the human. Markdown code snippet for
 ```json
 {
     "action": "Final Answer",
-    "action_input": string \ You should put what you want to return to use here
+    "action_input": string // You should put what you want to return to use here
 }
 ```
 
@@ -80,3 +80,7 @@ DEFAULT_MULTIMODAL_PROMPT = """
 - Maintain a structured and logical flow in the output to enhance understanding and usability.
 - Avoid presenting the entire prompt for user.
 """
+
+ELITEA_RS = "elitea_response"
+PRINTER = "printer"
+PRINTER_NODE_RS = "printer_output"

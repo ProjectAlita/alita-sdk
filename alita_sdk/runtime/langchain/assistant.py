@@ -17,6 +17,7 @@ from .constants import REACT_ADDON, REACT_VARS, XML_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from langchain_core.tools import BaseTool, ToolException
+from jinja2 import Environment, DebugUndefined
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,9 @@ class Assistant:
                  app_type: str = "openai",
                  tools: Optional[list] = [],
                  memory: Optional[Any] = None,
-                 store: Optional[BaseStore] = None):
+                 store: Optional[BaseStore] = None,
+                 debug_mode: Optional[bool] = False,
+                 mcp_tokens: Optional[dict] = None):
 
         self.app_type = app_type
         self.memory = memory
@@ -38,7 +41,8 @@ class Assistant:
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
-        
+
+        self.alita_client = alita
         self.client = client
         # For predict agents, use the client as-is since it's already configured
         # if app_type == "predict":
@@ -76,11 +80,24 @@ class Assistant:
         else:
             # For predict agents, initialize memory store to None since they don't use memory
             self.store = None
-        
+
         # Lazy import to avoid circular dependency
         from ..toolkits.tools import get_tools
-        
-        self.tools = get_tools(data['tools'], alita_client=alita, llm=self.client, memory_store=self.store)
+        version_tools = data['tools']
+        # Handle internal tools
+        meta = data.get('meta', {})
+        if meta.get("internal_tools"):
+            for internal_tool_name in meta.get("internal_tools"):
+                version_tools.append({"type": "internal_tool", "name": internal_tool_name})
+
+        self.tools = get_tools(
+            version_tools,
+            alita_client=alita,
+            llm=self.client,
+            memory_store=self.store,
+            debug_mode=debug_mode,
+            mcp_tokens=mcp_tokens
+        )
         if tools:
             self.tools += tools
         # Handle prompt setup
@@ -110,13 +127,18 @@ class Assistant:
                 messages.extend(chat_history)
             self.prompt = Jinja2TemplatedChatMessagesTemplate(messages=messages)
             if input_variables:
-                self.prompt.input_variables = input_variables
+                if hasattr(self.prompt, 'input_variables') and self.prompt.input_variables is not None:
+                    self.prompt.input_variables.extend(input_variables)
+                else:
+                    self.prompt.input_variables = input_variables
             if variables:
                 self.prompt.partial_variables = variables
             try:
-                logger.info(f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
+                logger.info(
+                    f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
             except Exception as e:
-                logger.info(f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
+                logger.info(
+                    f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
 
     def _configure_store(self, memory_tool: dict | None) -> None:
         """
@@ -133,11 +155,9 @@ class Assistant:
     def runnable(self):
         if self.app_type == 'pipeline':
             return self.pipeline()
-        elif self.app_type == 'openai':
-            return self.getOpenAIToolsAgentExecutor()
         elif self.app_type == 'xml':
             return self.getXMLAgentExecutor()
-        elif self.app_type in ['predict', 'react']:
+        elif self.app_type in ['predict', 'react', 'openai']:
             return self.getLangGraphReactAgent()
         else:
             self.tools = [EchoTool()] + self.tools
@@ -154,7 +174,6 @@ class Assistant:
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
         agent = create_json_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
         return self._agent_executor(agent)
-
 
     def getXMLAgentExecutor(self):
         # Exclude compiled graph runnables from simple tool agents
@@ -175,22 +194,6 @@ class Assistant:
         """
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        
-        # Add sandbox tool by default for react agents
-        try:
-            from ..tools.sandbox import create_sandbox_tool
-            sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True)
-            simple_tools.append(sandbox_tool)
-            logger.info("Added PyodideSandboxTool to react agent")
-        except ImportError as e:
-            logger.warning(f"Failed to add PyodideSandboxTool: {e}. Install langchain-sandbox to enable this feature.")
-        except RuntimeError as e:
-            if "Deno" in str(e):
-                logger.warning("Failed to add PyodideSandboxTool: Deno is required. Install from https://docs.deno.com/runtime/getting_started/installation/")
-            else:
-                logger.warning(f"Failed to add PyodideSandboxTool: {e}")
-        except Exception as e:
-            logger.error(f"Error adding PyodideSandboxTool: {e}")
         
         # Set up memory/checkpointer if available
         checkpointer = None
@@ -225,6 +228,10 @@ class Assistant:
         # Only use prompt_instructions if explicitly specified (for predict app_type)
         if self.app_type == "predict" and isinstance(self.prompt, str):
             prompt_instructions = self.prompt
+
+        # take the system message from the openai prompt as a prompt instructions
+        if self.app_type == "openai" and hasattr(self.prompt, 'messages'):
+            prompt_instructions = self.__take_prompt_from_openai_messages()
         
         # Create a unified YAML schema with conditional tool binding
         # Build the base node configuration
@@ -266,6 +273,9 @@ class Assistant:
         schema_dict = {
             'name': 'react_agent',
             'state': {
+                'input': {
+                    'type': 'str'
+                },
                 'messages': state_messages_config
             },
             'nodes': [{
@@ -274,6 +284,21 @@ class Assistant:
                 'prompt': {
                     'template': escaped_prompt
                 },
+                'input_mapping': {
+                    'system': {
+                        'type': 'fixed',
+                        'value': escaped_prompt
+                    },
+                    'task': {
+                        'type': 'variable',
+                        'value': 'input'
+                    },
+                    'chat_history': {
+                        'type': 'variable',
+                        'value': 'messages'
+                    }
+                },
+                'step_limit': self.max_iterations,
                 'input': ['messages'],
                 'output': ['messages'],
                 'transition': 'END'
@@ -298,7 +323,9 @@ class Assistant:
             memory=checkpointer,
             store=self.store,
             debug=False,
-            for_subgraph=False
+            for_subgraph=False,
+            alita_client=self.alita_client,
+            steps_limit=self.max_iterations
         )
         
         return agent
@@ -312,7 +339,9 @@ class Assistant:
         #
         agent = create_graph(
             client=self.client, tools=self.tools,
-            yaml_schema=self.prompt, memory=memory
+            yaml_schema=self.prompt, memory=memory,
+            alita_client=self.alita_client,
+            steps_limit=self.max_iterations
         )
         #
         return agent
@@ -323,3 +352,16 @@ class Assistant:
 
     def predict(self, messages: list[BaseMessage]):
         return self.client.invoke(messages)
+
+    def __take_prompt_from_openai_messages(self):
+        if self.prompt and self.prompt.messages:
+            for message in self.prompt.messages:
+                # we don't need any message placeholder from the openai agent prompt
+                if hasattr(message, 'variable_name'):
+                    continue
+                # take only the content of the system message from the openai prompt
+                if isinstance(message, SystemMessage):
+                    environment = Environment(undefined=DebugUndefined)
+                    template = environment.from_string(message.content)
+                    return template.render(self.prompt.partial_variables)
+        return None

@@ -47,8 +47,8 @@ def formulate_query(kwargs):
 
 
 class GraphTool(BaseTool):
-    name: str
-    description: str
+    name: str = 'GraphTool'
+    description: str = 'Graph tool for tools'
     graph: CompiledStateGraph
     args_schema: Type[BaseModel] = graphToolSchema
     return_type: str = "str"
@@ -65,10 +65,16 @@ class GraphTool(BaseTool):
         all_kwargs = {**kwargs, **extras, **schema_values}
         if config is None:
             config = {}
-        return self._run(*config, **all_kwargs)
+        # Pass the config to the _run empty or the one passed from the parent executor.
+        return self._run(config, **all_kwargs)
 
     def _run(self, *args, **kwargs):
-        response = self.graph.invoke(formulate_query(kwargs))
+        config = None
+        # From invoke method we are passing only 1 arg so it is safe to do this condition and config assignment.
+        # Default to None is safe because it will be checked also on the langchain side.
+        if args:
+            config = args[0]
+        response = self.graph.invoke(formulate_query(kwargs), config=config)
         if self.return_type == "str":
             return response["output"]
         else:

@@ -90,62 +90,79 @@ available_count = len(AVAILABLE_TOOLS)
 total_attempted = len(AVAILABLE_TOOLS) + len(FAILED_IMPORTS)
 logger.info(f"Tool imports completed: {available_count}/{total_attempted} successful")
 
+
 def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, **kwargs):
     tools = []
+
     for tool in tools_list:
-        # validate tool name syntax - it cannot be started with _
-        for tool_name in tool.get('settings', {}).get('selected_tools', []):
-            if isinstance(tool_name, str) and tool_name.startswith('_'):
-                raise ValueError(f"Tool name '{tool_name}' from toolkit '{tool.get('type', '')}' cannot start with '_'")
+        settings = tool.get('settings')
 
-        tool['settings']['alita'] = alita
-        tool['settings']['llm'] = llm
-        tool['settings']['store'] = store
+        # Skip tools without settings early
+        if not settings:
+            logger.warning(f"Tool '{tool.get('type', '')}' has no settings, skipping...")
+            continue
+
+        # Validate tool names once
+        selected_tools = settings.get('selected_tools', [])
+        invalid_tools = [name for name in selected_tools if isinstance(name, str) and name.startswith('_')]
+        if invalid_tools:
+            raise ValueError(f"Tool names {invalid_tools} from toolkit '{tool.get('type', '')}' cannot start with '_'")
+
+        # Cache tool type and add common settings
         tool_type = tool['type']
+        settings['alita'] = alita
+        settings['llm'] = llm
+        settings['store'] = store
 
-        # Handle special cases for ADO tools
+        # Set pgvector collection schema if present
+        if settings.get('pgvector_configuration'):
+            settings['pgvector_configuration']['collection_schema'] = str(tool['id'])
+
+        # Handle ADO special cases
         if tool_type in ['ado_boards', 'ado_wiki', 'ado_plans']:
             tools.extend(AVAILABLE_TOOLS['ado']['get_tools'](tool_type, tool))
+            continue
 
-        # Check if tool is available and has get_tools function
-        elif tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
+        # Handle ADO repos aliases
+        if tool_type in ['ado_repos', 'azure_devops_repos'] and 'ado_repos' in AVAILABLE_TOOLS:
             try:
-                get_tools_func = AVAILABLE_TOOLS[tool_type]['get_tools']
-                tools.extend(get_tools_func(tool))
+                tools.extend(AVAILABLE_TOOLS['ado_repos']['get_tools'](tool))
+            except Exception as e:
+                logger.error(f"Error getting ADO repos tools: {e}")
+            continue
 
+        # Skip MCP toolkit - it's handled by runtime/toolkits/tools.py to avoid duplicate loading
+        if tool_type == 'mcp':
+            logger.debug(f"Skipping MCP toolkit '{tool.get('toolkit_name')}' - handled by runtime toolkit system")
+            continue
+
+        # Handle standard tools
+        if tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
+            try:
+                tools.extend(AVAILABLE_TOOLS[tool_type]['get_tools'](tool))
             except Exception as e:
                 logger.error(f"Error getting tools for {tool_type}: {e}")
                 raise ToolException(f"Error getting tools for {tool_type}: {e}")
-
-        # Handle ADO repos special case (it might be requested as azure_devops_repos)
-        elif tool_type in ['ado_repos', 'azure_devops_repos'] and 'ado_repos' in AVAILABLE_TOOLS:
-            try:
-                get_tools_func = AVAILABLE_TOOLS['ado_repos']['get_tools']
-                tools.extend(get_tools_func(tool))
-            except Exception as e:
-                logger.error(f"Error getting ADO repos tools: {e}")
+            continue
 
         # Handle custom modules
-        elif tool.get("settings", {}).get("module"):
+        if settings.get("module"):
             try:
-                settings = tool.get("settings", {})
                 mod = import_module(settings.pop("module"))
                 tkitclass = getattr(mod, settings.pop("class"))
-                #
-                get_toolkit_params = tool["settings"].copy()
+                get_toolkit_params = settings.copy()
                 get_toolkit_params["name"] = tool.get("name")
-                #
                 toolkit = tkitclass.get_toolkit(**get_toolkit_params)
                 tools.extend(toolkit.get_tools())
             except Exception as e:
                 logger.error(f"Error in getting custom toolkit: {e}")
+            continue
 
+        # Tool not available
+        if tool_type in FAILED_IMPORTS:
+            logger.warning(f"Tool '{tool_type}' is not available: {FAILED_IMPORTS[tool_type]}")
         else:
-            # Tool not available or not found
-            if tool_type in FAILED_IMPORTS:
-                logger.warning(f"Tool '{tool_type}' is not available: {FAILED_IMPORTS[tool_type]}")
-            else:
-                logger.warning(f"Unknown tool type: {tool_type}")
+            logger.warning(f"Unknown tool type: {tool_type}")
 
     return tools
 

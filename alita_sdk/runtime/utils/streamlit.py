@@ -868,10 +868,24 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                 label = f"{'🔒 ' if is_secret else ''}{'*' if is_required else ''}{field_name.replace('_', ' ').title()}"
                                 
                                 if field_type == 'string':
-                                    if is_secret:
+                                    # Check if this is an enum field
+                                    if field_schema.get('enum'):
+                                        # Dropdown for enum values
+                                        options = field_schema['enum']
+                                        default_index = 0
+                                        if default_value and str(default_value) in options:
+                                            default_index = options.index(str(default_value))
+                                        toolkit_config_values[field_name] = st.selectbox(
+                                            label,
+                                            options=options,
+                                            index=default_index,
+                                            help=field_description,
+                                            key=f"config_{field_name}_{selected_toolkit_idx}"
+                                        )
+                                    elif is_secret:
                                         toolkit_config_values[field_name] = st.text_input(
                                             label,
-                                            value=str(default_value) if default_value else '', 
+                                            value=str(default_value) if default_value else '',
                                             help=field_description,
                                             type="password",
                                             key=f"config_{field_name}_{selected_toolkit_idx}"
@@ -879,7 +893,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                     else:
                                         toolkit_config_values[field_name] = st.text_input(
                                             label,
-                                            value=str(default_value) if default_value else '', 
+                                            value=str(default_value) if default_value else '',
                                             help=field_description,
                                             key=f"config_{field_name}_{selected_toolkit_idx}"
                                         )
@@ -971,6 +985,23 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                                 key=f"config_{field_name}_{selected_toolkit_idx}"
                                             )
                                         toolkit_config_values[field_name] = [line.strip() for line in array_input.split('\n') if line.strip()]
+                                elif field_type == 'object':
+                                    # Handle object/dict types (like headers)
+                                    obj_input = st.text_area(
+                                        f"{label} (JSON object)",
+                                        value=json.dumps(default_value) if isinstance(default_value, dict) else str(default_value) if default_value else '',
+                                        help=f"{field_description} - Enter as JSON object, e.g. {{\"Authorization\": \"Bearer token\"}}",
+                                        placeholder='{"key": "value"}',
+                                        key=f"config_{field_name}_{selected_toolkit_idx}"
+                                    )
+                                    try:
+                                        if obj_input.strip():
+                                            toolkit_config_values[field_name] = json.loads(obj_input)
+                                        else:
+                                            toolkit_config_values[field_name] = None
+                                    except json.JSONDecodeError as e:
+                                        st.error(f"Invalid JSON format for {field_name}: {e}")
+                                        toolkit_config_values[field_name] = None
                         else:
                             st.info("This toolkit doesn't require additional configuration.")
                         

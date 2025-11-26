@@ -563,7 +563,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         Use the appropriate issue link type (e.g., "Test", "Relates", "Blocks").
         If we use "Test" linktype, the test is inward issue, the story/other issue is outward issue.."""
 
-        comment = "This test is linked to the story."
+        comment = f"Issue {inward_issue_key} was linked to {outward_issue_key}."
         comment_body = {"content": [{"content": [{"text": comment,"type": "text"}],"type": "paragraph"}],"type": "doc","version": 1} if self.api_version == "3" else comment
         link_data = {
             "type": {"name": f"{linktype}"},
@@ -754,18 +754,15 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                 logger.info(f"Skipping attachment {attachment['filename']} as it does not match pattern {attachment_pattern}")
                 continue
             logger.info(f"Processing attachment {attachment['filename']} with ID {attachment['attachment_id']}")
-            if self.api_version == "3":
-                attachment_data.append(self._client.get_attachment_content(attachment['attachment_id']))
-            else:
-                try:
-                    attachment_content = self._client.get_attachment_content(attachment['attachment_id'])
-                except Exception as e:
-                    logger.error(
-                        f"Failed to download attachment {attachment['filename']} for issue {jira_issue_key}: {str(e)}")
-                    attachment_content = self._client.get(
-                        path=f"secure/attachment/{attachment['attachment_id']}/{attachment['filename']}", not_json_response=True)
-                content_docs = process_content_by_type(attachment_content, attachment['filename'], llm=self.llm)
-                attachment_data.append("filename: " + attachment['filename'] + "\ncontent: " + str([doc.page_content for doc in content_docs]))
+            try:
+                attachment_content = self._client.get_attachment_content(attachment['attachment_id'])
+            except Exception as e:
+                logger.error(
+                    f"Failed to download attachment {attachment['filename']} for issue {jira_issue_key}: {str(e)}")
+                attachment_content = self._client.get(
+                    path=f"secure/attachment/{attachment['attachment_id']}/{attachment['filename']}", not_json_response=True)
+            content_docs = process_content_by_type(attachment_content, attachment['filename'], llm=self.llm, fallback_extensions=[".txt", ".png"])
+            attachment_data.append("filename: " + attachment['filename'] + "\ncontent: " + str([doc.page_content for doc in content_docs]))
 
         return "\n\n".join(attachment_data)
 
@@ -1043,27 +1040,39 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
 
     def _extract_image_data(self, field_data):
         """
-        Extracts image data from general JSON response
+        Extracts image data from general JSON response.
+        Handles lists, dicts with image info, and plain strings.
         """
-        if isinstance(field_data, dict) and 'filename' in field_data and 'content' in field_data:
-            return f"!{field_data['filename']}|alt={field_data['filename']}!"
-        if 'content' in field_data and isinstance(field_data['content'], list):
-            result = []
-            for content_item in field_data['content']:
-                if 'content' in content_item and isinstance(content_item['content'], list) and len(content_item['content']) > 0:
-                    if content_item.get('type') == 'mediaSingle':
-                        media = content_item['content'][0]
-                        attrs = media.get('attrs', {})
-                        if attrs.get('type') == 'file':
-                            alt = attrs.get('alt', '')
-                            image_str = f'!{alt}|alt="{alt}"!'
-                            result.append(image_str)
-                    elif content_item.get('type') == 'paragraph':
-                        result.append(content_item['content'][0].get('text', ''))
-                    else:
-                        result.append(self._extract_image_data(content_item))
-            return '\n'.join(result)
-        return str(field_data)
+        if isinstance(field_data, list):
+            return ' '.join(self._extract_image_data(item) for item in field_data)
+        if isinstance(field_data, dict):
+            if 'filename' in field_data and 'content' in field_data:
+                return f"!{field_data['filename']}|alt={field_data['filename']}!"
+            if 'content' in field_data and isinstance(field_data['content'], list):
+                result = []
+                for content_item in field_data['content']:
+                    if (
+                        isinstance(content_item, dict)
+                        and 'content' in content_item
+                        and isinstance(content_item['content'], list)
+                        and content_item['content']
+                    ):
+                        if content_item.get('type') == 'mediaSingle':
+                            media = content_item['content'][0]
+                            attrs = media.get('attrs', {})
+                            if attrs.get('type') == 'file':
+                                alt = attrs.get('alt', '')
+                                image_str = f'!{alt}|alt="{alt}"!'
+                                result.append(image_str)
+                        elif content_item.get('type') == 'paragraph':
+                            result.append(content_item['content'][0].get('text', ''))
+                        else:
+                            result.append(self._extract_image_data(content_item))
+                return '\n'.join(result)
+            return f"Unsupported format of field content."
+        if isinstance(field_data, str):
+            return field_data
+        return f"Unsupported field content type: {type(field_data)}. Expected a string, list, or dict."
 
     def get_field_with_image_descriptions(self, jira_issue_key: str, field_name: str, prompt: Optional[str] = None,
                                           context_radius: int = 500):
@@ -1098,12 +1107,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                 return f"Unable to find field '{field_name}' or it's empty. Available fields are: {existing_fields_str}"
 
             # Handle multiple images or non-string content
-            if isinstance(field_content, list):
-                field_content = ' '.join(map(self._extract_image_data, field_content))
-            elif isinstance(field_content, dict):
-                field_content = self._extract_image_data(field_content)
-            elif not isinstance(field_content, str):
-                return f"Unsupported field content type: {type(field_content)}. Expected a string, list, or dict."
+            field_content = self._extract_image_data(field_content)
 
             # Regular expression to find image references in Jira markup
             image_pattern = r'!([^!|]+)(?:\|[^!]*)?!'
@@ -1237,24 +1241,22 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
 
             comment_author = comment.get('author', {}).get('displayName', 'Unknown')
             comment_created = comment.get('created', 'Unknown date')
+            comment_body = self._extract_image_data(comment_body)
 
             # Process the comment body by replacing image references with descriptions
-            try:
-                processed_body = re.sub(image_pattern,
-                                        lambda match: self.process_image_match(match, comment_body, attachment_resolver, context_radius, prompt),
-                                        comment_body)
+            processed_body = re.sub(image_pattern,
+                                    lambda match: self.process_image_match(match, comment_body, attachment_resolver, context_radius, prompt),
+                                    comment_body)
 
-                # Add the processed comment to our results
-                processed_comments.append({
-                    "author": comment_author,
-                    "created": comment_created,
-                    "id": comment.get('id'),
-                    "original_content": comment_body,
-                    "processed_content": processed_body
-                })
-            except Exception as e:
-                logger.error(f"Error processing image references in comment: {str(e)}")
-                # TODO process comment in api 3 format
+            # Add the processed comment to our results
+            processed_comments.append({
+                "author": comment_author,
+                "created": comment_created,
+                "id": comment.get('id'),
+                "original_content": comment_body,
+                "processed_content": processed_body
+            })
+        
         return processed_comments
 
     def get_comments_with_image_descriptions(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500):
@@ -1325,7 +1327,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
 
             # Use provided JQL query or default to all issues
             if not jql:
-                jql_query = "ORDER BY updated DESC"  # Default to get all issues ordered by update time
+                jql_query = "created >= \"1970-01-01\" ORDER BY updated DESC"  # Default to get all issues ordered by update time
             else:
                 jql_query = jql
 

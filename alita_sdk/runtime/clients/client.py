@@ -68,7 +68,10 @@ class AlitaClient:
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
+        self.image_generation_url = f"{self.base_url}{self.llm_path}/images/generations"
         self.configurations: list = configurations or []
+        self.model_timeout = kwargs.get('model_timeout', 120)
+        self.model_image_generation = kwargs.get('model_image_generation')
 
     def get_mcp_toolkits(self):
         if user_id := self._get_real_user_id():
@@ -85,7 +88,12 @@ class AlitaClient:
             # This loop iterates over each key-value pair in the arguments dictionary,
             # and if a value is a Pydantic object, it replaces it with its dictionary representation using .dict().
             for arg_name, arg_value in params.get('params', {}).get('arguments', {}).items():
-                if hasattr(arg_value, "dict") and callable(arg_value.dict):
+                if isinstance(arg_value, list):
+                    params['params']['arguments'][arg_name] = [
+                        item.dict() if hasattr(item, "dict") and callable(item.dict) else item
+                        for item in arg_value
+                    ]
+                elif hasattr(arg_value, "dict") and callable(arg_value.dict):
                     params['params']['arguments'][arg_name] = arg_value.dict()
             #
             response = requests.post(url, headers=self.headers, json=params, verify=False)
@@ -179,6 +187,7 @@ class AlitaClient:
             model=embedding_model,
             api_key=self.auth_token,
             openai_organization=str(self.project_id),
+            request_timeout=self.model_timeout
         )
 
     def get_llm(self, model_name: str, model_config: dict) -> ChatOpenAI:
@@ -204,13 +213,65 @@ class AlitaClient:
             streaming=model_config.get("streaming", True),
             stream_usage=model_config.get("stream_usage", True),
             max_tokens=model_config.get("max_tokens", None),
-            top_p=model_config.get("top_p"),
             temperature=model_config.get("temperature"),
             max_retries=model_config.get("max_retries", 3),
             seed=model_config.get("seed", None),
             openai_organization=str(self.project_id),
         )
 
+    def generate_image(self,
+                       prompt: str,
+                       n: int = 1,
+                       size: str = "auto",
+                       quality: str = "auto",
+                       response_format: str = "b64_json",
+                       style: Optional[str] = None) -> dict:
+
+        if not self.model_image_generation:
+            raise ValueError("Image generation model is not configured for this client")
+
+        image_generation_data = {
+            "prompt": prompt,
+            "model": self.model_image_generation,
+            "n": n,
+            "response_format": response_format,
+        }
+
+        # Only add optional parameters if they have meaningful values
+        if size and size.lower() != "auto":
+            image_generation_data["size"] = size
+
+        if quality and quality.lower() != "auto":
+            image_generation_data["quality"] = quality
+
+        if style:
+            image_generation_data["style"] = style
+
+        # Standard headers for image generation
+        image_headers = self.headers.copy()
+        image_headers.update({
+            "Content-Type": "application/json",
+        })
+
+        logger.info(f"Generating image with model: {self.model_image_generation}, prompt: {prompt[:50]}...")
+
+        try:
+            response = requests.post(
+                self.image_generation_url,
+                headers=image_headers,
+                json=image_generation_data,
+                verify=False,
+                timeout=self.model_timeout
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Image generation failed: {e.response.status_code} - {e.response.text}")
+            raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Image generation request failed: {e}")
+            raise
 
     def get_app_version_details(self, application_id: int, application_version_id: int) -> dict:
         url = f"{self.application_versions}/{application_id}/{application_version_id}"
@@ -242,7 +303,7 @@ class AlitaClient:
                     app_type=None, memory=None, runtime='langchain',
                     application_variables: Optional[dict] = None,
                     version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
-                    llm: Optional[ChatOpenAI] = None):
+                    llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -281,13 +342,16 @@ class AlitaClient:
             app_type = "react"
         elif app_type == 'autogen':
             app_type = "react"
+        
+        # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
+        # The exception will propagate naturally to the indexer worker's outer handler
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
-                                      tools=tools, memory=memory, store=store)
+                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
-                                      tools=tools, memory=memory, store=store).runnable()
+                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 
@@ -349,7 +413,8 @@ class AlitaClient:
         return self._process_requst(resp)
 
     def list_artifacts(self, bucket_name: str):
-        url = f'{self.artifacts_url}/{bucket_name}'
+        # Ensure bucket name is lowercase as required by the API
+        url = f'{self.artifacts_url}/{bucket_name.lower()}'
         data = requests.get(url, headers=self.headers, verify=False)
         return self._process_requst(data)
 
@@ -506,19 +571,23 @@ class AlitaClient:
     def predict_agent(self, llm: ChatOpenAI, instructions: str = "You are a helpful assistant.",
                       tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                       memory=None, runtime='langchain', variables: Optional[list] = None,
-                      store: Optional[BaseStore] = None):
+                      store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False,
+                      mcp_tokens: Optional[dict] = None):
         """
         Create a predict-type agent with minimal configuration.
 
         Args:
             llm: The LLM to use
             instructions: System instructions for the agent
-            tools: Optional list of tools to provide to the agent
+            tools: Optional list of tool configurations (not tool instances) to provide to the agent.
+                   Tool configs will be processed through get_tools() to create tool instances.
+                   Each tool config should have 'type', 'settings', etc.
             chat_history: Optional chat history
             memory: Optional memory/checkpointer
             runtime: Runtime type (default: 'langchain')
             variables: Optional list of variables for the agent
             store: Optional store for memory
+            debug_mode: Enable debug mode for cases when assistant can be initialized without tools
 
         Returns:
             Runnable agent ready for execution
@@ -532,13 +601,27 @@ class AlitaClient:
 
         # Create a minimal data structure for predict agent
         # All LLM settings are taken from the passed client instance
+        # Note: 'tools' here are tool CONFIGURATIONS, not tool instances
+        # They will be converted to tool instances by LangChainAssistant via get_tools()
         agent_data = {
             'instructions': instructions,
-            'tools': tools,  # Tools are handled separately in predict agents
+            'tools': tools,  # Tool configs that will be processed by get_tools()
             'variables': variables
         }
-        return LangChainAssistant(self, agent_data, llm,
-                                  chat_history, "predict", memory=memory, store=store).runnable()
+        
+        # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
+        # The exception will propagate naturally to the indexer worker's outer handler
+        return LangChainAssistant(
+            self,
+            agent_data,
+            llm,
+            chat_history,
+            "predict",
+            memory=memory,
+            store=store,
+            debug_mode=debug_mode,
+            mcp_tokens=mcp_tokens
+        ).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,
                           runtime_config: dict = None, llm_model: str = None,
@@ -679,7 +762,23 @@ class AlitaClient:
                 }
 
             # Instantiate the toolkit with client and LLM support
-            tools = instantiate_toolkit_with_client(toolkit_config, llm, self)
+            try:
+                tools = instantiate_toolkit_with_client(toolkit_config, llm, self)
+            except Exception as toolkit_error:
+                # Re-raise McpAuthorizationRequired to allow proper handling upstream
+                from ..utils.mcp_oauth import McpAuthorizationRequired
+                if isinstance(toolkit_error, McpAuthorizationRequired):
+                    raise
+                # For other errors, return error response
+                return {
+                    "success": False,
+                    "error": f"Failed to instantiate toolkit '{toolkit_config.get('toolkit_name')}': {str(toolkit_error)}",
+                    "tool_name": tool_name,
+                    "toolkit_config": toolkit_config_parsed_json,
+                    "llm_model": llm_model,
+                    "events_dispatched": events_dispatched,
+                    "execution_time_seconds": 0.0
+                }
 
             if not tools:
                 return {

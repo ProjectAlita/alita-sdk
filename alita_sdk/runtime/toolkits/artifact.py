@@ -6,7 +6,7 @@ from langchain_core.tools import BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 from ..tools.artifact import ArtifactWrapper
-from alita_sdk.tools.base.tool import BaseAction
+from ...tools.base.tool import BaseAction
 from ...configurations.pgvector import PgVectorConfiguration
 
 
@@ -21,7 +21,14 @@ class ArtifactToolkit(BaseToolkit):
         return create_model(
             "artifact",
             # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
-            bucket = (str, FieldInfo(description="Bucket name", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': ArtifactToolkit.toolkit_max_length})),
+            bucket=(str, FieldInfo(
+                description="Bucket name",
+                pattern=r'^[a-z][a-z0-9-]*$',
+                json_schema_extra={
+                    'toolkit_name': True,
+                    'max_toolkit_length': ArtifactToolkit.toolkit_max_length
+                }
+            )),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None, description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),

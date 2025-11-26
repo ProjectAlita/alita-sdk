@@ -7,12 +7,14 @@ from json import JSONDecodeError
 from typing import Optional, List, Any, Dict, Callable, Generator, Literal
 
 import requests
+from atlassian.errors import ApiError
 from langchain_community.document_loaders.confluence import ContentFormat
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import ToolException
 from markdownify import markdownify
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
+from requests import HTTPError
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
 from alita_sdk.tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
@@ -194,6 +196,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
     keep_markdown_format: Optional[bool] = True
     ocr_languages: Optional[str] = None
     keep_newlines: Optional[bool] = True
+    _errors: Optional[list[str]] = None
     _image_cache: ImageDescriptionCache = PrivateAttr(default_factory=ImageDescriptionCache)
 
     @model_validator(mode='before')
@@ -498,7 +501,9 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         restrictions = self.client.get_all_restrictions_for_content(page["id"])
 
         return (
-                page["status"] == "current"
+                (page["status"] == "current"
+                # allow user to see archived content if needed
+                 or page["status"] == "archived")
                 and not restrictions["read"]["restrictions"]["user"]["results"]
                 and not restrictions["read"]["restrictions"]["group"]["results"]
         )
@@ -518,18 +523,35 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 ),
                 before_sleep=before_sleep_log(logger, logging.WARNING),
             )(self.client.get_page_by_id)
-            page = get_page(
-                page_id=page_id, expand=f"{self.content_format.value},version"
-            )
-            if not self.include_restricted_content and not self.is_public_page(page):
-                continue
+            try:
+                page = get_page(
+                    page_id=page_id, expand=f"{self.content_format.value},version"
+                )
+            except (ApiError, HTTPError) as e:
+                logger.error(f"Error fetching page with ID {page_id}: {e}")
+                page_content_temp = f"Confluence API Error: cannot fetch the page with ID {page_id}: {e}"
+                # store errors
+                if self._errors is None:
+                    self._errors = []
+                self._errors.append(page_content_temp)
+                return Document(page_content=page_content_temp,
+                                metadata={})
+            # TODO: update on toolkit advanced settings level as a separate feature
+            # if not self.include_restricted_content and not self.is_public_page(page):
+            #     continue
             yield self.process_page(page, skip_images)
+
+    def _log_errors(self):
+        """ Log errors encountered during toolkit execution. """
+        if self._errors:
+            logger.info(f"Errors encountered during toolkit execution: {self._errors}")
 
     def read_page_by_id(self, page_id: str, skip_images: bool = False):
         """Reads a page by its id in the Confluence space. If id is not available, but there is a title - use get_page_id first."""
         result = list(self.get_pages_by_id([page_id], skip_images))
         if not result:
-            "Page not found"
+            return f"Pages not found. Errors: {self._errors}" if self._errors \
+                else "Pages not found or you do not have access to them."
         return result[0].page_content
         # return self._strip_base64_images(result[0].page_content) if skip_images else result[0].page_content
 
@@ -815,6 +837,10 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         from .loader import AlitaConfluenceLoader
         from copy import copy
         content_format = kwargs.get('content_format', 'view').lower()
+
+        self._index_include_attachments = kwargs.get('include_attachments', False)
+        self._include_extensions = kwargs.get('include_extensions', [])
+        self._skip_extensions = kwargs.get('skip_extensions', [])
         base_params = {
             'url': self.base_url,
             'space_key': self.space,
@@ -847,65 +873,79 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
         try:
-            page_id = document.metadata.get('id')
-            attachments = self.client.get_attachments_from_content(page_id)
-            if not attachments or not attachments.get('results'):
-                return f"No attachments found for page ID {page_id}."
+            if self._index_include_attachments:
+                page_id = document.metadata.get('id')
+                attachments = self.client.get_attachments_from_content(page_id)
+                if not attachments or not attachments.get('results'):
+                    return f"No attachments found for page ID {page_id}."
 
-            # Get attachment history for created/updated info
-            history_map = {}
-            for attachment in attachments['results']:
-                try:
-                    hist = self.client.history(attachment['id'])
-                    history_map[attachment['id']] = hist
-                except Exception as e:
-                    logger.warning(f"Failed to fetch history for attachment {attachment.get('title', '')}: {str(e)}")
-                    history_map[attachment['id']] = None
+                # Get attachment history for created/updated info
+                history_map = {}
+                for attachment in attachments['results']:
+                    try:
+                        hist = self.client.history(attachment['id'])
+                        history_map[attachment['id']] = hist
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch history for attachment {attachment.get('title', '')}: {str(e)}")
+                        history_map[attachment['id']] = None
 
-            import re
-            for attachment in attachments['results']:
-                title = attachment.get('title', '')
-                file_ext = title.lower().split('.')[-1] if '.' in title else ''
+                import re
+                for attachment in attachments['results']:
+                    title = attachment.get('title', '')
+                    file_ext = title.lower().split('.')[-1] if '.' in title else ''
 
-                media_type = attachment.get('metadata', {}).get('mediaType', '')
-                # Core metadata extraction with history
-                hist = history_map.get(attachment['id']) or {}
-                created_by = hist.get('createdBy', {}).get('displayName', '') if hist else attachment.get('creator', {}).get('displayName', '')
-                created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
-                last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
+                    # Re-verify extension filters
+                    # Check if file should be skipped based on skip_extensions
+                    if any(re.match(pattern.replace('*', '.*') + '$', title, re.IGNORECASE)
+                           for pattern in self._skip_extensions):
+                        continue
 
-                metadata = {
-                    'name': title,
-                    'size': attachment.get('extensions', {}).get('fileSize', None),
-                    'creator': created_by,
-                    'created': created_date,
-                    'updated': last_updated,
-                    'media_type': media_type,
-                    'labels': [label['name'] for label in
-                               attachment.get('metadata', {}).get('labels', {}).get('results', [])],
-                    'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get(
-                        '_links', {}).get('download') else None
-                }
+                    # Check if file should be included based on include_extensions
+                    # If include_extensions is empty, process all files (that weren't skipped)
+                    if self._include_extensions and not (
+                    any(re.match(pattern.replace('*', '.*') + '$', title, re.IGNORECASE)
+                        for pattern in self._include_extensions)):
+                        continue
 
-                download_url = self.base_url.rstrip('/') + attachment['_links']['download']
+                    media_type = attachment.get('metadata', {}).get('mediaType', '')
+                    # Core metadata extraction with history
+                    hist = history_map.get(attachment['id']) or {}
+                    created_by = hist.get('createdBy', {}).get('displayName', '') if hist else attachment.get('creator', {}).get('displayName', '')
+                    created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
+                    last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
 
-                try:
-                    resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
-                    if resp.status_code == 200:
-                        content = resp.content
+                    metadata = {
+                        'name': title,
+                        'size': attachment.get('extensions', {}).get('fileSize', None),
+                        'creator': created_by,
+                        'created': created_date,
+                        'updated': last_updated,
+                        'media_type': media_type,
+                        'labels': [label['name'] for label in
+                                   attachment.get('metadata', {}).get('labels', {}).get('results', [])],
+                        'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get(
+                            '_links', {}).get('download') else None
+                    }
+
+                    download_url = self.base_url.rstrip('/') + attachment['_links']['download']
+
+                    try:
+                        resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
+                        if resp.status_code == 200:
+                            content = resp.content
+                        else:
+                            content = f"[Failed to download {download_url}: HTTP status code {resp.status_code}]"
+                    except Exception as e:
+                        content = f"[Error downloading content: {str(e)}]"
+
+                    if isinstance(content, str):
+                        yield Document(page_content=content, metadata=metadata)
                     else:
-                        content = f"[Failed to download {download_url}: HTTP status code {resp.status_code}]"
-                except Exception as e:
-                    content = f"[Error downloading content: {str(e)}]"
-
-                if isinstance(content, str):
-                    yield Document(page_content=content, metadata=metadata)
-                else:
-                    yield Document(page_content="", metadata={
-                        **metadata,
-                        IndexerKeywords.CONTENT_FILE_NAME.value: f".{file_ext}",
-                        IndexerKeywords.CONTENT_IN_BYTES.value: content
-                    })
+                        yield Document(page_content="", metadata={
+                            **metadata,
+                            IndexerKeywords.CONTENT_FILE_NAME.value: f".{file_ext}",
+                            IndexerKeywords.CONTENT_IN_BYTES.value: content
+                        })
         except Exception as e:
             yield from ()
 
@@ -1648,8 +1688,15 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             "include_restricted_content": (Optional[bool], Field(description="Include restricted content.", default=False)),
             "include_archived_content": (Optional[bool], Field(description="Include archived content.", default=False)),
             "include_attachments": (Optional[bool], Field(description="Include attachments.", default=False)),
+            'include_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to include when processing attachments: i.e. ['*.png', '*.jpg']. "
+                            "If empty, all files will be processed (except skip_extensions).",
+                default=[])),
+            'skip_extensions': (Optional[List[str]], Field(
+                description="List of file extensions to skip when processing attachments: i.e. ['*.png', '*.jpg']",
+                default=[])),
             "include_comments": (Optional[bool], Field(description="Include comments.", default=False)),
-            "include_labels": (Optional[bool], Field(description="Include labels.", default=True)),
+            "include_labels": (Optional[bool], Field(description="Include labels.", default=False)),
             "ocr_languages": (Optional[str], Field(description="OCR languages for processing attachments.", default='eng')),
             "keep_markdown_format": (Optional[bool], Field(description="Keep the markdown format.", default=True)),
             "keep_newlines": (Optional[bool], Field(description="Keep newlines in the content.", default=True)),

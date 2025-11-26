@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Union, Any, Optional, Annotated, get_type_hints
 from uuid import uuid4
 from typing import Dict
@@ -18,8 +19,9 @@ from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 
+from .constants import PRINTER_NODE_RS, PRINTER
 from .mixedAgentRenderes import convert_message_to_json
-from .utils import create_state, propagate_the_input_mapping
+from .utils import create_state, propagate_the_input_mapping, safe_format
 from ..tools.function import FunctionTool
 from ..tools.indexer_tool import IndexerNode
 from ..tools.llm import LLMNode
@@ -231,6 +233,27 @@ class StateDefaultNode(Runnable):
                     result[key] = temp_value
         return result
 
+class PrinterNode(Runnable):
+    name = "PrinterNode"
+
+    def __init__(self, input_mapping: Optional[dict[str, dict]]):
+        self.input_mapping = input_mapping
+
+    def invoke(self, state: BaseStore, config: Optional[RunnableConfig] = None) -> dict:
+        logger.info(f"Printer Node - Current state variables: {state}")
+        result = {}
+        logger.debug(f"Initial text pattern: {self.input_mapping}")
+        mapping = propagate_the_input_mapping(self.input_mapping, [], state)
+        if mapping.get(PRINTER) is None:
+            raise ToolException(f"PrinterNode requires '{PRINTER}' field in input mapping")
+        formatted_output = mapping[PRINTER]
+        # add info label to the printer's output
+        if formatted_output:
+            formatted_output += f"\n\n-----\n*How to proceed?*\n* *to resume the pipeline - type anything...*"
+        logger.debug(f"Formatted output: {formatted_output}")
+        result[PRINTER_NODE_RS] = formatted_output
+        return result
+
 
 class StateModifierNode(Runnable):
     name = "StateModifierNode"
@@ -274,11 +297,20 @@ class StateModifierNode(Runnable):
                 logger.warning(f"Failed to decode base64 value: {e}")
                 return value
         
+        def split_by_words(value, chunk_size=100):
+            words = value.split()
+            return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+        
+        def split_by_regex(value, pattern):
+            """Splits the provided string using the specified regex pattern."""
+            return re.split(pattern, value)
 
         env = Environment()
         env.filters['from_json'] = from_json
-        env.filters['base64ToString'] = base64_to_string
-        
+        env.filters['base64_to_string'] = base64_to_string
+        env.filters['split_by_words'] = split_by_words
+        env.filters['split_by_regex'] = split_by_regex
+
         template = env.from_string(self.template)
         rendered_message = template.render(**input_data)
         result = {}
@@ -338,8 +370,8 @@ class StateModifierNode(Runnable):
         return result
 
 
-
-def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None, state_class=None, output_variables=None):
+def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None,
+                          state_class=None, output_variables=None):
     # prepare output channels
     if interrupt_after is None:
         interrupt_after = []
@@ -443,12 +475,16 @@ def create_graph(
             if toolkit_name:
                 tool_name = f"{clean_string(toolkit_name)}{TOOLKIT_SPLITTER}{tool_name}"
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-            if node_type in ['function', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
+            if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
+                if node_type == 'mcp' and tool_name not in [tool.name for tool in tools]:
+                    # MCP is not connected and node cannot be added
+                    raise ToolException(f"MCP tool '{tool_name}' not found in the provided tools. "
+                                        f"Make sure it is connected properly. Available tools: {[tool.name for tool in tools]}")
                 for tool in tools:
                     if tool.name == tool_name:
-                        if node_type == 'function':
+                        if node_type in ['function', 'toolkit', 'mcp']:
                             lg_builder.add_node(node_id, FunctionTool(
-                                tool=tool, name=node['id'], return_type='dict',
+                                tool=tool, name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_mapping=node.get('input_mapping',
                                                        {'messages': {'type': 'variable', 'value': 'messages'}}),
@@ -456,11 +492,12 @@ def create_graph(
                         elif node_type == 'agent':
                             input_params = node.get('input', ['messages'])
                             input_mapping = node.get('input_mapping',
-                                                       {'messages': {'type': 'variable', 'value': 'messages'}})
+                                                     {'messages': {'type': 'variable', 'value': 'messages'}})
+                            output_vars = node.get('output', [])
                             lg_builder.add_node(node_id, FunctionTool(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='str',
-                                output_variables=node.get('output', []),
+                                name=node_id, return_type='str',
+                                output_variables=output_vars + ['messages'] if 'messages' not in output_vars else output_vars,
                                 input_variables=input_params,
                                 input_mapping= input_mapping
                             ))
@@ -471,7 +508,8 @@ def create_graph(
                             # wrap with mappings
                             pipeline_name = node.get('tool', None)
                             if not pipeline_name:
-                                raise ValueError("Subgraph must have a 'tool' node: add required tool to the subgraph node")
+                                raise ValueError(
+                                    "Subgraph must have a 'tool' node: add required tool to the subgraph node")
                             node_fn = SubgraphRunnable(
                                 inner=tool.graph,
                                 name=pipeline_name,
@@ -483,25 +521,16 @@ def create_graph(
                         elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='dict',
+                                name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 structured_output=node.get('structured_output', False),
                                 task=node.get('task')
                             ))
-                        # TODO: decide on struct output for agent nodes
-                        # elif node_type == 'agent':
-                        #     lg_builder.add_node(node_id, AgentNode(
-                        #         client=client, tool=tool,
-                        #         name=node['id'], return_type='dict',
-                        #         output_variables=node.get('output', []),
-                        #         input_variables=node.get('input', ['messages']),
-                        #         task=node.get('task')
-                        #     ))
                         elif node_type == 'loop':
                             lg_builder.add_node(node_id, LoopNode(
                                 client=client, tool=tool,
-                                name=node['id'], return_type='dict',
+                                name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 task=node.get('task', '')
@@ -510,13 +539,14 @@ def create_graph(
                             loop_toolkit_name = node.get('loop_toolkit_name')
                             loop_tool_name = node.get('loop_tool')
                             if (loop_toolkit_name and loop_tool_name) or loop_tool_name:
-                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{loop_tool_name}" if loop_toolkit_name else clean_string(loop_tool_name)
+                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{loop_tool_name}" if loop_toolkit_name else clean_string(
+                                    loop_tool_name)
                                 for t in tools:
                                     if t.name == loop_tool_name:
                                         logger.debug(f"Loop tool discovered: {t}")
                                         lg_builder.add_node(node_id, LoopToolNode(
                                             client=client,
-                                            name=node['id'], return_type='dict',
+                                            name=node_id, return_type='dict',
                                             tool=tool, loop_tool=t,
                                             variables_mapping=node.get('variables_mapping', {}),
                                             output_variables=node.get('output', []),
@@ -536,13 +566,26 @@ def create_graph(
                                 client=client, tool=tool,
                                 index_tool=indexer_tool,
                                 input_mapping=node.get('input_mapping', {}),
-                                name=node['id'], return_type='dict',
+                                name=node_id, return_type='dict',
                                 chunking_tool=node.get('chunking_tool', None),
                                 chunking_config=node.get('chunking_config', {}),
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 structured_output=node.get('structured_output', False)))
                         break
+            elif node_type == 'code':
+                from ..tools.sandbox import create_sandbox_tool
+                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
+                                                   alita_client=kwargs.get('alita_client', None))
+                code_data = node.get('code', {'type': 'fixed', 'value': "return 'Code block is empty'"})
+                lg_builder.add_node(node_id, FunctionTool(
+                    tool=sandbox_tool, name=node['id'], return_type='dict',
+                    output_variables=node.get('output', []),
+                    input_mapping={'code': code_data},
+                    input_variables=node.get('input', ['messages']),
+                    structured_output=node.get('structured_output', False),
+                    alita_client=kwargs.get('alita_client', None)
+                ))
             elif node_type == 'llm':
                 output_vars = node.get('output', [])
                 output_vars_dict = {
@@ -571,23 +614,24 @@ def create_graph(
                 else:
                     # Use all available tools
                     available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
-                
+
                 lg_builder.add_node(node_id, LLMNode(
-                    client=client, 
-                    prompt=node.get('prompt', {}),
-                    name=node['id'], 
+                    client=client,
+                    input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
+                    name=node_id,
                     return_type='dict',
-                    response_key=node.get('response_key', 'messages'),
                     structured_output_dict=output_vars_dict,
                     output_variables=output_vars,
                     input_variables=node.get('input', ['messages']),
                     structured_output=node.get('structured_output', False),
                     available_tools=available_tools,
-                    tool_names=tool_names))
+                    tool_names=tool_names,
+                    steps_limit=kwargs.get('steps_limit', 25)
+                ))
             elif node_type == 'router':
                 # Add a RouterNode as an independent node
                 lg_builder.add_node(node_id, RouterNode(
-                    name=node['id'],
+                    name=node_id,
                     condition=node.get('condition', ''),
                     routes=node.get('routes', []),
                     default_output=node.get('default_output', 'END'),
@@ -603,6 +647,7 @@ def create_graph(
                         default_output=node.get('default_output', 'END')
                     )
                 )
+                continue
             elif node_type == 'state_modifier':
                 lg_builder.add_node(node_id, StateModifierNode(
                     template=node.get('template', ''),
@@ -610,6 +655,22 @@ def create_graph(
                     input_variables=node.get('input', ['messages']),
                     output_variables=node.get('output', [])
                 ))
+            elif node_type == 'printer':
+                lg_builder.add_node(node_id, PrinterNode(
+                    input_mapping=node.get('input_mapping', {'printer': {'type': 'fixed', 'value': ''}}),
+                ))
+
+                # add interrupts after printer node if specified
+                interrupt_after.append(clean_string(node_id))
+
+                # reset printer output variable to avoid carrying over
+                reset_node_id = f"{node_id}_reset"
+                lg_builder.add_node(reset_node_id, PrinterNode(
+                    input_mapping={'printer': {'type': 'fixed', 'value': ''}}
+                ))
+                lg_builder.add_conditional_edges(node_id, TransitionalEdge(reset_node_id))
+                lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
+                continue
             if node.get('transition'):
                 next_step = clean_string(node['transition'])
                 logger.info(f'Adding transition: {next_step}')
@@ -686,11 +747,15 @@ def set_defaults(d):
     type_defaults = {
         'str': '',
         'list': [],
+        'dict': {},
         'int': 0,
         'float': 0.0,
         'bool': False,
         # add more types as needed
     }
+    # Build state_types mapping with STRING type names (not actual type objects)
+    state_types = {}
+
     for k, v in d.items():
         # Skip 'input' key as it is not a state initial variable
         if k == 'input':
@@ -698,6 +763,16 @@ def set_defaults(d):
         # set value or default if type is defined
         if 'value' not in v:
             v['value'] = type_defaults.get(v['type'], None)
+
+        # Also build the state_types mapping with STRING type names
+        var_type = v['type'] if isinstance(v, dict) else v
+        if var_type in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number']:
+            # Store the string type name, not the actual type object
+            state_types[k] = var_type if var_type != 'number' else 'int'
+
+    # Add state_types as a default value that will be set at initialization
+    # Use string type names to avoid serialization issues
+    d['state_types'] = {'type': 'dict', 'value': state_types}
     return d
 
 def convert_dict_to_message(msg_dict):
@@ -731,7 +806,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
     def invoke(self, input: Union[dict[str, Any], Any],
                config: Optional[RunnableConfig] = None,
                *args, **kwargs):
-        logger.info(f"Incomming Input: {input}")
+        logger.info(f"Incoming Input: {input}")
         if config is None:
             config = RunnableConfig()
         if not config.get("configurable", {}).get("thread_id", ""):
@@ -742,20 +817,86 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             # Convert chat history dict messages to LangChain message objects
             chat_history = input.pop('chat_history')
             input['messages'] = [convert_dict_to_message(msg) for msg in chat_history]
-        
+
+        # handler for LLM node: if no input (Chat perspective), then take last human message
+        # Track if input came from messages to handle content extraction properly
+        input_from_messages = False
+        if not input.get('input'):
+            if input.get('messages'):
+                input['input'] = [next((msg for msg in reversed(input['messages']) if isinstance(msg, HumanMessage)),
+                                      None)]
+                if input['input'] is not None:
+                    input_from_messages = True
+
         # Append current input to existing messages instead of overwriting
         if input.get('input'):
-            current_message = input.get('input')[-1]
+            if isinstance(input['input'], str):
+                current_message = input['input']
+            else:
+                # input can be a list of messages or a single message object
+                current_message = input.get('input')[-1]
+
             # TODO: add handler after we add 2+ inputs (filterByType, etc.)
-            input['input'] = current_message  # Clear input after extracting current message
+            if isinstance(current_message, HumanMessage):
+                current_content = current_message.content
+                if isinstance(current_content, list):
+                    # Extract text parts and keep non-text parts (images, etc.)
+                    text_contents = []
+                    non_text_parts = []
+                    
+                    for item in current_content:
+                        if isinstance(item, dict) and item.get('type') == 'text':
+                            text_contents.append(item['text'])
+                        elif isinstance(item, str):
+                            text_contents.append(item)
+                        else:
+                            # Keep image_url and other non-text content
+                            non_text_parts.append(item)
+                    
+                    # Set input to the joined text
+                    input['input'] = ". ".join(text_contents) if text_contents else ""
+                    
+                    # If this message came from input['messages'], update or remove it
+                    if input_from_messages:
+                        if non_text_parts:
+                            # Keep the message but only with non-text content (images, etc.)
+                            current_message.content = non_text_parts
+                        else:
+                            # All content was text, remove this message from the list
+                            input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
+                
+                elif isinstance(current_content, str):
+                    # on regenerate case
+                    input['input'] = current_content
+                    # If from messages and all content is text, remove the message
+                    if input_from_messages:
+                        input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
+                else:
+                    input['input'] = str(current_content)
+                    # If from messages, remove since we extracted the content
+                    if input_from_messages:
+                        input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
+            elif isinstance(current_message, str):
+                input['input'] = current_message
+            else:
+                input['input'] = str(current_message)
             if input.get('messages'):
                 # Ensure existing messages are LangChain objects
                 input['messages'] = [convert_dict_to_message(msg) for msg in input['messages']]
                 # Append to existing messages
-                input['messages'].append(current_message)
-            else:
-                # No existing messages, create new list
-                input['messages'] = [current_message]
+                # input['messages'].append(current_message)
+            # else:
+                # NOTE: Commented out to prevent duplicates with input['input']
+                # input['messages'] = [current_message]
+        
+        # Validate that input is not empty after all processing
+        if not input.get('input'):
+            raise RuntimeError(
+                "Empty input after processing. Cannot send empty string to LLM. "
+                "This likely means the message contained only non-text content "
+                "with no accompanying text."
+            )
+        
         logging.info(f"Input: {thread_id} - {input}")
         if self.checkpointer and self.checkpointer.get_tuple(config):
             self.update_state(config, input)
@@ -763,22 +904,23 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            if self.output_variables and self.output_variables[0] != "messages":
-                # If output_variables are specified, use the value of first one or use the last messages as default
-                output = result.get(self.output_variables[0], result['messages'][-1].content)
+            if not result.get(PRINTER_NODE_RS):
+                output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)),
+                              result['messages'][-1].content)
             else:
-                output = result['messages'][-1].content
+                # used for printer node output - it will be reset by next `reset` node
+                output = result.get(PRINTER_NODE_RS)
         except:
             output = list(result.values())[-1]
-        thread_id = None
         config_state = self.get_state(config)
-        if config_state.next:
-            thread_id = config['configurable']['thread_id']
+        is_execution_finished = not config_state.next
+        if is_execution_finished:
+            thread_id = None
 
         result_with_state = {
             "output": output,
             "thread_id": thread_id,
-            "execution_finished": not config_state.next
+            "execution_finished": is_execution_finished
         }
 
         # Include all state values in the result

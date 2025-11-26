@@ -2,11 +2,12 @@ import builtins
 import json
 import logging
 import re
-from pydantic import create_model, Field
+from pydantic import create_model, Field, Json
 from typing import Tuple, TypedDict, Any, Optional, Annotated
 from langchain_core.messages import AnyMessage
-from langchain_core.prompts import PromptTemplate
-from langgraph.graph import MessagesState, add_messages
+from langgraph.graph import add_messages
+
+from ...runtime.langchain.constants import ELITEA_RS, PRINTER_NODE_RS
 
 logger = logging.getLogger(__name__)
 
@@ -130,16 +131,22 @@ def parse_type(type_str):
 
 
 def create_state(data: Optional[dict] = None):
-    state_dict = {'input': str, 'router_output': str}  # Always include router_output
+    state_dict = {'input': str, 'router_output': str,
+                  ELITEA_RS: str, PRINTER_NODE_RS: str}  # Always include router_output
+    types_dict = {}
     if not data:
         data = {'messages': 'list[str]'}
     for key, value in data.items():
         # support of old & new UI
         value = value['type'] if isinstance(value, dict) else value
+        value = 'str' if value == 'string' else value  # normalize string type (old state support)
         if key == 'messages':
             state_dict[key] = Annotated[list[AnyMessage], add_messages]
-        elif value in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number']:
+        elif value in ['str', 'int', 'float', 'bool', 'list', 'dict', 'number', 'dict']:
             state_dict[key] = parse_type(value)
+
+    state_dict["state_types"] = types_dict  # Default value for state_types
+    types_dict["state_types"] = dict
     logger.debug(f"Created state: {state_dict}")
     return TypedDict('State', state_dict)
 
@@ -173,16 +180,49 @@ def propagate_the_input_mapping(input_mapping: dict[str, dict], input_variables:
             var_dict = create_params(input_variables, source)
 
         if value['type'] == 'fstring':
-            input_data[key] = value['value'].format(**var_dict)
+            try:
+                input_data[key] = value['value'].format(**var_dict)
+            except KeyError as e:
+                logger.error(f"KeyError in fstring formatting for key '{key}'. Attempt to find proper data in state.\n{e}")
+                try:
+                    # search for variables in state if not found in var_dict
+                    input_data[key] = safe_format(value['value'], state)
+                except KeyError as no_var_exception:
+                    logger.error(f"KeyError in fstring formatting for key '{key}' with state data.\n{no_var_exception}")
+                    # leave value as is if still not found (could be a constant string marked as fstring by mistake)
+                    input_data[key] = value['value']
         elif value['type'] == 'fixed':
             input_data[key] = value['value']
         else:
             input_data[key] = source.get(value['value'], "")
     return input_data
 
+def safe_format(template, mapping):
+    """Format a template string using a mapping, leaving placeholders unchanged if keys are missing."""
+
+    def replacer(match):
+        key = match.group(1)
+        return str(mapping.get(key, f'{{{key}}}'))
+    return re.sub(r'\{(\w+)\}', replacer, template)
 
 def create_pydantic_model(model_name: str, variables: dict[str, dict]):
     fields = {}
     for var_name, var_data in variables.items():
-        fields[var_name] = (parse_type(var_data['type']), Field(description=var_data.get('description', None)))
+        fields[var_name] = (parse_pydantic_type(var_data['type']), Field(description=var_data.get('description', None)))
     return create_model(model_name, **fields)
+
+def parse_pydantic_type(type_name: str):
+    """
+    Helper function to parse type names into Python types.
+    Extend this function to handle custom types like 'dict' -> Json[Any].
+    """
+    type_mapping = {
+        'str': str,
+        'int': int,
+        'float': float,
+        'bool': bool,
+        'dict': Json[Any],  # Map 'dict' to Pydantic's Json type
+        'list': list,
+        'any': Any
+    }
+    return type_mapping.get(type_name, Any)

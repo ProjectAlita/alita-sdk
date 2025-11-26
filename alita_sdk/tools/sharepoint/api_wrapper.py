@@ -8,6 +8,7 @@ from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
+from .utils import decode_sharepoint_string
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.content_parser import parse_file_content
 from ...runtime.utils.utils import IndexerKeywords
@@ -91,44 +92,85 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             target_list = self._client.web.lists.get_by_title(list_title)
             self._client.load(target_list)
             self._client.execute_query()
-            items = target_list.items.get().top(limit).execute_query()
-            logging.info("{0} items from sharepoint loaded successfully.".format(len(items)))
+            items = target_list.items.top(limit).get().execute_query()
+            logging.info("{0} items from sharepoint loaded successfully via SharePoint REST API.".format(len(items)))
             result = []
             for item in items:
                 result.append(item.properties)
             return result
-        except Exception as e:
-            logging.error(f"Failed to load items from sharepoint: {e}")
-            return ToolException("Can not list items. Please, double check List name and read permissions.")
+        except Exception as base_e:
+            logging.warning(f"Primary SharePoint REST list read failed: {base_e}. Attempting Graph API fallback.")
+            # Attempt Graph API fallback
+            try:
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value() if self.client_secret else None,
+                    tenant="",  # optional for graph api (derived inside helper)
+                    scope="",  # optional for graph api
+                    token_json="",  # not needed for client credentials flow here
+                )
+                graph_items = auth_helper.get_list_items(self.site_url, list_title, limit)
+                if graph_items:
+                    logging.info(f"{len(graph_items)} items from sharepoint loaded successfully via Graph API fallback.")
+                    return graph_items
+                else:
+                    return ToolException("List appears empty or inaccessible via both REST and Graph APIs.")
+            except Exception as graph_e:
+                logging.error(f"Graph API fallback failed: {graph_e}")
+                return ToolException(f"Cannot read list '{list_title}'. Check list name and permissions: {base_e} | {graph_e}")
 
 
     def get_files_list(self, folder_name: str = None, limit_files: int = 100):
         """ If folder name is specified, lists all files in this folder under Shared Documents path. If folder name is empty, lists all files under root catalog (Shared Documents). Number of files is limited by limit_files (default is 100)."""
         try:
+            # exclude default system libraries like 'Form Templates', 'Site Assets', 'Style Library'
+            all_libraries = self._client.web.lists.filter("BaseTemplate eq 101 and Title ne 'Form Templates' and Title ne 'Site Assets' and Title ne 'Style Library'").get().execute_query()
             result = []
             if not limit_files:
                 limit_files = 100
-            target_folder_url = f"Shared Documents/{folder_name}" if folder_name else "Shared Documents"
-            files = (self._client.web.get_folder_by_server_relative_path(target_folder_url)
-                     .get_files(True)
-                     .execute_query())
-
-            for file in files:
-                if len(result) >= limit_files:
-                    break
-                temp_props = {
-                    'Name': file.properties['Name'],
-                    'Path': file.properties['ServerRelativeUrl'],
-                    'Created': file.properties['TimeCreated'],
-                    'Modified': file.properties['TimeLastModified'],
-                    'Link': file.properties['LinkingUrl'],
-                    'id': file.properties['UniqueId']
-                }
-                result.append(temp_props)
+            #
+            for lib in all_libraries:
+                library_type = decode_sharepoint_string(lib.properties["EntityTypeName"])
+                target_folder_url = f"{library_type}/{folder_name}" if folder_name else library_type
+                files = (self._client.web.get_folder_by_server_relative_path(target_folder_url)
+                         .get_files(True)
+                         .execute_query())
+                #
+                for file in files:
+                    if f"{library_type}/Forms" in file.properties['ServerRelativeUrl']:
+                        # skip files from system folder "Forms"
+                        continue
+                    if len(result) >= limit_files:
+                        break
+                    temp_props = {
+                        'Name': file.properties['Name'],
+                        'Path': file.properties['ServerRelativeUrl'],
+                        'Created': file.properties['TimeCreated'],
+                        'Modified': file.properties['TimeLastModified'],
+                        'Link': file.properties['LinkingUrl'],
+                        'id': file.properties['UniqueId']
+                    }
+                    result.append(temp_props)
             return result if result else ToolException("Can not get files or folder is empty. Please, double check folder name and read permissions.")
         except Exception as e:
-            logging.error(f"Failed to load files from sharepoint: {e}")
-            return ToolException("Can not get files. Please, double check folder name and read permissions.")
+            # attempt to get via graph api
+            try:
+                # attempt to get files via graph api
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value(),
+                    tenant="", # optional for graph api
+                    scope="", # optional for graph api
+                    token_json="", # optional for graph api
+                )
+                files = auth_helper.get_files_list(self.site_url, folder_name, limit_files)
+                return files
+            except Exception as graph_e:
+                logging.error(f"Failed to load files from sharepoint via base api: {e}")
+                logging.error(f"Failed to load files from sharepoint via graph api: {graph_e}")
+                return ToolException(f"Can not get files. Please, double check folder name and read permissions: {e} and {graph_e}")
 
     def read_file(self, path,
                   is_capture_image: bool = False,
@@ -141,11 +183,28 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             self._client.load(file).execute_query()
 
             file_content = file.read()
+            file_name = file.name
             self._client.execute_query()
         except Exception as e:
-            logging.error(f"Failed to load file from SharePoint: {e}. Path: {path}. Please, double check file name and path.")
-            return ToolException("File not found. Please, check file name and path.")
-        return parse_file_content(file_name=file.name,
+            # attempt to get via graph api
+            try:
+                # attempt to get files via graph api
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value(),
+                    tenant="",  # optional for graph api
+                    scope="",  # optional for graph api
+                    token_json="",  # optional for graph api
+                )
+                file_content = auth_helper.get_file_content(self.site_url, path)
+                file_name = path.split('/')[-1]
+            except Exception as graph_e:
+                logging.error(f"Failed to load file from SharePoint via base api: {e}. Path: {path}. Please, double check file name and path.")
+                logging.error(f"Failed to load file from SharePoint via graph api: {graph_e}. Path: {path}. Please, double check file name and path.")
+                return ToolException(f"File not found. Please, check file name and path: {e} and {graph_e}")
+        #
+        return parse_file_content(file_name=file_name,
                                   file_content=file_content,
                                   is_capture_image=is_capture_image,
                                   page_number=page_number,
@@ -219,12 +278,24 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 yield document
 
     def _load_file_content_in_bytes(self, path):
-        file = self._client.web.get_file_by_server_relative_path(path)
-        self._client.load(file).execute_query()
-        file_content = file.read()
-        self._client.execute_query()
-        #
-        return file_content
+        try:
+            file = self._client.web.get_file_by_server_relative_path(path)
+            self._client.load(file).execute_query()
+            file_content = file.read()
+            self._client.execute_query()
+            #
+            return file_content
+        except Exception as e:
+            # attempt to get via graph api
+            from .authorization_helper import SharepointAuthorizationHelper
+            auth_helper = SharepointAuthorizationHelper(
+                client_id=self.client_id,
+                client_secret=self.client_secret.get_secret_value(),
+                tenant="",  # optional for graph api
+                scope="",  # optional for graph api
+                token_json="",  # optional for graph api
+            )
+            return auth_helper.get_file_content(self.site_url, path)
 
     def get_available_tools(self):
         return super().get_available_tools() + [

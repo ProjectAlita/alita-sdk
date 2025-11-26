@@ -1,16 +1,18 @@
 import json
-import math
 from collections import OrderedDict
 from logging import getLogger
 from typing import Any, Optional, List, Dict, Generator
 
+import math
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import ToolException
+from psycopg.errors import DataException
 from pydantic import BaseModel, model_validator, Field
 
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from alita_sdk.tools.vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
-from ..utils.logging import dispatch_custom_event
+from ...runtime.utils.utils import IndexerKeywords
 
 logger = getLogger(__name__)
 
@@ -135,7 +137,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
     embedding_model: Optional[str] = None
     vectorstore_type: Optional[str]  = None
     vectorstore_params: Optional[dict]  = None
-    max_docs_per_add: int = 100
+    max_docs_per_add: int = 20
     dataset: Optional[str] = None
     vectorstore: Any = None
     pg_helper: Any = None
@@ -175,6 +177,37 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             except Exception as e:
                 logger.error(f"Failed to initialize PGVectorSearch: {str(e)}")
 
+    def _similarity_search_with_score(self, query: str, filter: dict = None, k: int = 10):
+        """
+        Perform similarity search with proper exception handling for DataException.
+
+        Args:
+            query: Search query string
+            filter: Optional filter dictionary
+            k: Number of results to return
+
+        Returns:
+            List of (Document, score) tuples
+
+        Raises:
+            ToolException: When DataException occurs or other search errors
+        """
+        try:
+            return self.vectorstore.similarity_search_with_score(
+                query, filter=filter, k=k
+            )
+        except DataException as dimException:
+            exception_str = str(dimException)
+            if 'different vector dimensions' in exception_str:
+                logger.error(f"Data exception: {exception_str}")
+                raise ToolException(f"Global search cannot be completed since collections were indexed using "
+                                    f"different embedding models. Use search within a single collection."
+                                    f"\nDetails: {exception_str}")
+            raise ToolException(f"Data exception during search. Possibly invalid filter: {exception_str}")
+        except Exception as e:
+            logger.error(f"Error during similarity search: {str(e)}")
+            raise ToolException(f"Search failed: {str(e)}")
+
     def list_collections(self) -> List[str]:
         """List all collections in the vectorstore."""
 
@@ -183,21 +216,42 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             return "No indexed collections"
         return collections
 
-    def _clean_collection(self, collection_suffix: str = ''):
+    def get_index_meta(self, index_name: str):
+        index_metas = self.vector_adapter.get_index_meta(self, index_name)
+        if len(index_metas) > 1:
+            raise RuntimeError(f"Multiple index_meta documents found: {index_metas}")
+        return index_metas[0] if index_metas else None
+
+    def get_indexed_count(self, index_name: str) -> int:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import func, or_
+
+        with Session(self.vectorstore.session_maker.bind) as session:
+            return session.query(
+                self.vectorstore.EmbeddingStore.id,
+            ).filter(
+                func.jsonb_extract_path_text(self.vectorstore.EmbeddingStore.cmetadata, 'collection') == index_name,
+                or_(
+                    func.jsonb_extract_path_text(self.vectorstore.EmbeddingStore.cmetadata, 'type').is_(None),
+                    func.jsonb_extract_path_text(self.vectorstore.EmbeddingStore.cmetadata, 'type') != IndexerKeywords.INDEX_META_TYPE.value
+                )
+            ).count()
+
+    def _clean_collection(self, index_name: str = ''):
         """
         Clean the vectorstore collection by deleting all indexed data.
         """
-        self._log_data(
+        self._log_tool_event(
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
-        self.vector_adapter.clean_collection(self, collection_suffix)
-        self._log_data(
+        self.vector_adapter.clean_collection(self, index_name)
+        self._log_tool_event(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
         )
 
-    def index_documents(self, documents: Generator[Document, None, None], collection_suffix: str, progress_step: int = 20, clean_index: bool = True):
+    def index_documents(self, documents: Generator[Document, None, None], index_name: str, progress_step: int = 20, clean_index: bool = True):
         """ Index documents in the vectorstore.
 
         Args:
@@ -206,21 +260,21 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             clean_index (bool): If True, clean the index before re-indexing all documents.
         """
         if clean_index:
-            self._clean_index(collection_suffix)
+            self._clean_index(index_name)
 
-        return self._save_index(list(documents), collection_suffix, progress_step)
+        return self._save_index(list(documents), index_name, progress_step)
 
-    def _clean_index(self, collection_suffix: str):
+    def _clean_index(self, index_name: str):
         logger.info("Cleaning index before re-indexing all documents.")
-        self._log_data("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
+        self._log_tool_event("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
         try:
-            self._clean_collection(collection_suffix)
-            self._log_data("Previous index has been removed",
+            self._clean_collection(index_name)
+            self._log_tool_event("Previous index has been removed",
                            tool_name="index_documents")
         except Exception as e:
             logger.warning(f"Failed to clean index: {str(e)}. Continuing with re-indexing.")
 
-    def _save_index(self, documents: list[Document], collection_suffix: Optional[str] = None, progress_step: int = 20):
+    def _save_index(self, documents: list[Document], index_name: Optional[str] = None, progress_step: int = 20):
         from ..langchain.interfaces.llm_processor import add_documents
         #
         for doc in documents:
@@ -229,13 +283,13 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
 
         logger.debug(f"Indexing documents: {documents}")
 
-        # if collection_suffix is provided, add it to metadata of each document
-        if collection_suffix:
+        # if index_name is provided, add it to metadata of each document
+        if index_name:
             for doc in documents:
                 if not doc.metadata.get('collection'):
-                    doc.metadata['collection'] = collection_suffix
+                    doc.metadata['collection'] = index_name
                 else:
-                    doc.metadata['collection'] += f";{collection_suffix}"
+                    doc.metadata['collection'] += f";{index_name}"
 
         total_docs = len(documents)
         documents_count = 0
@@ -261,7 +315,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 if percent >= next_progress_point:
                     msg = f"Indexing progress: {percent}%. Processed {documents_count} of {total_docs} documents."
                     logger.debug(msg)
-                    self._log_data(msg)
+                    self._log_tool_event(msg)
                     next_progress_point += progress_step
             except Exception:
                 from traceback import format_exc
@@ -269,7 +323,8 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 return {"status": "error", "message": f"Error: {format_exc()}"}
         if _documents:
             add_documents(vectorstore=self.vectorstore, documents=_documents)
-        return {"status": "ok", "message": f"successfully indexed {documents_count} documents"}
+        return {"status": "ok", "message": f"successfully indexed {documents_count} documents" if documents_count > 0
+        else "no documents to index"}
 
     def search_documents(self, query:str, doctype: str = 'code', 
                          filter:dict|str={}, cut_off: float=0.5,
@@ -303,7 +358,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 }
                 
             try:
-                document_items = self.vectorstore.similarity_search_with_score(
+                document_items = self._similarity_search_with_score(
                     query, filter=document_filter, k=search_top
                 )                
                 # Add document results to unique docs
@@ -336,18 +391,16 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                     }
                 
                 try:
-                    chunk_items = self.vectorstore.similarity_search_with_score(
+                    chunk_items = self._similarity_search_with_score(
                         query, filter=chunk_filter, k=search_top
                     )
-                    
-                    logger.debug(f"Chunk items for {chunk_type}: {chunk_items[0]}")
-                    
+
                     for doc, score in chunk_items:
                         # Create unique identifier for document
                         source = doc.metadata.get('source')
                         chunk_id = doc.metadata.get('chunk_id')
                         doc_id = f"{source}_{chunk_id}" if source and chunk_id else str(doc.metadata.get('id', id(doc)))
-                        
+
                         # Store document and its score
                         if doc_id not in unique_docs:
                             unique_docs[doc_id] = doc
@@ -367,9 +420,9 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                                 doc_filter = {
                                     "$and": doc_filter_parts
                                 }
-                                
+
                             try:
-                                fetch_items = self.vectorstore.similarity_search_with_score(
+                                fetch_items = self._similarity_search_with_score(
                                     query, filter=doc_filter, k=1
                                 )
                                 if fetch_items:
@@ -383,7 +436,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         else:
             # Default search behavior (unchanged)
             max_search_results = 30 if search_top * 3 > 30 else search_top * 3
-            vector_items = self.vectorstore.similarity_search_with_score(
+            vector_items = self._similarity_search_with_score(
                 query, filter=filter, k=max_search_results
             )
             
@@ -401,7 +454,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         doc_map = OrderedDict(
             sorted(doc_map.items(), key=lambda x: x[1][1], reverse=True)
         )
-        
+
         # Process full-text search if configured
         if full_text_search and full_text_search.get('enabled') and full_text_search.get('fields'):
             language = full_text_search.get('language', 'english')
@@ -414,7 +467,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 for field_name in full_text_search.get('fields', []):
                     try:
                         text_results = self.pg_helper.full_text_search(field_name, query)
-                        
+
                         # Combine text search results with vector results
                         for result in text_results:
                             doc_id = result['id']
@@ -568,21 +621,6 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             )
         ])
         return result.content
-
-    def _log_data(self, message: str, tool_name: str = "index_data"):
-        """Log data and dispatch custom event for indexing progress"""
-
-        try:
-            dispatch_custom_event(
-                name="thinking_step",
-                data={
-                    "message": message,
-                    "tool_name": tool_name,
-                    "toolkit": "vectorstore",
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to dispatch progress event: {str(e)}")
 
     def get_available_tools(self):
         return [

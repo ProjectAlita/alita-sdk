@@ -1,6 +1,6 @@
 import pymupdf
 import fitz
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFium2Loader
 
 from .ImageParser import ImageParser
 from .utils import perform_llm_prediction_for_image_bytes, create_temp_file
@@ -23,6 +23,7 @@ class AlitaPDFLoader:
         self.headers = kwargs.get('headers', None)
         self.extraction_mode = kwargs.get('extraction_mode', "plain")
         self.extraction_kwargs = kwargs.get('extraction_kwargs', None)
+        self.images_parser=ImageParser(llm=self.llm, prompt=self.prompt)
 
     def get_content(self):
         if hasattr(self, 'file_path'):
@@ -119,13 +120,13 @@ class AlitaPDFLoader:
             return self._load_docs()
 
     def _load_docs(self):
-        docs = PyPDFLoader(file_path=self.file_path,
-                        password=self.password,
-                        headers=self.headers,
-                        extract_images=self.extract_images,
-                        extraction_mode=self.extraction_mode,
-                        images_parser=ImageParser(llm=self.llm, prompt=self.prompt),
-                        extraction_kwargs=self.extraction_kwargs).load()
+        docs = PyPDFium2Loader(
+                file_path = self.file_path,
+                password=self.password,
+                headers=self.headers,
+                extract_images = self.extract_images,
+                images_parser = ImageParser(llm=self.llm, prompt=self.prompt),
+            ).load()
         for doc in docs:
             doc.metadata['chunk_id'] = doc.metadata['page']
         return docs

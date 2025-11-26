@@ -93,7 +93,7 @@ class PandasWrapper(BaseToolApiWrapper):
             if file_extension in ['csv', 'txt']:
                 df = pd.read_csv(file_obj)
             elif file_extension in ['xlsx', 'xls']:
-                df = pd.read_excel(file_obj)
+                df = pd.read_excel(file_obj, engine='calamine')
             elif file_extension == 'parquet':
                 df = pd.read_parquet(file_obj)
             elif file_extension == 'json':
@@ -162,35 +162,17 @@ class PandasWrapper(BaseToolApiWrapper):
         """Analyze and process using query on dataset""" 
         df = self._get_dataframe(filename)
         code = self.generate_code_with_retries(df, query)
-        dispatch_custom_event(
-                name="thinking_step",
-                data={
-                    "message": f"Executing generated code... \n\n```python\n{code}\n```",
-                    "tool_name": "process_query",
-                    "toolkit": "pandas"
-                }
-            )
+        self._log_tool_event(tool_name="process_query",
+                             message=f"Executing generated code... \n\n```python\n{code}\n```")
         try:
             result = self.execute_code(df, code)
         except Exception as e:
             logger.error(f"Code execution failed: {format_exc()}")
-            dispatch_custom_event(
-                name="thinking_step",
-                data={
-                    "message": f"Code execution failed: {format_exc()}",
-                    "tool_name": "process_query",
-                    "toolkit": "pandas"
-                }
-            )
+            self._log_tool_event(tool_name="process_query",
+                                 message=f"Executing generated code... \n\n```python\n{code}\n```")
             raise
-        dispatch_custom_event(
-            name="thinking_step",
-            data={
-                "message": f"Result of code execution... \n\n```\n{result['result']}\n```",
-                "tool_name": "process_query",
-                "toolkit": "pandas"
-            }
-        )
+        self._log_tool_event(tool_name="process_query",
+                             message=f"Executing generated code... \n\n```python\n{code}\n```")
         if result.get("df") is not None:
             df = result.pop("df")
             # Not saving dataframe to artifact repo for now

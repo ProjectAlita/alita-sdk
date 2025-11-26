@@ -39,7 +39,14 @@ class ApplicationToolkit(BaseToolkit):
                                       description=app_details.get("description"), 
                                       application=app, 
                                       args_schema=applicationToolSchema,
-                                      return_type='str')])
+                                      return_type='str',
+                                      client=client,
+                                      args_runnable={
+                                          "application_id": application_id,
+                                          "application_version_id": application_version_id,
+                                          "store": store,
+                                          "llm": client.get_llm(version_details['llm_settings']['model_name'], model_settings),
+                                      })])
             
     def get_tools(self):
         return self.tools

@@ -173,7 +173,7 @@ def get_vectorstore(vectorstore_type, vectorstore_params, embedding_func=None):
     #
     raise RuntimeError(f"Unknown VectorStore type: {vectorstore_type}")
 
-def add_documents(vectorstore, documents):
+def add_documents(vectorstore, documents, ids = None) -> list[str]:
     """ Add documents to vectorstore """
     if vectorstore is None:
         return None
@@ -189,7 +189,7 @@ def add_documents(vectorstore, documents):
             if isinstance(document.metadata[key], dict):
                 document.metadata[key] = dumps(document.metadata[key])
         metadata.append(document.metadata)
-    vectorstore.add_texts(texts, metadatas=metadata)
+    return vectorstore.add_texts(texts, metadatas=metadata, ids=ids)
 
 
 def generateResponse(

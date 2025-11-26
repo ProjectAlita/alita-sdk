@@ -3,7 +3,7 @@ from logging import getLogger
 from typing import Any, Type, Literal, Optional, Union, List
 
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, create_model, EmailStr, constr
+from pydantic import BaseModel, Field, create_model, EmailStr, constr, ConfigDict
 
 from ...tools.utils import TOOLKIT_SPLITTER
 
@@ -19,6 +19,7 @@ class McpServerTool(BaseTool):
     server: str
     tool_timeout_sec: int = 60
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @staticmethod
     def create_pydantic_model_from_schema(schema: dict, model_name: str = "ArgsSchema"):
@@ -90,6 +91,7 @@ class McpServerTool(BaseTool):
         return create_model(model_name, **fields)
 
     def _run(self, *args, **kwargs):
+        # Extract the actual tool/prompt name (remove toolkit prefix)
         call_data = {
             "server": self.server,
             "tool_timeout_sec": self.tool_timeout_sec,

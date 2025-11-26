@@ -1,8 +1,13 @@
 # api_wrapper.py
-from typing import Any, Dict, List, Optional
 import fnmatch
-from ...tools.elitea_base import BaseCodeToolApiWrapper
+from typing import Any, Dict, List, Optional
+
+from langchain_core.tools import ToolException
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
+
+from ..code_indexer_toolkit import CodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..utils.content_parser import parse_file_content
 
 AppendFileModel = create_model(
     "AppendFileModel",
@@ -97,18 +102,26 @@ GetCommitsModel = create_model(
     author=(Optional[str], Field(description="Author name", default=None)),
 )
 
-class GitLabAPIWrapper(BaseCodeToolApiWrapper):
+class GitLabAPIWrapper(CodeIndexerToolkit):
     url: str
     repository: str
     private_token: SecretStr
     branch: Optional[str] = 'main'
     _git: Any = PrivateAttr()
-    _repo_instance: Any = PrivateAttr()
     _active_branch: Any = PrivateAttr()
+
+    @staticmethod
+    def _sanitize_url(url: str) -> str:
+        """Remove trailing slash from URL if present."""
+        return url.rstrip('/') if url else url
 
     @model_validator(mode='before')
     @classmethod
-    def validate_toolkit(cls, values: Dict) -> Dict:
+    def validate_toolkit_before(cls, values: Dict) -> Dict:
+        return super().validate_toolkit(values)
+
+    @model_validator(mode='after')
+    def validate_toolkit(self):
         try:
            import gitlab
         except ImportError:
@@ -116,22 +129,34 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 "python-gitlab is not installed. "
                 "Please install it with `pip install python-gitlab`"
             )
-
+        self.repository = self._sanitize_url(self.repository)
         g = gitlab.Gitlab(
-            url=values['url'],
-            private_token=values['private_token'],
+            url=self._sanitize_url(self.url),
+            private_token=self.private_token.get_secret_value(),
             keep_base_url=True,
         )
 
         g.auth()
-        cls._repo_instance = g.projects.get(values.get('repository'))
-        cls._git = g
-        cls._active_branch = values.get('branch')
-        return values
+        self._git = g
+        self._active_branch = self.branch
+        return self
+
+    @property
+    def repo_instance(self):
+        if not hasattr(self, "_repo_instance") or self._repo_instance is None:
+            try:
+                if self._git and self.repository:
+                    self._repo_instance = self._git.projects.get(self.repository)
+                else:
+                    self._repo_instance = None
+            except Exception as e:
+                # Only raise when accessed, not during initialization
+                raise ToolException(e)
+        return self._repo_instance
 
     def set_active_branch(self, branch_name: str) -> str:
         self._active_branch = branch_name
-        self._repo_instance.default_branch = branch_name
+        self.repo_instance.default_branch = branch_name
         return f"Active branch set to {branch_name}"
 
     def list_branches_in_repo(self, limit: Optional[int] = 20, branch_wildcard: Optional[str] = None) -> List[str]:
@@ -146,7 +171,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             List[str]: List containing names of branches
         """
         try:
-            branches = self._repo_instance.branches.list(get_all=True)
+            branches = self.repo_instance.branches.list(get_all=True)
             
             if branch_wildcard:
                 branches = [branch for branch in branches if fnmatch.fnmatch(branch.name, branch_wildcard)]
@@ -173,7 +198,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
 
     def _get_all_files(self, path: str = None, recursive: bool = True, branch: str = None):
         branch = branch if branch else self._active_branch
-        return self._repo_instance.repository_tree(path=path, ref=branch, recursive=recursive, all=True)
+        return self.repo_instance.repository_tree(path=path, ref=branch, recursive=recursive, all=True)
 
     # overrided for indexer
     def _get_files(self, path: str = None, recursive: bool = True, branch: str = None):
@@ -185,7 +210,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
         Get the commit hash of a file in a specific branch.
         """
         try:
-            file = self._repo_instance.files.get(file_path, branch)
+            file = self.repo_instance.files.get(file_path, branch)
             return file.commit_id
         except Exception as e:
             return f"Unable to get commit hash for {file_path} due to error:\n{e}"
@@ -195,7 +220,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
 
     def create_branch(self, branch_name: str) -> str:
         try:
-            self._repo_instance.branches.create(
+            self.repo_instance.branches.create(
                 {
                     'branch': branch_name,
                     'ref': self._active_branch,
@@ -218,7 +243,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
         return parsed
 
     def get_issues(self) -> str:
-        issues = self._repo_instance.issues.list(state="opened")
+        issues = self.repo_instance.issues.list(state="opened")
         if len(issues) > 0:
             parsed_issues = self.parse_issues(issues)
             parsed_issues_str = (
@@ -229,7 +254,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             return "No open issues available"
 
     def get_issue(self, issue_number: int) -> Dict[str, Any]:
-        issue = self._repo_instance.issues.get(issue_number)
+        issue = self.repo_instance.issues.get(issue_number)
         page = 0
         comments: List[dict] = []
         while len(comments) <= 10:
@@ -255,7 +280,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             commits are already in the {self.branch} branch"""
         else:
             try:
-                pr = self._repo_instance.mergerequests.create(
+                pr = self.repo_instance.mergerequests.create(
                     {
                         "source_branch": branch,
                         "target_branch": self.branch,
@@ -272,7 +297,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
         issue_number = int(comment_query.split("\n\n")[0])
         comment = comment_query[len(str(issue_number)) + 2 :]
         try:
-            issue = self._repo_instance.issues.get(issue_number)
+            issue = self.repo_instance.issues.get(issue_number)
             issue.notes.create({"body": comment})
             return "Commented on issue " + str(issue_number)
         except Exception as e:
@@ -281,7 +306,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
         try:
             self.set_active_branch(branch)
-            self._repo_instance.files.get(file_path, branch)
+            self.repo_instance.files.get(file_path, branch)
             return f"File already exists at {file_path}. Use update_file instead"
         except Exception:
             data = {
@@ -290,14 +315,16 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 "file_path": file_path,
                 "content": file_contents,
             }
-            self._repo_instance.files.create(data)
+            self.repo_instance.files.create(data)
 
             return "Created file " + file_path
 
     def read_file(self, file_path: str, branch: str) -> str:
         self.set_active_branch(branch)
-        file = self._repo_instance.files.get(file_path, branch)
-        return file.decode().decode("utf-8")
+        file = self.repo_instance.files.get(file_path, branch)
+        return parse_file_content(file_name=file_path,
+                                  file_content=file.decode(),
+                                  llm=self.llm)
 
     def update_file(self, file_query: str, branch: str) -> str:
         if branch == self.branch:
@@ -335,7 +362,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 ],
             }
 
-            self._repo_instance.commits.create(commit)
+            self.repo_instance.commits.create(commit)
             return "Updated file " + file_path
         except Exception as e:
             return "Unable to update file due to error:\n" + str(e)
@@ -365,7 +392,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 ],
             }
 
-            self._repo_instance.commits.create(commit)
+            self.repo_instance.commits.create(commit)
             return "Updated file " + file_path
         except Exception as e:
             return "Unable to update file due to error:\n" + str(e)
@@ -375,20 +402,20 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             self.set_active_branch(branch)
             if not commit_message:
                 commit_message = f"Delete {file_path}"
-            self._repo_instance.files.delete(file_path, branch, commit_message)
+            self.repo_instance.files.delete(file_path, branch, commit_message)
             return f"Deleted file {file_path}"
         except Exception as e:
             return f"Unable to delete file due to error:\n{e}"
 
     def get_pr_changes(self, pr_number: int) -> str:
-        mr = self._repo_instance.mergerequests.get(pr_number)
+        mr = self.repo_instance.mergerequests.get(pr_number)
         res = f"title: {mr.title}\ndescription: {mr.description}\n\n"
         for change in mr.changes()["changes"]:
             res += f"diff --git a/{change['old_path']} b/{change['new_path']}\n{change['diff']}\n"
         return res
 
     def create_pr_change_comment(self, pr_number: int, file_path: str, line_number: int, comment: str) -> str:
-        mr = self._repo_instance.mergerequests.get(pr_number)
+        mr = self.repo_instance.mergerequests.get(pr_number)
         position = {"position_type": "text", "new_path": file_path, "new_line": line_number}
         mr.discussions.create({"body": comment, "position": position})
         return "Comment added"
@@ -405,7 +432,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             params["until"] = until
         if author:
             params["author"] = author
-        commits = self._repo_instance.commits.list(**params)
+        commits = self.repo_instance.commits.list(**params)
         return [
             {
                 "sha": commit.id,
@@ -417,6 +444,7 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
             for commit in commits
         ]
 
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {
@@ -521,4 +549,4 @@ class GitLabAPIWrapper(BaseCodeToolApiWrapper):
                 "description": "Retrieve a list of commits from the repository.",
                 "args_schema": GetCommitsModel,
             }
-        ] + self._get_vector_search_tools()
+        ]

@@ -1,3 +1,4 @@
+from copy import deepcopy
 import os
 import re
 import tempfile
@@ -91,21 +92,24 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
         return ToolException(
             "Not supported type of files entered. Supported types are TXT, DOCX, PDF, PPTX, XLSX and XLS only.")
 
-    if hasattr(loader, 'get_content'):
-        return loader.get_content()
-    else:
-        extension = Path(file_path if file_path else file_name).suffix
-        loader_kwargs = get_loader_kwargs(loaders_map.get(extension), file_name, file_content, is_capture_image, page_number, sheet_name, llm, file_path, excel_by_sheets)
-        if file_content:
-            return load_content_from_bytes(file_content=file_content,
-                                           extension=extension,
-                                           loader_extra_config=loader_kwargs,
-                                           llm=llm)
+    try:
+        if hasattr(loader, 'get_content'):
+            return loader.get_content()
         else:
-            return load_content(file_path=file_path,
-                                extension=extension,
-                                loader_extra_config=loader_kwargs,
-                                llm=llm)
+            extension = Path(file_path if file_path else file_name).suffix
+            loader_kwargs = get_loader_kwargs(loaders_map.get(extension), file_name, file_content, is_capture_image, page_number, sheet_name, llm, file_path, excel_by_sheets)
+            if file_content:
+                return load_content_from_bytes(file_content=file_content,
+                                               extension=extension,
+                                               loader_extra_config=loader_kwargs,
+                                               llm=llm)
+            else:
+                return load_content(file_path=file_path,
+                                    extension=extension,
+                                    loader_extra_config=loader_kwargs,
+                                    llm=llm)
+    except Exception as e:
+        return ToolException(f"Error reading file ({file_name or file_path}) content. Make sure these types are supported: {str(e)}")
 
 def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                        sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False) -> List[Document] | ToolException:
@@ -126,7 +130,7 @@ def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = F
 
 def get_loader_kwargs(loader_object, file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                     sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False, prompt=None):
-    loader_kwargs = loader_object['kwargs']
+    loader_kwargs = deepcopy(loader_object['kwargs'])
     loader_kwargs.update({
         "file_path": file_path,
         "file_content": file_content,
@@ -152,7 +156,7 @@ def prepare_loader(file_name=None, file_content=None, is_capture_image: bool = F
 
         loader_object = loaders_map.get(extension)
         if not loader_object:
-            return None
+            loader_object = loaders_map.get('.txt')  # Default to text loader if no specific loader found
         loader_kwargs = get_loader_kwargs(loader_object, file_name, file_content, is_capture_image, page_number, sheet_name, llm, file_path, excel_by_sheets, prompt)
         loader = loader_object['class'](**loader_kwargs)
         return loader
@@ -221,58 +225,80 @@ def process_document_by_type(content, extension_source: str, document: Document 
             metadata={**document.metadata, 'chunk_id': 1}
         )
         return
+    #
+    chunks_counter = 0
     for chunk in chunks:
+        chunks_counter += 1
+        metadata = {**document.metadata, **chunk.metadata}
+        #
+        # ensure each chunk has a unique chunk_id
+        metadata['chunk_id'] = chunks_counter
+        #
         yield Document(
             page_content=sanitize_for_postgres(chunk.page_content),
-            metadata={**document.metadata, **chunk.metadata}
+            metadata=metadata
         )
 
 
-def process_content_by_type(content, filename: str, llm=None, chunking_config=None) -> \
+def process_content_by_type(content, filename: str, llm=None, chunking_config=None, fallback_extensions=None) -> \
         Generator[Document, None, None]:
     """Process the content of a file based on its type using a configured loader."""
     temp_file_path = None
-    try:
-        match = re.search(r'\.([^.]+)$', filename)
-        extension = f".{match.group(1).lower()}" if match else ".txt"
+    extensions = fallback_extensions if fallback_extensions else []
+    match = re.search(r'\.([^.]+)$', filename)
 
-        with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            if content is None:
-                logger.warning(
-                    f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
-                return []
+    if match:
+        extensions.insert(0, f".{match.group(1).lower()}")
+    elif not extensions:
+        extensions = [".txt"]
 
-            temp_file.write(content)
-            temp_file.flush()
-
-            loader_config = loaders_map.get(extension)
-            if not loader_config:
-                logger.warning(f"No loader found for file extension: {extension}. File: {temp_file_path}")
-                return []
-
-            loader_cls = loader_config['class']
-            loader_kwargs = loader_config['kwargs']
-            # Determine which loader configuration keys are allowed to be overridden by user input.
-            # If 'allowed_to_override' is specified in the loader configuration, use it; otherwise, allow all keys in loader_kwargs.
-            allowed_to_override = loader_config.get('allowed_to_override', list(loader_kwargs.keys()))
-            # If a chunking_config is provided and contains custom configuration for the current file extension,
-            # update loader_kwargs with user-supplied values, but only for keys explicitly permitted in allowed_to_override.
-            # This ensures that only safe and intended parameters can be customized, preventing accidental or unauthorized changes
-            # to critical loader settings.
-            if chunking_config and (users_config_for_extension := chunking_config.get(extension, {})):
-                for key in set(users_config_for_extension.keys()) & set(allowed_to_override):
-                    loader_kwargs[key] = users_config_for_extension[key]
-            if LoaderProperties.LLM.value in loader_kwargs:
-                loader_kwargs[LoaderProperties.LLM.value] = llm
-            if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs:
-                loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value)
-                loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
-            loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
-            return loader.load()
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+    for extension in extensions:
+        try:
+            with tempfile.NamedTemporaryFile(mode='w+b', suffix=extension, delete=False) as temp_file:
+                temp_file_path = temp_file.name
+                if content is None:
+                    logger.warning(
+                        f"'{IndexerKeywords.CONTENT_IN_BYTES.value}' ie expected but not found in document metadata.")
+                    return []
+    
+                temp_file.write(content)
+                temp_file.flush()
+    
+                loader_config = loaders_map.get(extension)
+                if not loader_config:
+                    logger.warning(f"No loader found for file extension: {extension}. File: {temp_file_path}")
+                    return []
+    
+                loader_cls = loader_config['class']
+                loader_kwargs = loader_config['kwargs']
+                # Determine which loader configuration keys are allowed to be overridden by user input.
+                # If 'allowed_to_override' is specified in the loader configuration, use it; otherwise, allow all keys in loader_kwargs.
+                allowed_to_override = loader_config.get('allowed_to_override', loader_kwargs)
+                # If a chunking_config is provided and contains custom configuration for the current file extension,
+                # update loader_kwargs with user-supplied values, but only for keys explicitly permitted in allowed_to_override and if value differs from default.
+                # This ensures that only safe and intended parameters can be customized, preventing accidental or unauthorized changes
+                # to critical loader settings.
+                if chunking_config and (users_config_for_extension := chunking_config.get(extension, {})):
+                    for key in set(users_config_for_extension.keys()) & set(allowed_to_override.keys()):
+                        if users_config_for_extension[key] != allowed_to_override[key]:
+                            loader_kwargs[key] = users_config_for_extension[key]
+                if LoaderProperties.LLM.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.LLM.value):
+                    loader_kwargs['llm'] = llm
+                if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value):
+                    loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
+                loader = loader_cls(file_path=temp_file_path, **loader_kwargs)
+                yield from loader.load()
+                break
+        except Exception as e:
+            if fallback_extensions:
+                logger.warning(f"Error loading attachment: {str(e)} for file {temp_file_path} (extension: {extension})")
+                logger.warning(f"Continuing with fallback extensions: {fallback_extensions}.")
+                continue
+            else:
+                raise e
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
 # FIXME copied from langchain_core/utils/strings.py of 0.3.74 version
 # https://github.com/langchain-ai/langchain/pull/32157
@@ -296,7 +322,9 @@ def sanitize_for_postgres(text: str, replacement: str = "") -> str:
     return text.replace("\x00", replacement)
 
 
-def file_extension_by_chunker(chunker_name: str) -> str:
+def file_extension_by_chunker(chunker_name: str) -> str | None:
+    if not chunker_name:
+        return None
     name = chunker_name.lower()
     if name == "markdown":
         return ".md"

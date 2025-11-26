@@ -1049,13 +1049,14 @@ class PostmanAnalyzer:
         find_in_items(items, path_parts)
         return results
 
-    def find_request_by_path(self, items: List[Dict], request_path: str) -> Optional[Dict]:
+    def find_request_by_path(self, items: List[Dict], request_path: str, auth = None) -> Optional[Dict]:
         """Find a request by its path."""
         path_parts = [part.strip() for part in request_path.split('/') if part.strip()]
         if not path_parts:
             return None
 
         current_items = items
+        current_auth = auth
 
         # Navigate through folders to the request
         for i, part in enumerate(path_parts):
@@ -1065,6 +1066,9 @@ class PostmanAnalyzer:
                     if i == len(path_parts) - 1:
                         # This should be the request
                         if item.get('request'):
+                            # if request has no auth, inherit from parent
+                            if not item['request'].get('auth') and current_auth:
+                                item['request']['auth'] = current_auth
                             return item
                         else:
                             return None
@@ -1072,6 +1076,9 @@ class PostmanAnalyzer:
                         # This should be a folder
                         if item.get('item'):
                             current_items = item['item']
+                            # Update current_auth if folder has auth
+                            if item.get('auth'):
+                                current_auth = item['auth']
                             found = True
                             break
                         else:
