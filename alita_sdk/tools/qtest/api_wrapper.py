@@ -1520,9 +1520,13 @@ class QtestApiWrapper(BaseToolApiWrapper):
             internal_tc_id = test_run_data.get('Test Case Id')
             if internal_tc_id:
                 source_test_case_id = self.__get_entity_pid_by_internal_id('test-cases', internal_tc_id)
+        else:
+            raise ValueError(f"Test run '{test_run_id}' not found")
         
-        # Get internal QTest ID for the test run
-        qtest_test_run_id = self.__find_qtest_test_run_id_by_id(test_run_id)
+        # Get internal QTest ID for the test run from test_run_data (avoids duplicate API call)
+        qtest_test_run_id = test_run_data.get('QTest Id')
+        if not qtest_test_run_id:
+            raise ValueError(f"QTest Id not found in test run data for '{test_run_id}'")
         
         link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
         
