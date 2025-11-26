@@ -1753,7 +1753,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
         return result
 
     def create_test_cases(self, test_case_content: str, folder_to_place_test_cases_to: str) -> dict:
-        """ Create the tes case base on the incoming content. The input should be in json format. """
+        """ Create the test case based on the incoming content. The input should be in json format. """
         test_cases_api_instance: TestCaseApi = self.__instantiate_test_api_instance()
         input_obj = json.loads(test_case_content)
         test_cases = input_obj if isinstance(input_obj, list) else [input_obj]
