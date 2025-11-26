@@ -23,11 +23,7 @@ class ArtifactToolkit(BaseToolkit):
             # client = (Any, FieldInfo(description="Client object", required=True, autopopulate=True)),
             bucket=(str, FieldInfo(
                 description="Bucket name",
-                pattern=r'^[a-z][a-z0-9-]*$',
-                json_schema_extra={
-                    'toolkit_name': True,
-                    'max_toolkit_length': ArtifactToolkit.toolkit_max_length
-                }
+                pattern=r'^[a-z][a-z0-9-]*$'
             )),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
@@ -37,7 +33,10 @@ class ArtifactToolkit(BaseToolkit):
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.",
                                                   json_schema_extra={'configuration_model': 'embedding'})),
 
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact", "icon_url": None}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Artifact",
+                                                                  "icon_url": None,
+                                                                  "max_length": ArtifactToolkit.toolkit_max_length
+                                                                  }})
         )
     
     @classmethod
