@@ -147,12 +147,28 @@ class SharepointAuthorizationHelper:
                     if limit_files is not None and len(result) + len(files) >= limit_files:
                         return files[:limit_files - len(result)]
                 return files
+            #
+            site_segments = [seg for seg in site_url.strip('/').split('/') if seg][-2:]
+            full_path_prefix = '/'.join(site_segments)
+            #
             for drive in drives:
                 drive_id = drive.get("id")
                 drive_path = unquote(urlparse(drive.get("webUrl")).path) if drive.get("webUrl") else ""
                 if not drive_id:
                     continue  # skip drives without id
-                files = _recurse_drive(drive_id, drive_path, folder_name, limit_files)
+                #
+                sub_folder = folder_name
+                if folder_name:
+                    folder_path = folder_name.strip('/')
+                    expected_prefix = drive_path.strip('/')#f'{full_path_prefix}/{library_type}'
+                    if folder_path.startswith(full_path_prefix):
+                        if folder_path.startswith(expected_prefix):
+                            sub_folder = folder_path.removeprefix(f'{expected_prefix}').strip('/')#target_folder_url = folder_path.removeprefix(f'{full_path_prefix}/')
+                        else:
+                            # ignore full path folder which is not targeted to current drive
+                            continue
+                #
+                files = _recurse_drive(drive_id, drive_path, sub_folder, limit_files)
                 result.extend(files)
                 if limit_files is not None and len(result) >= limit_files:
                     return result[:limit_files]
