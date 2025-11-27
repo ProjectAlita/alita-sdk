@@ -381,9 +381,18 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 field_def = field_definitions[field_name]
                 field_id = field_def['field_id']
                 is_multiple = field_def.get('multiple', False)
+                has_allowed_values = bool(field_def.get('values'))  # True = dropdown, False = text
 
-                if is_multiple:
-                    # Multi-select/user fields: can clear using empty array "[]"
+                if not has_allowed_values:
+                    # TEXT FIELD: can clear with empty string
+                    props_dict[field_name] = {
+                        'field_id': field_id,
+                        'field_name': field_name,
+                        'field_value': '',
+                        'field_value_name': ''
+                    }
+                elif is_multiple:
+                    # MULTI-SELECT: can clear using empty array "[]"
                     props_dict[field_name] = {
                         'field_id': field_id,
                         'field_name': field_name,
@@ -391,7 +400,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
                         'field_value_name': None
                     }
                 else:
-                    # Single-select fields: QTest API limitation - cannot clear to empty
+                    # SINGLE-SELECT: QTest API limitation - cannot clear to empty
                     # Note: Users CAN clear these fields from UI, but API doesn't expose this capability
                     validation_errors.append(
                         f"⚠️ Cannot clear single-select field '{field_name}' - this is a QTest API limitation "
@@ -516,14 +525,21 @@ class QtestApiWrapper(BaseToolApiWrapper):
             
             body = swagger_client.TestCaseWithCustomFieldResource(properties=props)
             
-            # Only set fields if they are explicitly provided in the input
-            # This prevents overwriting existing values with None during partial updates
+            # Handle core fields: Name, Description, Precondition
+            # These are set if explicitly provided in the input
+            # None or empty string means "clear this field" (except Name which is required)
             if 'Name' in test_case:
-                body.name = test_case['Name']
+                # Name is required - use 'Untitled' as fallback if null/empty
+                name_value = test_case['Name']
+                body.name = name_value if name_value else 'Untitled'
+            
             if 'Precondition' in test_case:
-                body.precondition = test_case['Precondition']
+                # Allow clearing with None or empty string
+                body.precondition = test_case['Precondition'] if test_case['Precondition'] is not None else ''
+            
             if 'Description' in test_case:
-                body.description = test_case['Description']
+                # Allow clearing with None or empty string
+                body.description = test_case['Description'] if test_case['Description'] is not None else ''
             
             if parent_id:
                 body.parent_id = parent_id
@@ -773,16 +789,30 @@ class QtestApiWrapper(BaseToolApiWrapper):
         
         for field_name, field_info in sorted(field_definitions.items()):
             required_marker = " (Required)" if field_info.get('required') else ""
-            output.append(f"\n{field_name}{required_marker}:")
+            has_values = bool(field_info.get('values'))
+            is_multiple = field_info.get('multiple', False)
             
-            if field_info.get('values'):
-                for value_name, value_id in sorted(field_info['values'].items()):
-                    output.append(f"  - {value_name} (id: {value_id})")
+            # Determine field type label
+            if not has_values:
+                type_label = "Text"
+            elif is_multiple:
+                type_label = "Multi-select"
             else:
-                output.append("  Type: text")
+                type_label = "Single-select"
+            
+            output.append(f"\n{field_name} ({type_label}{required_marker}):")
+            
+            if has_values:
+                for value_name, value_id in sorted(field_info['values'].items()):
+                    output.append(f"  - {value_name}")
+            else:
+                output.append("  Free text input. Set to null to clear.")
         
-        output.append("\n\nUse these exact value names when creating or updating test cases.")
-        return ''.join(output)
+        output.append("\n\n--- Field Type Guide ---")
+        output.append("\nText fields: Use null to clear, provide string value to set.")
+        output.append("\nSingle-select: Provide exact value name from the list above. Cannot be cleared via API.")
+        output.append("\nMulti-select: Provide value as array [\"val1\", \"val2\"]. Use null to clear.")
+        return '\n'.join(output)
 
     def get_all_test_cases_fields_for_project(self, force_refresh: bool = False) -> str:
         """
@@ -844,6 +874,37 @@ class QtestApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to create test case in project - {self.qtest_project_id} with the following content:\n{test_case_content}.\n\n Stacktrace was {stacktrace}") from e
 
+    def __format_property_value(self, prop: dict) -> any:
+        """Format property value for display, detecting field type from response structure.
+        
+        Detection rules based on API response patterns:
+        - Text field: field_value_name is empty/None
+        - Multi-select: field_value_name starts with '[' and ends with ']'
+        - Single-select: field_value_name is plain text (no brackets)
+        
+        Args:
+            prop: Property dict from API response with field_value and field_value_name
+            
+        Returns:
+            Formatted value: list for multi-select, string for others
+        """
+        field_value = prop.get('field_value') or ''
+        field_value_name = prop.get('field_value_name')
+        
+        # Text field: no field_value_name, use field_value directly
+        if not field_value_name:
+            return field_value
+        
+        # Multi-select: field_value_name is bracketed like '[value1, value2]'
+        if isinstance(field_value_name, str) and field_value_name.startswith('[') and field_value_name.endswith(']'):
+            inner = field_value_name[1:-1].strip()  # Remove brackets
+            if inner:
+                return [v.strip() for v in inner.split(',')]
+            return []  # Empty multi-select
+        
+        # Single-select: plain text value
+        return field_value_name
+
     def __parse_data(self, response_to_parse: dict, parsed_data: list, extract_images: bool=False, prompt: str=None):
         import html
         
@@ -870,10 +931,9 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 field_name = prop.get('field_name')
                 if not field_name:
                     continue
-                    
-                # Use field_value_name if available (for dropdowns/users), otherwise field_value
-                field_value = prop.get('field_value_name') or prop.get('field_value') or ''
-                parsed_data_row[field_name] = field_value
+                
+                # Format value based on field type (multi-select as array, etc.)
+                parsed_data_row[field_name] = self.__format_property_value(prop)
             
             parsed_data.append(parsed_data_row)
 
@@ -1743,11 +1803,14 @@ class QtestApiWrapper(BaseToolApiWrapper):
             field_name = prop.get('field_name')
             if not field_name:
                 continue
-            # Use field_value_name if available (for dropdowns/users), otherwise field_value
-            field_value = prop.get('field_value_name') or prop.get('field_value') or ''
-            # Strip HTML from text fields
+            
+            # Format value based on field type (multi-select as array, etc.)
+            field_value = self.__format_property_value(prop)
+            
+            # Strip HTML from text fields (strings only, not arrays)
             if isinstance(field_value, str) and ('<' in field_value or '&' in field_value):
                 field_value = html.unescape(strip_tags(field_value))
+            
             result[field_name] = field_value
         
         return result
