@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from traceback import format_exc
 from typing import Any, Optional, List, Union
@@ -132,7 +133,9 @@ class LLMNode(BaseTool):
                 struct_model = create_pydantic_model(f"LLMOutput", struct_params)
                 completion = llm_client.invoke(messages, config=config)
                 if hasattr(completion, 'tool_calls') and completion.tool_calls:
-                    new_messages, _ = self.__perform_tool_calling(completion, messages, llm_client, config)
+                    new_messages, _ = self._run_async_in_sync_context(
+                        self.__perform_tool_calling(completion, messages, llm_client, config)
+                    )
                     llm = self.__get_struct_output_model(llm_client, struct_model)
                     completion = llm.invoke(new_messages, config=config)
                     result = completion.model_dump()
@@ -155,7 +158,9 @@ class LLMNode(BaseTool):
                 # Handle both tool-calling and regular responses
                 if hasattr(completion, 'tool_calls') and completion.tool_calls:
                     # Handle iterative tool-calling and execution
-                    new_messages, current_completion = self.__perform_tool_calling(completion, messages, llm_client, config)
+                    new_messages, current_completion = self._run_async_in_sync_context(
+                        self.__perform_tool_calling(completion, messages, llm_client, config)
+                    )
 
                     output_msgs = {"messages": new_messages}
                     if self.output_variables:
@@ -190,9 +195,53 @@ class LLMNode(BaseTool):
     def _run(self, *args, **kwargs):
         # Legacy support for old interface
         return self.invoke(kwargs, **kwargs)
+    
+    def _run_async_in_sync_context(self, coro):
+        """Run async coroutine from sync context.
+        
+        For MCP tools with persistent sessions, we reuse the same event loop
+        that was used to create the MCP client and sessions (set by CLI).
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            # Already in async context - run in thread with new loop
+            import threading
+            
+            result_container = []
+            
+            def run_in_thread():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result_container.append(new_loop.run_until_complete(coro))
+                finally:
+                    new_loop.close()
+            
+            thread = threading.Thread(target=run_in_thread)
+            thread.start()
+            thread.join()
+            return result_container[0] if result_container else None
+            
+        except RuntimeError:
+            # No event loop running - use/create persistent loop
+            # This loop is shared with MCP session creation for stateful tools
+            if not hasattr(self.__class__, '_persistent_loop') or \
+               self.__class__._persistent_loop is None or \
+               self.__class__._persistent_loop.is_closed():
+                self.__class__._persistent_loop = asyncio.new_event_loop()
+                logger.debug("Created persistent event loop for async tools")
+            
+            loop = self.__class__._persistent_loop
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+    
+    async def _arun(self, *args, **kwargs):
+        # Legacy async support
+        return self.invoke(kwargs, **kwargs)
 
-    def __perform_tool_calling(self, completion, messages, llm_client, config):
+    async def __perform_tool_calling(self, completion, messages, llm_client, config):
         # Handle iterative tool-calling and execution
+        logger.info(f"__perform_tool_calling called with {len(completion.tool_calls) if hasattr(completion, 'tool_calls') else 0} tool calls")
         new_messages = messages + [completion]
         iteration = 0
 
@@ -230,9 +279,16 @@ class LLMNode(BaseTool):
                 if tool_to_execute:
                     try:
                         logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
-                        # Pass the underlying config to the tool execution invoke method
-                        # since it may be another agent, graph, etc. to see it properly in thinking steps
-                        tool_result = tool_to_execute.invoke(tool_args, config=config)
+                        
+                        # Try async invoke first (for MCP tools), fallback to sync
+                        tool_result = None
+                        try:
+                            # Try async invocation first
+                            tool_result = await tool_to_execute.ainvoke(tool_args, config=config)
+                        except NotImplementedError:
+                            # Tool doesn't support async, use sync invoke
+                            logger.debug(f"Tool '{tool_name}' doesn't support async, using sync invoke")
+                            tool_result = tool_to_execute.invoke(tool_args, config=config)
 
                         # Create tool message with result - preserve structured content
                         from langchain_core.messages import ToolMessage
@@ -256,7 +312,9 @@ class LLMNode(BaseTool):
                         new_messages.append(tool_message)
 
                     except Exception as e:
-                        logger.error(f"Error executing tool '{tool_name}': {e}")
+                        import traceback
+                        error_details = traceback.format_exc()
+                        logger.error(f"Error executing tool '{tool_name}': {e}\n{error_details}")
                         # Create error tool message
                         from langchain_core.messages import ToolMessage
                         tool_message = ToolMessage(

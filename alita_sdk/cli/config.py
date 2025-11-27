@@ -55,14 +55,33 @@ class CLIConfig:
         return os.getenv('API_KEY')
     
     @property
+    def alita_dir(self) -> str:
+        """Get Alita directory from environment (defaults to .alita)."""
+        return os.getenv('ALITA_DIR', '.alita')
+    
+    @property
     def agents_dir(self) -> str:
-        """Get agents directory from environment."""
-        default_dir = os.getenv('AGENTS_DIR', '.alita/agents')
+        """Get agents directory (derived from ALITA_DIR)."""
+        alita_agents = os.path.join(self.alita_dir, 'agents')
         # Fallback to .github/agents if .alita/agents doesn't exist
-        if default_dir == '.alita/agents' and not os.path.exists(default_dir):
+        if self.alita_dir == '.alita' and not os.path.exists(alita_agents):
             if os.path.exists('.github/agents'):
                 return '.github/agents'
-        return default_dir
+        return alita_agents
+    
+    @property
+    def tools_dir(self) -> str:
+        """Get tools directory (derived from ALITA_DIR)."""
+        return os.path.join(self.alita_dir, 'tools')
+    
+    @property
+    def mcp_config_path(self) -> str:
+        """Get MCP configuration path (derived from ALITA_DIR)."""
+        alita_mcp = os.path.join(self.alita_dir, 'mcp.json')
+        # Fallback to mcp.json in current directory
+        if not os.path.exists(alita_mcp) and os.path.exists('mcp.json'):
+            return 'mcp.json'
+        return alita_mcp
     
     def is_configured(self) -> bool:
         """Check if all required configuration is present."""
