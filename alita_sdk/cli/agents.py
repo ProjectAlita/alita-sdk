@@ -9,6 +9,7 @@ import click
 import json
 import logging
 import sqlite3
+import sys
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 import yaml
@@ -157,6 +158,237 @@ def load_toolkit_config(file_path: str) -> Dict[str, Any]:
     # Apply environment variable substitution
     content = substitute_env_vars(content)
     return json.loads(content)
+
+
+def _load_toolkit_configs(agent_def: Dict[str, Any], toolkit_config_paths: tuple) -> List[Dict[str, Any]]:
+    """Load all toolkit configurations from agent definition and CLI options."""
+    toolkit_configs = []
+    
+    # Load from agent definition if present
+    if 'toolkit_configs' in agent_def:
+        for tk_config in agent_def['toolkit_configs']:
+            if isinstance(tk_config, dict):
+                if 'file' in tk_config:
+                    config = load_toolkit_config(tk_config['file'])
+                    toolkit_configs.append(config)
+                elif 'config' in tk_config:
+                    toolkit_configs.append(tk_config['config'])
+    
+    # Load from CLI options
+    if toolkit_config_paths:
+        for config_path in toolkit_config_paths:
+            config = load_toolkit_config(config_path)
+            toolkit_configs.append(config)
+    
+    return toolkit_configs
+
+
+def _create_llm_instance(client, model: Optional[str], agent_def: Dict[str, Any], 
+                         temperature: Optional[float], max_tokens: Optional[int]):
+    """Create LLM instance with appropriate configuration."""
+    llm_model = model or agent_def.get('model', 'gpt-4o')
+    llm_temperature = temperature if temperature is not None else agent_def.get('temperature', 0.7)
+    llm_max_tokens = max_tokens or agent_def.get('max_tokens', 2000)
+    
+    try:
+        llm = client.get_llm(
+            model_name=llm_model,
+            model_config={
+                'temperature': llm_temperature,
+                'max_tokens': llm_max_tokens
+            }
+        )
+        return llm, llm_model, llm_temperature, llm_max_tokens
+    except Exception as e:
+        console.print(f"\n✗ [red]Failed to create LLM instance:[/red] {e}")
+        console.print("[yellow]Hint: Make sure OPENAI_API_KEY or other LLM credentials are set[/yellow]")
+        raise
+
+
+def _create_agent_executor(client, agent_def: Dict[str, Any], toolkit_configs: List[Dict[str, Any]],
+                          llm, llm_model: str, llm_temperature: float, llm_max_tokens: int, memory):
+    """Create agent executor for local agents with tools."""
+    from ..runtime.langchain.assistant import Assistant
+    
+    # Build the data structure expected by Assistant
+    agent_data = build_agent_data_structure(
+        agent_def=agent_def,
+        toolkit_configs=toolkit_configs,
+        llm_model=llm_model,
+        llm_temperature=llm_temperature,
+        llm_max_tokens=llm_max_tokens
+    )
+    
+    # Create the Assistant instance
+    assistant = Assistant(
+        alita=client,
+        data=agent_data,
+        client=llm,
+        chat_history=[],
+        app_type=agent_data.get('agent_type', 'react'),
+        tools=[],
+        memory=memory,
+        store=None,
+        debug_mode=False,
+        mcp_tokens=None
+    )
+    
+    # Get the runnable agent
+    return assistant.runnable()
+
+
+def _extract_output_from_result(result) -> str:
+    """Extract output string from agent result (handles multiple formats)."""
+    if isinstance(result, dict):
+        # Try different keys that might contain the response
+        output = result.get('output')
+        if output is None and 'messages' in result:
+            # LangGraph format - get last message
+            messages = result['messages']
+            if messages and len(messages) > 0:
+                last_msg = messages[-1]
+                output = last_msg.content if hasattr(last_msg, 'content') else str(last_msg)
+        if output is None:
+            output = str(result)
+    else:
+        output = str(result)
+    return output
+
+
+def _display_output(agent_name: str, message: str, output: str):
+    """Display agent output with markdown rendering if applicable."""
+    console.print(f"\n[bold cyan]🤖 Agent: {agent_name}[/bold cyan]\n")
+    console.print(f"[bold]Message:[/bold] {message}\n")
+    console.print("[bold]Response:[/bold]")
+    if any(marker in output for marker in ['```', '**', '##', '- ', '* ']):
+        console.print(Markdown(output))
+    else:
+        console.print(output)
+    console.print()
+
+
+def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: List[Dict[str, Any]], 
+                               llm_model: str, llm_temperature: float, llm_max_tokens: int) -> Dict[str, Any]:
+    """
+    Convert a local agent definition to the data structure expected by the Assistant class.
+    
+    This utility function bridges between simple agent definition formats (e.g., from markdown files)
+    and the structured format that the Assistant class requires internally.
+    
+    Args:
+        agent_def: The agent definition loaded from a local file (markdown, YAML, or JSON)
+        toolkit_configs: List of toolkit configurations to be used by the agent
+        llm_model: The LLM model name (e.g., 'gpt-4o')
+        llm_temperature: Temperature setting for the model
+        llm_max_tokens: Maximum tokens for model responses
+        
+    Returns:
+        A dictionary in the format expected by the Assistant constructor with keys:
+        - instructions: System prompt for the agent
+        - tools: List of tool/toolkit configurations
+        - variables: Agent variables (empty for local agents)
+        - meta: Metadata including step_limit and internal_tools
+        - llm_settings: Complete LLM configuration
+        - agent_type: Type of agent (react, openai, etc.)
+    """
+    # Import toolkit registry to validate configs
+    from ..tools import AVAILABLE_TOOLS
+    
+    # Build the tools list from agent definition and toolkit configs
+    tools = []
+    processed_toolkit_names = set()
+    
+    # Validate and process toolkit configs through their Pydantic schemas
+    # This ensures toolkit_max_length and other class variables are properly initialized
+    validated_toolkit_configs = []
+    for toolkit_config in toolkit_configs:
+        toolkit_type = toolkit_config.get('type')
+        if toolkit_type and toolkit_type in AVAILABLE_TOOLS:
+            # Get the toolkit class and call toolkit_config_schema to initialize class variables
+            try:
+                toolkit_info = AVAILABLE_TOOLS[toolkit_type]
+                if 'toolkit_class' in toolkit_info:
+                    toolkit_class = toolkit_info['toolkit_class']
+                    # Call toolkit_config_schema() - this initializes class variables like toolkit_max_length
+                    if hasattr(toolkit_class, 'toolkit_config_schema'):
+                        schema = toolkit_class.toolkit_config_schema()
+                        # Validate the config through Pydantic
+                        # Note: The schema may not include 'type' and 'toolkit_name', so we need to preserve them
+                        validated_config = schema(**toolkit_config)
+                        # Convert back to dict for internal use, but preserve non-schema fields
+                        validated_dict = validated_config.model_dump()
+                        # Preserve 'type' and 'toolkit_name' from original config
+                        validated_dict['type'] = toolkit_config.get('type')
+                        validated_dict['toolkit_name'] = toolkit_config.get('toolkit_name')
+                        validated_toolkit_configs.append(validated_dict)
+                    else:
+                        validated_toolkit_configs.append(toolkit_config)
+                else:
+                    validated_toolkit_configs.append(toolkit_config)
+            except Exception as e:
+                logger.warning(f"Failed to validate toolkit config for {toolkit_type}: {e}", exc_info=True)
+                validated_toolkit_configs.append(toolkit_config)
+        else:
+            validated_toolkit_configs.append(toolkit_config)
+    
+    # Add tools from agent definition (these are tool names or toolkit names)
+    for tool_name in agent_def.get('tools', []):
+        # Check if this is a toolkit that needs to be configured from toolkit_configs
+        toolkit_config = next((tk for tk in validated_toolkit_configs if tk.get('toolkit_name') == tool_name), None)
+        if toolkit_config:
+            # Add as a full toolkit configuration
+            tools.append({
+                'type': toolkit_config.get('type'),
+                'toolkit_name': toolkit_config.get('toolkit_name'),
+                'settings': toolkit_config,
+                'selected_tools': toolkit_config.get('selected_tools', [])
+            })
+            processed_toolkit_names.add(tool_name)
+        else:
+            # Add as a simple tool reference (built-in tool or toolkit without config)
+            tools.append({
+                'type': tool_name,
+                'name': tool_name
+            })
+    
+    # Add any toolkit_configs that weren't already referenced in agent tools
+    # This allows --toolkit-config to work even when tools: [] in the agent definition
+    for toolkit_config in validated_toolkit_configs:
+        toolkit_name = toolkit_config.get('toolkit_name')
+        if toolkit_name and toolkit_name not in processed_toolkit_names:
+            tools.append({
+                'type': toolkit_config.get('type'),
+                'toolkit_name': toolkit_name,
+                'settings': toolkit_config,
+                'selected_tools': toolkit_config.get('selected_tools', [])
+            })
+    # Build the data structure expected by Assistant
+    return {
+        'instructions': agent_def.get('system_prompt', ''),
+        'tools': tools,
+        'variables': [],  # Local agents don't typically have variables in the same format
+        'meta': {
+            'step_limit': agent_def.get('step_limit', 25),
+            'internal_tools': agent_def.get('internal_tools', [])
+        },
+        'llm_settings': {
+            'model_name': llm_model,
+            'max_tokens': llm_max_tokens,
+            'temperature': llm_temperature,
+            'top_p': 1.0,
+            'top_k': 0,
+            'integration_uid': None,
+            'indexer_config': {
+                'ai_model': 'langchain_openai.ChatOpenAI',
+                'ai_model_params': {
+                    'model': llm_model,
+                    'temperature': llm_temperature,
+                    'max_tokens': llm_max_tokens
+                }
+            }
+        },
+        'agent_type': agent_def.get('agent_type', 'react')
+    }
 
 
 def _select_agent_interactive(client, config) -> Optional[str]:
@@ -575,28 +807,12 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
         
         # Load toolkits if provided
-        toolkit_configs = []
-        
-        # First load from agent definition if local
-        if is_local and 'toolkit_configs' in agent_def:
-            for tk_config in agent_def['toolkit_configs']:
-                if isinstance(tk_config, dict):
-                    if 'file' in tk_config:
-                        # Load from file
-                        config = load_toolkit_config(tk_config['file'])
-                        toolkit_configs.append(config)
-                        console.print(f"[dim]Loaded toolkit config from agent definition: {tk_config['file']}[/dim]")
-                    elif 'config' in tk_config:
-                        # Inline config
-                        toolkit_configs.append(tk_config['config'])
-                        console.print(f"[dim]Loaded inline toolkit config: {tk_config['config'].get('toolkit_name', 'unknown')}[/dim]")
-        
-        # Then load from --toolkit-config options
-        if toolkit_config:
+        if is_local:
+            toolkit_configs = _load_toolkit_configs(agent_def, toolkit_config)
             for config_path in toolkit_config:
-                config = load_toolkit_config(config_path)
-                toolkit_configs.append(config)
                 console.print(f"[dim]Loaded toolkit config: {config_path}[/dim]")
+        else:
+            toolkit_configs = []
         
         # Auto-add toolkits to tools if not already present
         if is_local and toolkit_configs:
@@ -627,19 +843,23 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             
             # Create LLM instance using AlitaClient
             try:
-                llm = client.get_llm(
-                    model_name=llm_model,
-                    model_config={
-                        'temperature': llm_temperature,
-                        'max_tokens': llm_max_tokens
-                    }
+                llm, llm_model, llm_temperature, llm_max_tokens = _create_llm_instance(
+                    client, model, agent_def, temperature, max_tokens
                 )
-            except Exception as e:
-                console.print(f"\n✗ [red]Failed to create LLM instance:[/red] {e}")
-                console.print("[yellow]Hint: Make sure OPENAI_API_KEY or other LLM credentials are set[/yellow]")
+            except Exception:
                 return
             
-            agent_executor = None  # Local agents use direct LLM calls
+            # Determine if we need to use Agent mode (with tools) or simple LLM mode
+            has_tools = bool(agent_def.get('tools') or toolkit_configs)
+            
+            if has_tools:
+                # Use Agent mode with tools
+                agent_executor = _create_agent_executor(
+                    client, agent_def, toolkit_configs,
+                    llm, llm_model, llm_temperature, llm_max_tokens, memory
+                )
+            else:
+                agent_executor = None  # Simple LLM mode without tools
         else:
             # Platform agent
             details = client.get_app_details(agent['id'])
@@ -712,8 +932,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     continue
                 
                 # Execute agent
-                if is_local:
-                    # Local agent: use direct LLM call with streaming
+                if is_local and agent_executor is None:
+                    # Local agent without tools: use direct LLM call with streaming
                     messages = []
                     if system_prompt:
                         messages.append({"role": "system", "content": system_prompt})
@@ -778,13 +998,15 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         console.print(f"\n[red]✗ Error: {e}[/red]\n")
                         continue
                 else:
-                    # Platform agent: use agent executor
+                    # Agent with tools or platform agent: use agent executor
                     with console.status("[yellow]Thinking...[/yellow]", spinner="dots"):
                         result = agent_executor.invoke({
-                            "input": [user_input],
+                            "input": [user_input] if not is_local else user_input,
                             "chat_history": chat_history
                         })
-                        output = result.get('output', '')
+                        
+                        # Extract output from result
+                        output = _extract_output_from_result(result)
                     
                     # Display response
                     console.print(f"\n[bold bright_cyan]{agent_name}:[/bold bright_cyan]")
@@ -866,43 +1088,19 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
         # Load agent
         is_local = Path(agent_source).exists()
         
-        # Load toolkits
-        toolkit_configs = []
-        
         if is_local:
             agent_def = load_agent_definition(agent_source)
             agent_name = agent_def.get('name', Path(agent_source).stem)
             
-            # Load toolkit configs from agent definition
-            if 'toolkit_configs' in agent_def:
-                for tk_config in agent_def['toolkit_configs']:
-                    if isinstance(tk_config, dict):
-                        if 'file' in tk_config:
-                            config = load_toolkit_config(tk_config['file'])
-                            toolkit_configs.append(config)
-                        elif 'config' in tk_config:
-                            toolkit_configs.append(tk_config['config'])
+            # Load all toolkit configs
+            toolkit_configs = _load_toolkit_configs(agent_def, toolkit_config)
             
-            # Load additional toolkit configs from --toolkit-config options
-            if toolkit_config:
-                for config_path in toolkit_config:
-                    config = load_toolkit_config(config_path)
-                    toolkit_configs.append(config)
-            
-            # Get LLM configuration
-            llm_model = model or agent_def.get('model', 'gpt-4o')
-            llm_temperature = temperature if temperature is not None else agent_def.get('temperature', 0.7)
-            llm_max_tokens = max_tokens or agent_def.get('max_tokens', 2000)
+            # Get LLM configuration and create instance
             system_prompt = agent_def.get('system_prompt', '')
             
-            # Create LLM instance
             try:
-                llm = client.get_llm(
-                    model_name=llm_model,
-                    model_config={
-                        'temperature': llm_temperature,
-                        'max_tokens': llm_max_tokens
-                    }
+                llm, llm_model, llm_temperature, llm_max_tokens = _create_llm_instance(
+                    client, model, agent_def, temperature, max_tokens
                 )
             except Exception as e:
                 error_panel = Panel(
@@ -914,44 +1112,79 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
                 console.print(error_panel, style="red")
                 raise click.Abort()
             
-            # Prepare messages
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": message})
+            # Determine if we need to use Agent mode (with tools) or simple LLM mode
+            has_tools = bool(agent_def.get('tools') or toolkit_configs)
             
-            # Execute with spinner for non-JSON output
-            if formatter.__class__.__name__ == 'JSONFormatter':
-                response = llm.invoke(messages)
-                if hasattr(response, 'content'):
-                    output = response.content
-                else:
-                    output = str(response)
+            if has_tools:
+                # Use Agent mode with tools
+                from langgraph.checkpoint.sqlite import SqliteSaver
                 
-                click.echo(formatter._dump({
-                    'agent': agent_name,
-                    'message': message,
-                    'response': output
-                }))
+                # Create memory for agent
+                memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+                
+                # Create agent executor
+                agent_executor = _create_agent_executor(
+                    client, agent_def, toolkit_configs,
+                    llm, llm_model, llm_temperature, llm_max_tokens, memory
+                )
+                
+                # Execute with spinner for non-JSON output
+                if formatter.__class__.__name__ == 'JSONFormatter':
+                    with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                        result = agent_executor.invoke({
+                            "input": message,
+                            "chat_history": []
+                        })
+                    
+                    click.echo(formatter._dump({
+                        'agent': agent_name,
+                        'message': message,
+                        'response': _extract_output_from_result(result),
+                        'full_result': result
+                    }))
+                else:
+                    # Show spinner while executing
+                    with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                        result = agent_executor.invoke({
+                            "input": message,
+                            "chat_history": []
+                        })
+                    
+                    # Extract and display output
+                    output = _extract_output_from_result(result)
+                    _display_output(agent_name, message, output)
             else:
-                # Show spinner while executing
-                with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                # Simple LLM mode without tools
+                # Prepare messages
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": message})
+                
+                # Execute with spinner for non-JSON output
+                if formatter.__class__.__name__ == 'JSONFormatter':
                     response = llm.invoke(messages)
                     if hasattr(response, 'content'):
                         output = response.content
                     else:
                         output = str(response)
-                
-                # Format and display output
-                console.print(f"\n[bold cyan]🤖 Agent: {agent_name}[/bold cyan]\n")
-                console.print(f"[bold]Message:[/bold] {message}\n")
-                console.print("[bold]Response:[/bold]")
-                # Render markdown if the response looks like it contains markdown
-                if any(marker in output for marker in ['```', '**', '##', '- ', '* ']):
-                    console.print(Markdown(output))
+                    
+                    click.echo(formatter._dump({
+                        'agent': agent_name,
+                        'message': message,
+                        'response': output
+                    }))
                 else:
-                    console.print(output)
-                console.print()
+                    # Show spinner while executing
+                    with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                        response = llm.invoke(messages)
+                        if hasattr(response, 'content'):
+                            output = response.content
+                        else:
+                            output = str(response)
+                    
+                    # Display output
+                    _display_output(agent_name, message, output)
         
         else:
             # Platform agent
@@ -978,11 +1211,11 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
             else:
                 version_id = details['versions'][0]['id']
             
-            # Load additional toolkit configs from --toolkit-config options
+            # Load toolkit configs from CLI options
+            toolkit_configs = []
             if toolkit_config:
                 for config_path in toolkit_config:
-                    config = load_toolkit_config(config_path)
-                    toolkit_configs.append(config)
+                    toolkit_configs.append(load_toolkit_config(config_path))
             
             # Create memory
             from langgraph.checkpoint.sqlite import SqliteSaver
@@ -1016,17 +1249,9 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
                         "chat_history": []
                     })
                 
-                # Format and display output
-                console.print(f"\n[bold cyan]🤖 Agent: {agent['name']}[/bold cyan]\n")
-                console.print(f"[bold]Message:[/bold] {message}\n")
-                console.print("[bold]Response:[/bold]")
+                # Display output
                 response = result.get('output', 'No response')
-                # Render markdown if the response looks like it contains markdown
-                if any(marker in response for marker in ['```', '**', '##', '- ', '* ']):
-                    console.print(Markdown(response))
-                else:
-                    console.print(response)
-                console.print()
+                _display_output(agent['name'], message, response)
             
             # Save thread if requested
             if save_thread:

@@ -565,7 +565,7 @@ class AlitaClient:
             monitoring_meta = tasknode_task.meta.get("monitoring", {})
             return monitoring_meta["user_id"]
         except Exception as e:
-            logger.warning(f"Error: Could not determine user ID for MCP tool: {e}")
+            logger.debug(f"Error: Could not determine user ID for MCP tool: {e}")
             return None
 
     def predict_agent(self, llm: ChatOpenAI, instructions: str = "You are a helpful assistant.",
