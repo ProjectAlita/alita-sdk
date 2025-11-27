@@ -16,6 +16,18 @@ from ..langchain.utils import propagate_the_input_mapping
 logger = logging.getLogger(__name__)
 
 
+def replace_escaped_newlines(data):
+    """
+        Replace \\n with \n in all string values recursively.
+        Required for sanitization of state variables in code node
+    """
+    if isinstance(data, dict):
+        return {key: replace_escaped_newlines(value) for key, value in data.items()}
+    elif isinstance(data, str):
+        return data.replace('\\n', '\n')
+    else:
+        return data
+
 class FunctionTool(BaseTool):
     name: str = 'FunctionalTool'
     description: str = 'This is direct call node for tools'
@@ -30,12 +42,13 @@ class FunctionTool(BaseTool):
     def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> str:
         """Prepare input for PyodideSandboxTool by injecting state into the code block."""
         # add state into the code block here since it might be changed during the execution of the code
-        state_copy = deepcopy(state)
+        state_copy = replace_escaped_newlines(deepcopy(state))
 
         del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
         # inject state into the code block as alita_state variable
         state_json = json.dumps(state_copy, ensure_ascii=False)
-        pyodide_predata = f'#state dict\nimport json\nalita_state = {repr(state_json)}\n'
+        pyodide_predata = f'#state dict\nimport json\nalita_state = json.loads({json.dumps(state_json)})\n'
+
         return pyodide_predata
 
     def _handle_pyodide_output(self, tool_result: Any) -> dict:
