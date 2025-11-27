@@ -890,7 +890,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # input['messages'] = [current_message]
         
         # Validate that input is not empty after all processing
-        if not input.get('input'):
+        if not input.get('input') and not config.get("configurable", {}).get("checkpoint_id"):
             raise RuntimeError(
                 "Empty input after processing. Cannot send empty string to LLM. "
                 "This likely means the message contained only non-text content "
