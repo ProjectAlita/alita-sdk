@@ -78,6 +78,73 @@ Steps: Array of test steps with Description and Expected Result.
 Json object
 """
 
+# DQL Syntax Documentation - reusable across all DQL-based search tools
+DQL_SYNTAX_DOCS = """
+CRITICAL: USE SINGLE QUOTES ONLY - DQL does not support double quotes!
+- ✓ CORRECT: Description ~ 'Forgot Password'
+- ✗ WRONG: Description ~ "Forgot Password"
+
+LIMITATION - CANNOT SEARCH BY LINKED OBJECTS:
+- ✗ Searching by linked requirements, test cases, defects is NOT supported
+- Use dedicated find_*_by_*_id tools for relationship queries
+
+SEARCHABLE FIELDS:
+- Direct fields: Id, Name, Description, Status, Type, Priority, etc.
+- Custom fields: Use exact field name from project configuration
+- Date fields: MUST use ISO DateTime format (e.g., '2024-01-01T00:00:00.000Z')
+
+ENTITY-SPECIFIC NOTES:
+- test-logs: Only support 'Execution Start Date' and 'Execution End Date' queries
+- builds/test-cycles: Also support 'Created Date' and 'Last Modified Date'
+- defects: Can use 'Affected Release/Build' and 'Fixed Release/Build'
+
+SYNTAX RULES:
+1. ALL string values MUST use single quotes (never double quotes)
+2. Field names with spaces MUST be in single quotes: 'Created Date' > '2024-01-01T00:00:00.000Z'
+3. Use ~ for 'contains', !~ for 'not contains': Description ~ 'login'
+4. Use 'is not empty' for non-empty check: Name is 'not empty'
+5. Operators: =, !=, <, >, <=, >=, in, ~, !~
+
+EXAMPLES:
+- Id = 'TC-123' or Id = 'RQ-15' or Id = 'DF-100' (depending on entity type)
+- Description ~ 'Forgot Password'
+- Status = 'New' and Priority = 'High'
+- Name ~ 'login'
+- 'Created Date' > '2024-01-01T00:00:00.000Z'
+- 'Execution Start Date' > '2024-01-01T00:00:00.000Z' (for test-logs)
+"""
+
+# Supported object types for DQL search (based on QTest Search API documentation)
+# Note: Prefixes are configurable per-project but these are standard defaults
+# Modules (MD) are NOT searchable via DQL - use get_modules tool instead
+# Test-logs have NO prefix - they are internal records accessed via test runs
+
+# Entity types with ID prefixes (can be looked up by ID like TC-123)
+QTEST_OBJECT_TYPES = {
+    # Core test management entities
+    'test-cases': {'prefix': 'TC', 'name': 'Test Case', 'description': 'Test case definitions with steps'},
+    'test-runs': {'prefix': 'TR', 'name': 'Test Run', 'description': 'Execution instances of test cases'},
+    'defects': {'prefix': 'DF', 'name': 'Defect', 'description': 'Bugs/issues found during testing'},
+    'requirements': {'prefix': 'RQ', 'name': 'Requirement', 'description': 'Requirements to be tested'},
+    
+    # Test organization entities
+    'test-suites': {'prefix': 'TS', 'name': 'Test Suite', 'description': 'Collections of test runs'},
+    'test-cycles': {'prefix': 'CL', 'name': 'Test Cycle', 'description': 'Test execution cycles'},
+    
+    # Release management entities
+    'releases': {'prefix': 'RL', 'name': 'Release', 'description': 'Software releases'},
+    'builds': {'prefix': 'BL', 'name': 'Build', 'description': 'Builds within releases'},
+}
+
+# Entity types searchable via DQL but without ID prefixes
+# These can be searched by specific fields only, not by ID
+QTEST_SEARCHABLE_ONLY_TYPES = {
+    'test-logs': {
+        'name': 'Test Log', 
+        'description': "Execution logs. Only date queries supported (Execution Start Date, Execution End Date). For specific log details, use test run's 'Latest Test Log' field."
+    },
+}
+
 logger = logging.getLogger(__name__)
 
 QtestDataQuerySearch = create_model(
@@ -152,6 +219,34 @@ FindTestCasesByRequirementId = create_model(
     "FindTestCasesByRequirementId",
     requirement_id=(str, Field(description="QTest requirement ID in format RQ-123. This will find all test cases linked to this requirement.")),
     include_details=(Optional[bool], Field(description="If true, returns full test case details. If false (default), returns Id, QTest Id, Name, and Description fields.", default=False)),
+)
+
+FindRequirementsByTestCaseId = create_model(
+    "FindRequirementsByTestCaseId",
+    test_case_id=(str, Field(description="Test case ID in format TC-123. This will find all requirements linked to this test case.")),
+)
+
+FindTestRunsByTestCaseId = create_model(
+    "FindTestRunsByTestCaseId",
+    test_case_id=(str, Field(description="Test case ID in format TC-123. This will find all test runs associated with this test case.")),
+)
+
+FindDefectsByTestRunId = create_model(
+    "FindDefectsByTestRunId",
+    test_run_id=(str, Field(description="Test run ID in format TR-123. This will find all defects associated with this test run.")),
+)
+
+# Generic search model for any entity type
+GenericDqlSearch = create_model(
+    "GenericDqlSearch",
+    object_type=(str, Field(description="Entity type to search: 'test-cases', 'test-runs', 'defects', 'requirements', 'test-suites', 'test-cycles', 'test-logs', 'releases', or 'builds'. Note: test-logs only support date queries; modules are NOT searchable - use get_modules tool.")),
+    dql=(str, Field(description="QTest Data Query Language (DQL) query string")),
+)
+
+# Generic find by ID model - only for entities with ID prefixes (NOT test-logs)
+FindEntityById = create_model(
+    "FindEntityById",
+    entity_id=(str, Field(description="Entity ID with prefix: TC-123 (test case), RQ-15 (requirement), DF-100 (defect), TR-39 (test run), TS-5 (test suite), CL-3 (test cycle), RL-1 (release), or BL-2 (build). Note: test-logs and modules do NOT have ID prefixes.")),
 )
 
 NoInput = create_model(
@@ -837,6 +932,42 @@ class QtestApiWrapper(BaseToolApiWrapper):
         parsed_data = self.__perform_search_by_dql(dql)
         return parsed_data[0]['QTest Id']
 
+    def __find_qtest_internal_id(self, object_type: str, entity_id: str) -> int:
+        """Generic search for an entity's internal QTest ID using its external ID (e.g., TR-xxx, DF-xxx, RQ-xxx).
+        
+        This is the unified method for looking up internal IDs. Use this instead of 
+        the entity-specific methods (__find_qtest_requirement_id_by_id, etc.).
+        
+        Args:
+            object_type: QTest object type ('test-runs', 'defects', 'requirements', etc.)
+            entity_id: Entity ID in format TR-123, DF-456, etc.
+            
+        Returns:
+            int: Internal QTest ID for the entity
+            
+        Raises:
+            ValueError: If entity is not found
+        """
+        dql = f"Id = '{entity_id}'"
+        search_instance: SearchApi = swagger_client.SearchApi(self._client)
+        body = swagger_client.ArtifactSearchParams(object_type=object_type, fields=['*'], query=dql)
+        
+        try:
+            response = search_instance.search_artifact(self.qtest_project_id, body)
+            if response['total'] == 0:
+                raise ValueError(
+                    f"{object_type.capitalize()} '{entity_id}' not found in project {self.qtest_project_id}. "
+                    f"Please verify the {entity_id} ID exists."
+                )
+            return response['items'][0]['id']
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when searching for '{object_type}': '{entity_id}': \n {stacktrace}")
+            raise ToolException(
+                f"Unable to search for {object_type} '{entity_id}' in project {self.qtest_project_id}. "
+                f"Exception: \n{stacktrace}"
+            ) from e
+
     def __find_qtest_requirement_id_by_id(self, requirement_id: str) -> int:
         """Search for requirement's internal QTest ID using requirement ID (RQ-xxx format).
         
@@ -849,25 +980,90 @@ class QtestApiWrapper(BaseToolApiWrapper):
         Raises:
             ValueError: If requirement is not found
         """
-        dql = f"Id = '{requirement_id}'"
+        return self.__find_qtest_internal_id('requirements', requirement_id)
+
+    def __find_qtest_defect_id_by_id(self, defect_id: str) -> int:
+        """Search for defect's internal QTest ID using defect ID (DF-xxx format).
+        
+        Args:
+            defect_id: Defect ID in format DF-123
+            
+        Returns:
+            int: Internal QTest ID for the defect
+            
+        Raises:
+            ValueError: If defect is not found
+        """
+        return self.__find_qtest_internal_id('defects', defect_id)
+
+    def __search_entity_by_id(self, object_type: str, entity_id: str) -> dict:
+        """Generic search for any entity by its ID (RQ-xxx, DF-xxx, etc.).
+        
+        Uses the unified __parse_entity_item method for consistent parsing.
+        
+        Args:
+            object_type: QTest object type ('requirements', 'defects', etc.)
+            entity_id: Entity ID in format prefix-number (RQ-123, DF-456)
+            
+        Returns:
+            dict: Entity data with all parsed fields, or None if not found
+        """
+        dql = f"Id = '{entity_id}'"
         search_instance: SearchApi = swagger_client.SearchApi(self._client)
-        body = swagger_client.ArtifactSearchParams(object_type='requirements', fields=['*'], query=dql)
+        body = swagger_client.ArtifactSearchParams(object_type=object_type, fields=['*'], query=dql)
         
         try:
             response = search_instance.search_artifact(self.qtest_project_id, body)
             if response['total'] == 0:
-                raise ValueError(
-                    f"Requirement '{requirement_id}' not found in project {self.qtest_project_id}. "
-                    f"Please verify the requirement ID exists."
-                )
-            return response['items'][0]['id']
+                return None  # Not found, but don't raise - caller handles this
+            
+            # Use the unified parser
+            return self.__parse_entity_item(object_type, response['items'][0])
+            
         except ApiException as e:
-            stacktrace = format_exc()
-            logger.error(f"Exception when searching for requirement: \n {stacktrace}")
-            raise ToolException(
-                f"Unable to search for requirement '{requirement_id}' in project {self.qtest_project_id}. "
-                f"Exception: \n{stacktrace}"
-            ) from e
+            logger.warning(f"Could not fetch details for {entity_id}: {e}")
+            return None
+
+    def __get_entity_pid_by_internal_id(self, object_type: str, internal_id: int) -> str:
+        """Reverse lookup: get entity PID (TC-xxx, TR-xxx, etc.) from internal QTest ID.
+        
+        Args:
+            object_type: QTest object type ('test-cases', 'test-runs', 'defects', 'requirements')
+            internal_id: Internal QTest ID (numeric)
+            
+        Returns:
+            str: Entity PID in format prefix-number (TC-123, TR-456, etc.) or None if not found
+        """
+        search_instance = swagger_client.SearchApi(self._client)
+        # Note: 'id' needs quotes for DQL when searching by internal ID
+        body = swagger_client.ArtifactSearchParams(
+            object_type=object_type, 
+            fields=['id', 'pid'], 
+            query=f"'id' = '{internal_id}'"
+        )
+        
+        try:
+            response = search_instance.search_artifact(self.qtest_project_id, body)
+            if response['total'] > 0:
+                return response['items'][0].get('pid')
+            return None
+        except ApiException as e:
+            logger.warning(f"Could not get PID for {object_type} internal ID {internal_id}: {e}")
+            return None
+
+    def __find_qtest_test_run_id_by_id(self, test_run_id: str) -> int:
+        """Search for test run's internal QTest ID using test run ID (TR-xxx format).
+        
+        Args:
+            test_run_id: Test run ID in format TR-123
+            
+        Returns:
+            int: Internal QTest ID for the test run
+            
+        Raises:
+            ValueError: If test run is not found
+        """
+        return self.__find_qtest_internal_id('test-runs', test_run_id)
 
     def __is_jira_requirement_present(self, jira_issue_id: str) -> tuple[bool, dict]:
         """ Define if particular Jira requirement is present in qtest or not """
@@ -1106,14 +1302,458 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
             ) from e
 
+    def find_requirements_by_test_case_id(self, test_case_id: str) -> dict:
+        """Find all requirements linked to a test case.
+        
+        This method uses the ObjectLinkApi.find() to discover requirements that are 
+        linked to a specific test case (reverse lookup).
+        
+        Args:
+            test_case_id: Test case ID in format TC-123
+            
+        Returns:
+            dict with test_case_id, total count, and requirements list
+            
+        Raises:
+            ValueError: If test case is not found
+            ToolException: If API call fails
+        """
+        # Get internal QTest ID for the test case
+        qtest_test_case_id = self.__find_qtest_id_by_test_id(test_case_id)
+        
+        link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
+        
+        try:
+            # Use ObjectLinkApi.find() to get linked artifacts
+            # type='test-cases' means we're searching from test cases
+            response = link_object_api_instance.find(
+                self.qtest_project_id,
+                type='test-cases',
+                ids=[qtest_test_case_id]
+            )
+            
+            # Parse the response to extract linked requirement IDs
+            linked_requirement_ids = []
+            if response and len(response) > 0:
+                for container in response:
+                    container_data = container.to_dict() if hasattr(container, 'to_dict') else container
+                    objects = container_data.get('objects', []) if isinstance(container_data, dict) else []
+                    
+                    for obj in objects:
+                        obj_data = obj.to_dict() if hasattr(obj, 'to_dict') else obj
+                        if isinstance(obj_data, dict):
+                            pid = obj_data.get('pid', '')
+                            # Requirements have RQ- prefix
+                            if pid and pid.startswith('RQ-'):
+                                linked_requirement_ids.append(pid)
+            
+            if not linked_requirement_ids:
+                return {
+                    'test_case_id': test_case_id,
+                    'total': 0,
+                    'requirements': [],
+                    'message': f"No requirements are linked to test case '{test_case_id}'"
+                }
+            
+            # Fetch actual requirement details via DQL search
+            requirements_result = []
+            for req_id in linked_requirement_ids:
+                req_data = self.__search_entity_by_id('requirements', req_id)
+                if req_data:
+                    requirements_result.append(req_data)
+                else:
+                    # Fallback if search fails
+                    requirements_result.append({
+                        'Id': req_id,
+                        'QTest Id': None,
+                        'Name': 'Unable to fetch',
+                        'Description': ''
+                    })
+            
+            return {
+                'test_case_id': test_case_id,
+                'total': len(requirements_result),
+                'requirements': requirements_result
+            }
+            
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Error finding requirements by test case: {stacktrace}")
+            raise ToolException(
+                f"Unable to find requirements linked to test case '{test_case_id}' "
+                f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
+            ) from e
+
+    def find_test_runs_by_test_case_id(self, test_case_id: str) -> dict:
+        """Find all test runs associated with a test case.
+        
+        A test run represents an execution instance of a test case. Each test run 
+        tracks execution details, status, and any defects found during that run.
+        
+        IMPORTANT: In QTest's data model, defects are linked to test runs, not directly 
+        to test cases. To find defects related to a test case:
+        1. Use this tool to find test runs for the test case
+        2. Use find_defects_by_test_run_id for each test run to get related defects
+        
+        Each test run in the result includes 'Test Case Id' showing which test case 
+        it executes, and 'Latest Test Log' with execution status and log ID.
+        
+        Args:
+            test_case_id: Test case ID in format TC-123
+            
+        Returns:
+            dict with test_case_id, total count, and test_runs list with full details
+            
+        Raises:
+            ValueError: If test case is not found
+            ToolException: If API call fails
+        """
+        # Get internal QTest ID for the test case
+        qtest_test_case_id = self.__find_qtest_id_by_test_id(test_case_id)
+        
+        link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
+        
+        try:
+            # Use ObjectLinkApi.find() to get linked artifacts
+            response = link_object_api_instance.find(
+                self.qtest_project_id,
+                type='test-cases',
+                ids=[qtest_test_case_id]
+            )
+            
+            # Parse the response to extract linked test run IDs
+            linked_test_run_ids = []
+            if response and len(response) > 0:
+                for container in response:
+                    container_data = container.to_dict() if hasattr(container, 'to_dict') else container
+                    objects = container_data.get('objects', []) if isinstance(container_data, dict) else []
+                    
+                    for obj in objects:
+                        obj_data = obj.to_dict() if hasattr(obj, 'to_dict') else obj
+                        if isinstance(obj_data, dict):
+                            pid = obj_data.get('pid', '')
+                            # Test runs have TR- prefix
+                            if pid and pid.startswith('TR-'):
+                                linked_test_run_ids.append(pid)
+            
+            if not linked_test_run_ids:
+                return {
+                    'test_case_id': test_case_id,
+                    'total': 0,
+                    'test_runs': [],
+                    'message': f"No test runs are associated with test case '{test_case_id}'"
+                }
+            
+            # Fetch actual test run details via DQL search
+            test_runs_result = []
+            for tr_id in linked_test_run_ids:
+                tr_data = self.__search_entity_by_id('test-runs', tr_id)
+                if tr_data:
+                    test_runs_result.append(tr_data)
+                else:
+                    # Fallback if search fails
+                    test_runs_result.append({
+                        'Id': tr_id,
+                        'QTest Id': None,
+                        'Name': 'Unable to fetch',
+                        'Description': ''
+                    })
+            
+            return {
+                'test_case_id': test_case_id,
+                'total': len(test_runs_result),
+                'test_runs': test_runs_result,
+                'hint': 'To find defects, use find_defects_by_test_run_id for each test run.'
+            }
+            
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Error finding test runs by test case: {stacktrace}")
+            raise ToolException(
+                f"Unable to find test runs associated with test case '{test_case_id}' "
+                f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
+            ) from e
+
+    def find_defects_by_test_run_id(self, test_run_id: str) -> dict:
+        """Find all defects associated with a test run.
+        
+        In QTest, defects are linked to test runs (not directly to test cases).
+        A test run executes a specific test case, so defects found here are 
+        related to that test case through the test run execution context.
+        
+        Use this tool after find_test_runs_by_test_case_id to discover defects.
+        The result includes source context (test run and test case IDs) for traceability.
+        
+        Args:
+            test_run_id: Test run ID in format TR-123
+            
+        Returns:
+            dict with test_run_id, source_test_case_id, total count, and defects list with full details
+            
+        Raises:
+            ValueError: If test run is not found
+            ToolException: If API call fails
+        """
+        # First, get test run details to get the source test case context
+        test_run_data = self.__search_entity_by_id('test-runs', test_run_id)
+        source_test_case_id = None
+        if test_run_data:
+            # testCaseId is the internal ID, we need the PID (TC-xxx format)
+            internal_tc_id = test_run_data.get('Test Case Id')
+            if internal_tc_id:
+                source_test_case_id = self.__get_entity_pid_by_internal_id('test-cases', internal_tc_id)
+        else:
+            raise ValueError(f"Test run '{test_run_id}' not found")
+        
+        # Get internal QTest ID for the test run from test_run_data (avoids duplicate API call)
+        qtest_test_run_id = test_run_data.get('QTest Id')
+        if not qtest_test_run_id:
+            raise ValueError(f"QTest Id not found in test run data for '{test_run_id}'")
+        
+        link_object_api_instance = swagger_client.ObjectLinkApi(self._client)
+        
+        try:
+            # Use ObjectLinkApi.find() to get linked artifacts
+            response = link_object_api_instance.find(
+                self.qtest_project_id,
+                type='test-runs',
+                ids=[qtest_test_run_id]
+            )
+            
+            # Parse the response to extract linked defect IDs
+            linked_defect_ids = []
+            if response and len(response) > 0:
+                for container in response:
+                    container_data = container.to_dict() if hasattr(container, 'to_dict') else container
+                    objects = container_data.get('objects', []) if isinstance(container_data, dict) else []
+                    
+                    for obj in objects:
+                        obj_data = obj.to_dict() if hasattr(obj, 'to_dict') else obj
+                        if isinstance(obj_data, dict):
+                            pid = obj_data.get('pid', '')
+                            # Defects have DF- prefix
+                            if pid and pid.startswith('DF-'):
+                                linked_defect_ids.append(pid)
+            
+            if not linked_defect_ids:
+                result = {
+                    'test_run_id': test_run_id,
+                    'total': 0,
+                    'defects': [],
+                    'message': f"No defects are associated with test run '{test_run_id}'"
+                }
+                if source_test_case_id:
+                    result['source_test_case_id'] = source_test_case_id
+                return result
+            
+            # Fetch actual defect details via DQL search
+            defects_result = []
+            for defect_id in linked_defect_ids:
+                defect_data = self.__search_entity_by_id('defects', defect_id)
+                if defect_data:
+                    defects_result.append(defect_data)
+                else:
+                    # Fallback if search fails
+                    defects_result.append({
+                        'Id': defect_id,
+                        'QTest Id': None,
+                        'Name': 'Unable to fetch',
+                        'Description': ''
+                    })
+            
+            result = {
+                'test_run_id': test_run_id,
+                'total': len(defects_result),
+                'defects': defects_result
+            }
+            if source_test_case_id:
+                result['source_test_case_id'] = source_test_case_id
+            return result
+            
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Error finding defects by test run: {stacktrace}")
+            raise ToolException(
+                f"Unable to find defects associated with test run '{test_run_id}' "
+                f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
+            ) from e
+
     def search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None):
         """Search for the test cases in qTest using Data Query Language """
         parsed_data = self.__perform_search_by_dql(dql, extract_images, prompt)
         return "Found " + str(
             len(parsed_data)) + f" Qtest test cases:\n" + str(parsed_data[:self.no_of_tests_shown_in_dql_search])
 
+    def search_entities_by_dql(self, object_type: str, dql: str) -> dict:
+        """Generic DQL search for any entity type (test-cases, requirements, defects, test-runs, etc.).
+        
+        This is the unified search method that works for all QTest searchable entity types.
+        Each entity type has its own properties structure, but this method parses
+        them consistently using the generic entity parser.
+        
+        Args:
+            object_type: Entity type to search (see QTEST_OBJECT_TYPES and QTEST_SEARCHABLE_ONLY_TYPES)
+            dql: QTest Data Query Language query string
+            
+        Returns:
+            dict with object_type, total count, and items list with full entity details
+        """
+        # Check if object_type is valid (either has prefix or is searchable-only)
+        all_searchable = {**QTEST_OBJECT_TYPES, **QTEST_SEARCHABLE_ONLY_TYPES}
+        if object_type not in all_searchable:
+            raise ValueError(
+                f"Invalid object_type '{object_type}'. "
+                f"Must be one of: {', '.join(all_searchable.keys())}"
+            )
+        
+        entity_info = all_searchable[object_type]
+        search_instance = swagger_client.SearchApi(self._client)
+        body = swagger_client.ArtifactSearchParams(
+            object_type=object_type,
+            fields=['*'],
+            query=dql
+        )
+        
+        try:
+            response = search_instance.search_artifact(self.qtest_project_id, body)
+            
+            # Parse all items using the generic parser
+            items = []
+            for item in response.get('items', []):
+                parsed = self.__parse_entity_item(object_type, item)
+                items.append(parsed)
+            
+            return {
+                'object_type': object_type,
+                'entity_name': entity_info['name'],
+                'total': response.get('total', 0),
+                'returned': len(items),
+                'items': items[:self.no_of_tests_shown_in_dql_search]
+            }
+            
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Error searching {object_type} by DQL: {stacktrace}")
+            raise ToolException(
+                f"Unable to search {entity_info['name']}s with DQL '{dql}' "
+                f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
+            ) from e
+
+    def find_entity_by_id(self, entity_id: str) -> dict:
+        """Find any QTest entity by its ID (TC-xxx, RQ-xxx, DF-xxx, TR-xxx).
+        
+        This is a universal lookup tool that works for any entity type.
+        The entity type is automatically determined from the ID prefix.
+        
+        Args:
+            entity_id: Entity ID with prefix (TC-123, RQ-15, DF-100, TR-39, etc.)
+            
+        Returns:
+            dict with full entity details including all properties
+        """
+        # Determine object type from prefix - dynamically built from registry
+        prefix = entity_id.split('-')[0].upper() if '-' in entity_id else ''
+        
+        # Build reverse mapping: prefix -> object_type from QTEST_OBJECT_TYPES
+        prefix_to_type = {
+            info['prefix']: obj_type 
+            for obj_type, info in QTEST_OBJECT_TYPES.items()
+        }
+        
+        if prefix not in prefix_to_type:
+            valid_prefixes = ', '.join(sorted(prefix_to_type.keys()))
+            raise ValueError(
+                f"Invalid entity ID format '{entity_id}'. "
+                f"Expected prefix to be one of: {valid_prefixes}"
+            )
+        
+        object_type = prefix_to_type[prefix]
+        result = self.__search_entity_by_id(object_type, entity_id)
+        
+        if result is None:
+            entity_name = QTEST_OBJECT_TYPES[object_type]['name']
+            raise ValueError(
+                f"{entity_name} '{entity_id}' not found in project {self.qtest_project_id}"
+            )
+        
+        return result
+
+    def __parse_entity_item(self, object_type: str, item: dict) -> dict:
+        """Generic parser for any entity type from DQL search response.
+        
+        This parses the raw API response item into a clean dictionary,
+        handling the differences between entity types (some have name at top level,
+        some have it in properties as Summary, etc.)
+        
+        Args:
+            object_type: QTest object type
+            item: Raw item from search response
+            
+        Returns:
+            dict with parsed entity data
+        """
+        import html
+        
+        result = {
+            'Id': item.get('pid'),
+            'QTest Id': item.get('id'),
+        }
+        
+        # Add top-level fields if present
+        if item.get('name'):
+            result['Name'] = item.get('name')
+        if item.get('description'):
+            result['Description'] = html.unescape(strip_tags(item.get('description', '') or ''))
+        if item.get('web_url'):
+            result['Web URL'] = item.get('web_url')
+        
+        # Test-case specific fields
+        if object_type == 'test-cases':
+            if item.get('precondition'):
+                result['Precondition'] = html.unescape(strip_tags(item.get('precondition', '') or ''))
+            if item.get('test_steps'):
+                result['Steps'] = [
+                    {
+                        'Test Step Number': idx + 1,
+                        'Test Step Description': html.unescape(strip_tags(step.get('description', '') or '')),
+                        'Test Step Expected Result': html.unescape(strip_tags(step.get('expected', '') or ''))
+                    }
+                    for idx, step in enumerate(item.get('test_steps', []))
+                ]
+        
+        # Test-run specific fields
+        if object_type == 'test-runs':
+            if item.get('testCaseId'):
+                result['Test Case Id'] = item.get('testCaseId')
+            if item.get('automation'):
+                result['Automation'] = item.get('automation')
+            if item.get('latest_test_log'):
+                log = item.get('latest_test_log')
+                result['Latest Test Log'] = {
+                    'Log Id': log.get('id'),
+                    'Status': log.get('status'),
+                    'Execution Start': log.get('exe_start_date'),
+                    'Execution End': log.get('exe_end_date')
+                }
+            if item.get('test_case_version'):
+                result['Test Case Version'] = item.get('test_case_version')
+        
+        # Parse all properties - works for all entity types
+        for prop in item.get('properties', []):
+            field_name = prop.get('field_name')
+            if not field_name:
+                continue
+            # Use field_value_name if available (for dropdowns/users), otherwise field_value
+            field_value = prop.get('field_value_name') or prop.get('field_value') or ''
+            # Strip HTML from text fields
+            if isinstance(field_value, str) and ('<' in field_value or '&' in field_value):
+                field_value = html.unescape(strip_tags(field_value))
+            result[field_name] = field_value
+        
+        return result
+
     def create_test_cases(self, test_case_content: str, folder_to_place_test_cases_to: str) -> dict:
-        """ Create the tes case base on the incoming content. The input should be in json format. """
+        """ Create the test case based on the incoming content. The input should be in json format. """
         test_cases_api_instance: TestCaseApi = self.__instantiate_test_api_instance()
         input_obj = json.loads(test_case_content)
         test_cases = input_obj if isinstance(input_obj, list) else [input_obj]
@@ -1207,11 +1847,11 @@ SEARCHABLE FIELDS:
 - Direct fields: Id, Name, Description, Status, Type, Priority, Automation, etc.
 - Module: Use 'Module in' syntax
 - Custom fields: Use exact field name from project configuration
-- Date fields: Use ISO DateTime format (e.g., 'Created Date' > '2021-05-07T03:15:37.652Z')
+- Date fields: MUST use ISO DateTime format (e.g., '2024-01-01T00:00:00.000Z')
 
 SYNTAX RULES:
 1. ALL string values MUST use single quotes (never double quotes)
-2. Field names with spaces MUST be in single quotes: 'Created Date' > '2024-01-01'
+2. Field names with spaces MUST be in single quotes: 'Created Date' > '2024-01-01T00:00:00.000Z'
 3. Use ~ for 'contains', !~ for 'not contains': Description ~ 'login'
 4. Use 'is not empty' for non-empty check: Name is 'not empty'
 5. Operators: =, !=, <, >, <=, >=, in, ~, !~
@@ -1301,5 +1941,141 @@ Examples:
 """,
                 "args_schema": FindTestCasesByRequirementId,
                 "ref": self.find_test_cases_by_requirement_id,
+            },
+            {
+                "name": "find_requirements_by_test_case_id",
+                "mode": "find_requirements_by_test_case_id",
+                "description": """Find all requirements linked to a test case (direct link: test-case 'covers' requirements).
+
+Use this tool to discover which requirements a specific test case covers.
+
+Parameters:
+- test_case_id: Test case ID in format TC-123
+
+Returns: List of linked requirements with Id, QTest Id, Name, and Description.
+
+Examples:
+- Find requirements for TC-123: test_case_id='TC-123'
+""",
+                "args_schema": FindRequirementsByTestCaseId,
+                "ref": self.find_requirements_by_test_case_id,
+            },
+            {
+                "name": "find_test_runs_by_test_case_id",
+                "mode": "find_test_runs_by_test_case_id",
+                "description": """Find all test runs associated with a test case.
+
+IMPORTANT: In QTest, defects are NOT directly linked to test cases. 
+Defects are linked to TEST RUNS. To find defects related to a test case:
+1. First use this tool to find test runs for the test case
+2. Then use find_defects_by_test_run_id for each test run
+
+Parameters:
+- test_case_id: Test case ID in format TC-123
+
+Returns: List of test runs with Id, QTest Id, Name, and Description.
+Also includes a hint about finding defects via test runs.
+
+Examples:
+- Find test runs for TC-123: test_case_id='TC-123'
+""",
+                "args_schema": FindTestRunsByTestCaseId,
+                "ref": self.find_test_runs_by_test_case_id,
+            },
+            {
+                "name": "find_defects_by_test_run_id",
+                "mode": "find_defects_by_test_run_id",
+                "description": """Find all defects associated with a test run.
+
+In QTest data model, defects are linked to test runs (not directly to test cases).
+A defect found here means it was reported during execution of this specific test run.
+
+To find defects related to a test case:
+1. First use find_test_runs_by_test_case_id to get test runs
+2. Then use this tool for each test run
+
+Parameters:
+- test_run_id: Test run ID in format TR-123
+
+Returns: List of defects with Id, QTest Id, Name, and Description.
+
+Examples:
+- Find defects for TR-39: test_run_id='TR-39'
+""",
+                "args_schema": FindDefectsByTestRunId,
+                "ref": self.find_defects_by_test_run_id,
+            },
+            {
+                "name": "search_entities_by_dql",
+                "mode": "search_entities_by_dql",
+                "description": f"""Search any QTest entity type using Data Query Language (DQL).
+
+This is a unified search tool for all searchable QTest entity types.
+
+SUPPORTED ENTITY TYPES (object_type parameter):
+- 'test-cases' (TC-xxx): Test case definitions with steps
+- 'test-runs' (TR-xxx): Execution instances of test cases  
+- 'defects' (DF-xxx): Bugs/issues found during testing
+- 'requirements' (RQ-xxx): Requirements to be tested
+- 'test-suites' (TS-xxx): Collections of test runs
+- 'test-cycles' (CL-xxx): Test execution cycles
+- 'test-logs': Execution logs (date queries ONLY - see notes)
+- 'releases' (RL-xxx): Software releases
+- 'builds' (BL-xxx): Builds within releases
+
+NOTES: 
+- Modules (MD-xxx) are NOT searchable via DQL. Use 'get_modules' tool instead.
+- Test-logs: Only date queries work (Execution Start Date, Execution End Date).
+  For specific test log details, use find_test_runs_by_test_case_id - 
+  the test run includes 'Latest Test Log' with status and execution times.
+
+{DQL_SYNTAX_DOCS}
+
+EXAMPLES BY ENTITY TYPE:
+- Test cases: object_type='test-cases', dql="Name ~ 'login'"
+- Requirements: object_type='requirements', dql="Status = 'Baselined'"
+- Defects: object_type='defects', dql="Priority = 'High'"
+- Test runs: object_type='test-runs', dql="Status = 'Failed'"
+- Test logs: object_type='test-logs', dql="'Execution Start Date' > '2024-01-01T00:00:00.000Z'" (date queries only)
+- Releases: object_type='releases', dql="Name ~ '2024'"
+""",
+                "args_schema": GenericDqlSearch,
+                "ref": self.search_entities_by_dql,
+            },
+            {
+                "name": "find_entity_by_id",
+                "mode": "find_entity_by_id",
+                "description": """Find any QTest entity by its ID.
+
+This universal lookup tool works for entity types that have ID prefixes. 
+The entity type is automatically determined from the ID prefix.
+
+SUPPORTED ID FORMATS:
+- TC-123: Test Case
+- TR-39: Test Run  
+- DF-100: Defect
+- RQ-15: Requirement
+- TS-5: Test Suite
+- CL-3: Test Cycle
+- RL-1: Release
+- BL-2: Build
+
+NOT SUPPORTED (no ID prefix):
+- Test Logs: Get details from test run's 'Latest Test Log' field (contains Log Id, Status, Execution Start/End Date)
+- Modules: Use 'get_modules' tool instead
+
+Parameters:
+- entity_id: Entity ID with prefix (e.g., TC-123, RQ-15, DF-100, TR-39)
+
+Returns: Full entity details including all properties.
+
+Examples:
+- Find test case: entity_id='TC-123'
+- Find requirement: entity_id='RQ-15'
+- Find defect: entity_id='DF-100'
+- Find test run: entity_id='TR-39'
+""",
+                "args_schema": FindEntityById,
+                "ref": self.find_entity_by_id,
             }
         ]
