@@ -1,0 +1,20 @@
+{
+  "toolkit_name": "jira",
+  "type": "jira",
+  "settings": {
+    "base_url": "${JIRA_URL}",
+    "cloud": true,
+    "jira_configuration": {
+      "username": "${JIRA_EMAIL}",
+      "api_key": "${JIRA_API_KEY}"
+    },
+    "selected_tools": [
+      "get_issue",
+      "search_issues",
+      "create_issue",
+      "update_issue",
+      "add_comment",
+      "assign_issue"
+    ]
+  }
+}
