@@ -874,7 +874,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to create test case in project - {self.qtest_project_id} with the following content:\n{test_case_content}.\n\n Stacktrace was {stacktrace}") from e
 
-    def __format_property_value(self, prop: dict) -> any:
+    def __format_property_value(self, prop: dict) -> Any:
         """Format property value for display, detecting field type from response structure.
         
         Detection rules based on API response patterns:
