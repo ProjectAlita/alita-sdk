@@ -34,7 +34,8 @@ class FunctionTool(BaseTool):
 
         del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
         # inject state into the code block as alita_state variable
-        pyodide_predata = f"#state dict\nalita_state = {state_copy}\n"
+        state_json = json.dumps(state_copy, ensure_ascii=False)
+        pyodide_predata = f'#state dict\nimport json\nalita_state = {repr(state_json)}\n'
         return pyodide_predata
 
     def _handle_pyodide_output(self, tool_result: Any) -> dict:
@@ -94,9 +95,7 @@ class FunctionTool(BaseTool):
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
             code = func_args['code']
-            func_args['code'] = (f"{self._prepare_pyodide_input(state)}\n{code}"
-                                # handle new lines in the code properly
-                                 .replace('\\n','\\\\n'))
+            func_args['code'] = f"{self._prepare_pyodide_input(state)}\n{code}"
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
             dispatch_custom_event(
