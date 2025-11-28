@@ -53,6 +53,144 @@ PROJECT_ID=<your_project_id>
 NOTE: these variables can be grabbed from your Elitea platform configuration page.
 ![Platform configuration](docs/readme_imgs/platform_config.png "Platform configuration")
 
+### Custom .env File Location
+
+By default, the CLI looks for `.env` files in the following order:
+1. `.alita/.env` (recommended)
+2. `.env` in the current directory
+
+You can override this by setting the `ALITA_ENV_FILE` environment variable:
+
+```bash
+export ALITA_ENV_FILE=/path/to/your/.env
+alita-cli agent chat
+```
+
+Using the CLI for Interactive Chat
+----------------------------------
+
+The Alita SDK includes a powerful CLI for interactive agent chat sessions.
+
+### Starting a Chat Session
+
+```bash
+# Interactive selection (shows all available agents + direct chat option)
+alita-cli agent chat
+
+# Chat with a specific local agent
+alita-cli agent chat .alita/agents/my-agent.agent.md
+
+# Chat with a platform agent
+alita-cli agent chat my-agent-name
+```
+
+### Direct Chat Mode (No Agent)
+
+You can start a chat session directly with the LLM without any agent configuration:
+
+```bash
+alita-cli agent chat
+# Select option 1: "Direct chat with model (no agent)"
+```
+
+This is useful for quick interactions or testing without setting up an agent.
+
+### Chat Commands
+
+During a chat session, you can use the following commands:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all available commands |
+| `/model` | Switch to a different model (preserves chat history) |
+| `/add_mcp` | Add an MCP server from your local mcp.json (preserves chat history) |
+| `/add_toolkit` | Add a toolkit from $ALITA_DIR/tools (preserves chat history) |
+| `/clear` | Clear conversation history |
+| `/history` | Show conversation history |
+| `/save` | Save conversation to file |
+| `exit` | End conversation |
+
+### Enhanced Input Features
+
+The chat interface includes readline-based input enhancements:
+
+| Feature | Key/Action |
+|---------|------------|
+| **Tab completion** | Press `Tab` to autocomplete commands (e.g., `/mo` → `/model`) |
+| **Command history** | `↑` / `↓` arrows to navigate through previous messages |
+| **Cursor movement** | `←` / `→` arrows to move within the current line |
+| **Start of line** | `Ctrl+A` jumps to the beginning of the line |
+| **End of line** | `Ctrl+E` jumps to the end of the line |
+| **Delete word** | `Ctrl+W` deletes the word before cursor |
+| **Clear line** | `Ctrl+U` clears from cursor to beginning of line |
+
+### Dynamic Model Switching
+
+Use `/model` to switch models on the fly:
+
+```
+> /model
+
+🔧 Select a model:
+
+#    Model              Type
+1    gpt-4o             openai
+2    gpt-4o-mini        openai
+3    claude-3-sonnet    anthropic
+
+Select model number: 1
+
+✓ Selected: gpt-4o
+╭──────────────────────────────────────────────────────────────╮
+│ ℹ Model switched to gpt-4o. Agent state reset, chat history  │
+│ preserved.                                                    │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+### Adding MCP Servers Dynamically
+
+Use `/add_mcp` to add MCP servers during a chat session. Servers are loaded from your local `mcp.json` file (typically at `.alita/mcp.json`):
+
+```
+> /add_mcp
+
+🔌 Select an MCP server to add:
+
+#    Server       Type     Command/URL
+1    playwright   stdio    npx @playwright/mcp@latest
+2    filesystem   stdio    npx @anthropic/mcp-fs
+
+Select MCP server number: 1
+
+✓ Selected: playwright
+╭──────────────────────────────────────────────────────────────╮
+│ ℹ Added MCP: playwright. Agent state reset, chat history     │
+│ preserved.                                                    │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+### Adding Toolkits Dynamically
+
+Use `/add_toolkit` to add toolkits from your `$ALITA_DIR/tools` directory (default: `.alita/tools`):
+
+```
+> /add_toolkit
+
+🧰 Select a toolkit to add:
+
+#    Toolkit    Type    File
+1    jira       jira    jira-config.json
+2    github     github  github-config.json
+
+Select toolkit number: 1
+
+✓ Selected: jira
+╭──────────────────────────────────────────────────────────────╮
+│ ℹ Added toolkit: jira. Agent state reset, chat history       │
+│ preserved.                                                    │
+╰──────────────────────────────────────────────────────────────╯
+```
+
 
 
 Using SDK with Streamlit for Local Development

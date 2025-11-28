@@ -7,9 +7,16 @@ The Alita CLI is your command-line interface for building and running AI agents 
 - [Quick Start](#quick-start)
 - [What Can You Do?](#what-can-you-do)
 - [Working with Agents](#working-with-agents)
+- [Interactive Chat Commands](#interactive-chat-commands)
+- [Session Management](#session-management)
+- [Approval Modes](#approval-modes)
+- [Planning Tools](#planning-tools)
+- [Terminal Execution](#terminal-execution)
 - [Using Toolkits](#using-toolkits)
 - [MCP Server Integration](#mcp-server-integration)
 - [Examples](#examples)
+- [Common Use Cases](#common-use-cases)
+- [Troubleshooting](#troubleshooting)
 - [Developer Guide](#developer-guide)
 
 ## Quick Start
@@ -30,7 +37,7 @@ ALITA_DEPLOYMENT=https://domain.elitea.ai
 ALITA_AUTH_TOKEN=your-token-here
 
 # Optional: Custom directories
-ALITA_DIR=.alita
+ALITA_DIR=~/.alita
 ```
 
 ### Your First Agent
@@ -41,7 +48,7 @@ Create `.alita/agents/hello.agent.md`:
 ---
 name: hello-assistant
 description: A friendly greeting assistant
-model: gpt-5
+model: gpt-4o
 temperature: 0.1
 ---
 
@@ -51,7 +58,7 @@ You are a friendly assistant who greets users warmly.
 Run it:
 
 ```bash
-alita-cli agent chat .alita/agents/hello.agent.md
+alita agent chat .alita/agents/hello.agent.md
 ```
 
 ## What Can You Do?
@@ -61,21 +68,44 @@ alita-cli agent chat .alita/agents/hello.agent.md
 - Run agents with single commands
 - Use both cloud-hosted and local agents
 - Give agents access to your filesystem
+- **Switch agents mid-conversation** with `/agent`
+- **Switch models on the fly** with `/model`
 
 ### 🔧 **Integrate External Tools**
 - Connect to JIRA, GitHub, GitLab, Azure DevOps
 - Configure tools with simple JSON/YAML files
 - Agents can query issues, create tickets, search repos
+- **Add toolkits dynamically** with `/add_toolkit`
 
-### 🌐 **Browser Automation**
+### 🌐 **Browser & MCP Automation**
 - Use Playwright MCP for web automation
 - Navigate websites, click elements, take screenshots
 - Browser state persists across actions
+- **Add MCP servers on the fly** with `/add_mcp`
 
 ### 📁 **Filesystem Operations**
 - Grant controlled filesystem access
 - Read, write, search, and analyze files
 - Security presets (full/safe/readonly)
+- **Mount directories dynamically** with `/dir`
+
+### 💻 **Terminal Execution**
+- Execute shell commands from agents
+- Sandboxed to mounted directory only
+- Configurable blocked command patterns
+- Security controls prevent dangerous operations
+
+### 📋 **Planning & Task Management**
+- Create structured execution plans
+- Track step-by-step progress
+- Persistent plans saved to sessions
+- Visual progress with checkboxes
+
+### 💾 **Session Persistence**
+- Automatic session management
+- Resume previous conversations
+- Memory + plan state preserved
+- List and switch between sessions
 
 ## Working with Agents
 
@@ -85,54 +115,49 @@ alita-cli agent chat .alita/agents/hello.agent.md
 
 ```bash
 # List platform agents
-alita-cli agent list
+alita agent list
 
 # List local agent files
-alita-cli agent list --local
+alita agent list --local
 ```
 
 #### Show Agent Details
 
 ```bash
 # Show platform agent
-alita-cli agent show my-agent
+alita agent show my-agent
 
 # Show local agent
-alita-cli agent show .alita/agents/my-agent.agent.md
+alita agent show .alita/agents/my-agent.agent.md
 ```
 
 #### Interactive Chat
 
 ```bash
 # Interactive selection menu
-alita-cli agent chat
+alita agent chat
 
 # Chat with specific agent
-alita-cli agent chat my-agent
+alita agent chat my-agent
 
 # Chat with local agent
-alita-cli agent chat .alita/agents/my-agent.agent.md
+alita agent chat .alita/agents/my-agent.agent.md
 
 # Override settings
-alita-cli agent chat my-agent --model gpt-4-turbo --temperature 0.5
-```
+alita agent chat my-agent --model gpt-4-turbo --temperature 0.5
 
-**Chat Commands:**
-- Type your message and press Enter
-- `exit` or `quit` - Exit chat
-- `/clear` - Clear conversation history
-- `/history` - Show conversation
-- `/save` - Save conversation to file
-- `/help` - Show help
+# Mount a directory for filesystem/terminal access
+alita agent chat my-agent --dir ./my-project
+```
 
 #### Single Command Execution
 
 ```bash
 # Run agent with a message
-alita-cli agent run my-agent "What is the weather today?"
+alita agent run my-agent "What is the weather today?"
 
 # Get JSON output (for scripting)
-alita-cli --output json agent run my-agent "Get status"
+alita --output json agent run my-agent "Get status"
 ```
 
 ### Creating Local Agents
@@ -200,6 +225,306 @@ filesystem_tools_include: [read_file, write_file, list_directory]
 filesystem_tools_exclude: [delete_file]
 ```
 
+## Interactive Chat Commands
+
+When chatting with an agent, you have access to powerful slash commands:
+
+### Basic Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all available commands |
+| `/clear` | Clear conversation history |
+| `/history` | Display conversation history |
+| `/save [filename]` | Save conversation to file |
+| `exit` or `quit` | Exit the chat |
+
+### Configuration Commands
+
+| Command | Description |
+|---------|-------------|
+| `/model` | Switch LLM model (interactive selection) |
+| `/agent` | Switch to a different agent |
+| `/reload` | Reload agent definition from file (hot reload) |
+| `/mode [always\|auto\|yolo]` | Set approval mode for tool execution |
+| `/verbose [on\|off]` | Toggle verbose output |
+
+### Dynamic Tool Commands
+
+| Command | Description |
+|---------|-------------|
+| `/dir <path>` | Mount a directory for filesystem/terminal access |
+| `/add_mcp` | Add an MCP server from your configuration |
+| `/add_toolkit` | Add a toolkit dynamically |
+
+### Session Commands
+
+| Command | Description |
+|---------|-------------|
+| `/session` or `/session list` | List all saved sessions |
+| `/session resume <id>` | Resume a previous session |
+| `/plan` | Show current plan status |
+
+### Example Session
+
+```
+You: /model
+[Interactive model selection appears]
+✓ Model switched to claude-sonnet-4
+
+You: /dir ./my-project
+✓ Mounted: /Users/me/my-project
+  Terminal + filesystem tools enabled.
+
+You: /add_mcp
+[Interactive MCP selection appears]
+✓ Added MCP: playwright
+
+You: /mode auto
+✓ Mode set to: auto (auto-approve tool calls)
+
+You: Analyze the codebase and create a plan
+[Agent creates plan and executes tools automatically]
+
+# After editing your agent file externally...
+You: /reload
+✓ Reloaded agent: my-agent
+  System prompt updated (2456 chars)
+```
+
+## Session Management
+
+Sessions automatically persist your conversation memory and plans, allowing you to resume work later.
+
+### How Sessions Work
+
+When you start a chat, a session is automatically created with a unique ID like `20251128-143522-a1b2c3`. All conversation memory and plans are saved to:
+
+```
+~/.alita/sessions/<session_id>/
+├── memory.db      # SQLite checkpoint for conversation memory
+├── plan.json      # Plan state with steps and progress
+└── metadata.json  # Agent name, model, timestamps
+```
+
+### Listing Sessions
+
+```
+You: /session
+
+📋 Saved Sessions:
+
+  ○ 20251128-143522-a1b2 - Fix authentication bug [2/5]
+      Testing Agent (claude-sonnet-4) • 2025-11-28 14:35 ◀ current
+  ● 20251128-120000-c3d4
+      Alita (gpt-4o) • 2025-11-28 12:00
+  ✓ 20251127-090000-e5f6 - Setup CI/CD pipeline [5/5]
+      DevOps Agent (gpt-4o) • 2025-11-27 09:00
+
+Usage: /session resume <session_id>
+```
+
+**Status Icons:**
+- `○` - Has plan in progress
+- `●` - Session without plan
+- `✓` - Plan completed
+
+### Resuming Sessions
+
+```
+You: /session resume 20251128-143522-a1b2
+
+╭─ Session Resumed ─────────────────────────────────────────╮
+│ ✓ Resumed session: 20251128-143522-a1b2                   │
+│ Agent: Testing Agent • Model: claude-sonnet-4             │
+│                                                           │
+│ 📋 Fix authentication bug                                 │
+│    ☑ 1. Analyze current auth flow (completed)             │
+│    ☑ 2. Identify security issues (completed)              │
+│    ☐ 3. Implement token refresh                           │
+│    ☐ 4. Add unit tests                                    │
+│    ☐ 5. Update documentation                              │
+╰───────────────────────────────────────────────────────────╯
+```
+
+Your conversation history and plan are restored - continue right where you left off!
+
+## Approval Modes
+
+Control how the agent executes tools with approval modes:
+
+### Available Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `always` | Prompt before each tool execution | Default - safe for learning |
+| `auto` | Auto-approve, but show tool calls | Trusted workflows |
+| `yolo` | No confirmations, minimal output | Automated scripts |
+
+### Setting the Mode
+
+**At startup:**
+```bash
+alita agent chat my-agent --mode auto
+```
+
+**During chat:**
+```
+You: /mode auto
+✓ Mode set to: auto (auto-approve tool calls)
+
+You: /mode
+🔧 Approval Mode:
+
+  ○ always  - Confirm before each tool execution
+  ● auto    - Execute tools without confirmation
+  ○ yolo    - No confirmations, skip safety warnings
+```
+
+### Approval Prompts (always mode)
+
+When a tool is about to execute, you'll see:
+
+```
+╭─ Tool: run_terminal_command ──────────────────────────────╮
+│ Command: npm install                                      │
+│ Working Directory: /Users/me/my-project                   │
+╰───────────────────────────────────────────────────────────╯
+Execute this tool? [Y/n/always/never]:
+```
+
+**Options:**
+- `Y` or Enter - Execute this tool
+- `n` - Skip this tool
+- `always` - Switch to auto mode for the rest of the session
+- `never` - Deny all future tool calls
+
+## Planning Tools
+
+Agents can create and manage structured execution plans for complex tasks.
+
+### How Plans Work
+
+When working on multi-step tasks, the agent can create a plan:
+
+```
+You: Refactor the authentication module
+
+╭─ Plan Created ────────────────────────────────────────────╮
+│ 📋 Refactor Authentication Module                         │
+│    ☐ 1. Analyze current auth implementation               │
+│    ☐ 2. Identify code smells and issues                   │
+│    ☐ 3. Create new auth service class                     │
+│    ☐ 4. Migrate existing code to new structure            │
+│    ☐ 5. Update all imports and references                 │
+│    ☐ 6. Add comprehensive tests                           │
+│    ☐ 7. Update documentation                              │
+╰───────────────────────────────────────────────────────────╯
+```
+
+As steps complete, they're automatically marked:
+
+```
+╭─ Plan Updated ────────────────────────────────────────────╮
+│ 📋 Refactor Authentication Module                         │
+│    ☑ 1. Analyze current auth implementation (completed)   │
+│    ☑ 2. Identify code smells and issues (completed)       │
+│    ☐ 3. Create new auth service class                     │
+│    ...                                                    │
+╰───────────────────────────────────────────────────────────╯
+```
+
+### Viewing the Plan
+
+```
+You: /plan
+
+📋 Refactor Authentication Module [3/7]
+
+   ☑ 1. Analyze current auth implementation (completed)
+   ☑ 2. Identify code smells and issues (completed)
+   ☑ 3. Create new auth service class (completed)
+   ☐ 4. Migrate existing code to new structure
+   ☐ 5. Update all imports and references
+   ☐ 6. Add comprehensive tests
+   ☐ 7. Update documentation
+```
+
+### Plan Persistence
+
+Plans are automatically saved to your session directory and persist across restarts. Resume a session to continue where you left off.
+
+## Terminal Execution
+
+When a directory is mounted, agents can execute shell commands in a sandboxed environment.
+
+### Enabling Terminal Access
+
+```bash
+# Mount at startup
+alita agent chat my-agent --dir ./my-project
+
+# Or mount during chat
+You: /dir ./my-project
+✓ Mounted: /Users/me/my-project
+  Terminal + filesystem tools enabled.
+```
+
+### Security Features
+
+Terminal execution includes multiple safety layers:
+
+**1. Directory Sandboxing**
+- Commands only execute within the mounted directory
+- Path traversal attempts are blocked
+- Working directory is always the mounted path
+
+**2. Blocked Command Patterns**
+
+By default, dangerous commands are blocked:
+
+```
+rm -rf /           # Destructive root operations
+sudo *             # Privilege escalation
+chmod 777          # Unsafe permissions
+> /dev/*           # Device manipulation
+:(){ :|:& };:      # Fork bombs
+...and more
+```
+
+**3. Custom Blocked Patterns**
+
+Create `~/.alita/blocked_patterns.txt` to add your own:
+
+```
+# Custom blocked patterns
+*password*
+*secret*
+curl * | bash
+```
+
+### Terminal Tool Usage
+
+The agent can run commands like:
+
+```
+You: Run the test suite
+
+╭─ Tool: run_terminal_command ──────────────────────────────╮
+│ Command: npm test                                         │
+│ Working Directory: /Users/me/my-project                   │
+╰───────────────────────────────────────────────────────────╯
+Execute this tool? [Y/n]:
+
+Running: npm test
+
+PASS  src/auth.test.js
+PASS  src/utils.test.js
+
+Test Suites: 2 passed, 2 total
+Tests:       12 passed, 12 total
+```
+
 ## Using Toolkits
 
 Toolkits connect your agents to external services like JIRA, GitHub, GitLab, and Azure DevOps.
@@ -208,13 +533,13 @@ Toolkits connect your agents to external services like JIRA, GitHub, GitLab, and
 
 ```bash
 # List available toolkits
-alita-cli toolkit list
+alita toolkit list
 
 # Show toolkit details
-alita-cli toolkit show jira
+alita toolkit show jira
 
 # Generate configuration template
-alita-cli toolkit config jira > .alita/tools/jira.json
+alita toolkit config jira > .alita/tools/jira.json
 ```
 
 ### Configuring Toolkits
@@ -264,7 +589,7 @@ tools:
 **2. Provide config file when running:**
 
 ```bash
-alita-cli agent chat jira-agent \
+alita agent chat jira-agent \
   --toolkit-config .alita/tools/jira.json \
   --toolkit-config .alita/tools/github.json
 ```
@@ -323,7 +648,7 @@ The browser maintains state across all your actions.
 **3. Use the agent:**
 
 ```bash
-alita-cli agent chat browser-agent
+alita agent chat browser-agent
 > Navigate to example.com
 > Click the "More information" link
 > What's the current page title?
@@ -381,7 +706,7 @@ You are an expert code reviewer. Analyze code for:
 
 **Usage**:
 ```bash
-alita-cli agent chat code-reviewer --dir ./my-project
+alita agent chat code-reviewer --dir ./my-project
 > Analyze the files in src/utils/ and suggest improvements
 ```
 
@@ -425,12 +750,12 @@ You help manage JIRA tickets. You can:
 **Usage**:
 ```bash
 # Interactive
-alita-cli agent chat jira-assistant --toolkit-config .alita/tools/jira.json
+alita agent chat jira-assistant --toolkit-config .alita/tools/jira.json
 > What are the open bugs in PROJ?
 > Create a new task for fixing the login issue
 
 # Single command
-alita-cli agent run jira-assistant "List all high-priority tickets" \
+alita agent run jira-assistant "List all high-priority tickets" \
   --toolkit-config .alita/tools/jira.json
 ```
 
@@ -470,7 +795,7 @@ You are a research assistant. Use the browser to:
 
 **Usage**:
 ```bash
-alita-cli agent chat researcher
+alita agent chat researcher
 > Research the latest trends in AI agents and summarize your findings
 > Navigate to arxiv.org and find recent papers on LLMs
 > Take a screenshot of the most cited paper
@@ -498,10 +823,42 @@ You generate documentation from code. For each file:
 
 **Usage**:
 ```bash
-alita-cli agent run doc-generator \
+alita agent run doc-generator \
   "Generate documentation for all Python files in src/" \
   --dir ./my-project
 ```
+
+### Example 5: Testing Agent with Planning
+
+**Agent**: `.alita/agents/testing-agent.agent.md`
+
+```markdown
+---
+name: testing-agent
+description: Creates comprehensive test suites
+model: claude-sonnet-4
+temperature: 0.3
+filesystem_tools_preset: safe
+---
+
+You are a testing expert. When given a codebase:
+1. Create a plan with clear steps
+2. Analyze existing code coverage
+3. Identify untested functions
+4. Generate test files
+5. Run tests and verify they pass
+6. Update the plan as you complete each step
+
+Always use update_plan to track your progress.
+```
+
+**Usage**:
+```bash
+alita agent chat testing-agent --dir ./my-project --mode auto
+> Create a comprehensive test suite for the auth module
+```
+
+The agent will create a plan, execute each step, and track progress automatically.
 
 ## Common Use Cases
 
@@ -576,8 +933,66 @@ max_tokens: 4000  # Increase for longer responses
 
 Or override at runtime:
 ```bash
-alita-cli agent chat my-agent --max-tokens 4000
+alita agent chat my-agent --max-tokens 4000
 ```
+
+### "Command blocked by security policy"
+
+**Solution:**
+The command matches a blocked pattern. Check `~/.alita/blocked_patterns.txt`:
+1. Review the blocked patterns
+2. Remove or modify patterns if they're too restrictive
+3. If legitimate, rephrase the command
+
+### "No directory mounted" for terminal commands
+
+**Solution:**
+Terminal commands require a mounted directory:
+```bash
+# At startup
+alita agent chat my-agent --dir ./my-project
+
+# Or during chat
+You: /dir ./my-project
+```
+
+### "Step limit reached" Error
+
+**What it means:**
+The agent has exceeded the maximum number of execution steps (default: 25). This happens with complex tasks requiring many tool calls.
+
+**In interactive chat mode:**
+When this happens, you'll be prompted with options:
+```
+⚠ Step limit reached (25 steps)
+
+What would you like to do?
+  c - Continue execution (agent will resume from checkpoint)
+  s - Stop and get partial results
+  n - Start a new request
+```
+
+Choose `c` to continue from where the agent left off - the checkpoint preserves all state.
+
+**In single-run mode (`alita agent run`):**
+The command will stop with suggestions:
+- Use `alita agent chat` for interactive continuation
+- Break the task into smaller, focused requests
+- Check if partial work was completed (files created, etc.)
+
+**Prevention:**
+- Break complex tasks into smaller steps
+- Use the planning tools to track progress across multiple interactions
+- For very complex tasks, use multiple focused requests instead of one large one
+You: /dir ./my-project
+```
+
+### Session not resuming properly
+
+**Solution:**
+1. Check session exists: `/session list`
+2. Use the full session ID: `/session resume 20251128-143522-a1b2`
+3. Session files are in `~/.alita/sessions/`
 
 ## Developer Guide
 
@@ -585,17 +1000,34 @@ alita-cli agent chat my-agent --max-tokens 4000
 
 ```
 cli/
+├── cli.py              # Main CLI entry point
+├── config.py           # Configuration (.env handling)
 ├── agents.py           # Agent commands (chat, run, list, show)
 ├── agent_executor.py   # Agent setup and execution
 ├── agent_loader.py     # Load agent definitions from markdown
-├── agent_ui.py         # Terminal UI components
+├── agent_ui.py         # Terminal UI components (banners, panels)
+├── input_handler.py    # Readline input with tab completion
 ├── toolkit.py          # Toolkit commands
 ├── toolkit_loader.py   # Load toolkit configs
 ├── mcp_loader.py       # MCP server management
-├── cli.py              # Main CLI entry point
-├── config.py           # Configuration (.env handling)
 └── tools/
-    └── filesystem.py   # Filesystem tools
+    ├── __init__.py     # Tool exports
+    ├── filesystem.py   # Filesystem tools (read, write, search)
+    ├── terminal.py     # Terminal execution (sandboxed)
+    ├── planning.py     # Planning tools + session management
+    └── approval.py     # Approval mode wrapper
+```
+
+### Session Storage
+
+Sessions are stored at `~/.alita/sessions/<session_id>/`:
+
+```
+sessions/
+└── 20251128-143522-a1b2/
+    ├── memory.db       # SQLite checkpoint (LangGraph)
+    ├── plan.json       # Plan state
+    └── metadata.json   # Agent info, timestamps
 ```
 
 ### Adding a New Toolkit
@@ -631,8 +1063,25 @@ pip install -e ".[dev]"
 pytest tests/
 
 # Test specific agent
-alita-cli agent run test-agent "Hello" --debug
+alita agent run test-agent "Hello" --verbose debug
 ```
+
+### Key Concepts
+
+**Approval Wrapper**: Tools are wrapped with `ApprovalToolWrapper` which:
+- Intercepts tool calls before execution
+- Prompts user based on approval mode
+- Logs tool usage for debugging
+
+**Session Memory**: Uses LangGraph's `SqliteSaver` for:
+- Persisting conversation checkpoints
+- Resuming sessions across restarts
+- Storing agent state
+
+**Plan State**: Managed by `PlanState` class:
+- Steps with completion tracking
+- JSON serialization to session directory
+- Visual rendering with checkboxes
 
 ### Contributing
 

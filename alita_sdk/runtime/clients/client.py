@@ -68,6 +68,7 @@ class AlitaClient:
         self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
+        self.models_url = f'{self.base_url}{self.api_path}/configurations/models/{self.project_id}?include_shared=true'
         self.image_generation_url = f"{self.base_url}{self.llm_path}/images/generations"
         self.configurations: list = configurations or []
         self.model_timeout = kwargs.get('model_timeout', 120)
@@ -173,6 +174,20 @@ class AlitaClient:
         resp = requests.get(self.ai_section_url, headers=self.headers, verify=False)
         if resp.ok:
             return resp.json()
+        return []
+
+    def get_available_models(self):
+        """Get list of available models from the configurations API.
+        
+        Returns:
+            List of model dictionaries with 'name' and other properties,
+            or empty list if request fails.
+        """
+        resp = requests.get(self.models_url, headers=self.headers, verify=False)
+        if resp.ok:
+            data = resp.json()
+            # API returns {"items": [...], ...}
+            return data.get('items', [])
         return []
 
     def get_embeddings(self, embedding_model: str) -> OpenAIEmbeddings:

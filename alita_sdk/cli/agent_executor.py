@@ -64,7 +64,8 @@ def _create_assistant(client, agent_data: Dict[str, Any], llm, memory, tools: Li
 
 def create_agent_executor(client, agent_def: Dict[str, Any], toolkit_configs: List[Dict[str, Any]],
                          llm, llm_model: str, llm_temperature: float, llm_max_tokens: int, memory,
-                         filesystem_tools: Optional[List] = None, mcp_tools: Optional[List] = None):
+                         filesystem_tools: Optional[List] = None, mcp_tools: Optional[List] = None,
+                         terminal_tools: Optional[List] = None, planning_tools: Optional[List] = None):
     """Create agent executor for local agents with tools (sync version).
     
     Note: mcp_tools parameter is deprecated - use create_agent_executor_with_mcp for MCP support.
@@ -81,6 +82,10 @@ def create_agent_executor(client, agent_def: Dict[str, Any], toolkit_configs: Li
     additional_tools = []
     if filesystem_tools:
         additional_tools.extend(filesystem_tools)
+    if terminal_tools:
+        additional_tools.extend(terminal_tools)
+    if planning_tools:
+        additional_tools.extend(planning_tools)
     if mcp_tools:
         additional_tools.extend(mcp_tools)
     
@@ -97,7 +102,9 @@ async def create_agent_executor_with_mcp(
     llm_temperature: float, 
     llm_max_tokens: int, 
     memory,
-    filesystem_tools: Optional[List] = None
+    filesystem_tools: Optional[List] = None,
+    terminal_tools: Optional[List] = None,
+    planning_tools: Optional[List] = None
 ) -> Tuple[Any, Optional[Any]]:
     """Create agent executor with MCP tools using persistent sessions.
     
@@ -135,6 +142,10 @@ async def create_agent_executor_with_mcp(
     additional_tools = []
     if filesystem_tools:
         additional_tools.extend(filesystem_tools)
+    if terminal_tools:
+        additional_tools.extend(terminal_tools)
+    if planning_tools:
+        additional_tools.extend(planning_tools)
     if mcp_tools:
         additional_tools.extend(mcp_tools)
     

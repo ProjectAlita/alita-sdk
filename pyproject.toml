@@ -40,7 +40,7 @@ dev = [ "pytest", "pytest-cov", "black", "flake8", "mypy",]
 cli = [ "click>=8.1.0", "rich>=13.0.0", "pyyaml>=6.0", "langchain-mcp-adapters",]
 
 [project.scripts]
-alita-cli = "alita_sdk.cli.cli:main"
+alita = "alita_sdk.cli.cli:main"
 
 [project.urls]
 Homepage = "https://projectalita.ai"

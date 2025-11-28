@@ -22,9 +22,20 @@ class CLIConfig:
         Initialize CLI configuration.
         
         Args:
-            env_file: Path to .env file. If None, uses default (.env in current directory)
+            env_file: Path to .env file. If None, checks ALITA_ENV_FILE env var,
+                      then falls back to .alita/.env or .env in current directory
         """
-        self.env_file = env_file or '.env'
+        if env_file:
+            self.env_file = env_file
+        else:
+            # Check ALITA_ENV_FILE environment variable first
+            alita_env_file = os.getenv('ALITA_ENV_FILE')
+            if alita_env_file and os.path.exists(alita_env_file):
+                self.env_file = alita_env_file
+            elif os.path.exists('.alita/.env'):
+                self.env_file = '.alita/.env'
+            else:
+                self.env_file = '.env'
         self._load_env()
         
     def _load_env(self):

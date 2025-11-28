@@ -31,11 +31,50 @@ from .agent_loader import load_agent_definition
 from .agent_executor import create_llm_instance, create_agent_executor, create_agent_executor_with_mcp
 from .toolkit_loader import load_toolkit_config, load_toolkit_configs
 from .callbacks import create_cli_callback, CLICallbackHandler
+from .input_handler import get_input_handler, styled_input, styled_selection_input
 
 logger = logging.getLogger(__name__)
 
 # Create a rich console for beautiful output
 console = Console()
+
+
+def _get_alita_system_prompt(config) -> str:
+    """
+    Get the Alita system prompt from user config or fallback to default.
+    
+    Checks for $ALITA_DIR/agents/default.agent.md first, then falls back
+    to the built-in DEFAULT_PROMPT.
+    
+    Returns:
+        The system prompt string for Alita
+    """
+    from .agent.default import DEFAULT_PROMPT
+    
+    # Check for user-customized prompt
+    custom_prompt_path = Path(config.agents_dir) / 'default.agent.md'
+    
+    if custom_prompt_path.exists():
+        try:
+            content = custom_prompt_path.read_text(encoding='utf-8')
+            # Parse the agent.md file - extract system_prompt from frontmatter or use content
+            if content.startswith('---'):
+                # Has YAML frontmatter, try to parse
+                try:
+                    parts = content.split('---', 2)
+                    if len(parts) >= 3:
+                        frontmatter = yaml.safe_load(parts[1])
+                        body = parts[2].strip()
+                        # Use system_prompt from frontmatter if present, otherwise use body
+                        return frontmatter.get('system_prompt', body) if frontmatter else body
+                except Exception:
+                    pass
+            # No frontmatter or parsing failed, use entire content as prompt
+            return content.strip()
+        except Exception as e:
+            logger.debug(f"Failed to load custom Alita prompt from {custom_prompt_path}: {e}")
+    
+    return DEFAULT_PROMPT
 
 
 def _load_mcp_tools(agent_def: Dict[str, Any], mcp_config_path: str) -> List[Dict[str, Any]]:
@@ -54,11 +93,12 @@ def _load_mcp_tools(agent_def: Dict[str, Any], mcp_config_path: str) -> List[Dic
 
 def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_config: tuple,
                                 config, model: Optional[str], temperature: Optional[float],
-                                max_tokens: Optional[int], memory, work_dir: Optional[str]):
+                                max_tokens: Optional[int], memory, work_dir: Optional[str],
+                                plan_state: Optional[Dict] = None):
     """Setup local agent executor with all configurations.
     
     Returns:
-        Tuple of (agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools)
+        Tuple of (agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools)
     """
     # Load toolkit configs
     toolkit_configs = load_toolkit_configs(agent_def, toolkit_config)
@@ -74,15 +114,19 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
     
     # Add filesystem tools if --dir is provided
     filesystem_tools = None
+    terminal_tools = None
     if work_dir:
-        from .tools import get_filesystem_tools
+        from .tools import get_filesystem_tools, get_terminal_tools
         preset = agent_def.get('filesystem_tools_preset')
         include_tools = agent_def.get('filesystem_tools_include')
         exclude_tools = agent_def.get('filesystem_tools_exclude')
         filesystem_tools = get_filesystem_tools(work_dir, include_tools, exclude_tools, preset)
         
-        tool_count = len(filesystem_tools)
-        access_msg = f"✓ Granted filesystem access to: {work_dir} ({tool_count} tools)"
+        # Also add terminal tools when work_dir is set
+        terminal_tools = get_terminal_tools(work_dir)
+        
+        tool_count = len(filesystem_tools) + len(terminal_tools)
+        access_msg = f"✓ Granted filesystem & terminal access to: {work_dir} ({tool_count} tools)"
         if preset:
             access_msg += f" [preset: {preset}]"
         if include_tools:
@@ -91,12 +135,32 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
             access_msg += f" [exclude: {', '.join(exclude_tools)}]"
         console.print(f"[dim]{access_msg}[/dim]")
     
+    # Add planning tools (always available)
+    planning_tools = None
+    plan_state_obj = None
+    if plan_state is not None:
+        from .tools import get_planning_tools, PlanState
+        # Create a plan callback to update the dict when plan changes
+        def plan_callback(state: PlanState):
+            plan_state['title'] = state.title
+            plan_state['steps'] = state.to_dict()['steps']
+            plan_state['session_id'] = state.session_id
+        
+        # Get session_id from plan_state dict if provided
+        session_id = plan_state.get('session_id')
+        planning_tools, plan_state_obj = get_planning_tools(
+            plan_state=None,
+            plan_callback=plan_callback,
+            session_id=session_id
+        )
+        console.print(f"[dim]✓ Planning tools enabled ({len(planning_tools)} tools) [session: {plan_state_obj.session_id}][/dim]")
+    
     # Check if we have tools
-    has_tools = bool(agent_def.get('tools') or toolkit_configs or filesystem_tools)
+    has_tools = bool(agent_def.get('tools') or toolkit_configs or filesystem_tools or terminal_tools or planning_tools)
     has_mcp = any(tc.get('toolkit_type') == 'mcp' for tc in toolkit_configs)
     
     if not has_tools:
-        return None, None, llm, llm_model, filesystem_tools
+        return None, None, llm, llm_model, filesystem_tools, terminal_tools, planning_tools
     
     # Create agent executor with or without MCP
     mcp_session_manager = None
@@ -116,17 +180,220 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
             create_agent_executor_with_mcp(
                 client, agent_def, toolkit_configs,
                 llm, llm_model, llm_temperature, llm_max_tokens, memory,
-                filesystem_tools=filesystem_tools
+                filesystem_tools=filesystem_tools,
+                terminal_tools=terminal_tools,
+                planning_tools=planning_tools
             )
         )
     else:
         agent_executor = create_agent_executor(
             client, agent_def, toolkit_configs,
             llm, llm_model, llm_temperature, llm_max_tokens, memory,
-            filesystem_tools=filesystem_tools
+            filesystem_tools=filesystem_tools,
+            terminal_tools=terminal_tools,
+            planning_tools=planning_tools
         )
     
-    return agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools
+    return agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools
+
+
+def _select_model_interactive(client) -> Optional[Dict[str, Any]]:
+    """
+    Show interactive menu to select a model from available models.
+    
+    Returns:
+        Selected model info dict or None if cancelled
+    """
+    console.print("\n🔧 [bold cyan]Select a model:[/bold cyan]\n")
+    
+    try:
+        # Use the new get_available_models API
+        models = client.get_available_models()
+        if not models:
+            console.print("[yellow]No models available from the platform.[/yellow]")
+            return None
+        
+        # Build models list - API returns items[].name
+        models_list = []
+        for model in models:
+            model_name = model.get('name')
+            if model_name:
+                models_list.append({
+                    'name': model_name,
+                    'id': model.get('id'),
+                    'model_data': model
+                })
+        
+        if not models_list:
+            console.print("[yellow]No models found.[/yellow]")
+            return None
+        
+        # Display models with numbers
+        table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE)
+        table.add_column("#", style="dim", width=4)
+        table.add_column("Model", style="cyan")
+        
+        for i, model in enumerate(models_list, 1):
+            table.add_row(str(i), model['name'])
+        
+        console.print(table)
+        console.print(f"\n[dim]0. Cancel[/dim]")
+        
+        # Get user selection using styled input
+        while True:
+            try:
+                choice = styled_selection_input("Select model number")
+                
+                if choice == '0':
+                    return None
+                
+                idx = int(choice) - 1
+                if 0 <= idx < len(models_list):
+                    selected = models_list[idx]
+                    console.print(f"✓ [green]Selected:[/green] [bold]{selected['name']}[/bold]")
+                    return selected
+                else:
+                    console.print(f"[yellow]Invalid selection. Please enter a number between 0 and {len(models_list)}[/yellow]")
+            except ValueError:
+                console.print("[yellow]Please enter a valid number[/yellow]")
+            except (KeyboardInterrupt, EOFError):
+                return None
+                
+    except Exception as e:
+        console.print(f"[red]Error fetching models: {e}[/red]")
+        return None
+
+
+def _select_mcp_interactive(config) -> Optional[Dict[str, Any]]:
+    """
+    Show interactive menu to select an MCP server from mcp.json.
+    
+    Returns:
+        Selected MCP server config dict or None if cancelled
+    """
+    from .mcp_loader import load_mcp_config
+    
+    console.print("\n🔌 [bold cyan]Select an MCP server to add:[/bold cyan]\n")
+    
+    mcp_config = load_mcp_config(config.mcp_config_path)
+    mcp_servers = mcp_config.get('mcpServers', {})
+    
+    if not mcp_servers:
+        console.print(f"[yellow]No MCP servers found in {config.mcp_config_path}[/yellow]")
+        return None
+    
+    servers_list = list(mcp_servers.items())
+    
+    # Display servers with numbers
+    table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE)
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Server", style="cyan")
+    table.add_column("Type", style="dim")
+    table.add_column("Command/URL", style="dim")
+    
+    for i, (name, server_config) in enumerate(servers_list, 1):
+        server_type = server_config.get('type', 'stdio')
+        cmd_or_url = server_config.get('url') or server_config.get('command', '')
+        table.add_row(str(i), name, server_type, cmd_or_url[:40])
+    
+    console.print(table)
+    console.print(f"\n[dim]0. Cancel[/dim]")
+    
+    # Get user selection using styled input
+    while True:
+        try:
+            choice = styled_selection_input("Select MCP server number")
+            
+            if choice == '0':
+                return None
+            
+            idx = int(choice) - 1
+            if 0 <= idx < len(servers_list):
+                name, server_config = servers_list[idx]
+                console.print(f"✓ [green]Selected:[/green] [bold]{name}[/bold]")
+                return {'name': name, 'config': server_config}
+            else:
+                console.print(f"[yellow]Invalid selection. Please enter a number between 0 and {len(servers_list)}[/yellow]")
+        except ValueError:
+            console.print("[yellow]Please enter a valid number[/yellow]")
+        except (KeyboardInterrupt, EOFError):
+            return None
+
+
+def _select_toolkit_interactive(config) -> Optional[Dict[str, Any]]:
+    """
+    Show interactive menu to select a toolkit from $ALITA_DIR/tools.
+    
+    Returns:
+        Selected toolkit config dict or None if cancelled
+    """
+    console.print("\n🧰 [bold cyan]Select a toolkit to add:[/bold cyan]\n")
+    
+    tools_dir = Path(config.tools_dir)
+    
+    if not tools_dir.exists():
+        console.print(f"[yellow]Tools directory not found: {tools_dir}[/yellow]")
+        return None
+    
+    # Find all toolkit config files
+    toolkit_files = []
+    for pattern in ['*.json', '*.yaml', '*.yml']:
+        toolkit_files.extend(tools_dir.glob(pattern))
+    
+    if not toolkit_files:
+        console.print(f"[yellow]No toolkit configurations found in {tools_dir}[/yellow]")
+        return None
+    
+    # Load toolkit info
+    toolkits_list = []
+    for file_path in toolkit_files:
+        try:
+            config_data = load_toolkit_config(str(file_path))
+            toolkits_list.append({
+                'file': str(file_path),
+                'name': config_data.get('toolkit_name') or config_data.get('name') or file_path.stem,
+                'type': config_data.get('toolkit_type') or config_data.get('type', 'unknown'),
+                'config': config_data
+            })
+        except Exception as e:
+            logger.debug(f"Failed to load toolkit config {file_path}: {e}")
+    
+    if not toolkits_list:
+        console.print(f"[yellow]No valid toolkit configurations found in {tools_dir}[/yellow]")
+        return None
+    
+    # Display toolkits with numbers
+    table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE)
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Toolkit", style="cyan")
+    table.add_column("Type", style="dim")
+    table.add_column("File", style="dim")
+    
+    for i, toolkit in enumerate(toolkits_list, 1):
+        table.add_row(str(i), toolkit['name'], toolkit['type'], Path(toolkit['file']).name)
+    
+    console.print(table)
+    console.print(f"\n[dim]0. Cancel[/dim]")
+    
+    # Get user selection using styled input
+    while True:
+        try:
+            choice = styled_selection_input("Select toolkit number")
+            
+            if choice == '0':
+                return None
+            
+            idx = int(choice) - 1
+            if 0 <= idx < len(toolkits_list):
+                selected = toolkits_list[idx]
+                console.print(f"✓ [green]Selected:[/green] [bold]{selected['name']}[/bold]")
+                return selected
+            else:
+                console.print(f"[yellow]Invalid selection. Please enter a number between 0 and {len(toolkits_list)}[/yellow]")
+        except ValueError:
+            console.print("[yellow]Please enter a valid number[/yellow]")
+        except (KeyboardInterrupt, EOFError):
+            return None
 
 
 def _select_agent_interactive(client, config) -> Optional[str]:
@@ -134,11 +401,15 @@ def _select_agent_interactive(client, config) -> Optional[str]:
     Show interactive menu to select an agent from platform and local agents.
     
     Returns:
-        Agent source (name/id for platform, file path for local) or None if cancelled
+        Agent source (name/id for platform, file path for local, '__direct__' for direct chat) or None if cancelled
     """
     from .config import CLIConfig
     
     console.print("\n🤖 [bold cyan]Select an agent to chat with:[/bold cyan]\n")
+    
+    # First option: Alita (direct LLM chat, no agent)
+    console.print(f"1. [[bold]💬 Alita[/bold]] [cyan]Chat directly with LLM (no agent)[/cyan]")
+    console.print(f"   [dim]Direct conversation with the model without agent configuration[/dim]")
     
     agents_list = []
     
@@ -173,12 +444,8 @@ def _select_agent_interactive(client, config) -> Optional[str]:
                 except Exception as e:
                     logger.debug(f"Failed to load {file_path}: {e}")
     
-    if not agents_list:
-        console.print("[yellow]No agents found. Create an agent first or check your configuration.[/yellow]")
-        return None
-    
-    # Display agents with numbers using rich
-    for i, agent in enumerate(agents_list, 1):
+    # Display agents with numbers using rich (starting from 2 since 1 is direct chat)
+    for i, agent in enumerate(agents_list, 2):
         agent_type = "📦 Platform" if agent['type'] == 'platform' else "📁 Local"
         console.print(f"{i}. [[bold]{agent_type}[/bold]] [cyan]{agent['name']}[/cyan]")
         if agent['description']:
@@ -186,25 +453,29 @@ def _select_agent_interactive(client, config) -> Optional[str]:
     
     console.print(f"\n[dim]0. Cancel[/dim]")
     
-    # Get user selection
+    # Get user selection using styled input
     while True:
         try:
-            choice = input("\nSelect agent number: ").strip()
+            choice = styled_selection_input("Select agent number")
             
             if choice == '0':
                 return None
             
-            idx = int(choice) - 1
+            if choice == '1':
+                console.print(f"✓ [green]Selected:[/green] [bold]Alita[/bold]")
+                return '__direct__'
+            
+            idx = int(choice) - 2  # Offset by 2 since 1 is direct chat
             if 0 <= idx < len(agents_list):
                 selected = agents_list[idx]
-                console.print(f"\n✓ [green]Selected:[/green] [bold]{selected['name']}[/bold]")
+                console.print(f"✓ [green]Selected:[/green] [bold]{selected['name']}[/bold]")
                 return selected['source']
             else:
-                console.print(f"[yellow]Invalid selection. Please enter a number between 0 and {len(agents_list)}[/yellow]")
+                console.print(f"[yellow]Invalid selection. Please enter a number between 0 and {len(agents_list) + 1}[/yellow]")
         except ValueError:
             console.print("[yellow]Please enter a valid number[/yellow]")
         except (KeyboardInterrupt, EOFError):
-            console.print("\n\n[dim]Cancelled.[/dim]")
+            console.print("\n[dim]Cancelled.[/dim]")
             return None
 
 
@@ -520,17 +791,46 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
     debug_mode = verbose == 'debug'
     
     try:
-        # If no agent specified, show selection menu
+        # If no agent specified, start with direct chat by default
         if not agent_source:
-            agent_source = _select_agent_interactive(client, config)
-            if not agent_source:
-                console.print("[yellow]No agent selected. Exiting.[/yellow]")
-                return
+            agent_source = '__direct__'
         
-        # Load agent
-        is_local = Path(agent_source).exists()
+        # Check for direct chat mode
+        is_direct = agent_source == '__direct__'
+        is_local = not is_direct and Path(agent_source).exists()
         
-        if is_local:
+        # Initialize variables for dynamic updates
+        current_model = model
+        current_temperature = temperature
+        current_max_tokens = max_tokens
+        added_mcp_configs = []
+        added_toolkit_configs = list(toolkit_config) if toolkit_config else []
+        mcp_session_manager = None
+        llm = None
+        agent_executor = None
+        agent_def = {}
+        filesystem_tools = None
+        terminal_tools = None
+        planning_tools = None
+        plan_state = None
+        
+        # Approval mode: 'always' (confirm each tool), 'auto' (no confirmation), 'yolo' (no safety checks)
+        approval_mode = 'always'
+        current_work_dir = work_dir  # Track work_dir for /dir command
+        current_agent_file = agent_source if is_local else None  # Track agent file for /reload command
+        
+        if is_direct:
+            # Direct chat mode - no agent, just LLM with Alita instructions
+            agent_name = "Alita"
+            agent_type = "Direct LLM"
+            alita_prompt = _get_alita_system_prompt(config)
+            agent_def = {
+                'model': model or 'gpt-5',
+                'temperature': temperature if temperature is not None else 0.1,
+                'max_tokens': max_tokens or 4096,
+                'system_prompt': alita_prompt
+            }
+        elif is_local:
             agent_def = load_agent_definition(agent_source)
             agent_name = agent_def.get('name', Path(agent_source).stem)
             agent_type = "Local Agent"
@@ -551,32 +851,42 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             agent_name = agent['name']
             agent_type = "Platform Agent"
         
+        # Get model and temperature for welcome banner
+        llm_model_display = current_model or agent_def.get('model', 'gpt-4o')
+        llm_temperature_display = current_temperature if current_temperature is not None else agent_def.get('temperature', 0.1)
+        
         # Print nice welcome banner
-        print_welcome(agent_name, agent_type)
+        print_welcome(agent_name, llm_model_display, llm_temperature_display, approval_mode)
         
         # Initialize conversation
         chat_history = []
         
-        # Create memory for agent
-        from langgraph.checkpoint.sqlite import SqliteSaver
-        memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+        # Initialize session for persistence (memory + plan)
+        from .tools import generate_session_id, create_session_memory, save_session_metadata
+        current_session_id = generate_session_id()
+        plan_state = {'session_id': current_session_id}
+        
+        # Create persistent memory for agent (stored in session directory)
+        memory = create_session_memory(current_session_id)
+        
+        # Save session metadata
+        save_session_metadata(current_session_id, {
+            'agent_name': agent_name,
+            'agent_type': agent_type if 'agent_type' in dir() else 'Direct LLM',
+            'model': llm_model_display,
+            'temperature': llm_temperature_display,
+            'work_dir': work_dir,
+            'is_direct': is_direct,
+            'is_local': is_local,
+        })
+        console.print(f"[dim]Session: {current_session_id}[/dim]")
         
         # Create agent executor
-        if is_local:
-            # Display configuration
-            llm_model_display = model or agent_def.get('model', 'gpt-4o')
-            llm_temperature_display = temperature if temperature is not None else agent_def.get('temperature', 0.7)
-            console.print()
-            console.print(f"✓ [green]Using model:[/green] [bold]{llm_model_display}[/bold]")
-            console.print(f"✓ [green]Temperature:[/green] [bold]{llm_temperature_display}[/bold]")
-            if agent_def.get('tools'):
-                console.print(f"✓ [green]Tools:[/green] [bold]{', '.join(agent_def['tools'])}[/bold]")
-            console.print()
-            
+        if is_direct or is_local:
             # Setup local agent executor (handles all config, tools, MCP, etc.)
             try:
-                agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools = _setup_local_agent_executor(
-                    client, agent_def, toolkit_config, config, model, temperature, max_tokens, memory, work_dir
+                agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, work_dir, plan_state
                 )
             except Exception:
                 return
@@ -606,12 +916,14 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             )
             llm = None  # Platform agents don't use direct LLM
         
+        # Initialize input handler for readline support
+        input_handler = get_input_handler()
+        
         # Interactive chat loop
         while True:
             try:
-                # Styled prompt
-                console.print("\n[bold bright_white]>[/bold bright_white] ", end="")
-                user_input = input().strip()
+                # Get input with styled prompt (prompt is part of input() for proper readline handling)
+                user_input = styled_input().strip()
                 
                 if not user_input:
                     continue
@@ -651,8 +963,416 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     print_help()
                     continue
                 
+                # /model command - switch model
+                if user_input == '/model':
+                    if not (is_direct or is_local):
+                        console.print("[yellow]Model switching is only available for local agents and direct chat.[/yellow]")
+                        continue
+                    
+                    selected_model = _select_model_interactive(client)
+                    if selected_model:
+                        current_model = selected_model['name']
+                        agent_def['model'] = current_model
+                        
+                        # Recreate LLM and agent executor - use session memory to preserve history
+                        from .tools import create_session_memory
+                        memory = create_session_memory(current_session_id)
+                        try:
+                            agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            )
+                            console.print(Panel(
+                                f"[cyan]ℹ Model switched to [bold]{current_model}[/bold]. Agent state reset, chat history preserved.[/cyan]",
+                                border_style="cyan",
+                                box=box.ROUNDED
+                            ))
+                        except Exception as e:
+                            console.print(f"[red]Error switching model: {e}[/red]")
+                    continue
+                
+                # /reload command - reload agent definition from file
+                if user_input == '/reload':
+                    if not is_local:
+                        if is_direct:
+                            console.print("[yellow]Cannot reload direct chat mode - no agent file to reload.[/yellow]")
+                        else:
+                            console.print("[yellow]Reload is only available for local agents (file-based).[/yellow]")
+                        continue
+                    
+                    if not current_agent_file or not Path(current_agent_file).exists():
+                        console.print("[red]Agent file not found. Cannot reload.[/red]")
+                        continue
+                    
+                    try:
+                        # Reload agent definition from file
+                        new_agent_def = load_agent_definition(current_agent_file)
+                        
+                        # Preserve runtime additions (MCPs, tools added via commands)
+                        if 'mcps' in agent_def and agent_def['mcps']:
+                            # Merge MCPs: file MCPs + runtime added MCPs
+                            file_mcps = new_agent_def.get('mcps', [])
+                            for mcp in agent_def['mcps']:
+                                mcp_name = mcp if isinstance(mcp, str) else mcp.get('name')
+                                file_mcp_names = [m if isinstance(m, str) else m.get('name') for m in file_mcps]
+                                if mcp_name not in file_mcp_names:
+                                    file_mcps.append(mcp)
+                            new_agent_def['mcps'] = file_mcps
+                        
+                        # Update agent_def with new values (preserving model/temp overrides)
+                        old_system_prompt = agent_def.get('system_prompt', '')
+                        new_system_prompt = new_agent_def.get('system_prompt', '')
+                        
+                        agent_def.update(new_agent_def)
+                        
+                        # Restore runtime overrides
+                        if current_model:
+                            agent_def['model'] = current_model
+                        if current_temperature is not None:
+                            agent_def['temperature'] = current_temperature
+                        if current_max_tokens:
+                            agent_def['max_tokens'] = current_max_tokens
+                        
+                        # Recreate agent executor with reloaded definition
+                        from .tools import create_session_memory
+                        memory = create_session_memory(current_session_id)
+                        agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                        )
+                        
+                        # Show what changed
+                        prompt_changed = old_system_prompt != new_system_prompt
+                        agent_name = agent_def.get('name', Path(current_agent_file).stem)
+                        
+                        if prompt_changed:
+                            console.print(Panel(
+                                f"[green]✓ Reloaded agent: [bold]{agent_name}[/bold][/green]\n"
+                                f"[dim]System prompt updated ({len(new_system_prompt)} chars)[/dim]",
+                                border_style="green",
+                                box=box.ROUNDED
+                            ))
+                        else:
+                            console.print(Panel(
+                                f"[cyan]ℹ Reloaded agent: [bold]{agent_name}[/bold][/cyan]\n"
+                                f"[dim]No changes detected in system prompt[/dim]",
+                                border_style="cyan",
+                                box=box.ROUNDED
+                            ))
+                    except Exception as e:
+                        console.print(f"[red]Error reloading agent: {e}[/red]")
+                    continue
+                
+                # /add_mcp command - add MCP server
+                if user_input == '/add_mcp':
+                    if not (is_direct or is_local):
+                        console.print("[yellow]Adding MCP is only available for local agents and direct chat.[/yellow]")
+                        continue
+                    
+                    selected_mcp = _select_mcp_interactive(config)
+                    if selected_mcp:
+                        mcp_name = selected_mcp['name']
+                        # Add MCP to agent definition
+                        if 'mcps' not in agent_def:
+                            agent_def['mcps'] = []
+                        if mcp_name not in [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])]:
+                            agent_def['mcps'].append(mcp_name)
+                        
+                        # Recreate agent executor with new MCP - use session memory to preserve history
+                        from .tools import create_session_memory
+                        memory = create_session_memory(current_session_id)
+                        try:
+                            agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            )
+                            console.print(Panel(
+                                f"[cyan]ℹ Added MCP: [bold]{mcp_name}[/bold]. Agent state reset, chat history preserved.[/cyan]",
+                                border_style="cyan",
+                                box=box.ROUNDED
+                            ))
+                        except Exception as e:
+                            console.print(f"[red]Error adding MCP: {e}[/red]")
+                    continue
+                
+                # /add_toolkit command - add toolkit
+                if user_input == '/add_toolkit':
+                    if not (is_direct or is_local):
+                        console.print("[yellow]Adding toolkit is only available for local agents and direct chat.[/yellow]")
+                        continue
+                    
+                    selected_toolkit = _select_toolkit_interactive(config)
+                    if selected_toolkit:
+                        toolkit_name = selected_toolkit['name']
+                        toolkit_file = selected_toolkit['file']
+                        
+                        # Add toolkit config path
+                        if toolkit_file not in added_toolkit_configs:
+                            added_toolkit_configs.append(toolkit_file)
+                        
+                        # Recreate agent executor with new toolkit - use session memory to preserve history
+                        from .tools import create_session_memory
+                        memory = create_session_memory(current_session_id)
+                        try:
+                            agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            )
+                            console.print(Panel(
+                                f"[cyan]ℹ Added toolkit: [bold]{toolkit_name}[/bold]. Agent state reset, chat history preserved.[/cyan]",
+                                border_style="cyan",
+                                box=box.ROUNDED
+                            ))
+                        except Exception as e:
+                            console.print(f"[red]Error adding toolkit: {e}[/red]")
+                    continue
+                
+                # /mode command - set approval mode
+                if user_input == '/mode' or user_input.startswith('/mode '):
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) == 1:
+                        # Show current mode and options
+                        mode_info = {
+                            'always': ('yellow', 'Confirm before each tool execution'),
+                            'auto': ('green', 'Execute tools without confirmation'),
+                            'yolo': ('red', 'No confirmations, skip safety warnings')
+                        }
+                        console.print("\n🔧 [bold cyan]Approval Mode:[/bold cyan]\n")
+                        for mode_name, (color, desc) in mode_info.items():
+                            marker = "●" if mode_name == approval_mode else "○"
+                            console.print(f"  [{color}]{marker}[/{color}] [bold]{mode_name}[/bold] - {desc}")
+                        console.print(f"\n[dim]Usage: /mode <always|auto|yolo>[/dim]")
+                    else:
+                        new_mode = parts[1].lower().strip()
+                        if new_mode in ['always', 'auto', 'yolo']:
+                            approval_mode = new_mode
+                            mode_colors = {'always': 'yellow', 'auto': 'green', 'yolo': 'red'}
+                            console.print(f"✓ [green]Mode set to[/green] [{mode_colors[new_mode]}][bold]{new_mode}[/bold][/{mode_colors[new_mode]}]")
+                        else:
+                            console.print(f"[yellow]Unknown mode: {new_mode}. Use: always, auto, or yolo[/yellow]")
+                    continue
+                
+                # /dir command - mount workspace directory
+                if user_input == '/dir' or user_input.startswith('/dir '):
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) == 1:
+                        if current_work_dir:
+                            console.print(f"📁 [bold cyan]Current workspace:[/bold cyan] {current_work_dir}")
+                        else:
+                            console.print("[yellow]No workspace mounted. Usage: /dir /path/to/workspace[/yellow]")
+                    else:
+                        new_dir = parts[1].strip()
+                        new_dir_path = Path(new_dir).expanduser().resolve()
+                        
+                        if not new_dir_path.exists():
+                            console.print(f"[red]Directory not found: {new_dir}[/red]")
+                            continue
+                        if not new_dir_path.is_dir():
+                            console.print(f"[red]Not a directory: {new_dir}[/red]")
+                            continue
+                        
+                        current_work_dir = str(new_dir_path)
+                        
+                        # Recreate agent executor with new work_dir - use session memory
+                        if is_direct or is_local:
+                            from .tools import create_session_memory
+                            memory = create_session_memory(current_session_id)
+                            try:
+                                agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                )
+                                console.print(Panel(
+                                    f"[cyan]✓ Mounted: [bold]{current_work_dir}[/bold]\n   Terminal + filesystem tools enabled.[/cyan]",
+                                    border_style="cyan",
+                                    box=box.ROUNDED
+                                ))
+                            except Exception as e:
+                                console.print(f"[red]Error mounting directory: {e}[/red]")
+                        else:
+                            console.print("[yellow]Directory mounting is only available for local agents and direct chat.[/yellow]")
+                    continue
+                
+                # /session command - list or resume sessions
+                if user_input == '/session' or user_input.startswith('/session '):
+                    from .tools import list_sessions, PlanState
+                    parts = user_input.split(maxsplit=2)
+                    
+                    if len(parts) == 1 or parts[1] == 'list':
+                        # List all sessions with plans
+                        sessions = list_sessions()
+                        if not sessions:
+                            console.print("[dim]No saved sessions found.[/dim]")
+                            console.print("[dim]Sessions are created when you start chatting.[/dim]")
+                        else:
+                            console.print("\n📋 [bold cyan]Saved Sessions:[/bold cyan]\n")
+                            from datetime import datetime
+                            for i, sess in enumerate(sessions[:10], 1):  # Show last 10
+                                modified = datetime.fromtimestamp(sess['modified']).strftime('%Y-%m-%d %H:%M')
+                                
+                                # Build session info line
+                                agent_info = sess.get('agent_name', 'unknown')
+                                model_info = sess.get('model', '')
+                                if model_info:
+                                    agent_info = f"{agent_info} ({model_info})"
+                                
+                                # Check if this is current session
+                                is_current = sess['session_id'] == current_session_id
+                                current_marker = " [green]◀ current[/green]" if is_current else ""
+                                
+                                # Plan progress if available
+                                if sess.get('steps_total', 0) > 0:
+                                    progress = f"[{sess['steps_completed']}/{sess['steps_total']}]"
+                                    status = "✓" if sess['steps_completed'] == sess['steps_total'] else "○"
+                                    plan_info = f" - {sess.get('title', 'Untitled')} {progress}"
+                                else:
+                                    status = "●"
+                                    plan_info = ""
+                                
+                                console.print(f"  {status} [cyan]{sess['session_id']}[/cyan]{plan_info}")
+                                console.print(f"      [dim]{agent_info} • {modified}[/dim]{current_marker}")
+                            console.print(f"\n[dim]Usage: /session resume <session_id>[/dim]")
+                    
+                    elif parts[1] == 'resume' and len(parts) > 2:
+                        session_id = parts[2].strip()
+                        from .tools import load_session_metadata, create_session_memory
+                        
+                        # Check if session exists (either plan or metadata)
+                        loaded_state = PlanState.load(session_id)
+                        session_metadata = load_session_metadata(session_id)
+                        
+                        if loaded_state or session_metadata:
+                            # Update current session to use this session_id
+                            current_session_id = session_id
+                            
+                            # Restore memory from session SQLite (reuses existing memory.db file)
+                            memory = create_session_memory(session_id)
+                            
+                            # Update plan state if available
+                            if loaded_state:
+                                plan_state.update(loaded_state.to_dict())
+                                resume_info = f"\n\n{loaded_state.render()}"
+                            else:
+                                plan_state['session_id'] = session_id
+                                resume_info = ""
+                            
+                            # Show session info
+                            agent_info = session_metadata.get('agent_name', 'unknown') if session_metadata else 'unknown'
+                            model_info = session_metadata.get('model', '') if session_metadata else ''
+                            
+                            console.print(Panel(
+                                f"[green]✓ Resumed session:[/green] [bold]{session_id}[/bold]\n"
+                                f"[dim]Agent: {agent_info}" + (f" • Model: {model_info}" if model_info else "") + f"[/dim]"
+                                f"{resume_info}",
+                                border_style="green",
+                                box=box.ROUNDED
+                            ))
+                            
+                            # Recreate planning tools with loaded state
+                            if is_direct or is_local:
+                                try:
+                                    from .tools import get_planning_tools
+                                    if loaded_state:
+                                        planning_tools, _ = get_planning_tools(loaded_state)
+                                    # Note: We'd need to rebuild the agent to inject new tools
+                                    # For now, the plan state dict is updated so new tool calls will see it
+                                except Exception as e:
+                                    console.print(f"[yellow]Warning: Could not reload planning tools: {e}[/yellow]")
+                        else:
+                            console.print(f"[red]Session not found: {session_id}[/red]")
+                    else:
+                        console.print("[dim]Usage: /session [list] or /session resume <session_id>[/dim]")
+                    continue
+                
+                # /agent command - switch to a different agent
+                if user_input == '/agent':
+                    selected_agent = _select_agent_interactive(client, config)
+                    if selected_agent and selected_agent != '__direct__':
+                        # Load the new agent
+                        new_is_local = Path(selected_agent).exists()
+                        
+                        if new_is_local:
+                            agent_def = load_agent_definition(selected_agent)
+                            agent_name = agent_def.get('name', Path(selected_agent).stem)
+                            agent_type = "Local Agent"
+                            is_local = True
+                            is_direct = False
+                            current_agent_file = selected_agent  # Track for /reload
+                        else:
+                            # Platform agent
+                            agents = client.get_list_of_apps()
+                            new_agent = None
+                            try:
+                                agent_id = int(selected_agent)
+                                new_agent = next((a for a in agents if a['id'] == agent_id), None)
+                            except ValueError:
+                                new_agent = next((a for a in agents if a['name'] == selected_agent), None)
+                            
+                            if new_agent:
+                                agent_name = new_agent['name']
+                                agent_type = "Platform Agent"
+                                is_local = False
+                                is_direct = False
+                                current_agent_file = None  # No file for platform agents
+                                
+                                # Setup platform agent
+                                details = client.get_app_details(new_agent['id'])
+                                version_id = details['versions'][0]['id']
+                                agent_executor = client.application(
+                                    application_id=new_agent['id'],
+                                    application_version_id=version_id,
+                                    memory=memory,
+                                    chat_history=chat_history
+                                )
+                                console.print(Panel(
+                                    f"[cyan]ℹ Switched to agent: [bold]{agent_name}[/bold] ({agent_type}). Chat history preserved.[/cyan]",
+                                    border_style="cyan",
+                                    box=box.ROUNDED
+                                ))
+                                continue
+                        
+                        # For local agents, recreate executor
+                        if new_is_local:
+                            from .tools import create_session_memory
+                            memory = create_session_memory(current_session_id)
+                            added_toolkit_configs = []
+                            try:
+                                agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                )
+                                console.print(Panel(
+                                    f"[cyan]ℹ Switched to agent: [bold]{agent_name}[/bold] ({agent_type}). Agent state reset, chat history preserved.[/cyan]",
+                                    border_style="cyan",
+                                    box=box.ROUNDED
+                                ))
+                            except Exception as e:
+                                console.print(f"[red]Error switching agent: {e}[/red]")
+                    elif selected_agent == '__direct__':
+                        # Switch back to direct mode
+                        is_direct = True
+                        is_local = False
+                        current_agent_file = None  # No file for direct mode
+                        agent_name = "Alita"
+                        agent_type = "Direct LLM"
+                        alita_prompt = _get_alita_system_prompt(config)
+                        agent_def = {
+                            'model': current_model or 'gpt-4o',
+                            'temperature': current_temperature if current_temperature is not None else 0.1,
+                            'max_tokens': current_max_tokens or 4096,
+                            'system_prompt': alita_prompt
+                        }
+                        from .tools import create_session_memory
+                        memory = create_session_memory(current_session_id)
+                        try:
+                            agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            )
+                            console.print(Panel(
+                                f"[cyan]ℹ Switched to [bold]Alita[/bold]. Agent state reset, chat history preserved.[/cyan]",
+                                border_style="cyan",
+                                box=box.ROUNDED
+                            ))
+                        except Exception as e:
+                            console.print(f"[red]Error switching to direct mode: {e}[/red]")
+                    continue
+                
                 # Execute agent
-                if is_local and agent_executor is None:
+                if (is_direct or is_local) and agent_executor is None:
                     # Local agent without tools: use direct LLM call with streaming
                     system_prompt = agent_def.get('system_prompt', '')
                     messages = []
@@ -722,34 +1442,104 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     # Agent with tools or platform agent: use agent executor
                     # Setup callback for verbose output
                     from langchain_core.runnables import RunnableConfig
+                    from langgraph.errors import GraphRecursionError
                     
                     invoke_config = None
                     if show_verbose:
                         cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
                         invoke_config = RunnableConfig(callbacks=[cli_callback])
                     
-                    # Show status only when not verbose (verbose shows its own progress)
-                    if not show_verbose:
-                        with console.status("[yellow]Thinking...[/yellow]", spinner="dots"):
-                            result = agent_executor.invoke(
-                                {
-                                    "input": [user_input] if not is_local else user_input,
-                                    "chat_history": chat_history
-                                },
-                                config=invoke_config
-                            )
-                    else:
-                        console.print()  # Add spacing before tool calls
-                        result = agent_executor.invoke(
-                            {
-                                "input": [user_input] if not is_local else user_input,
-                                "chat_history": chat_history
-                            },
-                            config=invoke_config
-                        )
+                    # Track recursion continuation state
+                    continue_from_recursion = False
+                    recursion_attempts = 0
+                    max_recursion_continues = 5  # Prevent infinite continuation loops
+                    
+                    while True:
+                        try:
+                            # Show status only when not verbose (verbose shows its own progress)
+                            if not show_verbose:
+                                with console.status("[yellow]Thinking...[/yellow]", spinner="dots"):
+                                    result = agent_executor.invoke(
+                                        {
+                                            "input": [user_input] if not is_local else user_input,
+                                            "chat_history": chat_history
+                                        },
+                                        config=invoke_config
+                                    )
+                            else:
+                                if not continue_from_recursion:
+                                    console.print()  # Add spacing before tool calls
+                                result = agent_executor.invoke(
+                                    {
+                                        "input": [user_input] if not is_local else user_input,
+                                        "chat_history": chat_history
+                                    },
+                                    config=invoke_config
+                                )
+                            
+                            # Success - exit the retry loop
+                            break
+                            
+                        except GraphRecursionError as e:
+                            recursion_attempts += 1
+                            step_limit = getattr(e, 'recursion_limit', 25)
+                            
+                            console.print()
+                            console.print(Panel(
+                                f"[yellow]⚠ Step limit reached ({step_limit} steps)[/yellow]\n\n"
+                                f"The agent has executed the maximum number of steps allowed.\n"
+                                f"This usually happens with complex tasks that require many tool calls.\n\n"
+                                f"[dim]Attempt {recursion_attempts}/{max_recursion_continues}[/dim]",
+                                title="Step Limit Reached",
+                                border_style="yellow",
+                                box=box.ROUNDED
+                            ))
+                            
+                            if recursion_attempts >= max_recursion_continues:
+                                console.print("[red]Maximum continuation attempts reached. Please break down your request into smaller tasks.[/red]")
+                                output = f"[Step limit reached after {recursion_attempts} continuation attempts. The task may be too complex - please break it into smaller steps.]"
+                                break
+                            
+                            # Prompt user for action
+                            console.print("\nWhat would you like to do?")
+                            console.print("  [bold cyan]c[/bold cyan] - Continue execution (agent will resume from checkpoint)")
+                            console.print("  [bold cyan]s[/bold cyan] - Stop and get partial results")
+                            console.print("  [bold cyan]n[/bold cyan] - Start a new request")
+                            console.print()
+                            
+                            try:
+                                choice = input_handler.get_input("Choice [c/s/n]: ").strip().lower()
+                            except (KeyboardInterrupt, EOFError):
+                                choice = 's'
+                            
+                            if choice == 'c':
+                                # Continue - the checkpoint should preserve state
+                                # We'll re-invoke with a continuation message
+                                continue_from_recursion = True
+                                console.print("\n[cyan]Continuing from last checkpoint...[/cyan]\n")
+                                
+                                # Modify the input to signal continuation
+                                user_input = "Continue from where you left off. Complete the remaining steps of the task."
+                                continue  # Retry the invoke
+                                
+                            elif choice == 's':
+                                # Stop and try to extract partial results
+                                console.print("\n[yellow]Stopped. Attempting to extract partial results...[/yellow]")
+                                output = "[Task stopped due to step limit. Partial work may have been completed - check any files or state that were modified.]"
+                                break
+                                
+                            else:  # 'n' or anything else
+                                console.print("\n[dim]Skipped. Enter a new request.[/dim]")
+                                output = None
+                                break
                         
-                    # Extract output from result
-                    output = extract_output_from_result(result)
+                    # Skip chat history update if we bailed out
+                    if output is None:
+                        continue
+                        
+                    # Extract output from result (if we have a result)
+                    if 'result' in dir() and result is not None:
+                        output = extract_output_from_result(result)
                     
                     # Display response
                     console.print(f"\n[bold bright_cyan]{agent_name}:[/bold bright_cyan]")
@@ -859,8 +1649,8 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
             
             # Setup local agent executor (reuses same logic as agent_chat)
             try:
-                agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools = _setup_local_agent_executor(
-                    client, agent_def, toolkit_config, ctx.obj['config'], model, temperature, max_tokens, memory, work_dir
+                agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                    client, agent_def, toolkit_config, ctx.obj['config'], model, temperature, max_tokens, memory, work_dir, {}
                 )
             except Exception as e:
                 error_panel = Panel(
@@ -876,31 +1666,42 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
             if agent_executor:
                 # Setup callback for verbose output
                 from langchain_core.runnables import RunnableConfig
+                from langgraph.errors import GraphRecursionError
                 
                 invoke_config = None
                 if show_verbose:
                     cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
                     invoke_config = RunnableConfig(callbacks=[cli_callback])
                 
-                # Execute with spinner for non-JSON output
-                if formatter.__class__.__name__ == 'JSONFormatter':
-                    # JSON output: always quiet, no callbacks
-                    with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
-                        result = agent_executor.invoke({
-                            "input": message,
-                            "chat_history": []
-                        })
-                    
-                    click.echo(formatter._dump({
-                        'agent': agent_name,
-                        'message': message,
-                        'response': extract_output_from_result(result),
-                        'full_result': result
-                    }))
-                else:
-                    # Show status only when not verbose (verbose shows its own progress)
-                    if not show_verbose:
+                try:
+                    # Execute with spinner for non-JSON output
+                    if formatter.__class__.__name__ == 'JSONFormatter':
+                        # JSON output: always quiet, no callbacks
                         with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                            result = agent_executor.invoke({
+                                "input": message,
+                                "chat_history": []
+                            })
+                        
+                        click.echo(formatter._dump({
+                            'agent': agent_name,
+                            'message': message,
+                            'response': extract_output_from_result(result),
+                            'full_result': result
+                        }))
+                    else:
+                        # Show status only when not verbose (verbose shows its own progress)
+                        if not show_verbose:
+                            with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                                result = agent_executor.invoke(
+                                    {
+                                        "input": message,
+                                        "chat_history": []
+                                    },
+                                    config=invoke_config
+                                )
+                        else:
+                            console.print()  # Add spacing before tool calls
                             result = agent_executor.invoke(
                                 {
                                     "input": message,
@@ -908,19 +1709,34 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
                                 },
                                 config=invoke_config
                             )
-                    else:
-                        console.print()  # Add spacing before tool calls
-                        result = agent_executor.invoke(
-                            {
-                                "input": message,
-                                "chat_history": []
-                            },
-                            config=invoke_config
-                        )
-                    
-                    # Extract and display output
-                    output = extract_output_from_result(result)
-                    display_output(agent_name, message, output)
+                        
+                        # Extract and display output
+                        output = extract_output_from_result(result)
+                        display_output(agent_name, message, output)
+                        
+                except GraphRecursionError as e:
+                    step_limit = getattr(e, 'recursion_limit', 25)
+                    console.print()
+                    console.print(Panel(
+                        f"[yellow]⚠ Step limit reached ({step_limit} steps)[/yellow]\n\n"
+                        f"The agent exceeded the maximum number of steps.\n"
+                        f"This task may be too complex for a single run.\n\n"
+                        f"[bold]Suggestions:[/bold]\n"
+                        f"• Use [cyan]alita agent chat[/cyan] for interactive continuation\n"
+                        f"• Break the task into smaller, focused requests\n"
+                        f"• Check if partial work was completed (files created, etc.)",
+                        title="Step Limit Reached",
+                        border_style="yellow",
+                        box=box.ROUNDED
+                    ))
+                    if formatter.__class__.__name__ == 'JSONFormatter':
+                        click.echo(formatter._dump({
+                            'agent': agent_name,
+                            'message': message,
+                            'error': 'step_limit_reached',
+                            'step_limit': step_limit,
+                            'response': f'Step limit of {step_limit} reached. Task may be too complex.'
+                        }))
             else:
                 # Simple LLM mode without tools
                 system_prompt = agent_def.get('system_prompt', '')
@@ -998,29 +1814,40 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
             
             # Setup callback for verbose output
             from langchain_core.runnables import RunnableConfig
+            from langgraph.errors import GraphRecursionError
             
             invoke_config = None
             if show_verbose:
                 cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
                 invoke_config = RunnableConfig(callbacks=[cli_callback])
             
-            # Execute with spinner for non-JSON output
-            if formatter.__class__.__name__ == 'JSONFormatter':
-                result = agent_executor.invoke({
-                    "input": [message],
-                    "chat_history": []
-                })
-                
-                click.echo(formatter._dump({
-                    'agent': agent['name'],
-                    'message': message,
-                    'response': result.get('output', ''),
-                    'full_result': result
-                }))
-            else:
-                # Show status only when not verbose
-                if not show_verbose:
-                    with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+            try:
+                # Execute with spinner for non-JSON output
+                if formatter.__class__.__name__ == 'JSONFormatter':
+                    result = agent_executor.invoke({
+                        "input": [message],
+                        "chat_history": []
+                    })
+                    
+                    click.echo(formatter._dump({
+                        'agent': agent['name'],
+                        'message': message,
+                        'response': result.get('output', ''),
+                        'full_result': result
+                    }))
+                else:
+                    # Show status only when not verbose
+                    if not show_verbose:
+                        with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                            result = agent_executor.invoke(
+                                {
+                                    "input": [message],
+                                    "chat_history": []
+                                },
+                                config=invoke_config
+                            )
+                    else:
+                        console.print()  # Add spacing before tool calls
                         result = agent_executor.invoke(
                             {
                                 "input": [message],
@@ -1028,32 +1855,47 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
                             },
                             config=invoke_config
                         )
-                else:
-                    console.print()  # Add spacing before tool calls
-                    result = agent_executor.invoke(
-                        {
-                            "input": [message],
-                            "chat_history": []
-                        },
-                        config=invoke_config
-                    )
+                    
+                    # Display output
+                    response = result.get('output', 'No response')
+                    display_output(agent['name'], message, response)
                 
-                # Display output
-                response = result.get('output', 'No response')
-                display_output(agent['name'], message, response)
-            
-            # Save thread if requested
-            if save_thread:
-                thread_data = {
-                    'agent_id': agent['id'],
-                    'agent_name': agent['name'],
-                    'version_id': version_id,
-                    'thread_id': result.get('thread_id'),
-                    'last_message': message
-                }
-                with open(save_thread, 'w') as f:
-                    json.dump(thread_data, f, indent=2)
-                logger.info(f"Thread saved to {save_thread}")
+                # Save thread if requested
+                if save_thread:
+                    thread_data = {
+                        'agent_id': agent['id'],
+                        'agent_name': agent['name'],
+                        'version_id': version_id,
+                        'thread_id': result.get('thread_id'),
+                        'last_message': message
+                    }
+                    with open(save_thread, 'w') as f:
+                        json.dump(thread_data, f, indent=2)
+                    logger.info(f"Thread saved to {save_thread}")
+                    
+            except GraphRecursionError as e:
+                step_limit = getattr(e, 'recursion_limit', 25)
+                console.print()
+                console.print(Panel(
+                    f"[yellow]⚠ Step limit reached ({step_limit} steps)[/yellow]\n\n"
+                    f"The agent exceeded the maximum number of steps.\n"
+                    f"This task may be too complex for a single run.\n\n"
+                    f"[bold]Suggestions:[/bold]\n"
+                    f"• Use [cyan]alita agent chat[/cyan] for interactive continuation\n"
+                    f"• Break the task into smaller, focused requests\n"
+                    f"• Check if partial work was completed (files created, etc.)",
+                    title="Step Limit Reached",
+                    border_style="yellow",
+                    box=box.ROUNDED
+                ))
+                if formatter.__class__.__name__ == 'JSONFormatter':
+                    click.echo(formatter._dump({
+                        'agent': agent['name'],
+                        'message': message,
+                        'error': 'step_limit_reached',
+                        'step_limit': step_limit,
+                        'response': f'Step limit of {step_limit} reached. Task may be too complex.'
+                    }))
     
     except click.ClickException:
         raise
