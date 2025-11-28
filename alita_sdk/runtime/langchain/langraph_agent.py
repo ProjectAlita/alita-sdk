@@ -19,7 +19,7 @@ from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 
-from .constants import PRINTER_NODE_RS, PRINTER
+from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping, safe_format
 from ..tools.function import FunctionTool
@@ -244,11 +244,16 @@ class PrinterNode(Runnable):
         result = {}
         logger.debug(f"Initial text pattern: {self.input_mapping}")
         mapping = propagate_the_input_mapping(self.input_mapping, [], state)
+        # for printer node we expect that all the lists will be joined into strings already
+        # Join any lists that haven't been converted yet
+        for key, value in mapping.items():
+            if isinstance(value, list):
+                mapping[key] = ', '.join(str(item) for item in value)
         if mapping.get(PRINTER) is None:
             raise ToolException(f"PrinterNode requires '{PRINTER}' field in input mapping")
         formatted_output = mapping[PRINTER]
         # add info label to the printer's output
-        if formatted_output:
+        if not formatted_output == PRINTER_COMPLETED_STATE:
             formatted_output += f"\n\n-----\n*How to proceed?*\n* *to resume the pipeline - type anything...*"
         logger.debug(f"Formatted output: {formatted_output}")
         result[PRINTER_NODE_RS] = formatted_output
@@ -666,7 +671,7 @@ def create_graph(
                 # reset printer output variable to avoid carrying over
                 reset_node_id = f"{node_id}_reset"
                 lg_builder.add_node(reset_node_id, PrinterNode(
-                    input_mapping={'printer': {'type': 'fixed', 'value': ''}}
+                    input_mapping={'printer': {'type': 'fixed', 'value': PRINTER_COMPLETED_STATE}}
                 ))
                 lg_builder.add_conditional_edges(node_id, TransitionalEdge(reset_node_id))
                 lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
@@ -908,7 +913,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            if not result.get(PRINTER_NODE_RS):
+            if result.get(PRINTER_NODE_RS) == PRINTER_COMPLETED_STATE:
                 output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)),
                               result['messages'][-1].content)
             else:
