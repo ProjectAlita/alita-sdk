@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Any, Optional, List, Dict, Generator
 
+from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.documents import Document
 from pydantic import create_model, Field, SecretStr
 
@@ -179,11 +180,13 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             #
             results_count = result["count"]
             self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count)
+            self._emit_index_event(index_name)
             #
             return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
             else "no new documents to index"}
         except Exception as e:
             self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"])
+            self._emit_index_event(index_name, error=str(e))
             raise e
             
 
@@ -511,6 +514,54 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             index_meta_doc = Document(page_content=index_meta_raw.get("content", ""), metadata=metadata)
             add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc], ids=[index_meta_raw.get("id")])
 
+    def _emit_index_event(self, index_name: str, error: Optional[str] = None):
+        """
+        Emit custom event for index data operation.
+        
+        Args:
+            index_name: The name of the index
+            error: Error message if the operation failed, None otherwise
+        """
+        index_meta = super().get_index_meta(index_name)
+        
+        if not index_meta:
+            logger.warning(
+                f"No index_meta found for index '{index_name}'. "
+                "Cannot emit index event."
+            )
+            return
+        
+        metadata = index_meta.get("metadata", {})
+        
+        # Determine if this is a reindex operation
+        history_raw = metadata.get("history", "[]")
+        try:
+            history = json.loads(history_raw) if history_raw.strip() else []
+            is_reindex = len(history) > 1
+        except (json.JSONDecodeError, TypeError):
+            is_reindex = False
+        
+        # Build event message
+        event_data = {
+            "id": index_meta.get("id"),
+            "index_name": index_name,
+            "state": metadata.get("state"),
+            "error": error,
+            "reindex": is_reindex,
+            "indexed": metadata.get("indexed", 0),
+            "updated": metadata.get("updated", 0),
+        }
+        
+        # Emit the event
+        try:
+            dispatch_custom_event("index_data_status", event_data)
+            logger.debug(
+                f"Emitted index_data_status event for index "
+                f"'{index_name}': {event_data}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to emit index_data_status event: {e}")
+
     def get_available_tools(self):
         """
         Returns the standardized vector search tools (search operations only).
@@ -564,6 +615,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "mode": "list_collections",
                 "ref": self.list_collections,
                 "description": self.list_collections.__doc__,
-                "args_schema": create_model("ListCollectionsParams")  # No parameters
+                # No parameters
+                "args_schema": create_model("ListCollectionsParams")
             },
         ]
