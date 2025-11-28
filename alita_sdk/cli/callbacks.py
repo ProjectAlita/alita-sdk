@@ -390,23 +390,26 @@ class CLICallbackHandler(BaseCallbackHandler):
         llm_run_id = str(run_id)
         llm_info = self.llm_runs.pop(llm_run_id, {})
         
-        # Show any pending tokens (streaming output)
-        if self.show_thinking:
-            tokens = self.pending_tokens.pop(llm_run_id, [])
-            if tokens:
-                thinking_text = "".join(tokens)
-                if thinking_text.strip():
-                    # Show thinking in a subtle panel
-                    max_len = 600
-                    display_text = thinking_text[:max_len] + ('...' if len(thinking_text) > max_len else '')
-                    console.print(Panel(
-                        Text(display_text, style="dim italic"),
-                        title="[dim]💭 Thinking[/dim]",
-                        title_align="left",
-                        border_style="dim",
-                        box=box.SIMPLE,
-                        padding=(0, 1),
-                    ))
+        # Clear pending tokens - we don't show them as "Thinking" anymore
+        # The final response will be displayed by the main chat loop
+        # Only show thinking if there were tool calls (indicated by having active tool runs)
+        tokens = self.pending_tokens.pop(llm_run_id, [])
+        
+        # Only show thinking panel if we have active tool context (intermediate reasoning)
+        if self.show_thinking and tokens and len(self.tool_runs) > 0:
+            thinking_text = "".join(tokens)
+            if thinking_text.strip():
+                # Show thinking in a subtle panel
+                max_len = 600
+                display_text = thinking_text[:max_len] + ('...' if len(thinking_text) > max_len else '')
+                console.print(Panel(
+                    Text(display_text, style="dim italic"),
+                    title="[dim]💭 Thinking[/dim]",
+                    title_align="left",
+                    border_style="dim",
+                    box=box.SIMPLE,
+                    padding=(0, 1),
+                ))
         
         if self.show_llm_calls and llm_info:
             start_time = llm_info.get("start_time")

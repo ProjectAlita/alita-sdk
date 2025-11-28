@@ -1453,22 +1453,16 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     continue_from_recursion = False
                     recursion_attempts = 0
                     max_recursion_continues = 5  # Prevent infinite continuation loops
+                    output = None  # Initialize output before loop
+                    result = None  # Initialize result before loop
                     
                     while True:
                         try:
-                            # Show status only when not verbose (verbose shows its own progress)
-                            if not show_verbose:
-                                with console.status("[yellow]Thinking...[/yellow]", spinner="dots"):
-                                    result = agent_executor.invoke(
-                                        {
-                                            "input": [user_input] if not is_local else user_input,
-                                            "chat_history": chat_history
-                                        },
-                                        config=invoke_config
-                                    )
-                            else:
-                                if not continue_from_recursion:
-                                    console.print()  # Add spacing before tool calls
+                            # Always start with a thinking spinner
+                            status = console.status("[yellow]Thinking...[/yellow]", spinner="dots")
+                            status.start()
+                            
+                            try:
                                 result = agent_executor.invoke(
                                     {
                                         "input": [user_input] if not is_local else user_input,
@@ -1476,6 +1470,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                     },
                                     config=invoke_config
                                 )
+                            finally:
+                                status.stop()
                             
                             # Success - exit the retry loop
                             break
@@ -1533,20 +1529,23 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                 output = None
                                 break
                         
-                    # Skip chat history update if we bailed out
-                    if output is None:
-                        continue
-                        
                     # Extract output from result (if we have a result)
-                    if 'result' in dir() and result is not None:
+                    if result is not None:
                         output = extract_output_from_result(result)
                     
-                    # Display response
-                    console.print(f"\n[bold bright_cyan]{agent_name}:[/bold bright_cyan]")
+                    # Skip chat history update if we bailed out (no result)
+                    if output is None:
+                        continue
+                    
+                    # Display response in a clear format
+                    console.print()  # Add spacing
+                    console.print(f"[bold bright_cyan]{agent_name}:[/bold bright_cyan]")
+                    console.print()  # Add spacing before response
                     if any(marker in output for marker in ['```', '**', '##', '- ', '* ']):
                         console.print(Markdown(output))
                     else:
                         console.print(output)
+                    console.print()  # Add spacing after response
                 
                 # Update chat history
                 chat_history.append({"role": "user", "content": user_input})
