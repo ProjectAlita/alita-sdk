@@ -254,6 +254,9 @@ class PrinterNode(Runnable):
         formatted_output = mapping[PRINTER]
         # add info label to the printer's output
         if not formatted_output == PRINTER_COMPLETED_STATE:
+            # convert formatted output to string if it's not
+            if not isinstance(formatted_output, str):
+                formatted_output = str(formatted_output)
             formatted_output += f"\n\n-----\n*How to proceed?*\n* *to resume the pipeline - type anything...*"
         logger.debug(f"Formatted output: {formatted_output}")
         result[PRINTER_NODE_RS] = formatted_output
