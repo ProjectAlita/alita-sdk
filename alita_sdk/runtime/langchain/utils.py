@@ -131,7 +131,7 @@ def parse_type(type_str):
 
 
 def create_state(data: Optional[dict] = None):
-    state_dict = {'input': str, 'router_output': str,
+    state_dict = {'input': str, 'messages': 'list[str]', 'router_output': str,
                   ELITEA_RS: str, PRINTER_NODE_RS: str}  # Always include router_output
     types_dict = {}
     if not data:
