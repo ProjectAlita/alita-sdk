@@ -26,10 +26,11 @@ from rich.live import Live
 
 from .cli import get_client
 # Import from refactored modules
-from .agent_ui import print_banner, print_help, display_output, extract_output_from_result
+from .agent_ui import print_welcome, print_help, display_output, extract_output_from_result
 from .agent_loader import load_agent_definition
 from .agent_executor import create_llm_instance, create_agent_executor, create_agent_executor_with_mcp
 from .toolkit_loader import load_toolkit_config, load_toolkit_configs
+from .callbacks import create_cli_callback, CLICallbackHandler
 
 logger = logging.getLogger(__name__)
 
@@ -464,11 +465,14 @@ def agent_show(ctx, agent_source: str, version: Optional[str]):
 @click.option('--max-tokens', type=int, help='Override max tokens')
 @click.option('--dir', 'work_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True),
               help='Grant agent filesystem access to this directory')
+@click.option('--verbose', '-v', type=click.Choice(['quiet', 'default', 'debug']), default='default',
+              help='Output verbosity level: quiet (final output only), default (tool calls + outputs), debug (all including LLM calls)')
 @click.pass_context
 def agent_chat(ctx, agent_source: Optional[str], version: Optional[str], 
                toolkit_config: tuple, thread_id: Optional[str],
                model: Optional[str], temperature: Optional[float], 
-               max_tokens: Optional[int], work_dir: Optional[str]):
+               max_tokens: Optional[int], work_dir: Optional[str],
+               verbose: str):
     """
     Start interactive chat with an agent.
     
@@ -500,10 +504,20 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         
         # Continue previous conversation
         alita-cli agent chat my-agent --thread-id abc123
+        
+        # Quiet mode (hide tool calls and thinking)
+        alita-cli agent chat my-agent --verbose quiet
+        
+        # Debug mode (show all including LLM calls)
+        alita-cli agent chat my-agent --verbose debug
     """
     formatter = ctx.obj['formatter']
     config = ctx.obj['config']
     client = get_client(ctx)
+    
+    # Setup verbose level
+    show_verbose = verbose != 'quiet'
+    debug_mode = verbose == 'debug'
     
     try:
         # If no agent specified, show selection menu
@@ -537,9 +551,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             agent_name = agent['name']
             agent_type = "Platform Agent"
         
-        # Print nice banner
-        print_banner(agent_name, agent_type)
-        print_help()
+        # Print nice welcome banner
+        print_welcome(agent_name, agent_type)
         
         # Initialize conversation
         chat_history = []
@@ -707,14 +720,36 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         continue
                 else:
                     # Agent with tools or platform agent: use agent executor
-                    with console.status("[yellow]Thinking...[/yellow]", spinner="dots"):
-                        result = agent_executor.invoke({
-                            "input": [user_input] if not is_local else user_input,
-                            "chat_history": chat_history
-                        })
+                    # Setup callback for verbose output
+                    from langchain_core.runnables import RunnableConfig
+                    
+                    invoke_config = None
+                    if show_verbose:
+                        cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
+                        invoke_config = RunnableConfig(callbacks=[cli_callback])
+                    
+                    # Show status only when not verbose (verbose shows its own progress)
+                    if not show_verbose:
+                        with console.status("[yellow]Thinking...[/yellow]", spinner="dots"):
+                            result = agent_executor.invoke(
+                                {
+                                    "input": [user_input] if not is_local else user_input,
+                                    "chat_history": chat_history
+                                },
+                                config=invoke_config
+                            )
+                    else:
+                        console.print()  # Add spacing before tool calls
+                        result = agent_executor.invoke(
+                            {
+                                "input": [user_input] if not is_local else user_input,
+                                "chat_history": chat_history
+                            },
+                            config=invoke_config
+                        )
                         
-                        # Extract output from result
-                        output = extract_output_from_result(result)
+                    # Extract output from result
+                    output = extract_output_from_result(result)
                     
                     # Display response
                     console.print(f"\n[bold bright_cyan]{agent_name}:[/bold bright_cyan]")
@@ -760,11 +795,14 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
 @click.option('--save-thread', help='Save thread ID to file for continuation')
 @click.option('--dir', 'work_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True),
               help='Grant agent filesystem access to this directory')
+@click.option('--verbose', '-v', type=click.Choice(['quiet', 'default', 'debug']), default='default',
+              help='Output verbosity level: quiet (final output only), default (tool calls + outputs), debug (all including LLM calls)')
 @click.pass_context
 def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
               toolkit_config: tuple, model: Optional[str], 
               temperature: Optional[float], max_tokens: Optional[int],
-              save_thread: Optional[str], work_dir: Optional[str]):
+              save_thread: Optional[str], work_dir: Optional[str],
+              verbose: str):
     """
     Run agent with a single message (handoff mode).
     
@@ -793,9 +831,19 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
         # Save thread for continuation
         alita-cli agent run my-agent "Start task" \\
             --save-thread thread.txt
+            
+        # Quiet mode (hide tool calls and thinking)
+        alita-cli agent run my-agent "Query" --verbose quiet
+        
+        # Debug mode (show all including LLM calls)
+        alita-cli agent run my-agent "Query" --verbose debug
     """
     formatter = ctx.obj['formatter']
     client = get_client(ctx)
+    
+    # Setup verbose level
+    show_verbose = verbose != 'quiet'
+    debug_mode = verbose == 'debug'
     
     try:
         # Load agent
@@ -826,9 +874,17 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
             
             # Execute agent
             if agent_executor:
+                # Setup callback for verbose output
+                from langchain_core.runnables import RunnableConfig
+                
+                invoke_config = None
+                if show_verbose:
+                    cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
+                    invoke_config = RunnableConfig(callbacks=[cli_callback])
                 
                 # Execute with spinner for non-JSON output
                 if formatter.__class__.__name__ == 'JSONFormatter':
+                    # JSON output: always quiet, no callbacks
                     with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
                         result = agent_executor.invoke({
                             "input": message,
@@ -842,12 +898,25 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
                         'full_result': result
                     }))
                 else:
-                    # Show spinner while executing
-                    with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
-                        result = agent_executor.invoke({
-                            "input": message,
-                            "chat_history": []
-                        })
+                    # Show status only when not verbose (verbose shows its own progress)
+                    if not show_verbose:
+                        with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                            result = agent_executor.invoke(
+                                {
+                                    "input": message,
+                                    "chat_history": []
+                                },
+                                config=invoke_config
+                            )
+                    else:
+                        console.print()  # Add spacing before tool calls
+                        result = agent_executor.invoke(
+                            {
+                                "input": message,
+                                "chat_history": []
+                            },
+                            config=invoke_config
+                        )
                     
                     # Extract and display output
                     output = extract_output_from_result(result)
@@ -927,6 +996,14 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
                 memory=memory
             )
             
+            # Setup callback for verbose output
+            from langchain_core.runnables import RunnableConfig
+            
+            invoke_config = None
+            if show_verbose:
+                cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
+                invoke_config = RunnableConfig(callbacks=[cli_callback])
+            
             # Execute with spinner for non-JSON output
             if formatter.__class__.__name__ == 'JSONFormatter':
                 result = agent_executor.invoke({
@@ -941,12 +1018,25 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
                     'full_result': result
                 }))
             else:
-                # Show spinner while executing
-                with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
-                    result = agent_executor.invoke({
-                        "input": [message],
-                        "chat_history": []
-                    })
+                # Show status only when not verbose
+                if not show_verbose:
+                    with console.status("[yellow]Processing...[/yellow]", spinner="dots"):
+                        result = agent_executor.invoke(
+                            {
+                                "input": [message],
+                                "chat_history": []
+                            },
+                            config=invoke_config
+                        )
+                else:
+                    console.print()  # Add spacing before tool calls
+                    result = agent_executor.invoke(
+                        {
+                            "input": [message],
+                            "chat_history": []
+                        },
+                        config=invoke_config
+                    )
                 
                 # Display output
                 response = result.get('output', 'No response')

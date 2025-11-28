@@ -133,6 +133,9 @@ from . import agents
 cli.add_command(toolkit.toolkit)
 cli.add_command(agents.agent)
 
+# Add top-level 'chat' command as alias to 'agent chat'
+cli.add_command(agents.agent_chat, name='chat')
+
 
 def main():
     """Entry point for CLI."""
