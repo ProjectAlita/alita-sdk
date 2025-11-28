@@ -97,6 +97,11 @@ class GetFileInfoInput(BaseModel):
     path: str = Field(description="Relative path to the file or directory")
 
 
+class EmptyInput(BaseModel):
+    """Empty input schema for tools that take no arguments."""
+    pass
+
+
 class FileSystemTool(BaseTool):
     """Base class for filesystem tools with directory restriction."""
     base_directory: str
@@ -744,7 +749,7 @@ class ListAllowedDirectoriesTool(FileSystemTool):
         "Subdirectories within allowed directories are also accessible. "
         "Use this to understand which directories and their nested paths are available before trying to access files."
     )
-    args_schema: type[BaseModel] = BaseModel
+    args_schema: type[BaseModel] = EmptyInput
     
     def _run(self) -> str:
         """List allowed directories."""
