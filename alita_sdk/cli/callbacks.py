@@ -246,14 +246,39 @@ class CLICallbackHandler(BaseCallbackHandler):
         tool_name = tool_info.get("name", kwargs.get("name", "Unknown"))
         step_num = tool_info.get("step", "?")
         
-        # Create error content
-        error_text = Text(str(error), style="red")
+        # Calculate duration
+        start_time = tool_info.get("start_time")
+        duration_str = ""
+        if start_time:
+            elapsed = (datetime.now(tz=timezone.utc) - start_time).total_seconds()
+            duration_str = f" │ {elapsed:.2f}s"
+        
+        # Build error content with exception details
+        content_parts = []
+        
+        # Error message
+        error_msg = str(error)
+        content_parts.append(Text(error_msg, style="red bold"))
+        
+        # Add traceback if available
+        tb_str = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        if tb_str and tb_str.strip():
+            content_parts.append(Text(""))  # blank line
+            content_parts.append(Text("Exception Traceback:", style="dim bold"))
+            # Truncate if too long
+            max_tb_len = 1500
+            if len(tb_str) > max_tb_len:
+                tb_str = tb_str[:max_tb_len] + f"\n... (truncated, {len(tb_str)} chars total)"
+            content_parts.append(Syntax(tb_str, "python", theme="monokai", 
+                                        word_wrap=True, line_numbers=False))
+        
+        panel_content = Group(*content_parts) if len(content_parts) > 1 else content_parts[0]
         
         panel = Panel(
-            error_text,
-            title=f"[bold red]✗ Error[/bold red] [dim]│[/dim] [dim]{tool_name}[/dim]",
+            panel_content,
+            title=f"[bold red]✗ Error[/bold red] [dim]│[/dim] [bold]{tool_name}[/bold]",
             title_align="left",
-            subtitle=f"[dim]Step {step_num}[/dim]",
+            subtitle=f"[dim]Step {step_num}{duration_str}[/dim]",
             subtitle_align="right",
             border_style="red",
             box=ERROR_BOX,
