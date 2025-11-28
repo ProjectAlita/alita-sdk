@@ -890,7 +890,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # input['messages'] = [current_message]
         
         # Validate that input is not empty after all processing
-        if not input.get('input') and not config.get("configurable", {}).get("checkpoint_id"):
+        if not input.get('input'):
             raise RuntimeError(
                 "Empty input after processing. Cannot send empty string to LLM. "
                 "This likely means the message contained only non-text content "
@@ -900,7 +900,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         logging.info(f"Input: {thread_id} - {input}")
         if self.checkpointer and self.checkpointer.get_tuple(config):
             self.update_state(config, input)
-            result = super().invoke(None, config=config, *args, **kwargs)
+            if config.pop("should_continue", False):
+                invoke_input = input
+            else:
+                invoke_input = None
+            result = super().invoke(invoke_input, config=config, *args, **kwargs)
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
