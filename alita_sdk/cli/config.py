@@ -30,8 +30,16 @@ class CLIConfig:
         else:
             # Check ALITA_ENV_FILE environment variable first
             alita_env_file = os.getenv('ALITA_ENV_FILE')
-            if alita_env_file and os.path.exists(alita_env_file):
-                self.env_file = alita_env_file
+            if alita_env_file:
+                # Expand ~ and resolve path
+                expanded_path = os.path.expanduser(alita_env_file)
+                if os.path.exists(expanded_path):
+                    self.env_file = expanded_path
+                else:
+                    logger.warning(f"ALITA_ENV_FILE set to {alita_env_file} but file not found")
+                    self.env_file = expanded_path  # Still use it, will warn later
+            elif os.path.exists(os.path.expanduser('~/.alita/.env')):
+                self.env_file = os.path.expanduser('~/.alita/.env')
             elif os.path.exists('.alita/.env'):
                 self.env_file = '.alita/.env'
             else:
@@ -41,7 +49,8 @@ class CLIConfig:
     def _load_env(self):
         """Load environment variables from .env file."""
         if os.path.exists(self.env_file):
-            load_dotenv(self.env_file)
+            # Use override=True to ensure .env values take precedence
+            load_dotenv(self.env_file, override=True)
             logger.debug(f"Loaded environment from {self.env_file}")
         else:
             logger.debug(f"No .env file found at {self.env_file}, using system environment")
