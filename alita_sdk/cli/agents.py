@@ -32,6 +32,8 @@ from .agent_executor import create_llm_instance, create_agent_executor, create_a
 from .toolkit_loader import load_toolkit_config, load_toolkit_configs
 from .callbacks import create_cli_callback, CLICallbackHandler
 from .input_handler import get_input_handler, styled_input, styled_selection_input
+# Context management for chat history
+from .context import CLIContextManager, CLIMessage, purge_old_sessions as purge_context_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -799,6 +801,11 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         is_direct = agent_source == '__direct__'
         is_local = not is_direct and Path(agent_source).exists()
         
+        # Get defaults from config
+        default_model = config.default_model or 'gpt-4o'
+        default_temperature = config.default_temperature if config.default_temperature is not None else 0.1
+        default_max_tokens = config.default_max_tokens or 4096
+        
         # Initialize variables for dynamic updates
         current_model = model
         current_temperature = temperature
@@ -825,9 +832,9 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             agent_type = "Direct LLM"
             alita_prompt = _get_alita_system_prompt(config)
             agent_def = {
-                'model': model or 'gpt-5',
-                'temperature': temperature if temperature is not None else 0.1,
-                'max_tokens': max_tokens or 4096,
+                'model': model or default_model,
+                'temperature': temperature if temperature is not None else default_temperature,
+                'max_tokens': max_tokens or default_max_tokens,
                 'system_prompt': alita_prompt
             }
         elif is_local:
@@ -852,8 +859,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             agent_type = "Platform Agent"
         
         # Get model and temperature for welcome banner
-        llm_model_display = current_model or agent_def.get('model', 'gpt-4o')
-        llm_temperature_display = current_temperature if current_temperature is not None else agent_def.get('temperature', 0.1)
+        llm_model_display = current_model or agent_def.get('model', default_model)
+        llm_temperature_display = current_temperature if current_temperature is not None else agent_def.get('temperature', default_temperature)
         
         # Print nice welcome banner
         print_welcome(agent_name, llm_model_display, llm_temperature_display, approval_mode)
@@ -862,24 +869,51 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         chat_history = []
         
         # Initialize session for persistence (memory + plan)
-        from .tools import generate_session_id, create_session_memory, save_session_metadata
+        from .tools import generate_session_id, create_session_memory, save_session_metadata, to_portable_path
         current_session_id = generate_session_id()
         plan_state = {'session_id': current_session_id}
         
         # Create persistent memory for agent (stored in session directory)
         memory = create_session_memory(current_session_id)
         
-        # Save session metadata
+        # Save session metadata with agent source for session resume
+        agent_source_portable = to_portable_path(current_agent_file) if current_agent_file else None
         save_session_metadata(current_session_id, {
             'agent_name': agent_name,
             'agent_type': agent_type if 'agent_type' in dir() else 'Direct LLM',
+            'agent_source': agent_source_portable,
             'model': llm_model_display,
             'temperature': llm_temperature_display,
             'work_dir': work_dir,
             'is_direct': is_direct,
             'is_local': is_local,
+            'added_toolkit_configs': list(added_toolkit_configs),
+            'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])],
         })
         console.print(f"[dim]Session: {current_session_id}[/dim]")
+        
+        # Initialize context manager for chat history management
+        context_config = config.context_management
+        ctx_manager = CLIContextManager(
+            session_id=current_session_id,
+            max_context_tokens=context_config.get('max_context_tokens', 8000),
+            preserve_recent=context_config.get('preserve_recent_messages', 5),
+            pruning_method=context_config.get('pruning_method', 'oldest_first'),
+            enable_summarization=context_config.get('enable_summarization', True),
+            summary_trigger_ratio=context_config.get('summary_trigger_ratio', 0.8),
+            summaries_limit=context_config.get('summaries_limit_count', 5),
+            llm=None  # Will be set after LLM creation
+        )
+        
+        # Purge old sessions on startup (cleanup task)
+        try:
+            purge_context_sessions(
+                sessions_dir=config.sessions_dir,
+                max_age_days=context_config.get('session_max_age_days', 30),
+                max_sessions=context_config.get('max_sessions', 100)
+            )
+        except Exception as e:
+            logger.debug(f"Session cleanup failed: {e}")
         
         # Create agent executor
         if is_direct or is_local:
@@ -916,25 +950,46 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             )
             llm = None  # Platform agents don't use direct LLM
         
+        # Set LLM on context manager for summarization
+        if llm is not None:
+            ctx_manager.llm = llm
+        
         # Initialize input handler for readline support
         input_handler = get_input_handler()
         
         # Interactive chat loop
         while True:
             try:
+                # Get context info for the UI indicator
+                context_info = ctx_manager.get_context_info()
+                
                 # Get input with styled prompt (prompt is part of input() for proper readline handling)
-                user_input = styled_input().strip()
+                user_input = styled_input(context_info=context_info).strip()
                 
                 if not user_input:
                     continue
                 
                 # Handle commands
                 if user_input.lower() in ['exit', 'quit']:
+                    # Save final session state before exiting
+                    try:
+                        from .tools import update_session_metadata, to_portable_path
+                        update_session_metadata(current_session_id, {
+                            'agent_source': to_portable_path(current_agent_file) if current_agent_file else None,
+                            'model': current_model or llm_model_display,
+                            'temperature': current_temperature if current_temperature is not None else llm_temperature_display,
+                            'work_dir': current_work_dir,
+                            'added_toolkit_configs': list(added_toolkit_configs),
+                            'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])],
+                        })
+                    except Exception as e:
+                        logger.debug(f"Failed to save session state on exit: {e}")
                     console.print("\n[bold cyan]👋 Goodbye![/bold cyan]\n")
                     break
                 
                 if user_input == '/clear':
                     chat_history = []
+                    ctx_manager.clear()
                     console.print("[green]✓ Conversation history cleared.[/green]")
                     continue
                 
@@ -947,7 +1002,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             role = msg.get('role', 'unknown')
                             content = msg.get('content', '')
                             role_color = 'blue' if role == 'user' else 'green'
-                            console.print(f"\n[bold {role_color}]{i}. {role.upper()}:[/bold {role_color}] {content[:100]}...")
+                            included_marker = "" if ctx_manager.is_message_included(i - 1) else " [dim](pruned)[/dim]"
+                            console.print(f"\n[bold {role_color}]{i}. {role.upper()}:[/bold {role_color}] {content[:100]}...{included_marker}")
                     continue
                 
                 if user_input == '/save':
@@ -975,12 +1031,17 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         agent_def['model'] = current_model
                         
                         # Recreate LLM and agent executor - use session memory to preserve history
-                        from .tools import create_session_memory
+                        from .tools import create_session_memory, update_session_metadata
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
                                 client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
                             )
+                            # Persist model change to session
+                            update_session_metadata(current_session_id, {
+                                'model': current_model,
+                                'temperature': current_temperature if current_temperature is not None else agent_def.get('temperature', 0.7)
+                            })
                             console.print(Panel(
                                 f"[cyan]ℹ Model switched to [bold]{current_model}[/bold]. Agent state reset, chat history preserved.[/cyan]",
                                 border_style="cyan",
@@ -1077,12 +1138,16 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             agent_def['mcps'].append(mcp_name)
                         
                         # Recreate agent executor with new MCP - use session memory to preserve history
-                        from .tools import create_session_memory
+                        from .tools import create_session_memory, update_session_metadata
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
                                 client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
                             )
+                            # Persist added MCPs to session
+                            update_session_metadata(current_session_id, {
+                                'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])]
+                            })
                             console.print(Panel(
                                 f"[cyan]ℹ Added MCP: [bold]{mcp_name}[/bold]. Agent state reset, chat history preserved.[/cyan]",
                                 border_style="cyan",
@@ -1108,12 +1173,16 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             added_toolkit_configs.append(toolkit_file)
                         
                         # Recreate agent executor with new toolkit - use session memory to preserve history
-                        from .tools import create_session_memory
+                        from .tools import create_session_memory, update_session_metadata
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
                                 client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
                             )
+                            # Persist added toolkits to session
+                            update_session_metadata(current_session_id, {
+                                'added_toolkit_configs': list(added_toolkit_configs)
+                            })
                             console.print(Panel(
                                 f"[cyan]ℹ Added toolkit: [bold]{toolkit_name}[/bold]. Agent state reset, chat history preserved.[/cyan]",
                                 border_style="cyan",
@@ -1230,7 +1299,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     
                     elif parts[1] == 'resume' and len(parts) > 2:
                         session_id = parts[2].strip()
-                        from .tools import load_session_metadata, create_session_memory
+                        from .tools import load_session_metadata, create_session_memory, from_portable_path
                         
                         # Check if session exists (either plan or metadata)
                         loaded_state = PlanState.load(session_id)
@@ -1251,6 +1320,64 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                 plan_state['session_id'] = session_id
                                 resume_info = ""
                             
+                            # Restore agent source and reload agent definition if available
+                            restored_agent = False
+                            if session_metadata:
+                                agent_source = session_metadata.get('agent_source')
+                                if agent_source:
+                                    agent_file_path = from_portable_path(agent_source)
+                                    if Path(agent_file_path).exists():
+                                        try:
+                                            agent_def = load_agent_definition(agent_file_path)
+                                            current_agent_file = agent_file_path
+                                            agent_name = agent_def.get('name', Path(agent_file_path).stem)
+                                            is_local = True
+                                            is_direct = False
+                                            restored_agent = True
+                                        except Exception as e:
+                                            console.print(f"[yellow]Warning: Could not reload agent from {agent_source}: {e}[/yellow]")
+                                
+                                # Restore added toolkit configs
+                                restored_toolkit_configs = session_metadata.get('added_toolkit_configs', [])
+                                if restored_toolkit_configs:
+                                    added_toolkit_configs.clear()
+                                    added_toolkit_configs.extend(restored_toolkit_configs)
+                                
+                                # Restore added MCPs to agent_def
+                                restored_mcps = session_metadata.get('added_mcps', [])
+                                if restored_mcps and restored_agent:
+                                    if 'mcps' not in agent_def:
+                                        agent_def['mcps'] = []
+                                    for mcp_name in restored_mcps:
+                                        if mcp_name not in [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])]:
+                                            agent_def['mcps'].append(mcp_name)
+                                
+                                # Restore model/temperature overrides
+                                if session_metadata.get('model'):
+                                    current_model = session_metadata['model']
+                                    if restored_agent:
+                                        agent_def['model'] = current_model
+                                if session_metadata.get('temperature') is not None:
+                                    current_temperature = session_metadata['temperature']
+                                    if restored_agent:
+                                        agent_def['temperature'] = current_temperature
+                                
+                                # Restore work directory
+                                if session_metadata.get('work_dir'):
+                                    current_work_dir = session_metadata['work_dir']
+                            
+                            # Reinitialize context manager with resumed session_id to load chat history
+                            ctx_manager = CLIContextManager(
+                                session_id=session_id,
+                                max_context_tokens=context_config.get('max_context_tokens', 8000),
+                                preserve_recent=context_config.get('preserve_recent_messages', 5),
+                                pruning_method=context_config.get('pruning_method', 'oldest_first'),
+                                enable_summarization=context_config.get('enable_summarization', True),
+                                summary_trigger_ratio=context_config.get('summary_trigger_ratio', 0.8),
+                                summaries_limit=context_config.get('summaries_limit_count', 5),
+                                llm=llm if 'llm' in dir() else None
+                            )
+                            
                             # Show session info
                             agent_info = session_metadata.get('agent_name', 'unknown') if session_metadata else 'unknown'
                             model_info = session_metadata.get('model', '') if session_metadata else ''
@@ -1263,14 +1390,48 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                 box=box.ROUNDED
                             ))
                             
-                            # Recreate planning tools with loaded state
-                            if is_direct or is_local:
+                            # Display restored chat history
+                            chat_history_export = ctx_manager.export_chat_history(include_only=False)
+                            if chat_history_export:
+                                preserve_recent = context_config.get('preserve_recent_messages', 5)
+                                total_messages = len(chat_history_export)
+                                
+                                if total_messages > preserve_recent:
+                                    console.print(f"\n[dim]... {total_messages - preserve_recent} earlier messages in context[/dim]")
+                                    messages_to_show = chat_history_export[-preserve_recent:]
+                                else:
+                                    messages_to_show = chat_history_export
+                                
+                                for msg in messages_to_show:
+                                    role = msg.get('role', 'user')
+                                    content = msg.get('content', '')[:200]  # Truncate for display
+                                    if len(msg.get('content', '')) > 200:
+                                        content += '...'
+                                    role_color = 'cyan' if role == 'user' else 'green'
+                                    role_label = 'You' if role == 'user' else 'Assistant'
+                                    console.print(f"[dim][{role_color}]{role_label}:[/{role_color}] {content}[/dim]")
+                                console.print()
+                            
+                            # Recreate agent executor with restored tools if we have a local agent
+                            if (is_direct or is_local) and restored_agent:
+                                try:
+                                    agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                        client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                    )
+                                    ctx_manager.llm = llm  # Update LLM for summarization
+                                    
+                                    # Warn about MCP state loss
+                                    if restored_mcps:
+                                        console.print("[yellow]Note: MCP connections re-initialized (stateful server state like browser sessions are lost)[/yellow]")
+                                except Exception as e:
+                                    console.print(f"[red]Error recreating agent executor: {e}[/red]")
+                                    console.print("[yellow]Session state loaded but agent not fully restored. Some tools may not work.[/yellow]")
+                            elif is_direct or is_local:
+                                # Just update planning tools if we couldn't restore agent
                                 try:
                                     from .tools import get_planning_tools
                                     if loaded_state:
                                         planning_tools, _ = get_planning_tools(loaded_state)
-                                    # Note: We'd need to rebuild the agent to inject new tools
-                                    # For now, the plan state dict is updated so new tool calls will see it
                                 except Exception as e:
                                     console.print(f"[yellow]Warning: Could not reload planning tools: {e}[/yellow]")
                         else:
@@ -1351,9 +1512,9 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         agent_type = "Direct LLM"
                         alita_prompt = _get_alita_system_prompt(config)
                         agent_def = {
-                            'model': current_model or 'gpt-4o',
-                            'temperature': current_temperature if current_temperature is not None else 0.1,
-                            'max_tokens': current_max_tokens or 4096,
+                            'model': current_model or default_model,
+                            'temperature': current_temperature if current_temperature is not None else default_temperature,
+                            'max_tokens': current_max_tokens or default_max_tokens,
                             'system_prompt': alita_prompt
                         }
                         from .tools import create_session_memory
@@ -1379,8 +1540,9 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     if system_prompt:
                         messages.append({"role": "system", "content": system_prompt})
                     
-                    # Add chat history
-                    for msg in chat_history:
+                    # Build pruned context from context manager
+                    context_messages = ctx_manager.build_context()
+                    for msg in context_messages:
                         messages.append(msg)
                     
                     # Add user message
@@ -1445,6 +1607,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     from langgraph.errors import GraphRecursionError
                     
                     invoke_config = None
+                    cli_callback = None
                     if show_verbose:
                         cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
                         invoke_config = RunnableConfig(callbacks=[cli_callback])
@@ -1462,16 +1625,24 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             status = console.status("[yellow]Thinking...[/yellow]", spinner="dots")
                             status.start()
                             
+                            # Pass status to callback so it can stop it when tool calls start
+                            if cli_callback:
+                                cli_callback.status = status
+                            
                             try:
                                 result = agent_executor.invoke(
                                     {
                                         "input": [user_input] if not is_local else user_input,
-                                        "chat_history": chat_history
+                                        "chat_history": ctx_manager.build_context()
                                     },
                                     config=invoke_config
                                 )
                             finally:
-                                status.stop()
+                                # Make sure spinner is stopped
+                                try:
+                                    status.stop()
+                                except Exception:
+                                    pass
                             
                             # Success - exit the retry loop
                             break
@@ -1537,6 +1708,51 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     if output is None:
                         continue
                     
+                    # Check if max tool iterations were reached and prompt user
+                    if output and "Maximum tool execution iterations" in output and "reached" in output:
+                        console.print()
+                        console.print(Panel(
+                            f"[yellow]⚠ Tool execution limit reached[/yellow]\n\n"
+                            f"The agent has executed the maximum number of tool calls in a single turn.\n"
+                            f"This usually happens with complex tasks that require many sequential operations.\n",
+                            title="Tool Limit Reached",
+                            border_style="yellow",
+                            box=box.ROUNDED
+                        ))
+                        
+                        console.print("\nWhat would you like to do?")
+                        console.print("  [bold cyan]c[/bold cyan] - Continue execution (tell agent to resume)")
+                        console.print("  [bold cyan]s[/bold cyan] - Stop and keep partial results")
+                        console.print("  [bold cyan]n[/bold cyan] - Start a new request")
+                        console.print()
+                        
+                        try:
+                            choice = input_handler.get_input("Choice [c/s/n]: ").strip().lower()
+                        except (KeyboardInterrupt, EOFError):
+                            choice = 's'
+                        
+                        if choice == 'c':
+                            # Continue - send a follow-up message to resume
+                            console.print("\n[cyan]Continuing execution...[/cyan]\n")
+                            
+                            # Add current output to history first
+                            chat_history.append({"role": "user", "content": user_input})
+                            chat_history.append({"role": "assistant", "content": output})
+                            ctx_manager.add_message("user", user_input)
+                            ctx_manager.add_message("assistant", output)
+                            
+                            # Set new input to continue and loop back
+                            user_input = "Continue from where you left off. Complete the remaining steps of the task."
+                            continue  # This will loop back and invoke again
+                            
+                        elif choice == 's':
+                            console.print("\n[yellow]Stopped. Partial work has been completed.[/yellow]")
+                            # Fall through to display output and save to history
+                            
+                        else:  # 'n' or anything else
+                            console.print("\n[dim]Skipped. Enter a new request.[/dim]")
+                            continue  # Skip saving this output
+                    
                     # Display response in a clear format
                     console.print()  # Add spacing
                     console.print(f"[bold bright_cyan]{agent_name}:[/bold bright_cyan]")
@@ -1547,14 +1763,31 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         console.print(output)
                     console.print()  # Add spacing after response
                 
-                # Update chat history
+                # Update chat history and context manager
                 chat_history.append({"role": "user", "content": user_input})
                 chat_history.append({"role": "assistant", "content": output})
+                
+                # Add messages to context manager for token tracking and pruning
+                ctx_manager.add_message("user", user_input)
+                ctx_manager.add_message("assistant", output)
                 
             except KeyboardInterrupt:
                 console.print("\n\n[yellow]Interrupted. Type 'exit' to quit or continue chatting.[/yellow]")
                 continue
             except EOFError:
+                # Save final session state before exiting
+                try:
+                    from .tools import update_session_metadata, to_portable_path
+                    update_session_metadata(current_session_id, {
+                        'agent_source': to_portable_path(current_agent_file) if current_agent_file else None,
+                        'model': current_model or llm_model_display,
+                        'temperature': current_temperature if current_temperature is not None else llm_temperature_display,
+                        'work_dir': current_work_dir,
+                        'added_toolkit_configs': list(added_toolkit_configs),
+                        'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])],
+                    })
+                except Exception as e:
+                    logger.debug(f"Failed to save session state on exit: {e}")
                 console.print("\n\n[bold cyan]Goodbye! 👋[/bold cyan]")
                 break
     

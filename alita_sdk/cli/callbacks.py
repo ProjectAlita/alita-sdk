@@ -68,6 +68,18 @@ class CLICallbackHandler(BaseCallbackHandler):
         self.pending_tokens: Dict[str, List[str]] = defaultdict(list)
         self.current_model: str = ""
         self.step_counter: int = 0
+        
+        # External status spinner that can be stopped
+        self.status = None
+    
+    def _stop_status(self):
+        """Stop the external status spinner if set."""
+        if self.status is not None:
+            try:
+                self.status.stop()
+                self.status = None
+            except Exception:
+                pass
     
     def _format_json_content(self, data: Any, max_length: int = 1500) -> str:
         """Format data as pretty JSON string."""
@@ -137,6 +149,9 @@ class CLICallbackHandler(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Called when a tool starts running."""
+        # Stop the thinking spinner when a tool starts
+        self._stop_status()
+        
         if not self.show_tool_outputs:
             return
         

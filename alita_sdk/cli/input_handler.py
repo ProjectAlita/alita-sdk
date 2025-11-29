@@ -6,7 +6,7 @@ Provides tab completion for commands, cursor movement, and input history.
 
 import readline
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional, Any
 
 from rich.console import Console
 from rich.text import Text
@@ -31,6 +31,7 @@ CHAT_COMMANDS = [
     '/session resume',
     '/add_mcp',
     '/add_toolkit',
+    '/reload',
     'exit',
     'quit',
 ]
@@ -177,12 +178,19 @@ def chat_input(prompt: str = "") -> str:
     return get_input_handler().get_input(prompt)
 
 
-def styled_input() -> str:
+def styled_input(context_info: Optional[Dict[str, Any]] = None) -> str:
     """
     Get user input with a styled bordered prompt that works correctly with readline.
     
     The prompt is passed directly to input() so readline can properly
     handle cursor positioning and history navigation.
+    
+    Args:
+        context_info: Optional context info dict with keys:
+            - used_tokens: Current tokens in context
+            - max_tokens: Maximum allowed tokens
+            - fill_ratio: Context fill ratio (0.0-1.0)
+            - pruned_count: Number of pruned messages
     
     Returns:
         The user's input string
@@ -193,11 +201,28 @@ def styled_input() -> str:
     except Exception:
         width = 78
     
+    # Build context indicator if provided
+    context_indicator = ""
+    if context_info and context_info.get('max_tokens', 0) > 0:
+        context_indicator = _format_context_indicator(
+            context_info.get('used_tokens', 0),
+            context_info.get('max_tokens', 8000),
+            context_info.get('fill_ratio', 0.0),
+            context_info.get('pruned_count', 0),
+        )
+    
     # Print the complete box frame first, then move cursor up to input line
     console.print()
     console.print(f"[dim]╭{'─' * width}╮[/dim]")
     console.print(f"[dim]│[/dim]{' ' * width}[dim]│[/dim]")
-    console.print(f"[dim]╰{'─' * width}╯[/dim]")
+    
+    # Bottom border with context indicator on the right
+    if context_indicator:
+        indicator_len = len(_strip_ansi(context_indicator))
+        padding = width - indicator_len - 1
+        console.print(f"[dim]╰{'─' * padding}[/dim]{context_indicator}[dim]─╯[/dim]")
+    else:
+        console.print(f"[dim]╰{'─' * width}╯[/dim]")
     
     # Move cursor up 2 lines and to position after "│ > "
     # \033[2A = move up 2 lines, \033[4C = move right 4 columns
@@ -209,6 +234,64 @@ def styled_input() -> str:
     console.print()
     
     return user_input
+
+
+def _format_context_indicator(
+    used_tokens: int,
+    max_tokens: int,
+    fill_ratio: float,
+    pruned_count: int = 0
+) -> str:
+    """
+    Format context usage indicator for display.
+    
+    Shows: [1234/8000 ██████░░░░ 15%]
+    Color coded: green <70%, yellow 70-90%, red >90%
+    
+    Args:
+        used_tokens: Current tokens in context
+        max_tokens: Maximum allowed tokens
+        fill_ratio: Context fill ratio (0.0-1.0)
+        pruned_count: Number of pruned messages
+        
+    Returns:
+        Formatted indicator string with ANSI colors
+    """
+    # Determine color based on fill ratio
+    if fill_ratio < 0.7:
+        color = "green"
+    elif fill_ratio < 0.9:
+        color = "yellow"
+    else:
+        color = "red"
+    
+    # Build progress bar (10 chars)
+    bar_width = 10
+    filled = int(fill_ratio * bar_width)
+    empty = bar_width - filled
+    bar = "█" * filled + "░" * empty
+    
+    # Format percentage
+    percent = int(fill_ratio * 100)
+    
+    # Build indicator
+    indicator = f"[{color}]{used_tokens}/{max_tokens} {bar} {percent}%[/{color}]"
+    
+    # Add pruned count if any
+    if pruned_count > 0:
+        indicator += f" [dim]({pruned_count} pruned)[/dim]"
+    
+    return indicator
+
+
+def _strip_ansi(text: str) -> str:
+    """Strip ANSI escape codes and Rich markup from text for length calculation."""
+    import re
+    # Remove Rich markup tags like [green], [/green], [dim], etc.
+    text = re.sub(r'\[/?[^\]]+\]', '', text)
+    # Remove ANSI escape codes
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+    return text
 
 
 def styled_selection_input(prompt_text: str = "Select") -> str:

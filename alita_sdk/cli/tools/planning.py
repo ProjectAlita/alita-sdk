@@ -102,6 +102,84 @@ def load_session_metadata(session_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def update_session_metadata(session_id: str, updates: Dict[str, Any]) -> None:
+    """
+    Update session metadata by merging new fields into existing metadata.
+    
+    This preserves existing fields while updating/adding new ones.
+    
+    Args:
+        session_id: The session ID
+        updates: Dictionary with fields to update/add
+    """
+    existing = load_session_metadata(session_id) or {}
+    existing.update(updates)
+    save_session_metadata(session_id, existing)
+    logger.debug(f"Updated session metadata with: {list(updates.keys())}")
+
+
+def get_alita_dir() -> Path:
+    """Get the ALITA_DIR path."""
+    return Path(os.environ.get('ALITA_DIR', os.path.expanduser('~/.alita')))
+
+
+def to_portable_path(path: str) -> str:
+    """
+    Convert an absolute path to a portable path for session storage.
+    
+    If the path is under $ALITA_DIR, store as relative path (e.g., 'agents/my-agent.yaml').
+    Otherwise, store the absolute path.
+    
+    Args:
+        path: Absolute file path
+        
+    Returns:
+        Portable path string (relative to ALITA_DIR if applicable, else absolute)
+    """
+    if not path:
+        return path
+    
+    try:
+        path_obj = Path(path).resolve()
+        alita_dir = get_alita_dir().resolve()
+        
+        # Check if path is under ALITA_DIR
+        if str(path_obj).startswith(str(alita_dir)):
+            relative = path_obj.relative_to(alita_dir)
+            return str(relative)
+    except (ValueError, OSError):
+        pass
+    
+    return str(path)
+
+
+def from_portable_path(portable_path: str) -> str:
+    """
+    Convert a portable path back to an absolute path.
+    
+    If the path is relative, resolve it against $ALITA_DIR.
+    Otherwise, return as-is.
+    
+    Args:
+        portable_path: Portable path string from session storage
+        
+    Returns:
+        Absolute file path
+    """
+    if not portable_path:
+        return portable_path
+    
+    path_obj = Path(portable_path)
+    
+    # If already absolute, return as-is
+    if path_obj.is_absolute():
+        return str(path_obj)
+    
+    # Resolve relative path against ALITA_DIR
+    alita_dir = get_alita_dir()
+    return str(alita_dir / portable_path)
+
+
 class PlanStep(BaseModel):
     """A single step in a plan."""
     description: str = Field(description="Step description")

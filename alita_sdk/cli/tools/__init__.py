@@ -14,7 +14,10 @@ from .planning import (
     create_session_memory,
     save_session_metadata,
     load_session_metadata,
+    update_session_metadata,
     get_session_dir,
+    to_portable_path,
+    from_portable_path,
 )
 from .approval import create_approval_wrapper, ApprovalToolWrapper, prompt_approval
 
@@ -29,7 +32,10 @@ __all__ = [
     'create_session_memory',
     'save_session_metadata',
     'load_session_metadata',
+    'update_session_metadata',
     'get_session_dir',
+    'to_portable_path',
+    'from_portable_path',
     'create_approval_wrapper',
     'ApprovalToolWrapper',
     'prompt_approval',

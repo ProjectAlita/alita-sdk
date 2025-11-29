@@ -13,6 +13,7 @@ from ..langchain.utils import create_pydantic_model, propagate_the_input_mapping
 
 logger = logging.getLogger(__name__)
 
+
 class LLMNode(BaseTool):
     """Enhanced LLM node with chat history and tool binding support"""
     
@@ -314,7 +315,8 @@ class LLMNode(BaseTool):
                     except Exception as e:
                         import traceback
                         error_details = traceback.format_exc()
-                        logger.error(f"Error executing tool '{tool_name}': {e}\n{error_details}")
+                        # Use debug level to avoid duplicate output when CLI callbacks are active
+                        logger.debug(f"Error executing tool '{tool_name}': {e}\n{error_details}")
                         # Create error tool message
                         from langchain_core.messages import ToolMessage
                         tool_message = ToolMessage(
@@ -351,10 +353,11 @@ class LLMNode(BaseTool):
                 new_messages.append(AIMessage(content=error_msg))
                 break
 
-        # Log completion status
+        # Handle max iterations
         if iteration >= self.steps_limit:
             logger.warning(f"Reached maximum iterations ({self.steps_limit}) for tool execution")
-            # Add a warning message to the chat
+            
+            # Add warning message - CLI or calling code can detect this and prompt user
             warning_msg = f"Maximum tool execution iterations ({self.steps_limit}) reached. Stopping tool execution."
             new_messages.append(AIMessage(content=warning_msg))
         else:
