@@ -453,41 +453,63 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         return super().validate_toolkit(values)
 
     def _parse_issues(self, issues: Dict) -> List[dict]:
-        parsed = []
-        for issue in issues["issues"]:
-            if len(parsed) >= self.limit:
+        parsed: List[dict] = []
+        issues_list = issues.get("issues") if isinstance(issues, dict) else None
+        if not isinstance(issues_list, list):
+            return parsed
+
+        for issue in issues_list:
+            if self.limit and len(parsed) >= self.limit:
                 break
-            issue_fields = issue["fields"]
-            key = issue["key"]
-            id = issue["id"]
-            summary = issue_fields["summary"]
-            description = issue_fields["description"]
-            created = issue_fields["created"][0:10]
-            updated = issue_fields["updated"]
-            duedate = issue_fields["duedate"]
-            priority = issue_fields["priority"]["name"]
-            status = issue_fields["status"]["name"]
-            project_id = issue_fields["project"]["id"]
-            issue_url = f"{self._client.url}browse/{key}"
-            try:
-                assignee = issue_fields["assignee"]["displayName"]
-            except Exception:
-                assignee = "None"
+
+            issue_fields = issue.get("fields") or {}
+            key = issue.get("key", "")
+            issue_id = issue.get("id", "")
+
+            summary = issue_fields.get("summary") or ""
+            description = issue_fields.get("description") or ""
+            created_raw = issue_fields.get("created") or ""
+            created = created_raw[:10] if created_raw else ""
+            updated = issue_fields.get("updated") or ""
+            duedate = issue_fields.get("duedate")
+
+            priority_info = issue_fields.get("priority") or {}
+            priority = priority_info.get("name") or "None"
+
+            status_info = issue_fields.get("status") or {}
+            status = status_info.get("name") or "Unknown"
+
+            project_info = issue_fields.get("project") or {}
+            project_id = project_info.get("id") or ""
+
+            issue_url = f"{self._client.url}browse/{key}" if key else self._client.url
+
+            assignee_info = issue_fields.get("assignee") or {}
+            assignee = assignee_info.get("displayName") or "None"
+
             rel_issues = {}
-            for related_issue in issue_fields["issuelinks"]:
-                if "inwardIssue" in related_issue.keys():
-                    rel_type = related_issue["type"]["inward"]
-                    rel_key = related_issue["inwardIssue"]["key"]
+            for related_issue in issue_fields.get("issuelinks") or []:
+                rel_type = None
+                rel_key = None
+                if related_issue.get("inwardIssue"):
+                    rel_type = related_issue.get("type", {}).get("inward")
+                    rel_key = related_issue["inwardIssue"].get("key")
                     # rel_summary = related_issue["inwardIssue"]["fields"]["summary"]
-                if "outwardIssue" in related_issue.keys():
-                    rel_type = related_issue["type"]["outward"]
-                    rel_key = related_issue["outwardIssue"]["key"]
+                elif related_issue.get("outwardIssue"):
+                    rel_type = related_issue.get("type", {}).get("outward")
+                    rel_key = related_issue["outwardIssue"].get("key")
                     # rel_summary = related_issue["outwardIssue"]["fields"]["summary"]
-                rel_issues = {"type": rel_type, "key": rel_key, "url": f"{self._client.url}browse/{rel_key}"}
+
+                if rel_type and rel_key:
+                    rel_issues = {
+                        "type": rel_type,
+                        "key": rel_key,
+                        "url": f"{self._client.url}browse/{rel_key}",
+                    }
 
             parsed_issue = {
                 "key": key,
-                "id": id,
+                "id": issue_id,
                 "projectId": project_id,
                 "summary": summary,
                 "description": description,
@@ -500,10 +522,13 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                 "url": issue_url,
                 "related_issues": rel_issues,
             }
-            for field in self.additional_fields:
-                field_value = issue_fields.get(field, None)
+
+            for field in (self.additional_fields or []):
+                field_value = issue_fields.get(field)
                 parsed_issue[field] = field_value
+
             parsed.append(parsed_issue)
+
         return parsed
 
     @staticmethod
