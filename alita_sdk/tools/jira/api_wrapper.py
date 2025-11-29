@@ -749,13 +749,24 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
 
         attachment_data = []
         attachments = self._client.get_attachments_ids_from_issue(issue=jira_issue_key)
+        api_version = str(getattr(self._client, "api_version", "2"))
         for attachment in attachments:
             if attachment_pattern and not re.search(attachment_pattern, attachment['filename']):
                 logger.info(f"Skipping attachment {attachment['filename']} as it does not match pattern {attachment_pattern}")
                 continue
             logger.info(f"Processing attachment {attachment['filename']} with ID {attachment['attachment_id']}")
             try:
-                attachment_content = self._client.get_attachment_content(attachment['attachment_id'])
+                attachment_content = None
+
+                # Cloud (REST v3) attachments require signed URLs returned from metadata
+                if api_version in {"3", "latest"} or self.cloud:
+                    attachment_content = self._download_attachment_v3(
+                        attachment['attachment_id'],
+                        attachment['filename']
+                    )
+
+                if attachment_content is None:
+                    attachment_content = self._client.get_attachment_content(attachment['attachment_id'])
             except Exception as e:
                 logger.error(
                     f"Failed to download attachment {attachment['filename']} for issue {jira_issue_key}: {str(e)}")
@@ -796,15 +807,6 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         response_string = f"HTTP: {method} {relative_url} -> {response.status_code} {response.reason} {response_text}"
         logger.debug(response_string)
         return response_string
-
-    def _extract_attachment_content(self, attachment):
-        """Extract attachment's content if possible (used for api v.2)"""
-
-        try:
-            content = self._client.get(attachment['content'].replace(self.base_url, ''))
-        except Exception as e:
-            content = f"Unable to parse content of '{attachment['filename']}' due to: {str(e)}"
-        return f"filename: {attachment['filename']}\ncontent: {content}"
 
     # Helper functions for image processing
     @staticmethod
@@ -1037,6 +1039,30 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         except Exception as e:
             logger.error(f"Error downloading attachment: {str(e)}")
             return None
+
+    def _download_attachment_v3(self, attachment_id: str, filename: str | None = None) -> Optional[bytes]:
+        """Download Jira attachment using metadata content URL (required for REST v3 / Cloud)."""
+        try:
+            metadata = self._client.get_attachment(attachment_id)
+        except Exception as e:
+            logger.error(f"Failed to retrieve metadata for attachment {attachment_id}: {str(e)}")
+            return None
+
+        download_url = metadata.get('content') or metadata.get('_links', {}).get('content')
+
+        if not download_url:
+            logger.warning(
+                f"Attachment {attachment_id} ({filename}) metadata does not include a content URL; falling back.")
+            return None
+
+        logger.info(f"Downloading attachment {attachment_id} via metadata content URL (v3).")
+        content = self._download_attachment(download_url)
+
+        if content is None:
+            logger.error(
+                f"Failed to download attachment {attachment_id} ({filename}) from v3 content URL: {download_url}")
+
+        return content
 
     def _extract_image_data(self, field_data):
         """
