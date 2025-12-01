@@ -271,7 +271,7 @@ def _init_single_mcp_tool(server_toolkit_name, toolkit_name, available_tool, ali
         tool_name = f'{toolkit_name}{TOOLKIT_SPLITTER}{available_tool["name"]}'
         return McpServerTool(
             name=tool_name,
-            description=f"MCP for a tool '{tool_name}': {available_tool.get("description", "")}",
+            description=f"MCP for a tool '{tool_name}': {available_tool.get('description', '')}",
             args_schema=McpServerTool.create_pydantic_model_from_schema(
                 available_tool.get("inputSchema", {})
             ),

@@ -1,0 +1,87 @@
+name: Test Execution
+
+on:
+  push:
+    branches:
+      - ai_test
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test-execution:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull Docker image
+        run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Run docker-compose
+        env:
+          GIT_TOOL_ACCESS_TOKEN: ${{ secrets.GIT_TOOL_ACCESS_TOKEN }}
+          DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL }}
+          API_KEY: ${{ secrets.ALITA_API_KEY }}
+          PROJECT_ID: ${{ secrets.PROJECT_ID }}
+        run: |
+          docker-compose up -d
+          
+      - name: Wait for tests to complete
+        run: |
+          echo "Waiting for test execution to complete..."
+          sleep 30
+          docker-compose logs alita-sdk
+          
+      - name: Copy test results
+        run: |
+          docker cp alita-sdk-dev:/app/.github/ai_native/results/test_execution_summary.json ./test_execution_summary.json || echo "{}" > ./test_execution_summary.json
+          
+      - name: Stop docker-compose
+        if: always()
+        run: docker-compose down
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: (!cancelled())
+        with:
+            files: |
+              .github/ai_native/results/**/*.xml
+
+      - name: Upload test results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            ./test_execution_summary.json
+            .github/ai_native/results/
+          retention-days: 30
+
+      - name: Fail workflow if tests failed
+        if: always()
+        run: |
+          if [ -f ./test_execution_summary.json ]; then
+            RESULT=$(jq -r '.overall_result' ./test_execution_summary.json)
+            if [ "$RESULT" != "pass" ]; then
+              echo "Tests failed with result: $RESULT"
+              exit 1
+            fi
+          else
+            echo "Test summary file not found"
+            exit 1
+          fi
