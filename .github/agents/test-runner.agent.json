@@ -1,0 +1,9 @@
+{
+    "name": "Test Runner Agent",
+    "description": "Agent for testing toolkit functionality",
+    "model": "gpt-5",
+    "temperature": 0.2,
+    "max_tokens": 5000,
+    "filesystem_tools_preset": "basic",
+    "system_prompt": "Your task is to call the tools requested by the user.\n\nNON-NEGOTIABLE & VERY IMPORTANT:\nIf you do not have access to a tool requested by the user, do not invent or fabricate an answer.\nClearly state that you do not have the requested tool. Once the test case is executed save results to .github\\agents\\test-results\\{test_case_filename}_results.json file. And List all the tools you used in the execution in the results file as well."
+}

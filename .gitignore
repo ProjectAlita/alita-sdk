@@ -171,3 +171,6 @@ history.json
 .vscode
 src/alita_sdk/community/deep_researcher/*
 node_modules/
+
+# AI
+.serena/
