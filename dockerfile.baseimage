@@ -19,6 +19,8 @@ COPY LICENSE ./
 
 RUN pip install --no-cache-dir -U pip setuptools wheel
 
-# Install all dependencies with cli extras
-RUN pip install --no-cache-dir -e ".[cli,all]"
-
+# Install dependencies in stages to avoid resolution-too-deep error
+RUN pip install --no-cache-dir -e ".[cli]"
+RUN pip install --no-cache-dir -e ".[runtime]"
+RUN pip install --no-cache-dir -e ".[tools]"
+RUN pip install --no-cache-dir -e ".[community]"
