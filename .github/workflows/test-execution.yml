@@ -41,12 +41,11 @@ jobs:
           docker pull ${{ env.REGISTRY }}/$IMAGE_NAME:latest
 
       - name: Run docker-compose
-        env:
-          GIT_TOOL_ACCESS_TOKEN: ${{ secrets.GIT_TOOL_ACCESS_TOKEN }}
-          DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL }}
-          API_KEY: ${{ secrets.ALITA_API_KEY }}
-          PROJECT_ID: ${{ secrets.PROJECT_ID }}
         run: |
+          export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
+          export DEPLOYMENT_URL="${{ secrets.DEPLOYMENT_URL }}"
+          export ALITA_API_KEY="${{ secrets.ALITA_API_KEY }}"
+          export PROJECT_ID="${{ secrets.PROJECT_ID }}"
           docker-compose up -d
           
       - name: Wait for tests to complete
