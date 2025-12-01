@@ -169,6 +169,12 @@ def toolkit_test(ctx, toolkit_type: str, tool: str, config_file, params,
             toolkit_config = json.load(config_file)
             logger.debug(f"Loaded toolkit config from {config_file.name}")
         
+        # Add the tool to selected_tools in the config
+        if 'selected_tools' not in toolkit_config:
+            toolkit_config['selected_tools'] = []
+        if tool not in toolkit_config['selected_tools']:
+            toolkit_config['selected_tools'].append(tool)
+        
         # Load tool parameters
         tool_params = {}
         if params:
