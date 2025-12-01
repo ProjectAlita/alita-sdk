@@ -3,7 +3,7 @@ name: Build and Push Docker Image
 on:
   push:
     branches:
-      - ai_native_tests
+      - ai_test
   workflow_dispatch:
 
 env:
