@@ -872,6 +872,16 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         else:
                             # All content was text, remove this message from the list
                             input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
+                    else:
+                        # Message came from input['input'], not from input['messages']
+                        # If there are non-text parts (images, etc.), preserve them in messages
+                        if non_text_parts:
+                            # Initialize messages if it doesn't exist or is empty
+                            if not input.get('messages'):
+                                input['messages'] = []
+                            # Create a new message with only non-text content
+                            non_text_message = HumanMessage(content=non_text_parts)
+                            input['messages'].append(non_text_message)
                 
                 elif isinstance(current_content, str):
                     # on regenerate case
