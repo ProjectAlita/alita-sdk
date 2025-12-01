@@ -22,6 +22,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Docker Compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -57,12 +63,59 @@ jobs:
         if: always()
         run: docker-compose down
 
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: (!cancelled())
-        with:
-            files: |
-              .github/ai_native/results/**/*.xml
+      - name: Generate Test Summary
+        if: always()
+        run: |
+          if [ -f ./test_execution_summary.json ]; then
+            echo "# Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Overall Results
+            OVERALL=$(jq -r '.overall_result' ./test_execution_summary.json)
+            TOTAL=$(jq -r '.summary.total_tests' ./test_execution_summary.json)
+            PASSED=$(jq -r '.summary.passed' ./test_execution_summary.json)
+            FAILED=$(jq -r '.summary.failed' ./test_execution_summary.json)
+            PASS_RATE=$(jq -r '.summary.pass_rate' ./test_execution_summary.json)
+            
+            if [ "$OVERALL" = "pass" ]; then
+              echo "## ✅ Overall Result: PASS" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## ❌ Overall Result: FAIL" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Total Tests:** $TOTAL | **Passed:** $PASSED | **Failed:** $FAILED | **Pass Rate:** $PASS_RATE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Test Cases Table
+            echo "## Test Cases" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Test Case | Status | Steps |" >> $GITHUB_STEP_SUMMARY
+            echo "|-----------|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            
+            jq -r '.test_cases[] | 
+              "| " + .title + " | " + 
+              (if .passed then "✅ PASS" else "❌ FAIL" end) + " | " + 
+              (.steps | length | tostring) + " |"
+            ' ./test_execution_summary.json >> $GITHUB_STEP_SUMMARY
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Detailed Steps
+            echo "## Detailed Steps" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            jq -r '.test_cases[] | 
+              "### " + (if .passed then "✅" else "❌" end) + " " + .title + "\n\n" +
+              (.steps[] | 
+                "**Step " + (.step_number | tostring) + ":** " + .title + "\n" +
+                "- " + (if .passed then "✅ PASSED" else "❌ FAILED" end) + ": " + .details + "\n"
+              ) + "\n"
+            ' ./test_execution_summary.json >> $GITHUB_STEP_SUMMARY
+          else
+            echo "# ⚠️ Test Summary Not Found" >> $GITHUB_STEP_SUMMARY
+            echo "Test execution summary file was not generated." >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload test results as artifact
         if: always()
