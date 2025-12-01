@@ -206,18 +206,37 @@ class AlitaClient:
 
         logger.info(f"Creating ChatOpenAI model: {model_name} with config: {model_config}")
 
-        return ChatOpenAI(
-            base_url=f"{self.base_url}{self.llm_path}",
-            model=model_name,
-            api_key=self.auth_token,
-            streaming=model_config.get("streaming", True),
-            stream_usage=model_config.get("stream_usage", True),
-            max_tokens=model_config.get("max_tokens", None),
-            temperature=model_config.get("temperature"),
-            max_retries=model_config.get("max_retries", 3),
-            seed=model_config.get("seed", None),
-            openai_organization=str(self.project_id),
-        )
+        try:
+            from tools import this  # pylint: disable=E0401,C0415
+            worker_config = this.for_module("indexer_worker").descriptor.config
+        except:  # pylint: disable=W0702
+            worker_config = {}
+
+        use_responses_api = False
+
+        if worker_config and isinstance(worker_config, dict):
+            for target_name_tag in worker_config.get("use_responses_api_for", []):
+                if target_name_tag in model_name:
+                    use_responses_api = True
+                    break
+
+        target_kwargs = {
+            "base_url": f"{self.base_url}{self.llm_path}",
+            "model": model_name,
+            "api_key": self.auth_token,
+            "streaming": model_config.get("streaming", True),
+            "stream_usage": model_config.get("stream_usage", True),
+            "max_tokens": model_config.get("max_tokens", None),
+            "temperature": model_config.get("temperature"),
+            "max_retries": model_config.get("max_retries", 3),
+            "seed": model_config.get("seed", None),
+            "openai_organization": str(self.project_id),
+        }
+
+        if use_responses_api:
+            target_kwargs["use_responses_api"] = True
+
+        return ChatOpenAI(**target_kwargs)
 
     def generate_image(self,
                        prompt: str,
