@@ -916,14 +916,30 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
         try:
-            if result.get(PRINTER_NODE_RS) == PRINTER_COMPLETED_STATE:
-                output = next((msg.content for msg in reversed(result['messages']) if not isinstance(msg, HumanMessage)),
-                              result['messages'][-1].content)
+            # Check if printer node output exists
+            printer_output = result.get(PRINTER_NODE_RS)
+            if printer_output == PRINTER_COMPLETED_STATE:
+                # Printer completed, extract last AI message
+                messages = result['messages']
+                output = next(
+                    (msg.content for msg in reversed(messages)
+                     if not isinstance(msg, HumanMessage)),
+                    messages[-1].content
+                )
+            elif printer_output is not None:
+                # Printer node has output (interrupted state)
+                output = printer_output
             else:
-                # used for printer node output - it will be reset by next `reset` node
-                output = result.get(PRINTER_NODE_RS)
-        except:
-            output = list(result.values())[-1]
+                # No printer node, extract last AI message from messages
+                messages = result.get('messages', [])
+                output = next(
+                    (msg.content for msg in reversed(messages)
+                     if not isinstance(msg, HumanMessage)),
+                    None
+                )
+        except Exception:
+            # Fallback: try to get last value or last message
+            output = list(result.values())[-1] if result else None
         config_state = self.get_state(config)
         is_execution_finished = not config_state.next
         if is_execution_finished:
