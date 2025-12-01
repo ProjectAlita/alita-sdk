@@ -49,6 +49,7 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
     client_id: str = None
     client_secret: SecretStr = None
     token: SecretStr = None
+    in_browser_auth: bool = False
     _client: Optional[ClientContext] = PrivateAttr()  # Private attribute for the office365 client
 
     @model_validator(mode='before')
@@ -63,13 +64,20 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                "`pip install office365-rest-python-client`"
             )
 
-        site_url = values['site_url']
+        site_urls = values['site_urls']
         client_id = values.get('client_id')
         client_secret = values.get('client_secret')
         token = values.get('token')
-
+        in_browser_auth = values.get('in_browser_auth', False)
+        #
+        if not isinstance(site_urls, list) or len(site_urls) == 0:
+            raise ToolException("site_urls must be a non-empty list.")
+        #
+        site_url = site_urls[0]
+        values['site_url'] = site_url
+        #
         try:
-            if client_id and client_secret:
+            if client_id and client_secret and not in_browser_auth:
                 credentials = ClientCredential(client_id, client_secret)
                 cls._client = ClientContext(site_url).with_credentials(credentials)
                 logging.info("Authenticated with secret id")

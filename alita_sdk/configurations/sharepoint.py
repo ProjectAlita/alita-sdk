@@ -16,4 +16,3 @@ class SharepointConfiguration(BaseModel):
     )
     client_id: str = Field(description="SharePoint Client ID")
     client_secret: SecretStr = Field(description="SharePoint Client Secret")
-    site_url: str = Field(description="SharePoint Site URL")
