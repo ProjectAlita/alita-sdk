@@ -3,6 +3,7 @@ from .sematic.statistical_chunker import statistical_chunker
 from .sematic.markdown_chunker import markdown_chunker
 from .sematic.proposal_chunker import proposal_chunker
 from .sematic.json_chunker import json_chunker
+from .universal_chunker import universal_chunker, chunk_single_document, get_file_type
 from .models import StatisticalChunkerConfig, MarkdownChunkerConfig, ProposalChunkerConfig
 
 __all__ = {
@@ -10,7 +11,8 @@ __all__ = {
     'statistical': statistical_chunker,
     'markdown': markdown_chunker,
     'proposal': proposal_chunker,
-    'json': json_chunker
+    'json': json_chunker,
+    'universal': universal_chunker,
 }
 
 __confluence_chunkers__ = {
