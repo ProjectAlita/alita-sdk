@@ -63,8 +63,10 @@ def init_config(output: str):
 
 
 @inventory.command('ingest')
-@click.option('--toolkit', '-t', required=True, type=click.Path(exists=True),
+@click.option('--toolkit', '-t', type=click.Path(exists=True),
               help='Path to toolkit config JSON (e.g., .alita/tools/github.json)')
+@click.option('--dir', '-d', 'directory', type=click.Path(exists=True, file_okay=False, dir_okay=True),
+              help='Local directory to ingest (alternative to --toolkit for local files)')
 @click.option('--graph', '-g', required=True, type=click.Path(),
               help='Path to output graph JSON file')
 @click.option('--config', '-c', type=click.Path(exists=True),
@@ -81,61 +83,102 @@ def init_config(output: str):
               help='Limit number of documents to process (for testing)')
 @click.option('--fresh', '-f', is_flag=True,
               help='Start fresh - delete existing graph and create new one')
+@click.option('--name', '-n', default=None,
+              help='Source name for the graph (default: directory name or toolkit_name)')
+@click.option('--recursive/--no-recursive', default=True,
+              help='Recursively scan subdirectories (default: recursive)')
 @click.pass_context
-def ingest(ctx, toolkit: str, graph: str, config: Optional[str], 
-           whitelist: tuple, blacklist: tuple, no_relations: bool, 
-           model: Optional[str], limit: Optional[int], fresh: bool):
+def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str, 
+           config: Optional[str], whitelist: tuple, blacklist: tuple, 
+           no_relations: bool, model: Optional[str], limit: Optional[int], 
+           fresh: bool, name: Optional[str], recursive: bool):
     """
     Run ingestion pipeline to build/update a knowledge graph.
     
-    All source configuration (type, repository, branch, credentials) comes
-    from the toolkit config file.
+    Use --toolkit for configured sources (GitHub, ADO, etc.) or --dir for
+    local directories (simpler, no config needed).
     
     Examples:
     
-        # Ingest markdown files from GitHub repo
+        # Ingest local directory (simple!)
+        alita inventory ingest --dir ./my-project -g ./graph.json -w "*.py" -w "*.md"
+        
+        # Ingest with custom name
+        alita inventory ingest --dir ./docs -g ./graph.json --name "my-docs"
+        
+        # Ingest from GitHub (requires toolkit config)
         alita inventory ingest -t .alita/tools/github.json -g ./graph.json -w "*.md"
         
         # Ingest with LLM/guardrails config
-        alita inventory ingest -t .alita/tools/github.json -g ./graph.json -c ./config.yml
-        
-        # Ingest Python files, skip relations
-        alita inventory ingest -t .alita/tools/localgit.json -g ./graph.json -w "*.py" --no-relations
+        alita inventory ingest --dir ./src -g ./graph.json -c ./config.yml
     """
-    # Load toolkit config
-    toolkit_config = _load_toolkit_config(toolkit)
-    click.echo(f"📦 Loaded toolkit config: {toolkit}")
+    # Validate: must have either --toolkit or --dir
+    if not toolkit and not directory:
+        raise click.ClickException("Must specify either --toolkit or --dir")
     
-    # Get source type from toolkit
-    source_type = toolkit_config.get('type')
-    if not source_type:
-        raise click.ClickException(f"Toolkit config missing 'type' field: {toolkit}")
-    click.echo(f"   Type: {source_type}")
+    if toolkit and directory:
+        raise click.ClickException("Cannot use both --toolkit and --dir. Choose one.")
     
-    # Get toolkit name (used as source identifier in the graph)
-    # Falls back to source_type if toolkit_name not specified
-    source_name = toolkit_config.get('toolkit_name') or source_type
-    click.echo(f"   Name: {source_name}")
-    
-    # Get repo/branch from toolkit config
-    repo = toolkit_config.get('repository')
-    if repo:
-        click.echo(f"   Repository: {repo}")
-    
-    branch = toolkit_config.get('active_branch') or toolkit_config.get('base_branch') or 'main'
-    click.echo(f"   Branch: {branch}")
-    
-    # Get path for local sources
-    path = toolkit_config.get('git_root_dir') or toolkit_config.get('path')
-    if path:
-        click.echo(f"   Path: {path}")
-    
-    # Validate required fields based on source type
-    if source_type in ('github', 'ado') and not repo:
-        raise click.ClickException(f"Toolkit config missing 'repository' for source '{source_type}'")
-    
-    if source_type in ('localgit', 'filesystem') and not path:
-        raise click.ClickException(f"Toolkit config missing 'git_root_dir' or 'path' for source '{source_type}'")
+    # Handle --dir mode (simple local directory ingestion)
+    if directory:
+        from pathlib import Path
+        dir_path = Path(directory).resolve()
+        source_name = name or dir_path.name
+        source_type = 'filesystem'
+        
+        click.echo(f"📂 Ingesting local directory: {dir_path}")
+        click.echo(f"   Name: {source_name}")
+        click.echo(f"   Recursive: {recursive}")
+        
+        # Create a simple toolkit config for the directory
+        toolkit_config = {
+            'type': 'filesystem',
+            'toolkit_name': source_name,
+            'base_directory': str(dir_path),
+            'recursive': recursive,
+        }
+        branch = None  # No branch for filesystem
+    else:
+        # Load toolkit config
+        toolkit_config = _load_toolkit_config(toolkit)
+        click.echo(f"📦 Loaded toolkit config: {toolkit}")
+        
+        # Get source type from toolkit
+        source_type = toolkit_config.get('type')
+        if not source_type:
+            raise click.ClickException(f"Toolkit config missing 'type' field: {toolkit}")
+        click.echo(f"   Type: {source_type}")
+        
+        # Get toolkit name (used as source identifier in the graph)
+        source_name = name or toolkit_config.get('toolkit_name') or source_type
+        click.echo(f"   Name: {source_name}")
+        
+        # Get repo/branch from toolkit config
+        repo = toolkit_config.get('repository')
+        if repo:
+            click.echo(f"   Repository: {repo}")
+        
+        branch = toolkit_config.get('active_branch') or toolkit_config.get('base_branch') or 'main'
+        click.echo(f"   Branch: {branch}")
+        
+        # Get path for local sources (filesystem or localgit)
+        path = (
+            toolkit_config.get('base_directory') or  # filesystem toolkit
+            toolkit_config.get('git_root_dir') or    # localgit toolkit
+            toolkit_config.get('path')               # generic path
+        )
+        if path:
+            click.echo(f"   Path: {path}")
+        
+        # Validate required fields based on source type
+        if source_type in ('github', 'ado') and not repo:
+            raise click.ClickException(f"Toolkit config missing 'repository' for source '{source_type}'")
+        
+        if source_type == 'filesystem' and not path:
+            raise click.ClickException(f"Toolkit config missing 'base_directory' or 'path' for source '{source_type}'")
+        
+        if source_type == 'localgit' and not path:
+            raise click.ClickException(f"Toolkit config missing 'git_root_dir' or 'path' for source '{source_type}'")
     
     # Handle --fresh option: delete existing graph
     if fresh and os.path.exists(graph):
@@ -601,23 +644,47 @@ def _get_source_toolkit(toolkit_config: Dict[str, Any]):
     Uses the SDK's toolkit factory pattern - all toolkits extend BaseCodeToolApiWrapper
     or BaseVectorStoreToolApiWrapper, which have loader() and chunker() methods.
     
+    Also supports CLI-specific toolkits like 'filesystem' for local document loading.
+    
     Args:
         toolkit_config: Toolkit configuration dict with 'type' and settings
         
     Returns:
         API wrapper instance with loader() method
     """
-    from alita_sdk.tools import AVAILABLE_TOOLS
-    
     source = toolkit_config.get('type')
     if not source:
         raise click.ClickException("Toolkit config missing 'type' field")
+    
+    # Handle filesystem type (CLI-specific, not in AVAILABLE_TOOLS)
+    if source == 'filesystem':
+        from .tools.filesystem import FilesystemApiWrapper
+        
+        base_directory = (
+            toolkit_config.get('base_directory') or
+            toolkit_config.get('path') or
+            toolkit_config.get('git_root_dir')
+        )
+        
+        if not base_directory:
+            raise click.ClickException(
+                "Filesystem toolkit requires 'base_directory' or 'path' field"
+            )
+        
+        return FilesystemApiWrapper(
+            base_directory=base_directory,
+            recursive=toolkit_config.get('recursive', True),
+            follow_symlinks=toolkit_config.get('follow_symlinks', False),
+        )
+    
+    # Handle standard SDK toolkits via AVAILABLE_TOOLS registry
+    from alita_sdk.tools import AVAILABLE_TOOLS
     
     # Check if toolkit type is available
     if source not in AVAILABLE_TOOLS:
         raise click.ClickException(
             f"Unknown toolkit type: {source}. "
-            f"Available: {', '.join(AVAILABLE_TOOLS.keys())}"
+            f"Available: {', '.join(list(AVAILABLE_TOOLS.keys()) + ['filesystem'])}"
         )
     
     toolkit_info = AVAILABLE_TOOLS[source]

@@ -4,7 +4,7 @@ CLI tools package.
 Contains specialized tools for CLI agents.
 """
 
-from .filesystem import get_filesystem_tools
+from .filesystem import get_filesystem_tools, FilesystemApiWrapper
 from .terminal import get_terminal_tools, create_default_blocked_patterns_file
 from .planning import (
     get_planning_tools, 
@@ -23,6 +23,7 @@ from .approval import create_approval_wrapper, ApprovalToolWrapper, prompt_appro
 
 __all__ = [
     'get_filesystem_tools',
+    'FilesystemApiWrapper',
     'get_terminal_tools',
     'create_default_blocked_patterns_file',
     'get_planning_tools',

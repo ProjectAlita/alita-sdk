@@ -3,14 +3,24 @@ Filesystem tools for CLI agents.
 
 Provides comprehensive file system operations restricted to specific directories.
 Inspired by MCP filesystem server implementation.
+
+Also provides a FilesystemApiWrapper for integration with the inventory ingestion
+pipeline, enabling local document loading and chunking.
 """
 
+import base64
+import fnmatch
+import hashlib
+import logging
 import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Generator
 from datetime import datetime
 from langchain_core.tools import BaseTool
+from langchain_core.documents import Document
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class ReadFileInput(BaseModel):
@@ -754,6 +764,452 @@ class ListAllowedDirectoriesTool(FileSystemTool):
     def _run(self) -> str:
         """List allowed directories."""
         return f"Allowed directory:\n{self.base_directory}\n\nAll subdirectories within this path are accessible."
+
+
+# ========== Filesystem API Wrapper for Inventory Ingestion ==========
+
+class FilesystemApiWrapper:
+    """
+    API Wrapper for filesystem operations compatible with inventory ingestion pipeline.
+    
+    Supports both text and non-text files:
+    - Text files: .py, .md, .txt, .json, .yaml, etc.
+    - Documents: .pdf, .docx, .pptx, .xlsx, .xls (converted to markdown)
+    - Images: .png, .jpg, .gif, .webp (base64 encoded or described via LLM)
+    
+    Usage:
+        # Create wrapper for a directory
+        wrapper = FilesystemApiWrapper(base_directory="/path/to/docs")
+        
+        # Load documents (uses inherited loader())
+        for doc in wrapper.loader(whitelist=["*.md", "*.pdf"]):
+            print(doc.page_content[:100])
+        
+        # For image description, provide an LLM
+        wrapper = FilesystemApiWrapper(base_directory="/path/to/docs", llm=my_llm)
+        for doc in wrapper.loader(whitelist=["*.png"]):
+            print(doc.page_content)  # LLM-generated description
+        
+        # Use with inventory ingestion
+        pipeline = IngestionPipeline(llm=llm, graph_path="./graph.json")
+        pipeline.register_toolkit("local_docs", wrapper)
+        result = pipeline.run(source="local_docs", whitelist=["*.md", "*.pdf"])
+    """
+    
+    # Filesystem-specific settings
+    base_directory: str = ""
+    recursive: bool = True
+    follow_symlinks: bool = False
+    llm: Any = None  # Optional LLM for image processing
+    
+    # File type categories
+    BINARY_EXTENSIONS = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls'}
+    IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'}
+    
+    def __init__(
+        self,
+        base_directory: str,
+        recursive: bool = True,
+        follow_symlinks: bool = False,
+        llm: Any = None,
+        **kwargs
+    ):
+        """
+        Initialize filesystem wrapper.
+        
+        Args:
+            base_directory: Root directory for file operations
+            recursive: If True, search subdirectories recursively
+            follow_symlinks: If True, follow symbolic links
+            llm: Optional LLM for image description (if not provided, images are base64 encoded)
+            **kwargs: Additional arguments (ignored, for compatibility)
+        """
+        self.base_directory = str(Path(base_directory).resolve())
+        self.recursive = recursive
+        self.follow_symlinks = follow_symlinks
+        self.llm = llm
+        
+        # For compatibility with BaseCodeToolApiWrapper.loader()
+        self.active_branch = None
+        
+        # Validate directory
+        if not Path(self.base_directory).exists():
+            raise ValueError(f"Directory does not exist: {self.base_directory}")
+        if not Path(self.base_directory).is_dir():
+            raise ValueError(f"Path is not a directory: {self.base_directory}")
+    
+    def _log_tool_event(self, message: str, tool_name: str = None):
+        """Log progress events (mirrors BaseToolApiWrapper)."""
+        logger.info(f"[{tool_name or 'filesystem'}] {message}")
+        try:
+            from langchain_core.callbacks import dispatch_custom_event
+            dispatch_custom_event(
+                name="thinking_step",
+                data={
+                    "message": message,
+                    "tool_name": tool_name or "filesystem",
+                    "toolkit": "FilesystemApiWrapper",
+                },
+            )
+        except Exception:
+            pass
+    
+    def _get_files(self, path: str = "", branch: str = None) -> List[str]:
+        """
+        Get list of files in the directory.
+        
+        Implements BaseCodeToolApiWrapper._get_files() for filesystem.
+        
+        Args:
+            path: Subdirectory path (relative to base_directory)
+            branch: Ignored for filesystem (compatibility with git-based toolkits)
+            
+        Returns:
+            List of file paths relative to base_directory
+        """
+        base = Path(self.base_directory)
+        search_path = base / path if path else base
+        
+        if not search_path.exists():
+            return []
+        
+        files = []
+        
+        if self.recursive:
+            for root, dirs, filenames in os.walk(search_path, followlinks=self.follow_symlinks):
+                # Skip hidden directories
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                
+                for filename in filenames:
+                    if filename.startswith('.'):
+                        continue
+                    
+                    full_path = Path(root) / filename
+                    try:
+                        rel_path = str(full_path.relative_to(base))
+                        files.append(rel_path)
+                    except ValueError:
+                        continue
+        else:
+            for entry in search_path.iterdir():
+                if entry.is_file() and not entry.name.startswith('.'):
+                    try:
+                        rel_path = str(entry.relative_to(base))
+                        files.append(rel_path)
+                    except ValueError:
+                        continue
+        
+        return sorted(files)
+    
+    def _is_binary_file(self, file_path: str) -> bool:
+        """Check if file is a binary document (PDF, DOCX, etc.)."""
+        ext = Path(file_path).suffix.lower()
+        return ext in self.BINARY_EXTENSIONS
+    
+    def _is_image_file(self, file_path: str) -> bool:
+        """Check if file is an image."""
+        ext = Path(file_path).suffix.lower()
+        return ext in self.IMAGE_EXTENSIONS
+    
+    def _read_binary_file(self, file_path: str) -> Optional[str]:
+        """
+        Read binary file (PDF, DOCX, PPTX, Excel) and convert to text/markdown.
+        
+        Uses the SDK's content_parser for document conversion.
+        
+        Args:
+            file_path: Path relative to base_directory
+            
+        Returns:
+            Converted text content, or None if conversion fails
+        """
+        full_path = Path(self.base_directory) / file_path
+        
+        try:
+            from alita_sdk.tools.utils.content_parser import parse_file_content
+            
+            result = parse_file_content(
+                file_path=str(full_path),
+                is_capture_image=bool(self.llm),  # Capture images if LLM available
+                llm=self.llm
+            )
+            
+            if isinstance(result, Exception):
+                logger.warning(f"Failed to parse {file_path}: {result}")
+                return None
+            
+            return result
+            
+        except ImportError:
+            logger.warning("content_parser not available, skipping binary file")
+            return None
+        except Exception as e:
+            logger.warning(f"Error parsing {file_path}: {e}")
+            return None
+    
+    def _read_image_file(self, file_path: str) -> Optional[str]:
+        """
+        Read image file and convert to text representation.
+        
+        If LLM is available, uses it to describe the image.
+        Otherwise, returns base64-encoded data URI.
+        
+        Args:
+            file_path: Path relative to base_directory
+            
+        Returns:
+            Image description or base64 data URI
+        """
+        full_path = Path(self.base_directory) / file_path
+        
+        if not full_path.exists():
+            return None
+        
+        ext = full_path.suffix.lower()
+        
+        try:
+            # Read image bytes
+            image_bytes = full_path.read_bytes()
+            
+            if self.llm:
+                # Use content_parser with LLM for image description
+                try:
+                    from alita_sdk.tools.utils.content_parser import parse_file_content
+                    
+                    result = parse_file_content(
+                        file_path=str(full_path),
+                        is_capture_image=True,
+                        llm=self.llm
+                    )
+                    
+                    if isinstance(result, Exception):
+                        logger.warning(f"Failed to describe image {file_path}: {result}")
+                    else:
+                        return f"[Image: {Path(file_path).name}]\n\n{result}"
+                        
+                except ImportError:
+                    pass
+            
+            # Fallback: return base64 data URI
+            mime_types = {
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp',
+                '.bmp': 'image/bmp',
+                '.svg': 'image/svg+xml',
+            }
+            mime_type = mime_types.get(ext, 'application/octet-stream')
+            b64_data = base64.b64encode(image_bytes).decode('utf-8')
+            
+            return f"[Image: {Path(file_path).name}]\ndata:{mime_type};base64,{b64_data}"
+            
+        except Exception as e:
+            logger.warning(f"Error reading image {file_path}: {e}")
+            return None
+    
+    def _read_file(
+        self,
+        file_path: str,
+        branch: str = None,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
+        head: Optional[int] = None,
+        tail: Optional[int] = None,
+    ) -> Optional[str]:
+        """
+        Read file content, handling text, binary documents, and images.
+        
+        Supports:
+        - Text files: Read directly with encoding detection
+        - Binary documents (PDF, DOCX, PPTX, Excel): Convert to markdown
+        - Images: Return LLM description or base64 data URI
+        
+        Args:
+            file_path: Path relative to base_directory
+            branch: Ignored for filesystem (compatibility with git-based toolkits)
+            offset: Start line number (1-indexed). If None, start from beginning.
+            limit: Maximum number of lines to read. If None, read to end.
+            head: Read only first N lines (alternative to offset/limit)
+            tail: Read only last N lines (alternative to offset/limit)
+            
+        Returns:
+            File content as string, or None if unreadable
+        """
+        full_path = Path(self.base_directory) / file_path
+        
+        # Security check - prevent path traversal
+        try:
+            full_path.resolve().relative_to(Path(self.base_directory).resolve())
+        except ValueError:
+            logger.warning(f"Access denied: {file_path} is outside base directory")
+            return None
+        
+        if not full_path.exists() or not full_path.is_file():
+            return None
+        
+        # Route to appropriate reader based on file type
+        # Note: offset/limit only apply to text files
+        if self._is_binary_file(file_path):
+            return self._read_binary_file(file_path)
+        
+        if self._is_image_file(file_path):
+            return self._read_image_file(file_path)
+        
+        # Default: read as text with encoding detection
+        encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+        
+        for encoding in encodings:
+            try:
+                content = full_path.read_text(encoding=encoding)
+                
+                # Apply line filtering if specified
+                if offset is not None or limit is not None or head is not None or tail is not None:
+                    lines = content.splitlines(keepends=True)
+                    
+                    if head is not None:
+                        # Read first N lines
+                        lines = lines[:head]
+                    elif tail is not None:
+                        # Read last N lines
+                        lines = lines[-tail:] if tail > 0 else []
+                    else:
+                        # Use offset/limit
+                        start_idx = (offset - 1) if offset and offset > 0 else 0
+                        if limit is not None:
+                            end_idx = start_idx + limit
+                            lines = lines[start_idx:end_idx]
+                        else:
+                            lines = lines[start_idx:]
+                    
+                    content = ''.join(lines)
+                
+                return content
+                
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                logger.warning(f"Failed to read {file_path}: {e}")
+                return None
+        
+        logger.warning(f"Could not decode {file_path} with any known encoding")
+        return None
+    
+    def read_file(
+        self,
+        file_path: str,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
+        head: Optional[int] = None,
+        tail: Optional[int] = None,
+    ) -> Optional[str]:
+        """
+        Public method to read file content with optional line range.
+        
+        Args:
+            file_path: Path relative to base_directory
+            offset: Start line number (1-indexed)
+            limit: Maximum number of lines to read
+            head: Read only first N lines
+            tail: Read only last N lines
+            
+        Returns:
+            File content as string
+        """
+        return self._read_file(file_path, offset=offset, limit=limit, head=head, tail=tail)
+    
+    def loader(
+        self,
+        branch: Optional[str] = None,
+        whitelist: Optional[List[str]] = None,
+        blacklist: Optional[List[str]] = None,
+        chunked: bool = True,
+    ) -> Generator[Document, None, None]:
+        """
+        Load documents from the filesystem.
+        
+        Mirrors BaseCodeToolApiWrapper.loader() interface for compatibility.
+        
+        Args:
+            branch: Ignored (kept for API compatibility with git-based loaders)
+            whitelist: File patterns to include (e.g., ['*.py', '*.md'])
+            blacklist: File patterns to exclude (e.g., ['*test*'])
+            chunked: If True, applies universal chunker based on file type
+        
+        Yields:
+            Document objects with page_content and metadata
+        """
+        _files = self._get_files()
+        self._log_tool_event(f"Found {len(_files)} files in {self.base_directory}", "loader")
+        
+        def is_whitelisted(file_path: str) -> bool:
+            if not whitelist:
+                return True
+            return (
+                any(fnmatch.fnmatch(file_path, p) for p in whitelist) or
+                any(fnmatch.fnmatch(Path(file_path).name, p) for p in whitelist) or
+                any(file_path.endswith(f'.{p.lstrip("*.")}') for p in whitelist if p.startswith('*.'))
+            )
+        
+        def is_blacklisted(file_path: str) -> bool:
+            if not blacklist:
+                return False
+            return (
+                any(fnmatch.fnmatch(file_path, p) for p in blacklist) or
+                any(fnmatch.fnmatch(Path(file_path).name, p) for p in blacklist)
+            )
+        
+        def raw_document_generator() -> Generator[Document, None, None]:
+            self._log_tool_event("Reading files...", "loader")
+            total_files = len(_files)
+            processed = 0
+            
+            for idx, file_path in enumerate(_files, 1):
+                if is_whitelisted(file_path) and not is_blacklisted(file_path):
+                    content = self._read_file(file_path)
+                    if not content:
+                        continue
+                    
+                    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+                    processed += 1
+                    
+                    yield Document(
+                        page_content=content,
+                        metadata={
+                            'file_path': file_path,
+                            'file_name': Path(file_path).name,
+                            'source': file_path,
+                            'commit_hash': content_hash,
+                        }
+                    )
+                
+                if idx % 20 == 0 or idx == total_files:
+                    self._log_tool_event(f"Checked {idx}/{total_files} files, {processed} matched", "loader")
+            
+            self._log_tool_event(f"Loaded {processed} files", "loader")
+        
+        if not chunked:
+            return raw_document_generator()
+        
+        try:
+            from alita_sdk.tools.chunkers.universal_chunker import universal_chunker
+            return universal_chunker(raw_document_generator())
+        except ImportError:
+            logger.warning("Universal chunker not available, returning raw documents")
+            return raw_document_generator()
+    
+    def chunker(self, documents: Generator[Document, None, None]) -> Generator[Document, None, None]:
+        """Apply universal chunker to documents."""
+        try:
+            from alita_sdk.tools.chunkers.universal_chunker import universal_chunker
+            return universal_chunker(documents)
+        except ImportError:
+            return documents
+    
+    def get_files_content(self, file_path: str) -> Optional[str]:
+        """Get file content (compatibility alias for retrieval toolkit)."""
+        return self._read_file(file_path)
 
 
 # Predefined tool presets for common use cases
