@@ -589,27 +589,37 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
     def loader(self,
                branch: Optional[str] = None,
                whitelist: Optional[List[str]] = None,
-               blacklist: Optional[List[str]] = None) -> str:
+               blacklist: Optional[List[str]] = None,
+               chunked: bool = True) -> Generator[Document, None, None]:
         """
-        Generates file content from a branch, respecting whitelist and blacklist patterns.
+        Generates Documents from files in a branch, respecting whitelist and blacklist patterns.
 
         Parameters:
         - branch (Optional[str]): Branch for listing files. Defaults to the current branch if None.
         - whitelist (Optional[List[str]]): File extensions or paths to include. Defaults to all files if None.
         - blacklist (Optional[List[str]]): File extensions or paths to exclude. Defaults to no exclusions if None.
+        - chunked (bool): If True (default), applies universal chunker based on file type.
+                         If False, returns raw Documents without chunking.
 
         Returns:
-        - generator: Yields content from files matching the whitelist but not the blacklist.
+        - generator: Yields Documents from files matching the whitelist but not the blacklist.
 
         Example:
         # Use 'feature-branch', include '.py' files, exclude 'test_' files
-        file_generator = loader(branch='feature-branch', whitelist=['*.py'], blacklist=['*test_*'])
+        for doc in loader(branch='feature-branch', whitelist=['*.py'], blacklist=['*test_*']):
+            print(doc.page_content)
 
         Notes:
         - Whitelist and blacklist use Unix shell-style wildcards.
         - Files must match the whitelist and not the blacklist to be included.
+        - When chunked=True:
+          - .md files → markdown chunker (header-based splitting)
+          - .py/.js/.ts/etc → code parser (TreeSitter-based)
+          - .json files → JSON chunker
+          - other files → default text chunker
         """
-        from .chunkers.code.codeparser import parse_code_files_for_db
+        from langchain_core.documents import Document
+        import hashlib
 
         _files = self.__handle_get_files("", self.__get_branch(branch))
         self._log_tool_event(message="Listing files in branch", tool_name="loader")
@@ -627,32 +637,52 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
                         or any(file_path.endswith(f'.{pattern}') for pattern in blacklist))
             return False
 
-        def file_content_generator():
+        def raw_document_generator() -> Generator[Document, None, None]:
+            """Yields raw Documents without chunking."""
             self._log_tool_event(message="Reading the files", tool_name="loader")
-            # log the progress of file reading
             total_files = len(_files)
+            processed = 0
+            
             for idx, file in enumerate(_files, 1):
                 if is_whitelisted(file) and not is_blacklisted(file):
-                    # read file ONLY if it matches whitelist and does not match blacklist
                     try:
                         file_content = self._read_file(file, self.__get_branch(branch))
                     except Exception as e:
                         logger.error(f"Failed to read file {file}: {e}")
-                        file_content = ""
-                    if not file_content:
-                        # empty file, skip
                         continue
-                    # hash the file content to ensure uniqueness
-                    import hashlib
+                    
+                    if not file_content:
+                        continue
+                    
+                    # Hash the file content for uniqueness tracking
                     file_hash = hashlib.sha256(file_content.encode("utf-8")).hexdigest()
-                    yield {"file_name": file,
-                           "file_content": file_content,
-                           "commit_hash": file_hash}
+                    processed += 1
+                    
+                    yield Document(
+                        page_content=file_content,
+                        metadata={
+                            'file_path': file,
+                            'file_name': file,
+                            'source': file,
+                            'commit_hash': file_hash,
+                        }
+                    )
+                
                 if idx % 10 == 0 or idx == total_files:
-                    self._log_tool_event(message=f"{idx} out of {total_files} files have been read", tool_name="loader")
-            self._log_tool_event(message=f"{len(_files)} have been read", tool_name="loader")
+                    self._log_tool_event(
+                        message=f"{idx} out of {total_files} files checked, {processed} matched",
+                        tool_name="loader"
+                    )
+            
+            self._log_tool_event(message=f"{processed} files loaded", tool_name="loader")
 
-        return parse_code_files_for_db(file_content_generator())
+        if not chunked:
+            # Return raw documents without chunking
+            return raw_document_generator()
+        
+        # Apply universal chunker based on file type
+        from .chunkers.universal_chunker import universal_chunker
+        return universal_chunker(raw_document_generator())
     
     def index_data(self,
                    index_name: str,
