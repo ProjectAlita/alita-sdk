@@ -79,6 +79,57 @@ def _get_alita_system_prompt(config) -> str:
     return DEFAULT_PROMPT
 
 
+def _get_inventory_system_prompt(config) -> str:
+    """
+    Get the Inventory agent system prompt from user config or fallback to default.
+    
+    Checks for $ALITA_DIR/agents/inventory.agent.md first, then falls back
+    to the default prompt with inventory-specific instructions.
+    
+    Returns:
+        The system prompt string for Inventory agent
+    """
+    from .agent.default import DEFAULT_PROMPT
+    
+    # Check for user-customized prompt
+    custom_prompt_path = Path(config.agents_dir) / 'inventory.agent.md'
+    
+    if custom_prompt_path.exists():
+        try:
+            content = custom_prompt_path.read_text(encoding='utf-8')
+            # Parse the agent.md file - extract system_prompt from frontmatter or use content
+            if content.startswith('---'):
+                try:
+                    parts = content.split('---', 2)
+                    if len(parts) >= 3:
+                        frontmatter = yaml.safe_load(parts[1])
+                        body = parts[2].strip()
+                        return frontmatter.get('system_prompt', body) if frontmatter else body
+                except Exception:
+                    pass
+            return content.strip()
+        except Exception as e:
+            logger.debug(f"Failed to load custom Inventory prompt from {custom_prompt_path}: {e}")
+    
+    # Use default prompt + inventory toolkit instructions
+    inventory_context = """
+
+## Inventory Knowledge Graph
+
+You have access to the Inventory toolkit for querying a knowledge graph of software entities and relationships.
+Use these tools to help users understand their codebase:
+
+- **search_entities**: Find entities by name, type, or path patterns
+- **get_entity**: Get full details of a specific entity
+- **get_relationships**: Find relationships from/to an entity
+- **impact_analysis**: Analyze what depends on an entity (useful for change impact)
+- **get_graph_stats**: Get statistics about the knowledge graph
+
+When answering questions about the codebase, use these tools to provide accurate, citation-backed answers.
+"""
+    return DEFAULT_PROMPT + inventory_context
+
+
 def _load_mcp_tools(agent_def: Dict[str, Any], mcp_config_path: str) -> List[Dict[str, Any]]:
     """Load MCP tools from agent definition with tool-level filtering.
     
@@ -398,20 +449,86 @@ def _select_toolkit_interactive(config) -> Optional[Dict[str, Any]]:
             return None
 
 
+def _list_available_toolkits(config) -> List[str]:
+    """
+    List names of all available toolkits in $ALITA_DIR/tools.
+    
+    Returns:
+        List of toolkit names
+    """
+    tools_dir = Path(config.tools_dir)
+    
+    if not tools_dir.exists():
+        return []
+    
+    toolkit_names = []
+    for pattern in ['*.json', '*.yaml', '*.yml']:
+        for file_path in tools_dir.glob(pattern):
+            try:
+                config_data = load_toolkit_config(str(file_path))
+                name = config_data.get('toolkit_name') or config_data.get('name') or file_path.stem
+                toolkit_names.append(name)
+            except Exception:
+                pass
+    
+    return toolkit_names
+
+
+def _find_toolkit_by_name(config, toolkit_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Find a toolkit by name in $ALITA_DIR/tools.
+    
+    Args:
+        config: CLI configuration
+        toolkit_name: Name of the toolkit to find (case-insensitive)
+        
+    Returns:
+        Toolkit config dict or None if not found
+    """
+    tools_dir = Path(config.tools_dir)
+    
+    if not tools_dir.exists():
+        return None
+    
+    toolkit_name_lower = toolkit_name.lower()
+    
+    for pattern in ['*.json', '*.yaml', '*.yml']:
+        for file_path in tools_dir.glob(pattern):
+            try:
+                config_data = load_toolkit_config(str(file_path))
+                name = config_data.get('toolkit_name') or config_data.get('name') or file_path.stem
+                
+                # Match by name (case-insensitive) or file stem
+                if name.lower() == toolkit_name_lower or file_path.stem.lower() == toolkit_name_lower:
+                    return {
+                        'file': str(file_path),
+                        'name': name,
+                        'type': config_data.get('toolkit_type') or config_data.get('type', 'unknown'),
+                        'config': config_data
+                    }
+            except Exception:
+                pass
+    
+    return None
+
+
 def _select_agent_interactive(client, config) -> Optional[str]:
     """
     Show interactive menu to select an agent from platform and local agents.
     
     Returns:
-        Agent source (name/id for platform, file path for local, '__direct__' for direct chat) or None if cancelled
+        Agent source (name/id for platform, file path for local, '__direct__' for direct chat,
+        '__inventory__' for inventory agent) or None if cancelled
     """
     from .config import CLIConfig
     
     console.print("\n🤖 [bold cyan]Select an agent to chat with:[/bold cyan]\n")
     
-    # First option: Alita (direct LLM chat, no agent)
+    # Built-in agents
     console.print(f"1. [[bold]💬 Alita[/bold]] [cyan]Chat directly with LLM (no agent)[/cyan]")
     console.print(f"   [dim]Direct conversation with the model without agent configuration[/dim]")
+    console.print(f"2. [[bold]📊 Inventory[/bold]] [cyan]Knowledge graph builder agent[/cyan]")
+    console.print(f"   [dim]Build inventories from connected toolkits (use --toolkit-config to add sources)[/dim]")
     
     agents_list = []
     
@@ -446,8 +563,8 @@ def _select_agent_interactive(client, config) -> Optional[str]:
                 except Exception as e:
                     logger.debug(f"Failed to load {file_path}: {e}")
     
-    # Display agents with numbers using rich (starting from 2 since 1 is direct chat)
-    for i, agent in enumerate(agents_list, 2):
+    # Display agents with numbers using rich (starting from 3 since 1-2 are built-in)
+    for i, agent in enumerate(agents_list, 3):
         agent_type = "📦 Platform" if agent['type'] == 'platform' else "📁 Local"
         console.print(f"{i}. [[bold]{agent_type}[/bold]] [cyan]{agent['name']}[/cyan]")
         if agent['description']:
@@ -467,13 +584,17 @@ def _select_agent_interactive(client, config) -> Optional[str]:
                 console.print(f"✓ [green]Selected:[/green] [bold]Alita[/bold]")
                 return '__direct__'
             
-            idx = int(choice) - 2  # Offset by 2 since 1 is direct chat
+            if choice == '2':
+                console.print(f"✓ [green]Selected:[/green] [bold]Inventory[/bold]")
+                return '__inventory__'
+            
+            idx = int(choice) - 3  # Offset by 3 since 1-2 are built-in agents
             if 0 <= idx < len(agents_list):
                 selected = agents_list[idx]
                 console.print(f"✓ [green]Selected:[/green] [bold]{selected['name']}[/bold]")
                 return selected['source']
             else:
-                console.print(f"[yellow]Invalid selection. Please enter a number between 0 and {len(agents_list) + 1}[/yellow]")
+                console.print(f"[yellow]Invalid selection. Please enter a number between 0 and {len(agents_list) + 2}[/yellow]")
         except ValueError:
             console.print("[yellow]Please enter a valid number[/yellow]")
         except (KeyboardInterrupt, EOFError):
@@ -755,6 +876,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
     AGENT_SOURCE can be:
     - Platform agent ID or name
     - Path to local agent file
+    - '__inventory__' for the built-in inventory/knowledge graph agent
     
     Examples:
     
@@ -783,6 +905,11 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         
         # Debug mode (show all including LLM calls)
         alita-cli agent chat my-agent --verbose debug
+        
+        # Built-in inventory agent with source toolkits
+        alita-cli agent chat __inventory__ \\
+            --toolkit-config jira.json \\
+            --toolkit-config github.json
     """
     formatter = ctx.obj['formatter']
     config = ctx.obj['config']
@@ -797,9 +924,11 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         if not agent_source:
             agent_source = '__direct__'
         
-        # Check for direct chat mode
+        # Check for built-in agent modes
         is_direct = agent_source == '__direct__'
-        is_local = not is_direct and Path(agent_source).exists()
+        is_inventory = agent_source == '__inventory__'
+        is_builtin = is_direct or is_inventory
+        is_local = not is_builtin and Path(agent_source).exists()
         
         # Get defaults from config
         default_model = config.default_model or 'gpt-4o'
@@ -836,6 +965,22 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                 'temperature': temperature if temperature is not None else default_temperature,
                 'max_tokens': max_tokens or default_max_tokens,
                 'system_prompt': alita_prompt
+            }
+        elif is_inventory:
+            # Inventory agent mode - knowledge graph builder with inventory toolkit
+            agent_name = "Inventory"
+            agent_type = "Built-in Agent"
+            inventory_prompt = _get_inventory_system_prompt(config)
+            agent_def = {
+                'name': 'inventory-agent',
+                'model': model or default_model,
+                'temperature': temperature if temperature is not None else 0.3,
+                'max_tokens': max_tokens or default_max_tokens,
+                'system_prompt': inventory_prompt,
+                # Include inventory toolkit by default
+                'toolkit_configs': [
+                    {'type': 'inventory', 'graph_path': './knowledge_graph.json'}
+                ]
             }
         elif is_local:
             agent_def = load_agent_definition(agent_source)
@@ -887,6 +1032,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             'work_dir': work_dir,
             'is_direct': is_direct,
             'is_local': is_local,
+            'is_inventory': is_inventory,
             'added_toolkit_configs': list(added_toolkit_configs),
             'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])],
         })
@@ -916,7 +1062,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             logger.debug(f"Session cleanup failed: {e}")
         
         # Create agent executor
-        if is_direct or is_local:
+        if is_direct or is_local or is_inventory:
             # Setup local agent executor (handles all config, tools, MCP, etc.)
             try:
                 agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
@@ -956,6 +1102,10 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         
         # Initialize input handler for readline support
         input_handler = get_input_handler()
+        
+        # Set up toolkit names callback for tab completion
+        from .input_handler import set_toolkit_names_callback
+        set_toolkit_names_callback(lambda: _list_available_toolkits(config))
         
         # Interactive chat loop
         while True:
@@ -1054,8 +1204,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                 # /reload command - reload agent definition from file
                 if user_input == '/reload':
                     if not is_local:
-                        if is_direct:
-                            console.print("[yellow]Cannot reload direct chat mode - no agent file to reload.[/yellow]")
+                        if is_direct or is_inventory:
+                            console.print("[yellow]Cannot reload built-in agent mode - no agent file to reload.[/yellow]")
                         else:
                             console.print("[yellow]Reload is only available for local agents (file-based).[/yellow]")
                         continue
@@ -1124,8 +1274,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                 
                 # /add_mcp command - add MCP server
                 if user_input == '/add_mcp':
-                    if not (is_direct or is_local):
-                        console.print("[yellow]Adding MCP is only available for local agents and direct chat.[/yellow]")
+                    if not (is_direct or is_local or is_inventory):
+                        console.print("[yellow]Adding MCP is only available for local agents and built-in agents.[/yellow]")
                         continue
                     
                     selected_mcp = _select_mcp_interactive(config)
@@ -1158,12 +1308,27 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     continue
                 
                 # /add_toolkit command - add toolkit
-                if user_input == '/add_toolkit':
-                    if not (is_direct or is_local):
-                        console.print("[yellow]Adding toolkit is only available for local agents and direct chat.[/yellow]")
+                if user_input == '/add_toolkit' or user_input.startswith('/add_toolkit '):
+                    if not (is_direct or is_local or is_inventory):
+                        console.print("[yellow]Adding toolkit is only available for local agents and built-in agents.[/yellow]")
                         continue
                     
-                    selected_toolkit = _select_toolkit_interactive(config)
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) == 2:
+                        # Direct toolkit selection by name
+                        toolkit_name_arg = parts[1].strip()
+                        selected_toolkit = _find_toolkit_by_name(config, toolkit_name_arg)
+                        if not selected_toolkit:
+                            console.print(f"[yellow]Toolkit '{toolkit_name_arg}' not found.[/yellow]")
+                            # Show available toolkits
+                            available = _list_available_toolkits(config)
+                            if available:
+                                console.print(f"[dim]Available toolkits: {', '.join(available)}[/dim]")
+                            continue
+                    else:
+                        # Interactive selection
+                        selected_toolkit = _select_toolkit_interactive(config)
+                    
                     if selected_toolkit:
                         toolkit_name = selected_toolkit['name']
                         toolkit_file = selected_toolkit['file']
@@ -1190,6 +1355,145 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             ))
                         except Exception as e:
                             console.print(f"[red]Error adding toolkit: {e}[/red]")
+                    continue
+                
+                # /rm_mcp command - remove MCP server
+                if user_input == '/rm_mcp' or user_input.startswith('/rm_mcp '):
+                    if not (is_direct or is_local or is_inventory):
+                        console.print("[yellow]Removing MCP is only available for local agents and built-in agents.[/yellow]")
+                        continue
+                    
+                    current_mcps = agent_def.get('mcps', [])
+                    if not current_mcps:
+                        console.print("[yellow]No MCP servers are currently loaded.[/yellow]")
+                        continue
+                    
+                    # Get list of MCP names
+                    mcp_names = [m if isinstance(m, str) else m.get('name') for m in current_mcps]
+                    
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) == 2:
+                        # Direct removal by name
+                        mcp_name_to_remove = parts[1].strip()
+                        if mcp_name_to_remove not in mcp_names:
+                            console.print(f"[yellow]MCP '{mcp_name_to_remove}' not found.[/yellow]")
+                            console.print(f"[dim]Loaded MCPs: {', '.join(mcp_names)}[/dim]")
+                            continue
+                    else:
+                        # Interactive selection
+                        console.print("\n🔌 [bold cyan]Remove MCP Server[/bold cyan]\n")
+                        for i, name in enumerate(mcp_names, 1):
+                            console.print(f"  [bold]{i}[/bold]. {name}")
+                        console.print(f"  [bold]0[/bold]. [dim]Cancel[/dim]")
+                        console.print()
+                        
+                        try:
+                            choice = int(input("Select MCP to remove: ").strip())
+                            if choice == 0:
+                                continue
+                            if 1 <= choice <= len(mcp_names):
+                                mcp_name_to_remove = mcp_names[choice - 1]
+                            else:
+                                console.print("[yellow]Invalid selection.[/yellow]")
+                                continue
+                        except (ValueError, KeyboardInterrupt):
+                            continue
+                    
+                    # Remove the MCP
+                    agent_def['mcps'] = [m for m in current_mcps if (m if isinstance(m, str) else m.get('name')) != mcp_name_to_remove]
+                    
+                    # Recreate agent executor without the MCP
+                    from .tools import create_session_memory, update_session_metadata
+                    memory = create_session_memory(current_session_id)
+                    try:
+                        agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                        )
+                        # Persist updated MCPs to session
+                        update_session_metadata(current_session_id, {
+                            'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])]
+                        })
+                        console.print(Panel(
+                            f"[cyan]ℹ Removed MCP: [bold]{mcp_name_to_remove}[/bold]. Agent state reset, chat history preserved.[/cyan]",
+                            border_style="cyan",
+                            box=box.ROUNDED
+                        ))
+                    except Exception as e:
+                        console.print(f"[red]Error removing MCP: {e}[/red]")
+                    continue
+                
+                # /rm_toolkit command - remove toolkit
+                if user_input == '/rm_toolkit' or user_input.startswith('/rm_toolkit '):
+                    if not (is_direct or is_local or is_inventory):
+                        console.print("[yellow]Removing toolkit is only available for local agents and built-in agents.[/yellow]")
+                        continue
+                    
+                    if not added_toolkit_configs:
+                        console.print("[yellow]No toolkits are currently loaded.[/yellow]")
+                        continue
+                    
+                    # Get toolkit names from config files
+                    toolkit_info = []  # List of (name, file_path)
+                    for toolkit_file in added_toolkit_configs:
+                        try:
+                            with open(toolkit_file, 'r') as f:
+                                tk_config = json.load(f)
+                                tk_name = tk_config.get('toolkit_name', Path(toolkit_file).stem)
+                                toolkit_info.append((tk_name, toolkit_file))
+                        except Exception:
+                            toolkit_info.append((Path(toolkit_file).stem, toolkit_file))
+                    
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) == 2:
+                        # Direct removal by name
+                        toolkit_name_to_remove = parts[1].strip()
+                        matching = [(name, path) for name, path in toolkit_info if name == toolkit_name_to_remove]
+                        if not matching:
+                            console.print(f"[yellow]Toolkit '{toolkit_name_to_remove}' not found.[/yellow]")
+                            console.print(f"[dim]Loaded toolkits: {', '.join(name for name, _ in toolkit_info)}[/dim]")
+                            continue
+                        toolkit_file_to_remove = matching[0][1]
+                    else:
+                        # Interactive selection
+                        console.print("\n🔧 [bold cyan]Remove Toolkit[/bold cyan]\n")
+                        for i, (name, _) in enumerate(toolkit_info, 1):
+                            console.print(f"  [bold]{i}[/bold]. {name}")
+                        console.print(f"  [bold]0[/bold]. [dim]Cancel[/dim]")
+                        console.print()
+                        
+                        try:
+                            choice = int(input("Select toolkit to remove: ").strip())
+                            if choice == 0:
+                                continue
+                            if 1 <= choice <= len(toolkit_info):
+                                toolkit_name_to_remove, toolkit_file_to_remove = toolkit_info[choice - 1]
+                            else:
+                                console.print("[yellow]Invalid selection.[/yellow]")
+                                continue
+                        except (ValueError, KeyboardInterrupt):
+                            continue
+                    
+                    # Remove the toolkit
+                    added_toolkit_configs.remove(toolkit_file_to_remove)
+                    
+                    # Recreate agent executor without the toolkit
+                    from .tools import create_session_memory, update_session_metadata
+                    memory = create_session_memory(current_session_id)
+                    try:
+                        agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                        )
+                        # Persist updated toolkits to session
+                        update_session_metadata(current_session_id, {
+                            'added_toolkit_configs': list(added_toolkit_configs)
+                        })
+                        console.print(Panel(
+                            f"[cyan]ℹ Removed toolkit: [bold]{toolkit_name_to_remove}[/bold]. Agent state reset, chat history preserved.[/cyan]",
+                            border_style="cyan",
+                            box=box.ROUNDED
+                        ))
+                    except Exception as e:
+                        console.print(f"[red]Error removing toolkit: {e}[/red]")
                     continue
                 
                 # /mode command - set approval mode
@@ -1239,7 +1543,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         current_work_dir = str(new_dir_path)
                         
                         # Recreate agent executor with new work_dir - use session memory
-                        if is_direct or is_local:
+                        if is_direct or is_local or is_inventory:
                             from .tools import create_session_memory
                             memory = create_session_memory(current_session_id)
                             try:
@@ -1254,7 +1558,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             except Exception as e:
                                 console.print(f"[red]Error mounting directory: {e}[/red]")
                         else:
-                            console.print("[yellow]Directory mounting is only available for local agents and direct chat.[/yellow]")
+                            console.print("[yellow]Directory mounting is only available for local agents and built-in agents.[/yellow]")
                     continue
                 
                 # /session command - list or resume sessions
@@ -1412,8 +1716,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                     console.print(f"[dim][{role_color}]{role_label}:[/{role_color}] {content}[/dim]")
                                 console.print()
                             
-                            # Recreate agent executor with restored tools if we have a local agent
-                            if (is_direct or is_local) and restored_agent:
+                            # Recreate agent executor with restored tools if we have a local/built-in agent
+                            if (is_direct or is_local or is_inventory) and restored_agent:
                                 try:
                                     agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
                                         client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
@@ -1426,7 +1730,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                 except Exception as e:
                                     console.print(f"[red]Error recreating agent executor: {e}[/red]")
                                     console.print("[yellow]Session state loaded but agent not fully restored. Some tools may not work.[/yellow]")
-                            elif is_direct or is_local:
+                            elif is_direct or is_local or is_inventory:
                                 # Just update planning tools if we couldn't restore agent
                                 try:
                                     from .tools import get_planning_tools
@@ -1443,7 +1747,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                 # /agent command - switch to a different agent
                 if user_input == '/agent':
                     selected_agent = _select_agent_interactive(client, config)
-                    if selected_agent and selected_agent != '__direct__':
+                    if selected_agent and selected_agent != '__direct__' and selected_agent != '__inventory__':
                         # Load the new agent
                         new_is_local = Path(selected_agent).exists()
                         
@@ -1453,6 +1757,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             agent_type = "Local Agent"
                             is_local = True
                             is_direct = False
+                            is_inventory = False
                             current_agent_file = selected_agent  # Track for /reload
                         else:
                             # Platform agent
@@ -1507,6 +1812,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         # Switch back to direct mode
                         is_direct = True
                         is_local = False
+                        is_inventory = False
                         current_agent_file = None  # No file for direct mode
                         agent_name = "Alita"
                         agent_type = "Direct LLM"
@@ -1530,10 +1836,42 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             ))
                         except Exception as e:
                             console.print(f"[red]Error switching to direct mode: {e}[/red]")
+                    elif selected_agent == '__inventory__':
+                        # Switch to inventory mode
+                        is_direct = False
+                        is_local = False
+                        is_inventory = True
+                        current_agent_file = None  # No file for inventory mode
+                        agent_name = "Inventory"
+                        agent_type = "Built-in Agent"
+                        inventory_prompt = _get_inventory_system_prompt(config)
+                        agent_def = {
+                            'name': 'inventory-agent',
+                            'model': current_model or default_model,
+                            'temperature': current_temperature if current_temperature is not None else 0.3,
+                            'max_tokens': current_max_tokens or default_max_tokens,
+                            'system_prompt': inventory_prompt,
+                            'toolkit_configs': [
+                                {'type': 'inventory', 'graph_path': './knowledge_graph.json'}
+                            ]
+                        }
+                        from .tools import create_session_memory
+                        memory = create_session_memory(current_session_id)
+                        try:
+                            agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            )
+                            console.print(Panel(
+                                f"[cyan]ℹ Switched to [bold]Inventory[/bold] agent. Use /add_toolkit to add source toolkits.[/cyan]",
+                                border_style="cyan",
+                                box=box.ROUNDED
+                            ))
+                        except Exception as e:
+                            console.print(f"[red]Error switching to inventory mode: {e}[/red]")
                     continue
                 
                 # Execute agent
-                if (is_direct or is_local) and agent_executor is None:
+                if (is_direct or is_local or is_inventory) and agent_executor is None:
                     # Local agent without tools: use direct LLM call with streaming
                     system_prompt = agent_def.get('system_prompt', '')
                     messages = []

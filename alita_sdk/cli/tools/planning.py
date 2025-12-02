@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_sessions_dir() -> Path:
-    """Get the sessions directory path."""
-    alita_dir = os.environ.get('ALITA_DIR', os.path.expanduser('~/.alita'))
+    """Get the sessions directory path (relative to $ALITA_DIR or .alita)."""
+    alita_dir = os.environ.get('ALITA_DIR', '.alita')
     return Path(alita_dir) / 'sessions'
 
 
@@ -119,8 +119,8 @@ def update_session_metadata(session_id: str, updates: Dict[str, Any]) -> None:
 
 
 def get_alita_dir() -> Path:
-    """Get the ALITA_DIR path."""
-    return Path(os.environ.get('ALITA_DIR', os.path.expanduser('~/.alita')))
+    """Get the ALITA_DIR path (relative to $ALITA_DIR or .alita)."""
+    return Path(os.environ.get('ALITA_DIR', '.alita'))
 
 
 def to_portable_path(path: str) -> str:

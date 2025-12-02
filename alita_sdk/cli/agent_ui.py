@@ -93,6 +93,8 @@ def print_help():
     table.add_row("/session", "List or resume previous sessions with plans")
     table.add_row("/add_mcp", "Add an MCP server (preserves history)")
     table.add_row("/add_toolkit", "Add a toolkit (preserves history)")
+    table.add_row("/rm_mcp", "Remove an MCP server")
+    table.add_row("/rm_toolkit", "Remove a toolkit")
     table.add_row("/help", "Show this help")
     table.add_row("exit", "End conversation")
     

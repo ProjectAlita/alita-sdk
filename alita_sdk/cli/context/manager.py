@@ -122,7 +122,7 @@ class CLIContextManager:
         self,
         config: Optional[Dict[str, Any]] = None,
         session_id: Optional[str] = None,
-        alita_dir: str = '~/.alita',
+        alita_dir: str = '.alita',
         # Convenience parameters (override config if provided)
         max_context_tokens: Optional[int] = None,
         preserve_recent: Optional[int] = None,

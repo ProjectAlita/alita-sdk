@@ -34,6 +34,7 @@ def _safe_import_tool(tool_name, module_path, get_tools_name=None, toolkit_class
         FAILED_IMPORTS[tool_name] = str(e)
         logger.debug(f"Failed to import {tool_name}: {e}")
 
+
 # Safe imports for all tools
 _safe_import_tool('github', 'github', 'get_tools', 'AlitaGitHubToolkit')
 _safe_import_tool('openapi', 'openapi', 'get_tools')
@@ -89,6 +90,13 @@ _safe_import_tool('delta_lake', 'aws.delta_lake', 'get_tools', 'DeltaLakeToolkit
 available_count = len(AVAILABLE_TOOLS)
 total_attempted = len(AVAILABLE_TOOLS) + len(FAILED_IMPORTS)
 logger.info(f"Tool imports completed: {available_count}/{total_attempted} successful")
+
+# Import community module to trigger community toolkit registration
+try:
+    from alita_sdk import community  # noqa: F401
+    logger.debug("Community toolkits registered successfully")
+except ImportError as e:
+    logger.debug(f"Community module not available: {e}")
 
 
 def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, **kwargs):

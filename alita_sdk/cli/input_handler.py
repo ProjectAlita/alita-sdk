@@ -6,7 +6,8 @@ Provides tab completion for commands, cursor movement, and input history.
 
 import readline
 import os
-from typing import Dict, List, Optional, Any
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Callable
 
 from rich.console import Console
 from rich.text import Text
@@ -31,10 +32,38 @@ CHAT_COMMANDS = [
     '/session resume',
     '/add_mcp',
     '/add_toolkit',
+    '/rm_mcp',
+    '/rm_toolkit',
     '/reload',
     'exit',
     'quit',
 ]
+
+
+# Callback to get dynamic toolkit names for completion
+_toolkit_names_callback: Optional[Callable[[], List[str]]] = None
+
+
+def set_toolkit_names_callback(callback: Callable[[], List[str]]):
+    """
+    Set a callback function that returns available toolkit names.
+    
+    This allows the input handler to provide dynamic completions
+    for /add_toolkit without having a direct dependency on config.
+    """
+    global _toolkit_names_callback
+    _toolkit_names_callback = callback
+
+
+def get_toolkit_names_for_completion() -> List[str]:
+    """Get toolkit names for tab completion."""
+    global _toolkit_names_callback
+    if _toolkit_names_callback:
+        try:
+            return _toolkit_names_callback()
+        except Exception:
+            return []
+    return []
 
 
 class ChatInputHandler:
@@ -105,8 +134,20 @@ class ChatInputHandler:
         if line and not line.startswith('/') and text != line:
             return None
         
+        matches = []
+        
+        # Handle /add_toolkit <name> completion
+        if line.startswith('/add_toolkit '):
+            # Get partial toolkit name being typed
+            toolkit_prefix = text.lower()
+            toolkit_names = get_toolkit_names_for_completion()
+            matches = [f'/add_toolkit {name}' for name in toolkit_names 
+                      if name.lower().startswith(toolkit_prefix) or toolkit_prefix == '']
+            # Also match just the toolkit name if text doesn't start with /
+            if not text.startswith('/'):
+                matches = [name for name in toolkit_names if name.lower().startswith(toolkit_prefix)]
         # Find matching commands
-        if text.startswith('/'):
+        elif text.startswith('/'):
             matches = [cmd for cmd in CHAT_COMMANDS if cmd.startswith(text)]
         elif text == '' and line == '':
             # Show all commands on empty tab

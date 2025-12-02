@@ -128,10 +128,12 @@ def config(ctx):
 # Import subcommands
 from . import toolkit
 from . import agents
+from . import inventory
 
 # Register subcommands
 cli.add_command(toolkit.toolkit)
 cli.add_command(agents.agent)
+cli.add_command(inventory.inventory)
 
 # Add top-level 'chat' command as alias to 'agent chat'
 cli.add_command(agents.agent_chat, name='chat')
