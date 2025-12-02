@@ -259,7 +259,7 @@ class McpToolkit(BaseToolkit):
             __config__=ConfigDict(
                 json_schema_extra={
                     'metadata': {
-                        "label": "Remove MCP",
+                        "label": "Remote MCP",
                         "icon_url": None,
                         "categories": ["other"],
                         "extra_categories": ["remote tools", "sse", "http"],
