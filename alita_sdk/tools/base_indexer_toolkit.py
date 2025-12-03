@@ -185,10 +185,15 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
             else "no new documents to index"}
         except Exception as e:
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"])
-            self._emit_index_event(index_name, error=str(e))
+            # Do maximum effort at least send custom event for supposed changed status
+            msg = str(e)
+            try:
+                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"])
+            except Exception as ie:
+                logger.error(f"Failed to update index meta status to FAILED for index '{index_name}': {ie}")
+                msg = f"{msg}; additionally failed to update index meta status to FAILED: {ie}"
+            self._emit_index_event(index_name, error=msg)
             raise e
-            
 
     def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, result, index_name: Optional[str] = None):
         self._log_tool_event(f"Base documents are ready for indexing. {base_total} base documents in total to index.")
@@ -545,7 +550,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         event_data = {
             "id": index_meta.get("id"),
             "index_name": index_name,
-            "state": metadata.get("state"),
+            "state": "failed" if error is not None else metadata.get("state"),
             "error": error,
             "reindex": is_reindex,
             "indexed": metadata.get("indexed", 0),
