@@ -482,6 +482,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "updated_on": created_on,
                 "task_id": None,
                 "conversation_id": None,
+                "toolkit_id": self.toolkit_id,
             }
             metadata["history"] = json.dumps([metadata])
             index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)

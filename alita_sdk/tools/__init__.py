@@ -103,6 +103,7 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
     tools = []
 
     for tool in tools_list:
+        toolkit_tools = []
         settings = tool.get('settings')
 
         # Skip tools without settings early
@@ -128,49 +129,46 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
 
         # Handle ADO special cases
         if tool_type in ['ado_boards', 'ado_wiki', 'ado_plans']:
-            tools.extend(AVAILABLE_TOOLS['ado']['get_tools'](tool_type, tool))
-            continue
-
-        # Handle ADO repos aliases
-        if tool_type in ['ado_repos', 'azure_devops_repos'] and 'ado_repos' in AVAILABLE_TOOLS:
+            toolkit_tools.extend(AVAILABLE_TOOLS['ado']['get_tools'](tool_type, tool))
+        elif tool_type in ['ado_repos', 'azure_devops_repos'] and 'ado_repos' in AVAILABLE_TOOLS:
             try:
-                tools.extend(AVAILABLE_TOOLS['ado_repos']['get_tools'](tool))
+                toolkit_tools.extend(AVAILABLE_TOOLS['ado_repos']['get_tools'](tool))
             except Exception as e:
                 logger.error(f"Error getting ADO repos tools: {e}")
-            continue
-
-        # Skip MCP toolkit - it's handled by runtime/toolkits/tools.py to avoid duplicate loading
-        if tool_type == 'mcp':
+        elif tool_type == 'mcp':
             logger.debug(f"Skipping MCP toolkit '{tool.get('toolkit_name')}' - handled by runtime toolkit system")
-            continue
-
-        # Handle standard tools
-        if tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
+        elif tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
             try:
-                tools.extend(AVAILABLE_TOOLS[tool_type]['get_tools'](tool))
+                toolkit_tools.extend(AVAILABLE_TOOLS[tool_type]['get_tools'](tool))
             except Exception as e:
                 logger.error(f"Error getting tools for {tool_type}: {e}")
                 raise ToolException(f"Error getting tools for {tool_type}: {e}")
-            continue
-
-        # Handle custom modules
-        if settings.get("module"):
+        elif settings.get("module"):
             try:
                 mod = import_module(settings.pop("module"))
                 tkitclass = getattr(mod, settings.pop("class"))
                 get_toolkit_params = settings.copy()
                 get_toolkit_params["name"] = tool.get("name")
                 toolkit = tkitclass.get_toolkit(**get_toolkit_params)
-                tools.extend(toolkit.get_tools())
+                toolkit_tools.extend(toolkit.get_tools())
             except Exception as e:
                 logger.error(f"Error in getting custom toolkit: {e}")
-            continue
-
-        # Tool not available
-        if tool_type in FAILED_IMPORTS:
-            logger.warning(f"Tool '{tool_type}' is not available: {FAILED_IMPORTS[tool_type]}")
         else:
-            logger.warning(f"Unknown tool type: {tool_type}")
+            if tool_type in FAILED_IMPORTS:
+                logger.warning(f"Tool '{tool_type}' is not available: {FAILED_IMPORTS[tool_type]}")
+            else:
+                logger.warning(f"Unknown tool type: {tool_type}")
+        #
+        # Always inject toolkit_id to each tool if it presents and has type 'int'
+        toolkit_id = tool.get('id')
+        if isinstance(toolkit_id, int):
+            for t in toolkit_tools:
+                if hasattr(t, 'api_wrapper') and hasattr(t.api_wrapper, 'toolkit_id'):
+                    t.api_wrapper.toolkit_id = toolkit_id
+        else:
+            logger.error(f"Toolkit ID is missing or not an integer for tool '{tool.get('type', '')}' with name '{tool.get('name', '')}'")
+
+        tools.extend(toolkit_tools)
 
     return tools
 
