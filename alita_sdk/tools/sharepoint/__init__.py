@@ -23,7 +23,9 @@ def get_tools(tool):
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         embedding_model=tool['settings'].get('embedding_model'),
         collection_name=str(tool['toolkit_name']),
-        vectorstore_type="PGVector")
+        vectorstore_type="PGVector",
+        in_browser_auth=tool['settings'].get('in_browser_auth', False),
+        site_urls=tool['settings'].get('site_urls', []))
             .get_tools())
 
 
@@ -39,6 +41,22 @@ class SharepointToolkit(BaseToolkit):
             name,
             sharepoint_configuration=(SharepointConfiguration, Field(description="SharePoint Configuration", json_schema_extra={'configuration_types': ['sharepoint']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
+            in_browser_auth=(
+                bool,
+                Field(
+                    default=False,
+                    description="Enable in-browser Microsoft authentication",
+                )
+            ),
+            site_urls=(List[str],
+                Field(
+                    description="List of SharePoint Site URLs to be accessed",
+                    json_schema_extra={
+                        'tooltip': 'HTTP headers to send with requests (e.g. Authorization)',
+                        'example': {'Authorization': 'Bearer your-api-token'}
+                    }
+                )
+            ),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",
