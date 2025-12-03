@@ -193,6 +193,11 @@ def display_output(agent_name: str, message: str, output: str):
     console.print(f"\n[bold cyan]🤖 Agent: {agent_name}[/bold cyan]\n")
     console.print(f"[bold]Message:[/bold] {message}\n")
     console.print("[bold]Response:[/bold]")
+    
+    # Ensure output is a string
+    if not isinstance(output, str):
+        output = str(output)
+    
     if any(marker in output for marker in ['```', '**', '##', '- ', '* ']):
         console.print(Markdown(output))
     else:

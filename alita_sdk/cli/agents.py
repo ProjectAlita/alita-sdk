@@ -103,6 +103,7 @@ def parse_test_case(test_case_path: str) -> Dict[str, Any]:
         - name: Test case name
         - objective: Test objective
         - config_path: Path to toolkit config file
+        - generate_test_data: Boolean flag indicating if test data generation is needed (default: True)
         - test_data_config: Dictionary of test data configuration from table
         - prerequisites: Pre-requisites section text
         - variables: List of variable placeholders found (e.g., {{TEST_PR_NUMBER}})
@@ -123,9 +124,22 @@ def parse_test_case(test_case_path: str) -> Dict[str, Any]:
     objective_match = re.search(r'##\s+Objective\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
     objective = objective_match.group(1).strip() if objective_match else ""
     
-    # Extract config path
-    config_match = re.search(r'##\s+Config\s*\n\npath:\s*(.+?)(?=\n|$)', content, re.MULTILINE)
-    config_path = config_match.group(1).strip() if config_match else None
+    # Extract config path and generateTestData flag
+    config_section_match = re.search(r'##\s+Config\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
+    config_path = None
+    generate_test_data = True  # Default to True if not specified
+    
+    if config_section_match:
+        config_section = config_section_match.group(1)
+        # Extract path
+        path_match = re.search(r'path:\s*(.+?)(?=\n|$)', config_section, re.MULTILINE)
+        if path_match:
+            config_path = path_match.group(1).strip()
+        
+        # Extract generateTestData flag
+        gen_data_match = re.search(r'generateTestData\s*:\s*(true|false)', config_section, re.IGNORECASE)
+        if gen_data_match:
+            generate_test_data = gen_data_match.group(1).lower() == 'true'
     
     # Extract Test Data Configuration table
     test_data_config = {}
@@ -182,6 +196,7 @@ def parse_test_case(test_case_path: str) -> Dict[str, Any]:
         'name': name,
         'objective': objective,
         'config_path': config_path,
+        'generate_test_data': generate_test_data,
         'test_data_config': test_data_config,
         'prerequisites': prerequisites,
         'variables': variables,
@@ -2564,7 +2579,6 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
         console.print(f"Test Cases: {len(test_case_files)}")
         console.print(f"Results Directory: {results_dir}\n")
         
-        # Prepare data generator agent (will be invoked per-test inside main loop)
         data_gen_def = None
         if data_generator and not skip_data_generation:
             try:
@@ -2598,12 +2612,19 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 console.print(f"[yellow]⚠ Warning: Failed to parse {test_file.name}: {e}[/yellow]")
                 logger.debug(f"Parse error for {test_file.name}: {e}", exc_info=True)
         
+        # Filter test cases that need data generation
+        test_cases_needing_data_gen = [
+            tc for tc in parsed_test_cases 
+            if tc['data'].get('generate_test_data', True)
+        ]
+        
         # Bulk test data generation (if enabled)
-        if data_gen_def and not skip_data_generation and parsed_test_cases:
+        if data_gen_def and not skip_data_generation and test_cases_needing_data_gen:
             console.print(f"\n[bold yellow]🔧 Bulk Test Data Generation[/bold yellow]")
-            console.print(f"Generating test data for {len(parsed_test_cases)} test cases...\n")
+            console.print(f"Generating test data for {len(test_cases_needing_data_gen)} test cases...\n")
+            console.print(f"[dim]Skipping {len(parsed_test_cases) - len(test_cases_needing_data_gen)} test cases with generateTestData: false[/dim]\n")
             
-            bulk_data_gen_prompt = _build_bulk_data_gen_prompt(parsed_test_cases)
+            bulk_data_gen_prompt = _build_bulk_data_gen_prompt(test_cases_needing_data_gen)
             
             try:
                 # Setup data generator agent
@@ -2634,7 +2655,7 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                         })
                     bulk_gen_output = extract_output_from_result(bulk_gen_result)
                     console.print(f"[green]✓ Bulk test data generation completed[/green]")
-                    console.print(f"[dim]{bulk_gen_output[:200]}...[/dim]\n")
+                    console.print(f"[dim]{bulk_gen_output}...[/dim]\n")
                     
                     # Store chat history from data generation to pass to test executors
                     bulk_gen_chat_history = [
@@ -2679,6 +2700,8 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
         
         # Build bulk execution prompt
         bulk_all_prompt = _build_bulk_execution_prompt(parsed_test_cases)
+
+        console.print(f"Executing the prompt: {bulk_all_prompt}\n")
         
         # Execute all test cases in bulk
         test_results = []
@@ -2694,7 +2717,7 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 all_execution_output = extract_output_from_result(bulk_result)
                 
                 console.print(f"[green]✓ All test cases executed[/green]")
-                console.print(f"[dim]{all_execution_output[:500]}...[/dim]\n")
+                console.print(f"[dim]{all_execution_output}...[/dim]\n")
                 
                 # Update chat history
                 chat_history.append({"role": "user", "content": bulk_all_prompt})
@@ -2712,7 +2735,7 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                     })
                 validation_output = extract_output_from_result(validation_result)
                 
-                console.print(f"[dim]Validation Response: {validation_output[:200]}...[/dim]\n")
+                console.print(f"[dim]Validation Response: {validation_output}...[/dim]\n")
                 
                 # Parse validation JSON
                 try:

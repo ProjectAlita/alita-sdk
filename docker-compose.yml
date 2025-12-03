@@ -8,6 +8,14 @@ services:
       - DEPLOYMENT_URL=${DEPLOYMENT_URL}
       - API_KEY=${ALITA_API_KEY}
       - PROJECT_ID=${PROJECT_ID}
+      - TEST_CASES_DIR=${TEST_CASES_DIR:-github}
+      - CONFLUENCE_API_KEY=${CONFLUENCE_API_KEY}
+      - CONFLUENCE_BASE_URL=${CONFLUENCE_BASE_URL}
+      - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
+      - ADO_TOKEN=${ADO_TOKEN}
+      - ADO_REPOSITORY_ID=${ADO_REPOSITORY_ID}
+      - ADO_ORGANIZATION_URL=${ADO_ORGANIZATION_URL}
+      - ADO_PROJECT=${ADO_PROJECT}
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
     volumes:
@@ -16,7 +24,7 @@ services:
     command: >
       sh -c "alita agent execute-test-cases
       .github/agents/test-runner.agent.json
-      --test-cases-dir .github/ai_native/testcases/github
+      --test-cases-dir .github/ai_native/testcases/$${TEST_CASES_DIR}
       --results-dir .github/ai_native/results
       --data-generator .github/agents/test-data-generator.agent.json
       --dir ."

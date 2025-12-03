@@ -1,10 +1,13 @@
 name: Test Execution
+run-name: Executing test for ${{ inputs.test_cases_dir }}
 
 on:
-  push:
-    branches:
-      - ai_test
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      test_cases_dir:
+        description: 'Test cases directory (e.g., github, ado, confluence)'
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -46,6 +49,14 @@ jobs:
           export DEPLOYMENT_URL="${{ secrets.DEPLOYMENT_URL }}"
           export ALITA_API_KEY="${{ secrets.ALITA_API_KEY }}"
           export PROJECT_ID="${{ secrets.PROJECT_ID }}"
+          export CONFLUENCE_API_KEY="${{ secrets.CONFLUENCE_API_KEY }}"
+          export CONFLUENCE_BASE_URL="${{ secrets.CONFLUENCE_BASE_URL }}"
+          export CONFLUENCE_USERNAME="${{ secrets.CONFLUENCE_USERNAME }}"
+          export ADO_TOKEN="${{ secrets.ADO_TOKEN }}"
+          export ADO_REPOSITORY_ID="${{ secrets.ADO_REPOSITORY_ID }}"
+          export ADO_ORGANIZATION_URL="${{ secrets.ADO_ORGANIZATION_URL }}"
+          export ADO_PROJECT="${{ secrets.ADO_PROJECT }}"
+          export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           docker-compose up -d
           
       - name: Wait for tests to complete
@@ -91,6 +102,11 @@ jobs:
       - name: Copy test results
         run: |
           docker cp alita-sdk-dev:/app/.github/ai_native/results/test_execution_summary.json ./test_execution_summary.json || echo "{}" > ./test_execution_summary.json
+      
+      - name: Save Docker logs
+        if: always()
+        run: |
+          docker-compose logs alita-sdk > docker-logs.txt 2>&1 || echo "Failed to retrieve logs" > docker-logs.txt
           
       - name: Stop docker-compose
         if: always()
@@ -154,9 +170,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ inputs.test_cases_dir }}
           path: |
             ./test_execution_summary.json
+            ./docker-logs.txt
             .github/ai_native/results/
           retention-days: 30
 

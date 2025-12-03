@@ -1,0 +1,35 @@
+name: Test Matrix Execution
+
+on:
+  push:
+    branches:
+      - ai_test
+  workflow_dispatch:
+
+jobs:
+  configure-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate test matrix
+        id: set-matrix
+        run: |
+          # Get all directories in .github/ai_native/testcases
+          TEST_DIRS=$(find .github/ai_native/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
+          echo "Generated matrix: $TEST_DIRS"
+
+  test-execution:
+    needs: configure-matrix
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        test_cases_dir: ${{ fromJson(needs.configure-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/test-execution.yml
+    with:
+      test_cases_dir: ${{ matrix.test_cases_dir }}

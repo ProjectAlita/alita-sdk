@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from .cli import get_client
+from .toolkit_loader import load_toolkit_config
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def toolkit_test(ctx, toolkit_type: str, tool: str, config_file, params,
         # Load toolkit configuration
         toolkit_config = {}
         if config_file:
-            toolkit_config = json.load(config_file)
+            toolkit_config = load_toolkit_config(config_file.name)
             logger.debug(f"Loaded toolkit config from {config_file.name}")
         
         # Add the tool to selected_tools in the config
@@ -260,7 +261,7 @@ def toolkit_tools(ctx, toolkit_type: str, config_file):
         # Load toolkit configuration if provided
         toolkit_config = {}
         if config_file:
-            toolkit_config = json.load(config_file)
+            toolkit_config = load_toolkit_config(config_file.name)
         
         # Import and instantiate toolkit
         from alita_sdk.tools import AVAILABLE_TOOLS
