@@ -62,6 +62,105 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# ENTITY TYPE NORMALIZATION
+# ============================================================================
+
+# Types that should never be deduplicated (context-dependent)
+CONTEXT_DEPENDENT_TYPES = {
+    "tool", "property", "properties", "parameter", "argument",
+    "field", "column", "attribute", "option", "setting",
+    "step", "test_step", "ui_field", "endpoint", "method",
+    "mcp_tool", "mcp_resource"
+}
+
+# Build canonical type set from ENTITY_TAXONOMY
+_CANONICAL_TYPES = set()
+for layer_data in ENTITY_TAXONOMY.values():
+    for type_def in layer_data["types"]:
+        _CANONICAL_TYPES.add(type_def["name"].lower())
+
+# Map common variations to canonical forms
+TYPE_NORMALIZATION_MAP = {
+    # Tool/Toolkit variations
+    "tools": "tool",
+    "Tool": "tool", 
+    "Tools": "tool",
+    "Toolkit": "toolkit",
+    "toolkits": "toolkit",
+    # MCP variations
+    "MCP Server": "mcp_server",
+    "MCP Tool": "mcp_tool",
+    "MCP Resource": "mcp_resource",
+    # Common variations  
+    "Feature": "feature",
+    "Features": "feature",
+    "API": "api",
+    "APIs": "api",
+    "Service": "service",
+    "Services": "service",
+    "Endpoint": "endpoint",
+    "Endpoints": "endpoint",
+    "Configuration": "configuration",
+    "Config": "configuration",
+    "Test Case": "test_case",
+    "Test Cases": "test_case",
+    "test case": "test_case",
+    "User Story": "user_story",
+    "User Stories": "user_story",
+    "user story": "user_story",
+    "Business Rule": "business_rule",
+    "business rule": "business_rule",
+    "UI Component": "ui_component",
+    "ui component": "ui_component",
+    "UI Field": "ui_field",
+    "ui field": "ui_field",
+    "Test Suite": "test_suite",
+    "test suite": "test_suite",
+    "Test Step": "test_step",
+    "test step": "test_step",
+    "Glossary Term": "glossary_term",
+    "glossary term": "glossary_term",
+    "Domain Entity": "domain_entity",
+    "domain entity": "domain_entity",
+    "Pull Request": "pull_request",
+    "pull request": "pull_request",
+}
+
+def normalize_entity_type(entity_type: str) -> str:
+    """
+    Normalize entity type to canonical lowercase form.
+    
+    Args:
+        entity_type: Raw entity type from LLM extraction
+        
+    Returns:
+        Canonical lowercase entity type
+    """
+    if not entity_type:
+        return "unknown"
+    
+    # Check explicit mapping first
+    if entity_type in TYPE_NORMALIZATION_MAP:
+        return TYPE_NORMALIZATION_MAP[entity_type]
+    
+    # Normalize: lowercase, replace spaces with underscores
+    normalized = entity_type.lower().strip().replace(" ", "_").replace("-", "_")
+    
+    # If it's already canonical, return it
+    if normalized in _CANONICAL_TYPES:
+        return normalized
+    
+    # Handle plural forms by removing trailing 's' (but not 'ss' like 'class')
+    if normalized.endswith('s') and not normalized.endswith('ss') and len(normalized) > 3:
+        singular = normalized[:-1]
+        if singular in _CANONICAL_TYPES:
+            return singular
+    
+    # Return the normalized form even if not in taxonomy
+    # (allows for custom types while maintaining consistency)
+    return normalized
+
 
 class IngestionResult(BaseModel):
     """Result of an ingestion run."""
@@ -536,6 +635,10 @@ class IngestionPipeline(BaseModel):
         
         entities = []
         for entity in extracted:
+            # Normalize entity type to canonical form
+            raw_type = entity.get('type', 'unknown')
+            normalized_type = normalize_entity_type(raw_type)
+            
             # Adjust line numbers if this is a chunk with offset
             entity_line_start = entity.get('line_start')
             entity_line_end = entity.get('line_end')
@@ -546,7 +649,7 @@ class IngestionPipeline(BaseModel):
                     entity_line_end = start_line + entity_line_end - 1
             
             entity_id = self._generate_entity_id(
-                entity.get('type', 'unknown'),
+                normalized_type,
                 entity.get('name', 'unnamed'),
                 file_path
             )
@@ -564,7 +667,7 @@ class IngestionPipeline(BaseModel):
             entities.append({
                 'id': entity_id,
                 'name': entity.get('name', 'unnamed'),
-                'type': entity.get('type', 'unknown'),
+                'type': normalized_type,  # Use normalized type
                 'citation': citation,
                 'properties': {
                     k: v for k, v in entity.items()

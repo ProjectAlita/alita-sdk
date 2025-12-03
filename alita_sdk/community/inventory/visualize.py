@@ -126,6 +126,10 @@ TYPE_COLORS = {
     "toolkit": "#A1887F",           # Light Brown
     "script": "#BCAAA4",            # Pale Brown
     "utility": "#D7CCC8",           # Very Light Brown
+    "mcp_server": "#6D4C41",        # Dark Brown (MCP)
+    "mcp_tool": "#795548",          # Medium Brown (MCP)
+    "mcp_resource": "#8D6E63",      # Brown (MCP)
+    "connector": "#5D4037",         # Deep Brown
     
     # Structure & Organization
     "structure": "#78909C",         # Blue Grey
@@ -564,9 +568,44 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         
         /* Filter panel */
         #type-filters {
-            max-height: 200px;
+            max-height: 400px;
             overflow-y: auto;
             margin-top: 10px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 5px;
+        }
+        
+        #type-filter-controls {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 8px;
+        }
+        
+        #type-filter-controls button {
+            flex: 1;
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 3px;
+        }
+        
+        #type-filter-controls button:hover {
+            background: #444;
+        }
+        
+        #type-filter-search {
+            width: 100%;
+            padding: 5px;
+            margin-bottom: 8px;
+            background: #1a1a2e;
+            color: #fff;
+            border: 1px solid #333;
+            border-radius: 3px;
+            font-size: 12px;
         }
         
         .type-filter {
@@ -583,6 +622,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .type-filter .count {
             color: #888;
             margin-left: auto;
+        }
+        
+        .type-filter.hidden {
+            display: none;
         }
     </style>
 </head>
@@ -610,7 +653,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <input type="checkbox" id="show-orphans" checked> Show Orphan Nodes
                 </label>
                 
-                <h3 style="margin-top: 15px;">📊 Filter by Type</h3>
+                <h3 style="margin-top: 15px;">📊 Filter by Type <span id="type-count-display" style="color: #888; font-size: 12px;"></span></h3>
+                <input type="text" id="type-filter-search" placeholder="Search types...">
+                <div id="type-filter-controls">
+                    <button id="select-all-types">All</button>
+                    <button id="select-none-types">None</button>
+                    <button id="select-top10-types">Top 10</button>
+                </div>
                 <div id="type-filters"></div>
             </div>
             <svg id="graph"></svg>
@@ -700,12 +749,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Build type filters
         const typeFiltersDiv = document.getElementById('type-filters');
         const enabledTypes = new Set(Object.keys(typeCounts));
+        const sortedTypes = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]);
         
-        Object.entries(typeCounts)
-            .sort((a, b) => b[1] - a[1])
-            .forEach(([type, count]) => {
+        // Display type count
+        document.getElementById('type-count-display').textContent = `(${sortedTypes.length} types)`;
+        
+        sortedTypes.forEach(([type, count]) => {
                 const div = document.createElement('div');
                 div.className = 'type-filter';
+                div.dataset.typeName = type.toLowerCase();
                 div.innerHTML = `
                     <input type="checkbox" checked data-type="${type}">
                     <span class="legend-color" style="background: ${getColor(type)}"></span>
@@ -714,6 +766,55 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 `;
                 typeFiltersDiv.appendChild(div);
             });
+        
+        // Type filter search
+        document.getElementById('type-filter-search').addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            document.querySelectorAll('.type-filter').forEach(div => {
+                const typeName = div.dataset.typeName;
+                div.classList.toggle('hidden', !typeName.includes(searchTerm));
+            });
+        });
+        
+        // Select all/none/top10 buttons
+        function updateGraphVisibility() {
+            node.style('display', d => enabledTypes.has(d.type) ? 'block' : 'none');
+            link.style('display', d => {
+                const sourceType = typeof d.source === 'object' ? d.source.type : nodes.find(n => n.id === d.source)?.type;
+                const targetType = typeof d.target === 'object' ? d.target.type : nodes.find(n => n.id === d.target)?.type;
+                return enabledTypes.has(sourceType) && enabledTypes.has(targetType) ? 'block' : 'none';
+            });
+        }
+        
+        document.getElementById('select-all-types').addEventListener('click', () => {
+            document.querySelectorAll('.type-filter input[type="checkbox"]').forEach(cb => {
+                cb.checked = true;
+                enabledTypes.add(cb.dataset.type);
+            });
+            updateGraphVisibility();
+        });
+        
+        document.getElementById('select-none-types').addEventListener('click', () => {
+            document.querySelectorAll('.type-filter input[type="checkbox"]').forEach(cb => {
+                cb.checked = false;
+                enabledTypes.delete(cb.dataset.type);
+            });
+            updateGraphVisibility();
+        });
+        
+        document.getElementById('select-top10-types').addEventListener('click', () => {
+            const top10Types = new Set(sortedTypes.slice(0, 10).map(([type]) => type));
+            document.querySelectorAll('.type-filter input[type="checkbox"]').forEach(cb => {
+                const isTop10 = top10Types.has(cb.dataset.type);
+                cb.checked = isTop10;
+                if (isTop10) {
+                    enabledTypes.add(cb.dataset.type);
+                } else {
+                    enabledTypes.delete(cb.dataset.type);
+                }
+            });
+            updateGraphVisibility();
+        });
         
         // Build legend
         const legendDiv = document.getElementById('legend-items');

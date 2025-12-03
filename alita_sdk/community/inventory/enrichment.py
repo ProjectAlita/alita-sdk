@@ -27,6 +27,107 @@ from difflib import SequenceMatcher
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# TYPE NORMALIZATION FOR ENRICHMENT
+# ============================================================================
+
+# Map common type variations to canonical lowercase forms
+TYPE_NORMALIZATION_MAP = {
+    # Tool/Toolkit variations
+    "Tools": "tool",
+    "Tool": "tool",
+    "Toolkit": "toolkit",
+    "Toolkits": "toolkit",
+    # Feature variations
+    "Feature": "feature",
+    "Features": "feature",
+    # Common variations
+    "API": "api",
+    "APIs": "api",
+    "Service": "service",
+    "Services": "service",
+    "Endpoint": "endpoint",
+    "Endpoints": "endpoint",
+    "Configuration": "configuration",
+    "Config": "configuration",
+    "Concept": "concept",
+    "Concepts": "concept",
+    "Process": "process",
+    "Processes": "process",
+    "Component": "component",
+    "Components": "component",
+    "Entity": "entity",
+    "Entities": "entity",
+    "Section": "section",
+    "Sections": "section",
+    "Parameter": "parameter",
+    "Parameters": "parameter",
+    "Action": "action",
+    "Actions": "action",
+    "Agent": "agent",
+    "Agents": "agent",
+    # Multi-word types
+    "Test Case": "test_case",
+    "Test Cases": "test_case",
+    "test case": "test_case",
+    "User Story": "user_story",
+    "User Stories": "user_story",
+    "user story": "user_story",
+    "Business Rule": "business_rule",
+    "business rule": "business_rule",
+    "UI Component": "ui_component",
+    "ui component": "ui_component",
+    "UI Field": "ui_field",
+    "ui field": "ui_field",
+    "Test Suite": "test_suite",
+    "test suite": "test_suite",
+    "Test Step": "test_step",
+    "test step": "test_step",
+    "Glossary Term": "glossary_term",
+    "glossary term": "glossary_term",
+    "Domain Entity": "domain_entity",
+    "domain entity": "domain_entity",
+    "Pull Request": "pull_request",
+    "pull request": "pull_request",
+    "MCP Server": "mcp_server",
+    "MCP Tool": "mcp_tool", 
+    "MCP Resource": "mcp_resource",
+    "Use Case": "use_case",
+    "use case": "use_case",
+    "Fixed Issue": "fixed_issue",
+    "Fixed_Issue": "fixed_issue",
+}
+
+def normalize_type(entity_type: str) -> str:
+    """
+    Normalize entity type to canonical lowercase form.
+    
+    Args:
+        entity_type: Raw entity type
+        
+    Returns:
+        Canonical lowercase entity type
+    """
+    if not entity_type:
+        return "unknown"
+    
+    # Check explicit mapping first
+    if entity_type in TYPE_NORMALIZATION_MAP:
+        return TYPE_NORMALIZATION_MAP[entity_type]
+    
+    # Normalize: lowercase, replace spaces with underscores
+    normalized = entity_type.lower().strip().replace(" ", "_").replace("-", "_")
+    
+    # Handle plural forms by removing trailing 's' (but not 'ss' like 'class')
+    if normalized.endswith('s') and not normalized.endswith('ss') and len(normalized) > 3:
+        singular = normalized[:-1]
+        # Don't singularize common standalone types
+        if singular not in {'proces', 'clas', 'statu', 'analysi'}:
+            return singular
+    
+    return normalized
+
+
 # Relationship types for cross-source linking
 CROSS_SOURCE_RELATIONS = {
     # (source_type, target_type): relation_type
@@ -237,6 +338,46 @@ class GraphEnricher:
             self.existing_links.add((link["target"], link["source"]))  # bidirectional check
         
         logger.info(f"Loaded graph: {len(self.nodes_by_id)} nodes, {len(self.existing_links)//2} links")
+    
+    def normalize_entity_types(self):
+        """
+        Normalize all entity types in the graph to canonical lowercase forms.
+        
+        This fixes inconsistencies like Tool/tool/Tools all becoming 'tool'.
+        Should be run before other enrichment steps.
+        """
+        logger.info("Normalizing entity types...")
+        types_normalized = 0
+        type_changes: Dict[str, str] = {}  # original -> normalized
+        
+        for node in self.graph_data.get("nodes", []):
+            original_type = node.get("type", "")
+            normalized = normalize_type(original_type)
+            
+            if normalized != original_type:
+                if original_type not in type_changes:
+                    type_changes[original_type] = normalized
+                node["type"] = normalized
+                types_normalized += 1
+        
+        # Log what was changed
+        if type_changes:
+            logger.info(f"Normalized {types_normalized} entity types:")
+            for orig, norm in sorted(type_changes.items()):
+                logger.debug(f"  {orig} -> {norm}")
+        
+        self.stats["types_normalized"] = types_normalized
+        self.stats["type_changes"] = len(type_changes)
+        
+        # Rebuild indices after type normalization
+        self.nodes_by_id.clear()
+        self.nodes_by_name.clear()
+        for node in self.graph_data.get("nodes", []):
+            self.nodes_by_id[node["id"]] = node
+            name_key = self._normalize_name(node.get("name", ""))
+            self.nodes_by_name[name_key].append(node)
+        
+        logger.info(f"Normalized {len(type_changes)} distinct type variations")
     
     def _normalize_name(self, name: str) -> str:
         """Normalize entity name for matching."""
@@ -766,6 +907,16 @@ class GraphEnricher:
         name1 = self._normalize_name(node1.get("name", ""))
         name2 = self._normalize_name(node2.get("name", ""))
         
+        # Tool/Toolkit relationships - highest priority
+        if type1 == "toolkit" and type2 == "tool":
+            return "contains"
+        if type2 == "toolkit" and type1 == "tool":
+            return "part_of"
+        if type1 == "mcp_server" and type2 == "mcp_tool":
+            return "provides"
+        if type2 == "mcp_server" and type1 == "mcp_tool":
+            return "provided_by"
+        
         # Check for hierarchical relationship (one name contains the other)
         if name1 in name2 or name2 in name1:
             if len(name1) < len(name2):
@@ -781,6 +932,8 @@ class GraphEnricher:
             ({"defect", "incident"}, {"feature", "component"}, "affects"),
             ({"ticket"}, {"feature", "epic", "user_story"}, "implements"),
             ({"documentation"}, {"feature", "api", "class"}, "documents"),
+            ({"toolkit"}, {"feature", "capability", "function"}, "provides"),
+            ({"tool"}, {"feature", "capability", "function"}, "implements"),
         ]
         
         for types_a, types_b, rel in type_pairs:
@@ -794,6 +947,90 @@ class GraphEnricher:
             return CROSS_SOURCE_RELATIONS[(type2, type1)]
         
         return "related_to"
+    
+    def enrich_toolkit_tool_links(self):
+        """
+        Create explicit links between toolkits and their tools.
+        
+        This method specifically handles the toolkit → tool relationship by:
+        1. Finding all toolkit and tool entities
+        2. Matching tools to toolkits based on:
+           - Same file path (tools defined in toolkit's documentation)
+           - Toolkit name appearing in tool's parent_toolkit property
+           - Tool name containing toolkit name prefix
+        """
+        logger.info("Linking tools to toolkits...")
+        
+        nodes = self.graph_data.get("nodes", [])
+        links_created = 0
+        
+        # Index toolkits and tools
+        toolkits = [n for n in nodes if n.get("type", "").lower() == "toolkit"]
+        tools = [n for n in nodes if n.get("type", "").lower() == "tool"]
+        
+        # Index toolkits by file_path and name
+        toolkit_by_file: Dict[str, List[Dict]] = defaultdict(list)
+        toolkit_by_name: Dict[str, Dict] = {}
+        
+        for tk in toolkits:
+            file_path = tk.get("file_path", "")
+            if file_path:
+                toolkit_by_file[file_path].append(tk)
+            name = tk.get("name", "").lower()
+            if name:
+                toolkit_by_name[name] = tk
+                # Also index by common variations
+                # e.g., "GitHub Toolkit" → "github", "github toolkit"
+                short_name = name.replace(" toolkit", "").replace("_toolkit", "")
+                toolkit_by_name[short_name] = tk
+        
+        for tool in tools:
+            tool_id = tool["id"]
+            tool_file = tool.get("file_path", "")
+            tool_name = tool.get("name", "").lower()
+            tool_props = tool.get("properties", {})
+            parent_toolkit = tool_props.get("parent_toolkit", "").lower()
+            
+            matched_toolkit = None
+            match_reason = ""
+            
+            # Strategy 1: Match by parent_toolkit property
+            if parent_toolkit:
+                for tk_name, tk in toolkit_by_name.items():
+                    if tk_name in parent_toolkit or parent_toolkit in tk_name:
+                        matched_toolkit = tk
+                        match_reason = f"parent_toolkit:{parent_toolkit}"
+                        break
+            
+            # Strategy 2: Match by same file path
+            if not matched_toolkit and tool_file:
+                if tool_file in toolkit_by_file:
+                    # Pick first matching toolkit in same file
+                    matched_toolkit = toolkit_by_file[tool_file][0]
+                    match_reason = f"same_file:{tool_file}"
+            
+            # Strategy 3: Match by tool name containing toolkit name
+            if not matched_toolkit:
+                for tk_name, tk in toolkit_by_name.items():
+                    if tk_name in tool_name:
+                        matched_toolkit = tk
+                        match_reason = f"name_match:{tk_name}"
+                        break
+            
+            # Create link if matched
+            if matched_toolkit:
+                pair = tuple(sorted([matched_toolkit["id"], tool_id]))
+                if pair not in self.existing_links:
+                    if self._add_link(
+                        matched_toolkit["id"],
+                        tool_id,
+                        "contains",
+                        f"toolkit_tool:{match_reason}"
+                    ):
+                        links_created += 1
+        
+        self.stats["toolkit_tool_links"] = links_created
+        logger.info(f"Created {links_created} toolkit → tool links")
     
     def enrich_orphan_nodes(self, max_links_per_orphan: int = 3):
         """
@@ -900,9 +1137,11 @@ class GraphEnricher:
     
     def enrich(
         self,
+        normalize_types: bool = True,  # Normalize entity types first
         deduplicate: bool = False,  # Disabled by default - can lose semantic meaning
         cross_source: bool = True,
         semantic_links: bool = True,
+        toolkit_tools: bool = True,  # Link tools to their toolkits
         orphans: bool = True,
         similarity: bool = False,  # Disabled by default - can create too many links
         min_similarity: float = 0.9,
@@ -912,34 +1151,46 @@ class GraphEnricher:
         Run all enrichment steps.
         
         The recommended order is:
+        0. Normalize entity types (Tool/tool/Tools → tool)
         1. Deduplicate entities (DISABLED by default - use with caution)
-        2. Create cross-source links (code ↔ docs)
-        3. Create semantic links (shared concepts) - LINKS related entities
-        4. Connect orphans
-        5. Similarity links (optional)
+        2. Link tools to toolkits (explicit toolkit → tool relationships)
+        3. Create cross-source links (code ↔ docs)
+        4. Create semantic links (shared concepts) - LINKS related entities
+        5. Connect orphans
+        6. Similarity links (optional)
         
         Args:
+            normalize_types: Normalize entity types to canonical forms
             deduplicate: Merge entities with exact same name (DISABLED by default)
             cross_source: Link same-named entities across sources
             semantic_links: Link entities sharing significant words
+            toolkit_tools: Create explicit toolkit → tool relationships
             orphans: Connect orphan nodes to related entities
             similarity: Link highly similar entity names
             min_similarity: Threshold for similarity matching
             exact_match_only: Only merge exact name matches if dedup enabled
         """
+        # Step 0: Normalize entity types (Tool/tool/Tools → tool)
+        if normalize_types:
+            self.normalize_entity_types()
+        
         # Step 1: Deduplication (DISABLED by default - can lose semantic meaning)
         if deduplicate:
             self.deduplicate_entities(require_exact_match=exact_match_only)
         
-        # Step 2: Cross-source linking
+        # Step 2: Link tools to their toolkits (high priority - structural)
+        if toolkit_tools:
+            self.enrich_toolkit_tool_links()
+        
+        # Step 3: Cross-source linking
         if cross_source:
             self.enrich_cross_source_links()
         
-        # Step 3: Semantic cross-linking (LINKS related entities, doesn't merge)
+        # Step 4: Semantic cross-linking (LINKS related entities, doesn't merge)
         if semantic_links:
             self.enrich_semantic_links()
         
-        # Step 4: Orphan connections
+        # Step 5: Orphan connections
         if orphans:
             self.enrich_orphan_nodes()
         
@@ -989,9 +1240,10 @@ class GraphEnricher:
 def enrich_graph(
     graph_path: str,
     output_path: Optional[str] = None,
-    deduplicate: bool = True,
+    deduplicate: bool = False,  # Disabled by default
     cross_source: bool = True,
     semantic_links: bool = True,
+    toolkit_tools: bool = True,
     orphans: bool = True,
     similarity: bool = False,
 ) -> Dict[str, Any]:
@@ -1001,9 +1253,10 @@ def enrich_graph(
     Args:
         graph_path: Path to input graph JSON
         output_path: Path to output (default: overwrite input)
-        deduplicate: Merge same/similar entities
+        deduplicate: Merge same/similar entities (disabled by default)
         cross_source: Create cross-source links
         semantic_links: Create semantic cross-links
+        toolkit_tools: Link tools to their toolkits
         orphans: Connect orphan nodes
         similarity: Create similarity links
         
@@ -1015,6 +1268,7 @@ def enrich_graph(
         deduplicate=deduplicate,
         cross_source=cross_source,
         semantic_links=semantic_links,
+        toolkit_tools=toolkit_tools,
         orphans=orphans,
         similarity=similarity,
     )

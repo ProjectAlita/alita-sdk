@@ -119,17 +119,29 @@ ENTITY_TAXONOMY = {
             {"name": "documentation", "description": "Documentation page or article", "properties": ["name", "url", "description", "doc_type", "last_updated"]},
         ]
     },
+    "tooling_layer": {
+        "description": "Tools and integration toolkits",
+        "types": [
+            {"name": "toolkit", "description": "Integration toolkit or connector (e.g., Jira Toolkit, GitHub Toolkit)", "properties": ["name", "description", "tools", "configuration_fields", "authentication"]},
+            {"name": "tool", "description": "Individual tool or capability within a toolkit", "properties": ["name", "description", "parameters", "return_type", "parent_toolkit"]},
+            {"name": "mcp_server", "description": "MCP (Model Context Protocol) server", "properties": ["name", "description", "transport", "tools", "resources"]},
+            {"name": "mcp_tool", "description": "Tool exposed by an MCP server", "properties": ["name", "description", "input_schema", "parent_server"]},
+            {"name": "mcp_resource", "description": "Resource exposed by an MCP server", "properties": ["name", "uri", "description", "mime_type"]},
+            {"name": "connector", "description": "External system connector or adapter", "properties": ["name", "description", "target_system", "auth_type", "capabilities"]},
+        ]
+    },
 }
 
 RELATIONSHIP_TAXONOMY = {
     "structural": {
         "description": "Structural relationships",
         "types": [
-            {"name": "contains", "description": "Parent contains child", "examples": ["module contains class", "screen contains ui_component"]},
+            {"name": "contains", "description": "Parent contains child", "examples": ["module contains class", "screen contains ui_component", "toolkit contains tool"]},
             {"name": "extends", "description": "Inherits or extends", "examples": ["class extends parent_class", "epic contains feature"]},
             {"name": "implements", "description": "Implements interface or requirement", "examples": ["class implements interface", "function implements user_story"]},
             {"name": "imports", "description": "Import or include dependency", "examples": ["module imports module"]},
-            {"name": "part_of", "description": "Part of larger whole", "examples": ["column part_of table", "step part_of test_case"]},
+            {"name": "part_of", "description": "Part of larger whole", "examples": ["column part_of table", "step part_of test_case", "tool part_of toolkit"]},
+            {"name": "provides", "description": "Provides capability or resource", "examples": ["toolkit provides tool", "mcp_server provides mcp_tool", "service provides api"]},
         ]
     },
     "behavioral": {
