@@ -837,12 +837,40 @@ class FilesystemApiWrapper:
             raise ValueError(f"Directory does not exist: {self.base_directory}")
         if not Path(self.base_directory).is_dir():
             raise ValueError(f"Path is not a directory: {self.base_directory}")
+        
+        # Optional RunnableConfig for CLI/standalone usage
+        self._runnable_config = None
     
-    def _log_tool_event(self, message: str, tool_name: str = None):
-        """Log progress events (mirrors BaseToolApiWrapper)."""
+    def set_runnable_config(self, config: Optional[Dict[str, Any]]) -> None:
+        """
+        Set the RunnableConfig for dispatching custom events.
+        
+        This is required when running outside of a LangChain agent context
+        (e.g., from CLI). Without a config containing a run_id, 
+        dispatch_custom_event will fail with "Unable to dispatch an adhoc event 
+        without a parent run id".
+        
+        Args:
+            config: A RunnableConfig dict with at least {'run_id': uuid}
+        """
+        self._runnable_config = config
+    
+    def _log_tool_event(self, message: str, tool_name: str = None, config: Optional[Dict[str, Any]] = None):
+        """Log progress events (mirrors BaseToolApiWrapper).
+        
+        Args:
+            message: The message to log
+            tool_name: Name of the tool (defaults to 'filesystem')
+            config: Optional RunnableConfig. If not provided, uses self._runnable_config.
+                   Required when running outside a LangChain agent context.
+        """
         logger.info(f"[{tool_name or 'filesystem'}] {message}")
         try:
             from langchain_core.callbacks import dispatch_custom_event
+            
+            # Use provided config, fall back to instance config
+            effective_config = config or getattr(self, '_runnable_config', None)
+            
             dispatch_custom_event(
                 name="thinking_step",
                 data={
@@ -850,6 +878,7 @@ class FilesystemApiWrapper:
                     "tool_name": tool_name or "filesystem",
                     "toolkit": "FilesystemApiWrapper",
                 },
+                config=effective_config,
             )
         except Exception:
             pass

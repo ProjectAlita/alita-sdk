@@ -48,9 +48,10 @@ logger = logging.getLogger(__name__)
 
 SearchGraphParams = create_model(
     "SearchGraphParams",
-    query=(str, Field(description="Search query for finding entities")),
-    entity_type=(Optional[str], Field(default=None, description="Filter by entity type")),
-    layer=(Optional[str], Field(default=None, description="Filter by entity layer (product, domain, service, code, data, testing, delivery, organization)")),
+    query=(str, Field(description="Search query for finding entities. Supports token matching (e.g., 'chat message' finds 'ChatMessageHandler')")),
+    entity_type=(Optional[str], Field(default=None, description="Filter by entity type (e.g., 'class', 'function', 'method'). Case-insensitive.")),
+    layer=(Optional[str], Field(default=None, description="Filter by semantic layer: 'code' (classes/functions), 'service' (APIs/endpoints), 'data' (models/schemas), 'product' (features/menus), 'domain' (concepts/processes), 'documentation', 'configuration', 'testing', 'tooling'")),
+    file_pattern=(Optional[str], Field(default=None, description="Filter by file path pattern (glob-like, e.g., '**/chat*.py', 'api/v2/*.py')")),
     top_k=(Optional[int], Field(default=10, description="Number of results to return")),
 )
 
@@ -97,8 +98,23 @@ ListEntitiesByTypeParams = create_model(
 
 ListEntitiesByLayerParams = create_model(
     "ListEntitiesByLayerParams",
-    layer=(str, Field(description="Layer to list entities from (product, domain, service, code, data, testing, delivery, organization)")),
+    layer=(str, Field(description="Layer to list entities from: 'code' (classes/functions/methods), 'service' (APIs/RPCs), 'data' (models/schemas), 'product' (features/UI), 'domain' (concepts/processes), 'documentation', 'configuration', 'testing', 'tooling'")),
     limit=(Optional[int], Field(default=50, description="Maximum number of entities to return")),
+)
+
+SearchByFileParams = create_model(
+    "SearchByFileParams",
+    file_pattern=(str, Field(description="File path pattern (glob-like, e.g., '**/chat*.py', 'api/v2/*.py', 'rpc/*.py')")),
+    limit=(Optional[int], Field(default=50, description="Maximum number of entities to return")),
+)
+
+AdvancedSearchParams = create_model(
+    "AdvancedSearchParams",
+    query=(Optional[str], Field(default=None, description="Text search query (optional)")),
+    entity_types=(Optional[str], Field(default=None, description="Comma-separated entity types to include (e.g., 'class,function,method')")),
+    layers=(Optional[str], Field(default=None, description="Comma-separated layers to include (e.g., 'code,service')")),
+    file_patterns=(Optional[str], Field(default=None, description="Comma-separated file patterns (e.g., 'api/*.py,rpc/*.py')")),
+    top_k=(Optional[int], Field(default=20, description="Maximum number of results")),
 )
 
 
@@ -236,18 +252,26 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
         query: str, 
         entity_type: Optional[str] = None,
         layer: Optional[str] = None,
+        file_pattern: Optional[str] = None,
         top_k: int = 10
     ) -> str:
         """
-        Search for entities in the knowledge graph.
+        Search for entities in the knowledge graph with enhanced matching.
+        
+        Supports:
+        - Token-based matching: "chat message" finds "ChatMessageHandler"
+        - File path patterns: "**/chat*.py" finds entities from chat files
+        - Layer filtering: "code" includes classes, functions, methods
+        - Type filtering: Case-insensitive matching
         
         Returns entity metadata with citations. Use get_entity_content
         to retrieve the actual source code.
         
         Args:
-            query: Search query (matches entity names and properties)
+            query: Search query (matches entity names, descriptions, file paths)
             entity_type: Optional filter by type (class, function, api_endpoint, etc.)
-            layer: Optional filter by layer (product, domain, service, code, etc.)
+            layer: Optional filter by layer (code, service, data, product, domain, etc.)
+            file_pattern: Optional glob pattern for file paths
             top_k: Maximum number of results
         """
         self._log_tool_event(f"Searching: {query}", "search_graph")
@@ -255,12 +279,10 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
         results = self._knowledge_graph.search(
             query, 
             top_k=top_k, 
-            entity_type=entity_type
+            entity_type=entity_type,
+            layer=layer,
+            file_pattern=file_pattern,
         )
-        
-        # Additional layer filtering if specified
-        if layer and results:
-            results = [r for r in results if r['entity'].get('layer') == layer]
         
         if not results:
             filters = []
@@ -268,6 +290,8 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
                 filters.append(f"type={entity_type}")
             if layer:
                 filters.append(f"layer={layer}")
+            if file_pattern:
+                filters.append(f"file={file_pattern}")
             filter_str = f" (filters: {', '.join(filters)})" if filters else ""
             return f"No entities found matching '{query}'{filter_str}"
         
@@ -275,16 +299,26 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
         
         for i, result in enumerate(results, 1):
             entity = result['entity']
-            citation = entity.get('citation', {})
+            match_field = result.get('match_field', '')
+            score = result.get('score', 0)
+            
+            # Get citations (support both list and legacy single citation)
+            citations = entity.get('citations', [])
+            if not citations and 'citation' in entity:
+                citations = [entity['citation']]
             
             entity_type_str = entity.get('type', 'unknown')
             layer_str = entity.get('layer', '')
+            if not layer_str:
+                # Infer layer from type
+                layer_str = self._knowledge_graph.TYPE_TO_LAYER.get(entity_type_str.lower(), '')
             if layer_str:
                 entity_type_str = f"{layer_str}/{entity_type_str}"
             
-            output += f"{i}. **{entity.get('name')}** ({entity_type_str})\n"
+            output += f"{i:2}. **{entity.get('name')}** ({entity_type_str})\n"
             
-            if citation:
+            if citations:
+                citation = citations[0]  # Primary citation
                 file_path = citation.get('file_path', 'unknown')
                 line_info = ""
                 if citation.get('line_start'):
@@ -292,14 +326,19 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
                         line_info = f":{citation['line_start']}-{citation['line_end']}"
                     else:
                         line_info = f":{citation['line_start']}"
-                output += f"   📍 `{file_path}{line_info}`\n"
+                output += f"    📍 `{file_path}{line_info}`\n"
+            elif entity.get('file_path'):
+                output += f"    📍 `{entity['file_path']}`\n"
             
             # Show description if available
-            if entity.get('description'):
-                desc = entity['description'][:100]
-                if len(entity['description']) > 100:
+            description = entity.get('description', '')
+            if not description and isinstance(entity.get('properties'), dict):
+                description = entity['properties'].get('description', '')
+            if description:
+                desc = description[:120]
+                if len(description) > 120:
                     desc += "..."
-                output += f"   {desc}\n"
+                output += f"    {desc}\n"
             
             output += "\n"
         
@@ -309,54 +348,105 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
         """
         Get detailed information about a specific entity.
         
+        If multiple entities have the same name (e.g., 'Chat' as Feature vs command),
+        shows all matches with their types.
+        
         Returns metadata, citation, properties, and optionally relations.
         Use get_entity_content for the actual source code.
         """
         self._log_tool_event(f"Getting entity: {entity_name}", "get_entity")
         
-        entity = self._knowledge_graph.find_entity_by_name(entity_name)
+        # Get all entities with this name
+        entities = self._knowledge_graph.find_all_entities_by_name(entity_name)
         
-        if not entity:
-            results = self._knowledge_graph.search(entity_name, top_k=1)
+        if not entities:
+            # Try search as fallback
+            results = self._knowledge_graph.search(entity_name, top_k=5)
             if results:
-                entity = results[0]['entity']
+                entities = [r['entity'] for r in results]
         
-        if not entity:
+        if not entities:
             return f"Entity '{entity_name}' not found"
         
-        output = f"# {entity.get('name')}\n\n"
-        output += f"**Type:** {entity.get('type')}\n"
+        # If multiple matches, show disambiguation
+        if len(entities) > 1:
+            output = f"# Found {len(entities)} entities named '{entity_name}'\n\n"
+            for i, entity in enumerate(entities, 1):
+                etype = entity.get('type', 'unknown')
+                layer = entity.get('layer', '') or self._knowledge_graph.TYPE_TO_LAYER.get(etype.lower(), '')
+                fp = entity.get('file_path', '')
+                
+                type_str = f"{layer}/{etype}" if layer else etype
+                output += f"{i}. **{entity.get('name')}** ({type_str})"
+                if fp:
+                    output += f" - `{fp}`"
+                output += f"\n   ID: `{entity.get('id')}`\n\n"
+            
+            output += "\n---\n\n"
+            output += "Showing details for the first match:\n\n"
+            entity = entities[0]
+        else:
+            entity = entities[0]
+            output = ""
         
-        if entity.get('layer'):
-            output += f"**Layer:** {entity.get('layer')}\n"
+        # Show details for the primary entity
+        output += f"# {entity.get('name')}\n\n"
+        
+        etype = entity.get('type', 'unknown')
+        layer = entity.get('layer', '') or self._knowledge_graph.TYPE_TO_LAYER.get(etype.lower(), '')
+        
+        output += f"**Type:** {etype}\n"
+        if layer:
+            output += f"**Layer:** {layer}\n"
         
         output += f"**ID:** `{entity.get('id')}`\n"
         
-        # Citation
-        citation = entity.get('citation', {})
-        if citation:
-            file_path = citation.get('file_path', 'unknown')
-            source = citation.get('source_toolkit', 'filesystem')
-            output += f"\n**Location:** `{file_path}`"
-            if citation.get('line_start'):
-                output += f" (lines {citation['line_start']}"
-                if citation.get('line_end'):
-                    output += f"-{citation['line_end']}"
-                output += ")"
-            output += f"\n**Source:** {source}\n"
+        # Citations (support both list and legacy single citation)
+        citations = entity.get('citations', [])
+        if not citations and 'citation' in entity:
+            citations = [entity['citation']]
+        
+        if citations:
+            output += f"\n**Locations ({len(citations)}):**\n"
+            for citation in citations[:5]:
+                if isinstance(citation, dict):
+                    file_path = citation.get('file_path', 'unknown')
+                    source = citation.get('source_toolkit', 'filesystem')
+                    line_info = ""
+                    if citation.get('line_start'):
+                        line_info = f":{citation['line_start']}"
+                        if citation.get('line_end'):
+                            line_info += f"-{citation['line_end']}"
+                    output += f"- `{file_path}{line_info}` ({source})\n"
+            if len(citations) > 5:
+                output += f"- ... and {len(citations) - 5} more citations\n"
+        elif entity.get('file_path'):
+            output += f"\n**Location:** `{entity['file_path']}`\n"
         
         # Description
-        if entity.get('description'):
-            output += f"\n**Description:**\n{entity['description']}\n"
+        description = entity.get('description', '')
+        if not description and isinstance(entity.get('properties'), dict):
+            description = entity['properties'].get('description', '')
+        if description:
+            output += f"\n**Description:**\n{description}\n"
         
         # Properties
-        props = {k: v for k, v in entity.items() 
-                if k not in ('id', 'name', 'type', 'layer', 'citation', 'description')}
+        skip_keys = {'id', 'name', 'type', 'layer', 'citation', 'citations', 'description', 'file_path', 'source_toolkit', 'properties'}
+        props = {k: v for k, v in entity.items() if k not in skip_keys}
+        
+        # Also include nested properties
+        if isinstance(entity.get('properties'), dict):
+            for k, v in entity['properties'].items():
+                if k not in skip_keys and k != 'description':
+                    props[k] = v
+        
         if props:
             output += f"\n**Properties:**\n"
             for key, value in props.items():
                 if isinstance(value, (list, dict)):
                     output += f"- {key}: {len(value)} items\n"
+                elif isinstance(value, str) and len(value) > 100:
+                    output += f"- {key}: {value[:100]}...\n"
                 else:
                     output += f"- {key}: {value}\n"
         
@@ -730,7 +820,16 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
         """
         List all entities in a specific layer.
         
-        Layers: product, domain, service, code, data, testing, delivery, organization
+        Layers:
+        - code: classes, functions, methods, modules
+        - service: API endpoints, RPC methods, handlers
+        - data: models, schemas, fields
+        - product: features, UI components, menus
+        - domain: concepts, processes, use cases
+        - documentation: guides, sections, examples
+        - configuration: settings, credentials
+        - testing: test cases, fixtures
+        - tooling: tools, toolkits, commands
         
         Args:
             layer: Layer to filter
@@ -741,7 +840,8 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
         entities = self._knowledge_graph.get_entities_by_layer(layer, limit=limit)
         
         if not entities:
-            return f"No entities in layer '{layer}' found"
+            available_layers = ", ".join(self._knowledge_graph.LAYER_TYPE_MAPPING.keys())
+            return f"No entities in layer '{layer}' found. Available layers: {available_layers}"
         
         output = f"# Entities in layer '{layer}' ({len(entities)})\n\n"
         
@@ -753,12 +853,116 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
                 by_type[etype] = []
             by_type[etype].append(ent)
         
-        for etype, ents in by_type.items():
+        for etype, ents in sorted(by_type.items(), key=lambda x: -len(x[1])):
             output += f"## {etype} ({len(ents)})\n"
             for ent in ents[:10]:
-                output += f"- **{ent.get('name')}**\n"
+                file_path = ent.get('file_path', '')
+                if file_path:
+                    output += f"- **{ent.get('name')}** - `{file_path}`\n"
+                else:
+                    output += f"- **{ent.get('name')}**\n"
             if len(ents) > 10:
                 output += f"- ... and {len(ents) - 10} more\n"
+            output += "\n"
+        
+        return output
+    
+    def search_by_file(self, file_pattern: str, limit: int = 50) -> str:
+        """
+        Search for entities by file path pattern.
+        
+        Useful for finding all code elements in specific files or directories.
+        
+        Args:
+            file_pattern: Glob-like pattern (e.g., "**/chat*.py", "api/v2/*.py", "rpc/*.py")
+            limit: Maximum entities to return
+        """
+        self._log_tool_event(f"Searching by file: {file_pattern}", "search_by_file")
+        
+        entities = self._knowledge_graph.search_by_file(file_pattern, limit=limit)
+        
+        if not entities:
+            return f"No entities found matching file pattern '{file_pattern}'"
+        
+        output = f"# Entities from files matching '{file_pattern}' ({len(entities)})\n\n"
+        
+        # Group by file
+        by_file: Dict[str, List] = {}
+        for ent in entities:
+            fp = ent.get('file_path', 'unknown')
+            if fp not in by_file:
+                by_file[fp] = []
+            by_file[fp].append(ent)
+        
+        for fp, ents in sorted(by_file.items()):
+            output += f"## `{fp}` ({len(ents)} entities)\n"
+            for ent in ents[:15]:
+                output += f"- **{ent.get('name')}** ({ent.get('type', 'unknown')})\n"
+            if len(ents) > 15:
+                output += f"- ... and {len(ents) - 15} more\n"
+            output += "\n"
+        
+        return output
+    
+    def advanced_search(
+        self,
+        query: Optional[str] = None,
+        entity_types: Optional[str] = None,
+        layers: Optional[str] = None,
+        file_patterns: Optional[str] = None,
+        top_k: int = 20,
+    ) -> str:
+        """
+        Advanced search with multiple filter criteria.
+        
+        All filters use OR logic within each parameter.
+        
+        Args:
+            query: Text search query (optional)
+            entity_types: Comma-separated types to include (e.g., "class,function,method")
+            layers: Comma-separated layers to include (e.g., "code,service")
+            file_patterns: Comma-separated file patterns (e.g., "api/*.py,rpc/*.py")
+            top_k: Maximum results
+        """
+        self._log_tool_event(f"Advanced search: query={query}, types={entity_types}, layers={layers}, files={file_patterns}", "advanced_search")
+        
+        # Parse comma-separated values
+        types_list = [t.strip() for t in entity_types.split(',')] if entity_types else None
+        layers_list = [l.strip() for l in layers.split(',')] if layers else None
+        files_list = [f.strip() for f in file_patterns.split(',')] if file_patterns else None
+        
+        results = self._knowledge_graph.search_advanced(
+            query=query,
+            entity_types=types_list,
+            layers=layers_list,
+            file_patterns=files_list,
+            top_k=top_k,
+        )
+        
+        if not results:
+            filters = []
+            if entity_types:
+                filters.append(f"types={entity_types}")
+            if layers:
+                filters.append(f"layers={layers}")
+            if file_patterns:
+                filters.append(f"files={file_patterns}")
+            filter_str = f" (filters: {', '.join(filters)})" if filters else ""
+            query_str = f" matching '{query}'" if query else ""
+            return f"No entities found{query_str}{filter_str}"
+        
+        output = f"# Advanced Search Results ({len(results)})\n\n"
+        
+        for i, result in enumerate(results, 1):
+            entity = result['entity']
+            etype = entity.get('type', 'unknown')
+            layer = entity.get('layer', '') or self._knowledge_graph.TYPE_TO_LAYER.get(etype.lower(), '')
+            fp = entity.get('file_path', '')
+            
+            type_str = f"{layer}/{etype}" if layer else etype
+            output += f"{i:2}. **{entity.get('name')}** ({type_str})\n"
+            if fp:
+                output += f"    📍 `{fp}`\n"
             output += "\n"
         
         return output
@@ -769,7 +973,7 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
             {
                 "name": "search_graph",
                 "ref": self.search_graph,
-                "description": "Search for entities in the knowledge graph by name, type, or layer.",
+                "description": "Search for entities with enhanced token matching. Supports 'chat message' finding 'ChatMessageHandler', file patterns like '**/chat*.py', and layer filtering (code, service, data, product).",
                 "args_schema": SearchGraphParams,
             },
             {
@@ -783,6 +987,18 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
                 "ref": self.get_entity_content,
                 "description": "Retrieve source code for an entity using its citation. Reads from local files or remote toolkit.",
                 "args_schema": GetEntityContentParams,
+            },
+            {
+                "name": "search_by_file",
+                "ref": self.search_by_file,
+                "description": "Search entities by file path pattern. Use '**/chat*.py' to find all chat-related code, 'api/v2/*.py' for API v2 files.",
+                "args_schema": SearchByFileParams,
+            },
+            {
+                "name": "advanced_search",
+                "ref": self.advanced_search,
+                "description": "Advanced multi-criteria search. Combine text query with type/layer/file filters. Types: class,function,method. Layers: code,service,data,product.",
+                "args_schema": AdvancedSearchParams,
             },
             {
                 "name": "impact_analysis",
@@ -811,13 +1027,13 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
             {
                 "name": "list_entities_by_type",
                 "ref": self.list_entities_by_type,
-                "description": "List all entities of a specific type (class, function, api_endpoint, etc.).",
+                "description": "List all entities of a specific type (class, function, api_endpoint, etc.). Case-insensitive.",
                 "args_schema": ListEntitiesByTypeParams,
             },
             {
                 "name": "list_entities_by_layer",
                 "ref": self.list_entities_by_layer,
-                "description": "List all entities in a specific layer (product, domain, service, code, data, testing, delivery, organization).",
+                "description": "List entities by semantic layer: code (classes/functions), service (APIs), data (models), product (features), documentation, configuration, testing, tooling.",
                 "args_schema": ListEntitiesByLayerParams,
             },
         ]

@@ -456,13 +456,34 @@ class IngestionPipeline(BaseModel):
         """
         Generate unique entity ID.
         
-        Entity IDs are based on (type, name) only - NOT file_path.
+        For most entity types, IDs are based on (type, name) only - NOT file_path.
         This enables same-named entities from different files to be merged,
         creating a unified knowledge graph with multiple citations per entity.
+        
+        HOWEVER, for context-dependent types (tools, properties, etc.), the file_path
+        IS included because the same name in different files means different things:
+        - "Get Tests" tool in Xray toolkit != "Get Tests" tool in Zephyr toolkit
+        - "name" property in User entity != "name" property in Project entity
         """
+        # Types that are context-dependent - same name in different files = different entities
+        CONTEXT_DEPENDENT_TYPES = {
+            "tool", "property", "properties", "parameter", "argument",
+            "field", "column", "attribute", "option", "setting",
+            "step", "test_step", "ui_field", "endpoint", "method",
+        }
+        
         # Normalize name for consistent hashing
         normalized_name = name.lower().strip()
-        content = f"{entity_type}:{normalized_name}"
+        normalized_type = entity_type.lower().strip()
+        
+        # Include file_path for context-dependent types
+        if normalized_type in CONTEXT_DEPENDENT_TYPES and file_path:
+            # Use file path to differentiate same-named entities from different contexts
+            content = f"{entity_type}:{normalized_name}:{file_path}"
+        else:
+            # Standard: merge same-named entities across files
+            content = f"{entity_type}:{normalized_name}"
+        
         return hashlib.md5(content.encode()).hexdigest()[:12]
     
     def _normalize_document(self, doc: Any, source_toolkit: str) -> Optional[Document]:

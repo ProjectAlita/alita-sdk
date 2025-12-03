@@ -128,12 +128,36 @@ BaseIndexDataParams = create_model(
 
 
 class BaseToolApiWrapper(BaseModel):
+    
+    # Optional RunnableConfig for CLI/standalone usage (allows dispatch_custom_event to work)
+    _runnable_config: Optional[Dict[str, Any]] = None
 
     def get_available_tools(self):
         raise NotImplementedError("Subclasses should implement this method")
 
-    def _log_tool_event(self, message: str, tool_name: str = None):
-        """Log data and dispatch custom event for the tool"""
+    def set_runnable_config(self, config: Optional[Dict[str, Any]]) -> None:
+        """
+        Set the RunnableConfig for dispatching custom events.
+        
+        This is required when running outside of a LangChain agent context
+        (e.g., from CLI). Without a config containing a run_id, 
+        dispatch_custom_event will fail with "Unable to dispatch an adhoc event 
+        without a parent run id".
+        
+        Args:
+            config: A RunnableConfig dict with at least {'run_id': uuid}
+        """
+        self._runnable_config = config
+
+    def _log_tool_event(self, message: str, tool_name: str = None, config: Optional[Dict[str, Any]] = None):
+        """Log data and dispatch custom event for the tool.
+        
+        Args:
+            message: The message to log
+            tool_name: Name of the tool (defaults to 'tool_progress')
+            config: Optional RunnableConfig. If not provided, uses self._runnable_config.
+                   Required when running outside a LangChain agent context.
+        """
 
         try:
             from langchain_core.callbacks import dispatch_custom_event
@@ -142,6 +166,10 @@ class BaseToolApiWrapper(BaseModel):
                 tool_name = 'tool_progress'
 
             logger.info(message)
+            
+            # Use provided config, fall back to instance config
+            effective_config = config or self._runnable_config
+            
             dispatch_custom_event(
                 name="thinking_step",
                 data={
@@ -149,6 +177,7 @@ class BaseToolApiWrapper(BaseModel):
                     "tool_name": tool_name,
                     "toolkit": self.__class__.__name__,
                 },
+                config=effective_config,
             )
         except Exception as e:
             logger.warning(f"Failed to dispatch progress event: {str(e)}")

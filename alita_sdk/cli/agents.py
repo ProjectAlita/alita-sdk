@@ -1953,6 +1953,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     # Track recursion continuation state
                     continue_from_recursion = False
                     recursion_attempts = 0
+                    tool_limit_attempts = 0  # Track tool limit continuation attempts
                     max_recursion_continues = 5  # Prevent infinite continuation loops
                     output = None  # Initialize output before loop
                     result = None  # Initialize result before loop
@@ -1981,6 +1982,63 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                     status.stop()
                                 except Exception:
                                     pass
+                            
+                            # Extract output from result
+                            if result is not None:
+                                output = extract_output_from_result(result)
+                            
+                            # Check if max tool iterations were reached and prompt user
+                            if output and "Maximum tool execution iterations" in output and "reached" in output:
+                                tool_limit_attempts += 1
+                                
+                                console.print()
+                                console.print(Panel(
+                                    f"[yellow]⚠ Tool execution limit reached[/yellow]\n\n"
+                                    f"The agent has executed the maximum number of tool calls in a single turn.\n"
+                                    f"This usually happens with complex tasks that require many sequential operations.\n\n"
+                                    f"[dim]Attempt {tool_limit_attempts}/{max_recursion_continues}[/dim]",
+                                    title="Tool Limit Reached",
+                                    border_style="yellow",
+                                    box=box.ROUNDED
+                                ))
+                                
+                                if tool_limit_attempts >= max_recursion_continues:
+                                    console.print("[red]Maximum continuation attempts reached. Please break down your request into smaller tasks.[/red]")
+                                    break
+                                
+                                console.print("\nWhat would you like to do?")
+                                console.print("  [bold cyan]c[/bold cyan] - Continue execution (tell agent to resume)")
+                                console.print("  [bold cyan]s[/bold cyan] - Stop and keep partial results")
+                                console.print("  [bold cyan]n[/bold cyan] - Start a new request")
+                                console.print()
+                                
+                                try:
+                                    choice = input_handler.get_input("Choice [c/s/n]: ").strip().lower()
+                                except (KeyboardInterrupt, EOFError):
+                                    choice = 's'
+                                
+                                if choice == 'c':
+                                    # Continue - send a follow-up message to resume
+                                    console.print("\n[cyan]Continuing execution...[/cyan]\n")
+                                    
+                                    # Add current output to history first
+                                    chat_history.append({"role": "user", "content": user_input})
+                                    chat_history.append({"role": "assistant", "content": output})
+                                    ctx_manager.add_message("user", user_input)
+                                    ctx_manager.add_message("assistant", output)
+                                    
+                                    # Set new input to continue and retry the invoke
+                                    user_input = "Continue from where you left off. Complete the remaining steps of the task."
+                                    continue  # Retry the invoke in this inner loop
+                                    
+                                elif choice == 's':
+                                    console.print("\n[yellow]Stopped. Partial work has been completed.[/yellow]")
+                                    break  # Exit retry loop and show output
+                                    
+                                else:  # 'n' or anything else
+                                    console.print("\n[dim]Skipped. Enter a new request.[/dim]")
+                                    output = None
+                                    break  # Exit retry loop
                             
                             # Success - exit the retry loop
                             break
@@ -2037,59 +2095,10 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                 console.print("\n[dim]Skipped. Enter a new request.[/dim]")
                                 output = None
                                 break
-                        
-                    # Extract output from result (if we have a result)
-                    if result is not None:
-                        output = extract_output_from_result(result)
                     
                     # Skip chat history update if we bailed out (no result)
                     if output is None:
                         continue
-                    
-                    # Check if max tool iterations were reached and prompt user
-                    if output and "Maximum tool execution iterations" in output and "reached" in output:
-                        console.print()
-                        console.print(Panel(
-                            f"[yellow]⚠ Tool execution limit reached[/yellow]\n\n"
-                            f"The agent has executed the maximum number of tool calls in a single turn.\n"
-                            f"This usually happens with complex tasks that require many sequential operations.\n",
-                            title="Tool Limit Reached",
-                            border_style="yellow",
-                            box=box.ROUNDED
-                        ))
-                        
-                        console.print("\nWhat would you like to do?")
-                        console.print("  [bold cyan]c[/bold cyan] - Continue execution (tell agent to resume)")
-                        console.print("  [bold cyan]s[/bold cyan] - Stop and keep partial results")
-                        console.print("  [bold cyan]n[/bold cyan] - Start a new request")
-                        console.print()
-                        
-                        try:
-                            choice = input_handler.get_input("Choice [c/s/n]: ").strip().lower()
-                        except (KeyboardInterrupt, EOFError):
-                            choice = 's'
-                        
-                        if choice == 'c':
-                            # Continue - send a follow-up message to resume
-                            console.print("\n[cyan]Continuing execution...[/cyan]\n")
-                            
-                            # Add current output to history first
-                            chat_history.append({"role": "user", "content": user_input})
-                            chat_history.append({"role": "assistant", "content": output})
-                            ctx_manager.add_message("user", user_input)
-                            ctx_manager.add_message("assistant", output)
-                            
-                            # Set new input to continue and loop back
-                            user_input = "Continue from where you left off. Complete the remaining steps of the task."
-                            continue  # This will loop back and invoke again
-                            
-                        elif choice == 's':
-                            console.print("\n[yellow]Stopped. Partial work has been completed.[/yellow]")
-                            # Fall through to display output and save to history
-                            
-                        else:  # 'n' or anything else
-                            console.print("\n[dim]Skipped. Enter a new request.[/dim]")
-                            continue  # Skip saving this output
                     
                     # Display response in a clear format
                     console.print()  # Add spacing

@@ -92,7 +92,54 @@ class KnowledgeGraph:
     - Delta update support with source document tracking
     - Entity deduplication with merge strategies
     - Impact analysis via graph traversal
+    - Enhanced search with fuzzy matching, token-based search, and file path patterns
     """
+    
+    # Layer classification based on entity types
+    LAYER_TYPE_MAPPING = {
+        'code': {
+            'class', 'function', 'method', 'module', 'import', 'variable', 
+            'constant', 'attribute', 'decorator', 'exception', 'enum',
+            'class_reference', 'class_import', 'function_import', 'function_reference',
+            'function_call', 'method_call', 'test_function', 'pydanticmodel'
+        },
+        'service': {
+            'api_endpoint', 'rpc_method', 'route', 'service', 'handler',
+            'controller', 'middleware', 'event', 'sio', 'rpc'
+        },
+        'data': {
+            'model', 'schema', 'field', 'table', 'database', 'migration',
+            'entity', 'pydantic_model', 'dictionary', 'list', 'object'
+        },
+        'product': {
+            'feature', 'capability', 'platform', 'product', 'application',
+            'menu', 'ui_element', 'ui_component', 'interface_element'
+        },
+        'domain': {
+            'concept', 'process', 'action', 'use_case', 'workflow',
+            'requirement', 'guideline', 'best_practice'
+        },
+        'documentation': {
+            'document', 'guide', 'section', 'subsection', 'tip',
+            'example', 'resource', 'reference', 'documentation'
+        },
+        'configuration': {
+            'configuration', 'configuration_option', 'configuration_section',
+            'setting', 'credential', 'secret', 'integration'
+        },
+        'testing': {
+            'test', 'test_case', 'test_function', 'fixture', 'mock'
+        },
+        'tooling': {
+            'tool', 'toolkit', 'command', 'node_type', 'node'
+        }
+    }
+    
+    # Reverse mapping: type -> layer
+    TYPE_TO_LAYER = {}
+    for layer, types in LAYER_TYPE_MAPPING.items():
+        for t in types:
+            TYPE_TO_LAYER[t] = layer
     
     def __init__(self):
         """Initialize an empty knowledge graph."""
@@ -100,7 +147,9 @@ class KnowledgeGraph:
             raise ImportError("networkx is required for KnowledgeGraph. Install with: pip install networkx>=3.0")
         
         self._graph: DiGraph = DiGraph()
-        self._entity_index: Dict[str, str] = {}  # name -> node_id
+        self._entity_index: Dict[str, Set[str]] = defaultdict(set)  # name -> set of node_ids (handles duplicates)
+        self._type_index: Dict[str, Set[str]] = defaultdict(set)  # type (lowercase) -> node_ids
+        self._file_index: Dict[str, Set[str]] = defaultdict(set)  # file_path -> node_ids
         self._source_doc_index: Dict[str, Set[str]] = defaultdict(set)  # source_doc_id -> node_ids
         self._metadata: Dict[str, Any] = {}  # Graph metadata (sources, timestamps)
         self._schema: Optional[Dict[str, Any]] = None  # Discovered entity schema
@@ -169,12 +218,20 @@ class KnowledgeGraph:
             'type': entity_type,
         }
         
+        # Auto-assign layer based on entity type
+        inferred_layer = self.TYPE_TO_LAYER.get(entity_type.lower())
+        if inferred_layer:
+            node_data['layer'] = inferred_layer
+        
         # Store citation in list format from the start
         if citation:
             node_data['citations'] = [citation.to_dict()]
             # Track source document
             if citation.doc_id:
                 self._source_doc_index[citation.doc_id].add(entity_id)
+            # Track file index
+            if citation.file_path:
+                self._file_index[citation.file_path].add(entity_id)
         
         # Add other properties (excluding any large content)
         if properties:
@@ -190,8 +247,9 @@ class KnowledgeGraph:
         # Add new node
         self._graph.add_node(entity_id, **node_data)
         
-        # Update name index
-        self._entity_index[name.lower()] = entity_id
+        # Update indices - store ALL entities with this name (not just one)
+        self._entity_index[name.lower()].add(entity_id)
+        self._type_index[entity_type.lower()].add(entity_id)
         
         logger.debug(f"Added entity: {entity_type} '{name}' ({entity_id})")
         return entity_id
@@ -203,30 +261,91 @@ class KnowledgeGraph:
         return None
     
     def find_entity_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Find entity by name (case-insensitive)."""
-        node_id = self._entity_index.get(name.lower())
-        if node_id:
-            return self.get_entity(node_id)
+        """
+        Find entity by name (case-insensitive).
+        
+        If multiple entities have the same name, returns the first one found.
+        Use find_all_entities_by_name to get all matches.
+        """
+        node_ids = self._entity_index.get(name.lower(), set())
+        if node_ids:
+            # Return first match
+            return self.get_entity(next(iter(node_ids)))
         return None
     
+    def find_all_entities_by_name(self, name: str) -> List[Dict[str, Any]]:
+        """
+        Find all entities with the given name (case-insensitive).
+        
+        Returns all entities if multiple have the same name but different types.
+        """
+        node_ids = self._entity_index.get(name.lower(), set())
+        return [self.get_entity(nid) for nid in node_ids if nid]
+    
     def get_entities_by_type(self, entity_type: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get all entities of a specific type."""
+        """
+        Get all entities of a specific type (case-insensitive).
+        
+        Also checks layer-based type groups. For example, searching for 'code'
+        will return classes, functions, methods, etc.
+        """
+        entity_type_lower = entity_type.lower()
+        
+        # Check if this is a layer name
+        if entity_type_lower in self.LAYER_TYPE_MAPPING:
+            # Get all types in this layer
+            results = []
+            for t in self.LAYER_TYPE_MAPPING[entity_type_lower]:
+                node_ids = self._type_index.get(t, set())
+                for nid in node_ids:
+                    entity = self.get_entity(nid)
+                    if entity:
+                        results.append(entity)
+            if limit:
+                return results[:limit]
+            return results
+        
+        # Use type index for fast lookup
+        node_ids = self._type_index.get(entity_type_lower, set())
+        if node_ids:
+            results = [self.get_entity(nid) for nid in node_ids if nid]
+            if limit:
+                return results[:limit]
+            return results
+        
+        # Fallback: linear scan (for types not in index)
         results = [
             dict(data)
             for _, data in self._graph.nodes(data=True)
-            if data.get('type') == entity_type
+            if data.get('type', '').lower() == entity_type_lower
         ]
         if limit:
             return results[:limit]
         return results
     
     def get_entities_by_layer(self, layer: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get all entities in a specific layer (product, domain, service, code, etc.)."""
-        results = [
-            dict(data)
-            for _, data in self._graph.nodes(data=True)
-            if data.get('layer') == layer
-        ]
+        """
+        Get all entities in a specific layer (product, domain, service, code, data, etc.).
+        
+        Layer is inferred from entity type if not explicitly set on the entity.
+        """
+        layer_lower = layer.lower()
+        
+        # Get types that belong to this layer
+        layer_types = self.LAYER_TYPE_MAPPING.get(layer_lower, set())
+        
+        results = []
+        for _, data in self._graph.nodes(data=True):
+            # Check explicit layer
+            if data.get('layer', '').lower() == layer_lower:
+                results.append(dict(data))
+                continue
+            
+            # Check if type belongs to this layer
+            entity_type = data.get('type', '').lower()
+            if entity_type in layer_types:
+                results.append(dict(data))
+        
         if limit:
             return results[:limit]
         return results
@@ -283,18 +402,36 @@ class KnowledgeGraph:
         if not self._graph.has_node(entity_id):
             return False
         
-        # Remove from indices
+        # Remove from all indices
         entity = self.get_entity(entity_id)
         if entity:
+            # Remove from name index
             name = entity.get('name', '').lower()
             if name in self._entity_index:
-                del self._entity_index[name]
+                self._entity_index[name].discard(entity_id)
+                if not self._entity_index[name]:
+                    del self._entity_index[name]
             
-            citation_data = entity.get('citation', {})
-            if isinstance(citation_data, dict):
-                doc_id = citation_data.get('doc_id')
-                if doc_id and entity_id in self._source_doc_index.get(doc_id, set()):
-                    self._source_doc_index[doc_id].discard(entity_id)
+            # Remove from type index
+            entity_type = entity.get('type', '').lower()
+            if entity_type in self._type_index:
+                self._type_index[entity_type].discard(entity_id)
+                if not self._type_index[entity_type]:
+                    del self._type_index[entity_type]
+            
+            # Remove from file index
+            file_path = entity.get('file_path', '')
+            if file_path in self._file_index:
+                self._file_index[file_path].discard(entity_id)
+                if not self._file_index[file_path]:
+                    del self._file_index[file_path]
+            
+            # Remove from source doc index
+            for citation in entity.get('citations', []):
+                if isinstance(citation, dict):
+                    doc_id = citation.get('doc_id')
+                    if doc_id and entity_id in self._source_doc_index.get(doc_id, set()):
+                        self._source_doc_index[doc_id].discard(entity_id)
         
         self._graph.remove_node(entity_id)
         return True
@@ -519,55 +656,338 @@ class KnowledgeGraph:
     
     # ========== Search Operations ==========
     
+    def _tokenize(self, text: str) -> Set[str]:
+        """Tokenize text into searchable tokens (handles camelCase, snake_case, etc.)."""
+        import re
+        if not text:
+            return set()
+        
+        # Split on non-alphanumeric
+        words = re.split(r'[^a-zA-Z0-9]+', text.lower())
+        
+        # Also split camelCase
+        tokens = set()
+        for word in words:
+            if word:
+                tokens.add(word)
+                # Split camelCase: "ChatMessageHandler" -> ["chat", "message", "handler"]
+                camel_parts = re.findall(r'[a-z]+|[A-Z][a-z]*|[0-9]+', word)
+                tokens.update(p.lower() for p in camel_parts if p)
+        
+        return tokens
+    
+    def _calculate_match_score(
+        self,
+        query_tokens: Set[str],
+        query_lower: str,
+        name: str,
+        entity_type: str,
+        description: str,
+        file_path: str,
+    ) -> tuple:
+        """
+        Calculate match score for an entity.
+        
+        Returns (score, match_field) tuple.
+        Higher scores mean better matches.
+        """
+        name_lower = name.lower()
+        name_tokens = self._tokenize(name)
+        
+        # Exact name match (highest priority)
+        if query_lower == name_lower:
+            return (1.0, 'name_exact')
+        
+        # Exact substring in name
+        if query_lower in name_lower:
+            # Prefer matches at word boundaries
+            score = 0.85 if name_lower.startswith(query_lower) else 0.75
+            return (score, 'name_contains')
+        
+        # Token overlap in name (for camelCase matching)
+        if query_tokens and name_tokens:
+            overlap = len(query_tokens & name_tokens)
+            if overlap > 0:
+                # Score based on percentage of query tokens matched
+                score = 0.6 * (overlap / len(query_tokens))
+                if overlap == len(query_tokens):  # All query tokens found
+                    score = 0.7
+                return (score, 'name_tokens')
+        
+        # Check file path
+        if file_path and query_lower in file_path.lower():
+            return (0.55, 'file_path')
+        
+        # Check description
+        if description:
+            desc_lower = description.lower()
+            if query_lower in desc_lower:
+                return (0.5, 'description')
+            # Token match in description
+            desc_tokens = self._tokenize(description)
+            if query_tokens and desc_tokens:
+                overlap = len(query_tokens & desc_tokens)
+                if overlap > 0:
+                    score = 0.35 * (overlap / len(query_tokens))
+                    return (score, 'description_tokens')
+        
+        # Check entity type
+        if query_lower in entity_type.lower():
+            return (0.3, 'type')
+        
+        return (0.0, None)
+    
     def search(
         self,
         query: str,
         top_k: int = 10,
         entity_type: Optional[str] = None,
+        layer: Optional[str] = None,
+        file_pattern: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Search entities by name or properties.
+        Search entities with enhanced matching capabilities.
+        
+        Supports:
+        - Exact and partial name matching
+        - Token-based matching (handles camelCase, snake_case)
+        - Description and property search
+        - File path pattern matching
+        - Type and layer filtering
         
         Args:
             query: Search query string
             top_k: Maximum results to return
-            entity_type: Filter by entity type
+            entity_type: Filter by entity type (case-insensitive)
+            layer: Filter by layer (code, service, data, product, etc.)
+            file_pattern: Filter by file path pattern (glob-like)
             
         Returns:
             List of matching entities with scores
         """
+        import re
+        
         results = []
-        query_lower = query.lower()
+        query_lower = query.lower().strip()
+        query_tokens = self._tokenize(query)
+        
+        # Get layer types for filtering
+        layer_types = set()
+        if layer:
+            layer_types = self.LAYER_TYPE_MAPPING.get(layer.lower(), set())
+        
+        # Compile file pattern if provided
+        file_regex = None
+        if file_pattern:
+            # Convert glob pattern to regex
+            pattern = file_pattern.replace('.', r'\.').replace('*', '.*').replace('?', '.')
+            try:
+                file_regex = re.compile(pattern, re.IGNORECASE)
+            except re.error:
+                pass
         
         for node_id, data in self._graph.nodes(data=True):
-            # Type filter
-            if entity_type and data.get('type') != entity_type:
+            # Type filter (case-insensitive)
+            data_type = data.get('type', '').lower()
+            if entity_type and data_type != entity_type.lower():
                 continue
             
-            # Name match
+            # Layer filter
+            if layer:
+                entity_layer = data.get('layer', '').lower()
+                if entity_layer != layer.lower() and data_type not in layer_types:
+                    continue
+            
+            # File pattern filter
+            citations = data.get('citations', [])
+            if not citations and 'citation' in data:
+                citations = [data['citation']]
+            
+            file_paths = [c.get('file_path', '') for c in citations if isinstance(c, dict)]
+            primary_file = file_paths[0] if file_paths else data.get('file_path', '')
+            
+            if file_regex and primary_file:
+                if not file_regex.search(primary_file):
+                    continue
+            
+            # Calculate match score
             name = data.get('name', '')
-            if query_lower in name.lower():
+            description = data.get('description', '')
+            if isinstance(data.get('properties'), dict):
+                description = description or data['properties'].get('description', '')
+            
+            score, match_field = self._calculate_match_score(
+                query_tokens, query_lower, name, data_type, description, primary_file
+            )
+            
+            if score > 0:
                 results.append({
                     'entity': dict(data),
-                    'score': 1.0 if query_lower == name.lower() else 0.5,
-                    'match_field': 'name',
+                    'score': score,
+                    'match_field': match_field,
                 })
+        
+        # Sort by score (descending), then by name
+        results.sort(key=lambda x: (-x['score'], x['entity'].get('name', '').lower()))
+        return results[:top_k]
+    
+    def search_by_file(self, file_path_pattern: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Search entities by file path pattern.
+        
+        Args:
+            file_path_pattern: Glob-like pattern (e.g., "api/*.py", "**/chat*.py")
+            limit: Maximum results
+            
+        Returns:
+            List of entities from matching files
+        """
+        import re
+        
+        # Convert glob to regex
+        pattern = file_path_pattern.replace('.', r'\.').replace('**', '.*').replace('*', '[^/]*').replace('?', '.')
+        try:
+            file_regex = re.compile(pattern, re.IGNORECASE)
+        except re.error:
+            return []
+        
+        results = []
+        for file_path, node_ids in self._file_index.items():
+            if file_regex.search(file_path):
+                for nid in node_ids:
+                    entity = self.get_entity(nid)
+                    if entity:
+                        results.append(entity)
+                        if len(results) >= limit:
+                            return results
+        
+        # Also check entities with file_path attribute (backup)
+        if not results:
+            for _, data in self._graph.nodes(data=True):
+                fp = data.get('file_path', '')
+                if fp and file_regex.search(fp):
+                    results.append(dict(data))
+                    if len(results) >= limit:
+                        break
+        
+        return results
+    
+    def search_advanced(
+        self,
+        query: Optional[str] = None,
+        entity_types: Optional[List[str]] = None,
+        layers: Optional[List[str]] = None,
+        file_patterns: Optional[List[str]] = None,
+        has_relations: Optional[bool] = None,
+        min_citations: Optional[int] = None,
+        top_k: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Advanced search with multiple filter criteria.
+        
+        Args:
+            query: Text search query (optional)
+            entity_types: List of types to include (OR logic)
+            layers: List of layers to include (OR logic)
+            file_patterns: List of file patterns to include (OR logic)
+            has_relations: If True, only entities with relations; if False, isolated entities
+            min_citations: Minimum number of citations required
+            top_k: Maximum results
+            
+        Returns:
+            List of matching entities
+        """
+        import re
+        
+        # Build type filter set
+        type_filter = set()
+        if entity_types:
+            for t in entity_types:
+                type_filter.add(t.lower())
+                # Expand layer names to types
+                if t.lower() in self.LAYER_TYPE_MAPPING:
+                    type_filter.update(self.LAYER_TYPE_MAPPING[t.lower()])
+        
+        # Build layer filter set
+        layer_filter = set()
+        if layers:
+            for l in layers:
+                layer_filter.add(l.lower())
+        
+        # Build file regex patterns
+        file_regexes = []
+        if file_patterns:
+            for fp in file_patterns:
+                pattern = fp.replace('.', r'\.').replace('**', '.*').replace('*', '[^/]*')
+                try:
+                    file_regexes.append(re.compile(pattern, re.IGNORECASE))
+                except re.error:
+                    pass
+        
+        query_tokens = self._tokenize(query) if query else set()
+        query_lower = query.lower().strip() if query else ''
+        
+        results = []
+        
+        for node_id, data in self._graph.nodes(data=True):
+            data_type = data.get('type', '').lower()
+            data_layer = data.get('layer', '').lower() or self.TYPE_TO_LAYER.get(data_type, '')
+            
+            # Type filter
+            if type_filter and data_type not in type_filter:
                 continue
             
-            # Property match
-            for key, value in data.items():
-                if key in ('id', 'name', 'type', 'citation'):
+            # Layer filter
+            if layer_filter and data_layer not in layer_filter:
+                continue
+            
+            # File pattern filter
+            file_path = data.get('file_path', '')
+            if file_regexes:
+                if not any(rx.search(file_path) for rx in file_regexes):
                     continue
-                if isinstance(value, str) and query_lower in value.lower():
-                    results.append({
-                        'entity': dict(data),
-                        'score': 0.3,
-                        'match_field': key,
-                    })
-                    break
+            
+            # Relations filter
+            if has_relations is not None:
+                has_edges = (
+                    self._graph.in_degree(node_id) > 0 or 
+                    self._graph.out_degree(node_id) > 0
+                )
+                if has_relations and not has_edges:
+                    continue
+                if not has_relations and has_edges:
+                    continue
+            
+            # Citations filter
+            if min_citations:
+                citations = data.get('citations', [])
+                if len(citations) < min_citations:
+                    continue
+            
+            # Text search
+            score = 1.0
+            match_field = 'filter'
+            
+            if query:
+                name = data.get('name', '')
+                description = data.get('description', '')
+                if isinstance(data.get('properties'), dict):
+                    description = description or data['properties'].get('description', '')
+                
+                score, match_field = self._calculate_match_score(
+                    query_tokens, query_lower, name, data_type, description, file_path
+                )
+                
+                if score == 0:
+                    continue
+            
+            results.append({
+                'entity': dict(data),
+                'score': score,
+                'match_field': match_field,
+            })
         
-        # Sort by score and limit
-        results.sort(key=lambda x: -x['score'])
+        results.sort(key=lambda x: (-x['score'], x['entity'].get('name', '').lower()))
         return results[:top_k]
     
     def get_entities_by_source(self, doc_id: str) -> List[Dict[str, Any]]:
@@ -577,11 +997,25 @@ class KnowledgeGraph:
     
     def get_entities_by_file(self, file_path: str) -> List[Dict[str, Any]]:
         """Get all entities with citations from a specific file."""
+        # First try the file index
+        node_ids = self._file_index.get(file_path, set())
+        if node_ids:
+            return [self.get_entity(nid) for nid in node_ids if nid]
+        
+        # Fallback to linear scan for partial matches
         results = []
         for _, data in self._graph.nodes(data=True):
-            citation = data.get('citation', {})
-            if isinstance(citation, dict) and citation.get('file_path') == file_path:
+            # Check file_path attribute
+            if data.get('file_path') == file_path:
                 results.append(dict(data))
+                continue
+            
+            # Check citations
+            for citation in data.get('citations', []):
+                if isinstance(citation, dict) and citation.get('file_path') == file_path:
+                    results.append(dict(data))
+                    break
+        
         return results
     
     # ========== Delta Operations ==========
@@ -670,11 +1104,15 @@ class KnowledgeGraph:
         Args:
             path: File path to write JSON
         """
-        data = nx.node_link_data(self._graph)
+        # Use edges="links" explicitly for NetworkX 3.5+ compatibility
+        # This ensures consistent format that visualize.py and load_from_json expect
+        data = nx.node_link_data(self._graph, edges="links")
         
         # Add index data for persistence
         data['_indices'] = {
-            'entity_index': self._entity_index,
+            'entity_index': {k: list(v) for k, v in self._entity_index.items()},
+            'type_index': {k: list(v) for k, v in self._type_index.items()},
+            'file_index': {k: list(v) for k, v in self._file_index.items()},
             'source_doc_index': {k: list(v) for k, v in self._source_doc_index.items()}
         }
         
@@ -684,7 +1122,7 @@ class KnowledgeGraph:
         
         # Add metadata
         self._metadata['last_saved'] = datetime.now().isoformat()
-        self._metadata['version'] = '2.0'  # Citation-based lightweight format
+        self._metadata['version'] = '2.1'  # Enhanced indices version
         data['_metadata'] = self._metadata
         
         with open(path, 'w', encoding='utf-8') as f:
@@ -707,10 +1145,29 @@ class KnowledgeGraph:
         
         # Restore indices
         indices = data.pop('_indices', {})
-        self._entity_index = indices.get('entity_index', {})
+        
+        # Entity index - convert to set (handles both old string format and new list format)
+        self._entity_index = defaultdict(set)
+        for k, v in indices.get('entity_index', {}).items():
+            if isinstance(v, list):
+                self._entity_index[k] = set(v)
+            elif isinstance(v, str):
+                self._entity_index[k] = {v}  # Legacy format
+        
+        # Type index
+        self._type_index = defaultdict(set)
+        for k, v in indices.get('type_index', {}).items():
+            self._type_index[k] = set(v) if isinstance(v, list) else set()
+        
+        # File index
+        self._file_index = defaultdict(set)
+        for k, v in indices.get('file_index', {}).items():
+            self._file_index[k] = set(v) if isinstance(v, list) else set()
+        
+        # Source doc index
         self._source_doc_index = defaultdict(set)
         for k, v in indices.get('source_doc_index', {}).items():
-            self._source_doc_index[k] = set(v)
+            self._source_doc_index[k] = set(v) if isinstance(v, list) else set()
         
         # Restore schema
         self._schema = data.pop('_schema', None)
@@ -718,15 +1175,61 @@ class KnowledgeGraph:
         # Restore metadata
         self._metadata = data.pop('_metadata', {})
         
-        # Restore graph (use edges="links" for networkx 3.6+ compatibility)
+        # Restore graph - handle both "links" and "edges" keys for compatibility
+        # NetworkX 3.5+ defaults to "edges", but we write "links" for visualization compatibility
+        if 'edges' in data and 'links' not in data:
+            # Data uses new NetworkX 3.5+ default "edges" key - rename to "links" for node_link_graph
+            data['links'] = data.pop('edges')
+        
         self._graph = nx.node_link_graph(data, edges="links")
         
+        # Rebuild missing indices if needed (for legacy graphs)
+        if not self._type_index or not self._file_index:
+            self._rebuild_indices()
+        
         logger.info(f"Loaded graph from {path} ({self._graph.number_of_nodes()} entities, {self._graph.number_of_edges()} relations)")
+    
+    def _rebuild_indices(self) -> None:
+        """Rebuild all indices from graph data (for legacy graph files)."""
+        self._entity_index = defaultdict(set)
+        self._type_index = defaultdict(set)
+        self._file_index = defaultdict(set)
+        self._source_doc_index = defaultdict(set)
+        
+        for node_id, data in self._graph.nodes(data=True):
+            # Name index
+            name = data.get('name', '').lower()
+            if name:
+                self._entity_index[name].add(node_id)
+            
+            # Type index
+            entity_type = data.get('type', '').lower()
+            if entity_type:
+                self._type_index[entity_type].add(node_id)
+            
+            # File index (from file_path attribute)
+            file_path = data.get('file_path', '')
+            if file_path:
+                self._file_index[file_path].add(node_id)
+            
+            # Also index from citations
+            for citation in data.get('citations', []):
+                if isinstance(citation, dict):
+                    fp = citation.get('file_path', '')
+                    if fp:
+                        self._file_index[fp].add(node_id)
+                    doc_id = citation.get('doc_id', '')
+                    if doc_id:
+                        self._source_doc_index[doc_id].add(node_id)
+        
+        logger.info(f"Rebuilt indices: {len(self._entity_index)} names, {len(self._type_index)} types, {len(self._file_index)} files")
     
     def clear(self) -> None:
         """Clear all data from the graph."""
         self._graph.clear()
         self._entity_index.clear()
+        self._type_index.clear()
+        self._file_index.clear()
         self._source_doc_index.clear()
         self._schema = None
         self._metadata = {}

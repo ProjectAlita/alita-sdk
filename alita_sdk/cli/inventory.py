@@ -237,6 +237,19 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
         
         # Get source toolkit from config and register it
         source_toolkit = _get_source_toolkit(toolkit_config)
+        
+        # Create a RunnableConfig for CLI context - this allows dispatch_custom_event to work
+        # without being inside a LangChain agent run
+        import uuid
+        cli_runnable_config = {
+            'run_id': uuid.uuid4(),
+            'tags': ['cli', 'inventory', 'ingest'],
+        }
+        
+        # Set the runnable config on the toolkit if it supports it
+        if hasattr(source_toolkit, 'set_runnable_config'):
+            source_toolkit.set_runnable_config(cli_runnable_config)
+        
         pipeline.register_toolkit(source_name, source_toolkit)
         
         # Run ingestion
@@ -515,28 +528,45 @@ def visualize(graph: str, output: Optional[str], open_browser: bool, title: Opti
               help='Path to graph JSON file')
 @click.option('--output', '-o', default=None, type=click.Path(),
               help='Output graph file (default: overwrite input)')
+@click.option('--deduplicate/--no-deduplicate', default=False,
+              help='Merge entities with exact same name (DISABLED by default, use with caution)')
 @click.option('--cross-source/--no-cross-source', default=True,
               help='Link same-named entities across sources (default: yes)')
+@click.option('--semantic/--no-semantic', default=True,
+              help='Create semantic cross-links based on shared concepts (default: yes)')
 @click.option('--orphans/--no-orphans', default=True,
               help='Connect orphan nodes to related entities (default: yes)')
 @click.option('--similarity/--no-similarity', default=False,
               help='Link entities with similar names (default: no)')
 @click.option('--dry-run', is_flag=True, default=False,
               help='Show what would be done without saving')
-def enrich(graph: str, output: Optional[str], cross_source: bool, orphans: bool, 
-           similarity: bool, dry_run: bool):
+def enrich(graph: str, output: Optional[str], deduplicate: bool, cross_source: bool,
+           semantic: bool, orphans: bool, similarity: bool, dry_run: bool):
     """
-    Enrich a knowledge graph with additional relationships.
+    Enrich a knowledge graph with cross-linking.
     
-    Post-processes the graph to improve connectivity by:
-    - Linking same-named entities across sources (SDK class → docs concept)
-    - Connecting orphan nodes to semantically related entities
-    - Optionally linking entities with very similar names
+    Post-processes the graph to improve connectivity by creating links:
+    
+    1. CROSS-SOURCE LINKING: Link entities across sources
+       - SDK class ↔ docs concept, code ↔ documentation
+       - Automatically determines relationship type
+    
+    2. SEMANTIC LINKING: Link entities sharing concepts
+       - Finds entities with overlapping significant words
+       - Creates LINKS between related entities
+       - Example: "Artifact Toolkit" --[related_to]--> "Configure Artifact Toolkit"
+    
+    3. ORPHAN LINKING: Connect isolated nodes
+       - Links unconnected nodes to related entities
+    
+    4. DEDUPLICATION (optional, disabled by default):
+       - Use --deduplicate to merge exact name matches
+       - Use with caution - can lose semantic meaning
     
     Example:
         alita inventory enrich -g ./graph.json
         alita inventory enrich -g ./graph.json -o enriched.json
-        alita inventory enrich -g ./graph.json --no-orphans
+        alita inventory enrich -g ./graph.json --deduplicate
         alita inventory enrich -g ./graph.json --dry-run
     """
     try:
@@ -548,25 +578,50 @@ def enrich(graph: str, output: Optional[str], cross_source: bool, orphans: bool,
         enricher = GraphEnricher(graph)
         
         # Show initial stats
+        initial_nodes = len(enricher.nodes_by_id)
         initial_links = len(enricher.graph_data.get("links", []))
-        click.echo(f"   Initial: {len(enricher.nodes_by_id)} nodes, {initial_links} links")
+        click.echo(f"   Initial: {initial_nodes} nodes, {initial_links} links")
         
         # Run enrichment
         stats = enricher.enrich(
+            deduplicate=deduplicate,
             cross_source=cross_source,
+            semantic_links=semantic,
             orphans=orphans,
             similarity=similarity,
         )
         
         click.echo(f"\n   📊 Enrichment results:")
-        click.echo(f"      Cross-source links: +{stats['cross_source_links']}")
-        click.echo(f"      Orphan connections: +{stats['orphan_links']}")
+        
+        if deduplicate:
+            click.echo(f"      Entities merged:    {stats.get('entities_merged', 0)} (exact name matches into {stats.get('merge_groups', 0)} groups)")
+            final_nodes = len(enricher.nodes_by_id)
+            click.echo(f"      Node reduction:     {initial_nodes} → {final_nodes}")
+        
+        click.echo(f"      Cross-source links: +{stats.get('cross_source_links', 0)}")
+        
+        if semantic:
+            click.echo(f"      Semantic links:     +{stats.get('semantic_links', 0)}")
+        
+        click.echo(f"      Orphan connections: +{stats.get('orphan_links', 0)}")
+        
         if similarity:
-            click.echo(f"      Similarity links:   +{stats['similarity_links']}")
+            click.echo(f"      Similarity links:   +{stats.get('similarity_links', 0)}")
+        
         click.echo(f"      Total new links:    +{len(enricher.new_links)}")
         
         if dry_run:
             click.echo(f"\n   🔍 Dry run - no changes saved")
+            
+            # Show merge examples
+            if deduplicate and enricher.merged_nodes:
+                click.echo(f"\n   Sample merged entities:")
+                for merge in enricher.merged_nodes[:5]:
+                    new_node = merge["new_node"]
+                    types = merge.get("merged_types", [])
+                    click.echo(f"      '{new_node['name']}' [{' + '.join(set(types))}] → [{new_node['type']}]")
+            
+            # Show link examples
             click.echo(f"\n   Sample new links:")
             for link in enricher.new_links[:10]:
                 src = enricher.nodes_by_id.get(link['source'], {})

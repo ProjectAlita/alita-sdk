@@ -20,93 +20,200 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
-# Color palette for entity types (Material Design colors)
+# Color palette for entity types based on ENTITY_TAXONOMY layers
+# Each layer has its own distinct hue range to prevent overlap
 TYPE_COLORS = {
-    # Product Layer
-    "epic": "#E91E63",
-    "feature": "#F44336",
-    "user_story": "#FF5722",
-    "screen": "#FF9800",
-    "ux_flow": "#FFC107",
-    "ui_component": "#FFEB3B",
-    "ui_field": "#CDDC39",
+    # =========================================================================
+    # PRODUCT LAYER - Red/Pink/Orange hues (0-30° and 330-360°)
+    # =========================================================================
+    "epic": "#D32F2F",              # Deep Red
+    "feature": "#E53935",           # Red
+    "user_story": "#F44336",        # Lighter Red
+    "screen": "#FF5722",            # Deep Orange
+    "ux_flow": "#FF7043",           # Orange
+    "ui_component": "#FF8A65",      # Light Orange
+    "ui_field": "#FFAB91",          # Peach
     
-    # Domain Layer
-    "domain_entity": "#4CAF50",
-    "attribute": "#8BC34A",
-    "business_rule": "#009688",
-    "business_event": "#00BCD4",
-    "glossary_term": "#03A9F4",
-    "workflow": "#2196F3",
+    # =========================================================================
+    # DOMAIN LAYER - Green hues (90-150°)
+    # =========================================================================
+    "domain_entity": "#2E7D32",     # Dark Green
+    "attribute": "#388E3C",         # Green
+    "business_rule": "#43A047",     # Medium Green
+    "business_event": "#4CAF50",    # Light Green
+    "glossary_term": "#66BB6A",     # Pale Green
+    "workflow": "#81C784",          # Very Light Green
     
-    # Service Layer
-    "service": "#3F51B5",
-    "api": "#673AB7",
-    "endpoint": "#9C27B0",
-    "payload": "#E91E63",
-    "integration": "#795548",
+    # =========================================================================
+    # SERVICE LAYER - Cyan/Teal hues (160-200°)
+    # =========================================================================
+    "service": "#00695C",           # Dark Teal
+    "api": "#00796B",               # Teal
+    "endpoint": "#00897B",          # Medium Teal
+    "payload": "#009688",           # Light Teal
+    "integration": "#26A69A",       # Pale Teal
     
-    # Code Layer
-    "module": "#607D8B",
-    "class": "#455A64",
-    "function": "#37474F",
-    "interface": "#263238",
-    "constant": "#78909C",
-    "configuration": "#90A4AE",
+    # =========================================================================
+    # CODE LAYER - Blue hues (200-240°)
+    # =========================================================================
+    "module": "#1565C0",            # Dark Blue
+    "class": "#1976D2",             # Blue
+    "function": "#1E88E5",          # Medium Blue
+    "interface": "#2196F3",         # Light Blue
+    "constant": "#42A5F5",          # Pale Blue
+    "configuration": "#64B5F6",     # Very Light Blue
     
-    # Data Layer
-    "database": "#5D4037",
-    "table": "#6D4C41",
-    "column": "#8D6E63",
-    "constraint": "#A1887F",
-    "index": "#BCAAA4",
-    "migration": "#D7CCC8",
-    "enum": "#4E342E",
+    # =========================================================================
+    # DATA LAYER - Brown/Amber hues (30-60°)
+    # =========================================================================
+    "database": "#E65100",          # Dark Orange/Brown
+    "table": "#EF6C00",             # Orange
+    "column": "#F57C00",            # Medium Orange
+    "constraint": "#FB8C00",        # Light Orange
+    "index": "#FF9800",             # Amber
+    "migration": "#FFA726",         # Light Amber
+    "enum": "#FFB74D",              # Pale Amber
     
-    # Testing Layer
-    "test_suite": "#1A237E",
-    "test_case": "#283593",
-    "test_step": "#303F9F",
-    "assertion": "#3949AB",
-    "test_data": "#3F51B5",
-    "defect": "#C62828",
-    "incident": "#B71C1C",
+    # =========================================================================
+    # TESTING LAYER - Purple/Violet hues (260-290°)
+    # =========================================================================
+    "test_suite": "#4527A0",        # Deep Purple
+    "test_case": "#512DA8",         # Dark Purple
+    "test_step": "#5E35B1",         # Purple
+    "assertion": "#673AB7",         # Medium Purple
+    "test_data": "#7E57C2",         # Light Purple
+    "defect": "#B71C1C",            # Dark Red (stands out - critical)
+    "incident": "#C62828",          # Red (stands out - critical)
     
-    # Delivery Layer
-    "release": "#1B5E20",
-    "sprint": "#2E7D32",
-    "commit": "#388E3C",
-    "pull_request": "#43A047",
-    "ticket": "#4CAF50",
-    "deployment": "#66BB6A",
+    # =========================================================================
+    # DELIVERY LAYER - Lime/Yellow-Green hues (60-90°)
+    # =========================================================================
+    "release": "#827717",           # Dark Lime
+    "sprint": "#9E9D24",            # Olive
+    "commit": "#AFB42B",            # Lime
+    "pull_request": "#C0CA33",      # Light Lime
+    "ticket": "#CDDC39",            # Yellow-Lime
+    "deployment": "#D4E157",        # Pale Lime
     
-    # Organization Layer
-    "team": "#4A148C",
-    "owner": "#6A1B9A",
-    "stakeholder": "#7B1FA2",
-    "repository": "#8E24AA",
-    "documentation": "#9C27B0",
+    # =========================================================================
+    # ORGANIZATION LAYER - Magenta/Pink hues (290-330°)
+    # =========================================================================
+    "team": "#AD1457",              # Dark Magenta
+    "owner": "#C2185B",             # Magenta
+    "stakeholder": "#D81B60",       # Pink-Magenta
+    "repository": "#E91E63",        # Pink
+    "documentation": "#EC407A",     # Light Pink
     
-    # Generic types
-    "document": "#2196F3",
-    "section": "#64B5F6",
-    "process": "#4CAF50",
-    "script": "#FF9800",
-    "action": "#F44336",
-    "state": "#9C27B0",
-    "checklist": "#00BCD4",
-    "structure": "#795548",
-    "resource": "#607D8B",
-    "requirement": "#E91E63",
-    "troubleshooting": "#FF5722",
-    "reference": "#3F51B5",
-    "project": "#673AB7",
-    "Platform": "#2196F3",
-    "Value": "#4CAF50",
-    "agent_type": "#9C27B0",
+    # =========================================================================
+    # GENERIC/COMMON TYPES - Distinct colors for frequently used types
+    # =========================================================================
+    # Documents & Content
+    "document": "#5C6BC0",          # Indigo
+    "section": "#7986CB",           # Light Indigo
+    "chapter": "#9FA8DA",           # Pale Indigo
+    "paragraph": "#C5CAE9",         # Very Light Indigo
+    "text": "#E8EAF6",              # Faint Indigo
     
-    # Default
-    "default": "#9E9E9E",
+    # Process & Actions
+    "process": "#00ACC1",           # Cyan
+    "action": "#26C6DA",            # Light Cyan
+    "step": "#4DD0E1",              # Pale Cyan
+    "task": "#80DEEA",              # Very Light Cyan
+    "activity": "#B2EBF2",          # Faint Cyan
+    
+    # Tools & Scripts
+    "tool": "#8D6E63",              # Brown
+    "toolkit": "#A1887F",           # Light Brown
+    "script": "#BCAAA4",            # Pale Brown
+    "utility": "#D7CCC8",           # Very Light Brown
+    
+    # Structure & Organization
+    "structure": "#78909C",         # Blue Grey
+    "component": "#90A4AE",         # Light Blue Grey
+    "element": "#B0BEC5",           # Pale Blue Grey
+    "item": "#CFD8DC",              # Very Light Blue Grey
+    
+    # Resources & References
+    "resource": "#546E7A",          # Dark Blue Grey
+    "reference": "#607D8B",         # Blue Grey
+    "link": "#78909C",              # Light Blue Grey
+    
+    # Requirements & Specs
+    "requirement": "#F06292",       # Pink
+    "specification": "#F48FB1",     # Light Pink
+    "criteria": "#F8BBD9",          # Pale Pink
+    
+    # Issues & Problems
+    "issue": "#EF5350",             # Red
+    "bug": "#E57373",               # Light Red
+    "error": "#EF9A9A",             # Pale Red
+    "problem": "#FFCDD2",           # Very Light Red
+    "troubleshooting": "#FFEBEE",   # Faint Red
+    
+    # States & Status
+    "state": "#AB47BC",             # Purple
+    "status": "#BA68C8",            # Light Purple
+    "condition": "#CE93D8",         # Pale Purple
+    
+    # Misc common types
+    "entity": "#26A69A",            # Teal
+    "object": "#4DB6AC",            # Light Teal
+    "concept": "#80CBC4",           # Pale Teal
+    "idea": "#B2DFDB",              # Very Light Teal
+    
+    "checklist": "#FFD54F",         # Amber
+    "list": "#FFE082",              # Light Amber
+    "collection": "#FFECB3",        # Pale Amber
+    
+    "project": "#7B1FA2",           # Deep Purple
+    "program": "#8E24AA",           # Purple
+    "initiative": "#9C27B0",        # Light Purple
+    
+    "platform": "#0097A7",          # Dark Cyan
+    "system": "#00ACC1",            # Cyan
+    "application": "#00BCD4",       # Light Cyan
+    "app": "#26C6DA",               # Pale Cyan
+    
+    "value": "#689F38",             # Light Green
+    "property": "#7CB342",          # Pale Green
+    "setting": "#8BC34A",           # Very Light Green
+    
+    "agent": "#FF7043",             # Deep Orange
+    "agent_type": "#FF8A65",        # Orange
+    "bot": "#FFAB91",               # Light Orange
+    
+    "category": "#5D4037",          # Brown
+    "type": "#6D4C41",              # Light Brown
+    "kind": "#795548",              # Medium Brown
+    "group": "#8D6E63",             # Pale Brown
+    
+    "file": "#455A64",              # Dark Blue Grey
+    "folder": "#546E7A",            # Blue Grey
+    "directory": "#607D8B",         # Light Blue Grey
+    "path": "#78909C",              # Pale Blue Grey
+    
+    "method": "#1E88E5",            # Blue (code related)
+    "parameter": "#42A5F5",         # Light Blue
+    "argument": "#64B5F6",          # Pale Blue
+    "variable": "#90CAF9",          # Very Light Blue
+    
+    "event": "#7E57C2",             # Purple
+    "trigger": "#9575CD",           # Light Purple
+    "handler": "#B39DDB",           # Pale Purple
+    "callback": "#D1C4E9",          # Very Light Purple
+    
+    "rule": "#43A047",              # Green (business related)
+    "policy": "#66BB6A",            # Light Green
+    "guideline": "#81C784",         # Pale Green
+    "standard": "#A5D6A7",          # Very Light Green
+    
+    "user": "#EC407A",              # Pink (organization related)
+    "role": "#F06292",              # Light Pink
+    "permission": "#F48FB1",        # Pale Pink
+    "access": "#F8BBD9",            # Very Light Pink
+    
+    # Default fallback
+    "default": "#9E9E9E",           # Grey
 }
 
 # Relation type colors
@@ -623,8 +730,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 legendDiv.appendChild(div);
             });
         
+        // Generate a consistent color from a string hash (fallback for unknown types)
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            // Use golden ratio to spread hues evenly, avoiding muddy colors
+            const h = Math.abs(hash * 137.508) % 360;
+            const s = 55 + (Math.abs(hash >> 8) % 25); // 55-80% saturation
+            const l = 45 + (Math.abs(hash >> 16) % 20); // 45-65% lightness
+            return `hsl(${h}, ${s}%, ${l}%)`;
+        }
+        
         function getColor(type) {
-            return typeColors[type] || typeColors['default'];
+            // First try exact match in predefined colors
+            if (typeColors[type]) return typeColors[type];
+            // Try lowercase match
+            const lower = type.toLowerCase();
+            if (typeColors[lower]) return typeColors[lower];
+            // Try with underscores/spaces/dashes replaced (e.g., "UserStory" -> "userstory")
+            const normalized = lower.replace(/[_\\s-]/g, '');
+            for (const [key, color] of Object.entries(typeColors)) {
+                if (key.toLowerCase().replace(/[_\\s-]/g, '') === normalized) {
+                    return color;
+                }
+            }
+            // Fallback: generate consistent color from type name
+            return stringToColor(type);
         }
         
         function getRelationColor(type) {
@@ -1058,6 +1191,10 @@ def generate_visualization(
     
     with open(graph_path, 'r') as f:
         graph_data = json.load(f)
+    
+    # Handle NetworkX 3.5+ compatibility: may have "edges" instead of "links"
+    if 'edges' in graph_data and 'links' not in graph_data:
+        graph_data['links'] = graph_data.pop('edges')
     
     # Prepare data for JavaScript
     graph_json = json.dumps(graph_data, default=str)
