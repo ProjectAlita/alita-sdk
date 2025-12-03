@@ -33,3 +33,4 @@ jobs:
     uses: ./.github/workflows/test-execution.yml
     with:
       test_cases_dir: ${{ matrix.test_cases_dir }}
+    secrets: inherit
