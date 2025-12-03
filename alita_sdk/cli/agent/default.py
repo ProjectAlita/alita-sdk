@@ -117,7 +117,36 @@ Common use cases include:
 
 ---
 
-## Handling large files
+## Handling files
+
+### CRITICAL: File creation and modification rules
+
+**NEVER output entire file contents in your response.** Always use tools to write files.
+
+When creating or modifying files:
+
+1. **Use incremental writes for new files**: Create files in logical sections using multiple tool calls:
+   - First call: Create file with initial structure (imports, class definition header)
+   - Subsequent calls: Add methods, functions, or sections one at a time using edit/append
+   - This prevents context overflow and ensures each part is properly written
+
+2. **Use edit tools for modifications**: Use `filesystem_edit_file` for precise text replacement instead of rewriting entire files
+
+3. **Never dump code in chat**: If you find yourself about to write a large code block in your response, STOP and use a file tool instead
+
+Example - creating a test file correctly:
+```
+# Call 1: Create file with structure
+filesystem_write_file("test_api.py", "import pytest\\nimport requests\\n\\n")
+
+# Call 2: Append first test class/method
+filesystem_append_file("test_api.py", "class TestAPI:\\n    def test_health(self):\\n        assert requests.get('/health').status_code == 200\\n")
+
+# Call 3: Append second test method  
+filesystem_append_file("test_api.py", "\\n    def test_auth(self):\\n        assert requests.get('/protected').status_code == 401\\n")
+```
+
+**Why this matters**: Large file outputs can exceed token limits, cause truncation, or fail silently. Incremental writes are reliable and verifiable.
 
 ### Reading large files
 

@@ -60,6 +60,12 @@ class WriteFileInput(BaseModel):
     content: str = Field(description="Content to write to the file")
 
 
+class AppendFileInput(BaseModel):
+    """Input for appending to a file."""
+    path: str = Field(description="Relative path to the file to append to")
+    content: str = Field(description="Content to append to the end of the file")
+
+
 class EditFileInput(BaseModel):
     """Input for editing a file with precise replacements."""
     path: str = Field(description="Relative path to the file to edit")
@@ -299,6 +305,43 @@ class WriteFileTool(FileSystemTool):
             return f"Successfully wrote to '{path}' ({self._format_size(size)})"
         except Exception as e:
             return f"Error writing to file '{path}': {str(e)}"
+
+
+class AppendFileTool(FileSystemTool):
+    """Append content to the end of a file."""
+    name: str = "filesystem_append_file"
+    description: str = (
+        "Append content to the end of an existing file. Creates the file if it doesn't exist. "
+        "Use this for incremental file creation - write initial structure with write_file, "
+        "then add sections progressively with append_file. This is safer than rewriting "
+        "entire files and prevents context overflow. Only works within allowed directories."
+    )
+    args_schema: type[BaseModel] = AppendFileInput
+    
+    def _run(self, path: str, content: str) -> str:
+        """Append to a file."""
+        try:
+            target = self._resolve_path(path)
+            
+            # Create parent directories if they don't exist
+            target.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Check current file size if it exists
+            existed = target.exists()
+            original_size = target.stat().st_size if existed else 0
+            
+            with open(target, 'a', encoding='utf-8') as f:
+                f.write(content)
+            
+            appended_size = len(content.encode('utf-8'))
+            new_size = original_size + appended_size
+            
+            if existed:
+                return f"Successfully appended {self._format_size(appended_size)} to '{path}' (total: {self._format_size(new_size)})"
+            else:
+                return f"Created '{path}' and wrote {self._format_size(appended_size)}"
+        except Exception as e:
+            return f"Error appending to file '{path}': {str(e)}"
 
 
 class EditFileTool(FileSystemTool):
@@ -1246,6 +1289,7 @@ FILESYSTEM_TOOL_PRESETS = {
     'read_only': {
         'exclude_tools': [
             'filesystem_write_file',
+            'filesystem_append_file',
             'filesystem_edit_file',
             'filesystem_apply_patch',
             'filesystem_delete_file',
@@ -1260,6 +1304,7 @@ FILESYSTEM_TOOL_PRESETS = {
         'include_tools': [
             'filesystem_read_file',
             'filesystem_write_file',
+            'filesystem_append_file',
             'filesystem_list_directory',
             'filesystem_create_directory',
         ]
@@ -1290,7 +1335,7 @@ def get_filesystem_tools(
         preset: Optional preset name to use predefined tool sets. Presets:
                 - 'read_only': Excludes all write/modify operations
                 - 'no_delete': All tools except delete
-                - 'basic': Read, write, list, create directory
+                - 'basic': Read, write, append, list, create directory
                 - 'minimal': Only read and list
                 Note: If preset is used with include_tools or exclude_tools, 
                       preset is applied first, then custom filters.
@@ -1303,6 +1348,7 @@ def get_filesystem_tools(
         - filesystem_read_file_chunk
         - filesystem_read_multiple_files
         - filesystem_write_file
+        - filesystem_append_file (for incremental file creation)
         - filesystem_edit_file
         - filesystem_apply_patch
         - filesystem_list_directory
@@ -1364,6 +1410,7 @@ def get_filesystem_tools(
         'filesystem_read_file_chunk': ReadFileChunkTool(base_directory=base_dir),
         'filesystem_read_multiple_files': ReadMultipleFilesTool(base_directory=base_dir),
         'filesystem_write_file': WriteFileTool(base_directory=base_dir),
+        'filesystem_append_file': AppendFileTool(base_directory=base_dir),
         'filesystem_edit_file': EditFileTool(base_directory=base_dir),
         'filesystem_apply_patch': ApplyPatchTool(base_directory=base_dir),
         'filesystem_list_directory': ListDirectoryTool(base_directory=base_dir),
