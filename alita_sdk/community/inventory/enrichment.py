@@ -31,76 +31,433 @@ logger = logging.getLogger(__name__)
 # TYPE NORMALIZATION FOR ENRICHMENT
 # ============================================================================
 
-# Map common type variations to canonical lowercase forms
+# Comprehensive type consolidation map
+# Maps many ad-hoc LLM types to a smaller set of canonical types
 TYPE_NORMALIZATION_MAP = {
-    # Tool/Toolkit variations
+    # ==========================================================================
+    # TOOL & TOOLKIT FAMILY → tool, toolkit
+    # ==========================================================================
     "Tools": "tool",
     "Tool": "tool",
+    "tool_used": "tool",
+    "tool_example": "tool",
+    "tool_category": "tool",
+    "internal_tool": "tool",
+    "documentationtool": "tool",
     "Toolkit": "toolkit",
     "Toolkits": "toolkit",
-    # Feature variations
+    "toolkit_type": "toolkit",
+    
+    # ==========================================================================
+    # FEATURE & CAPABILITY FAMILY → feature
+    # ==========================================================================
     "Feature": "feature",
     "Features": "feature",
-    # Common variations
-    "API": "api",
-    "APIs": "api",
-    "Service": "service",
-    "Services": "service",
-    "Endpoint": "endpoint",
-    "Endpoints": "endpoint",
-    "Configuration": "configuration",
-    "Config": "configuration",
-    "Concept": "concept",
-    "Concepts": "concept",
+    "functionality": "feature",
+    "capability": "feature",
+    "benefit": "feature",
+    "characteristic": "feature",
+    
+    # ==========================================================================
+    # PROCESS & WORKFLOW FAMILY → process
+    # ==========================================================================
     "Process": "process",
     "Processes": "process",
-    "Component": "component",
-    "Components": "component",
+    "procedure": "process",
+    "workflow": "process",
+    "flow": "process",
+    "pipeline": "process",
+    
+    # ==========================================================================
+    # CONCEPT & ENTITY FAMILY → concept
+    # ==========================================================================
+    "Concept": "concept",
+    "Concepts": "concept",
     "Entity": "entity",
     "Entities": "entity",
+    "entity_type": "entity",
+    "entitytype": "entity",
+    "domain_entity": "entity",
+    "domain": "concept",
+    "topic": "concept",
+    "term": "concept",
+    "glossary_term": "concept",
+    "key_concept": "concept",
+    
+    # ==========================================================================
+    # CONFIGURATION FAMILY → configuration
+    # ==========================================================================
+    "Configuration": "configuration",
+    "Config": "configuration",
+    "configuration_section": "configuration",
+    "configuration_field": "configuration",
+    "configuration_option": "configuration",
+    "configuration_file": "configuration",
+    "configurationfile": "configuration",
+    "configurationchange": "configuration",
+    "configuration_command": "configuration",
+    "setting": "configuration",
+    "environment": "configuration",
+    
+    # ==========================================================================
+    # DOCUMENTATION & GUIDE FAMILY → documentation
+    # ==========================================================================
+    "documentation": "documentation",
+    "documentation_section": "documentation",
+    "documentation_template": "documentation",
+    "guide": "documentation",
+    "guideline": "documentation",
+    "instruction": "documentation",
+    "tip": "documentation",
+    "note": "documentation",
+    "faq": "documentation",
+    "overview": "documentation",
+    "summary": "documentation",
+    "best_practice": "documentation",
+    
+    # ==========================================================================
+    # SECTION & STRUCTURE FAMILY → section
+    # ==========================================================================
     "Section": "section",
     "Sections": "section",
-    "Parameter": "parameter",
-    "Parameters": "parameter",
+    "interface_section": "section",
+    "navigation_structure": "section",
+    "navigation_group": "section",
+    "navigation": "section",
+    
+    # ==========================================================================
+    # COMPONENT & UI FAMILY → component
+    # ==========================================================================
+    "Component": "component",
+    "Components": "component",
+    "ui_component": "component",
+    "ui_element": "component",
+    "ui_layout": "component",
+    "interface_element": "component",
+    "button": "component",
+    "menu": "component",
+    "tab": "component",
+    "panel": "component",
+    "editor": "component",
+    "view": "component",
+    
+    # ==========================================================================
+    # ISSUE & PROBLEM FAMILY → issue
+    # ==========================================================================
+    "Issue": "issue",
+    "Issues": "issue",
+    "issue_type": "issue",
+    "issuetype": "issue",
+    "known_issue": "issue",
+    "fixed_issue": "issue",
+    "limitation": "issue",
+    "challenge": "issue",
+    "problem": "issue",
+    "error_message": "issue",
+    "troubleshooting": "issue",
+    "compatibilityissue": "issue",
+    
+    # ==========================================================================
+    # ACTION & COMMAND FAMILY → action
+    # ==========================================================================
     "Action": "action",
     "Actions": "action",
+    "command": "action",
+    "operation": "action",
+    "task": "action",
+    "trigger": "action",
+    "automation_rule": "action",
+    
+    # ==========================================================================
+    # PARAMETER & FIELD FAMILY → parameter
+    # ==========================================================================
+    "Parameter": "parameter",
+    "Parameters": "parameter",
+    "field": "parameter",
+    "field_identifier": "parameter",
+    "variable": "parameter",
+    "placeholder": "parameter",
+    "value": "parameter",
+    "label": "parameter",
+    "tag": "parameter",
+    
+    # ==========================================================================
+    # CREDENTIAL & AUTH FAMILY → credential
+    # ==========================================================================
+    "credential": "credential",
+    "credential_type": "credential",
+    "secret": "credential",
+    "token": "credential",
+    "api_key": "credential",
+    "api_token": "credential",
+    "key": "credential",
+    "authentication": "credential",
+    "authentication_method": "credential",
+    "permission": "credential",
+    "access_control": "credential",
+    "access_requirement": "credential",
+    
+    # ==========================================================================
+    # RESOURCE & FILE FAMILY → resource
+    # ==========================================================================
+    "Resource": "resource",
+    "Resources": "resource",
+    "file": "resource",
+    "file_type": "resource",
+    "file_format": "resource",
+    "file_path": "resource",
+    "folder": "resource",
+    "artifact": "resource",
+    "artifact_type": "resource",
+    "document": "resource",
+    "template": "resource",
+    "script": "resource",
+    
+    # ==========================================================================
+    # PLATFORM & SOFTWARE FAMILY → platform
+    # ==========================================================================
+    "Platform": "platform",
+    "Platforms": "platform",
+    "software": "platform",
+    "softwareversion": "platform",
+    "application": "platform",
+    "app": "platform",
+    "system": "platform",
+    "framework": "platform",
+    "library": "platform",
+    "technology": "platform",
+    "product": "platform",
+    
+    # ==========================================================================
+    # SERVICE & API FAMILY → service
+    # ==========================================================================
+    "Service": "service",
+    "Services": "service",
+    "api": "service",
+    "API": "service",
+    "api_endpoint": "service",
+    "endpoint": "service",
+    "web_service": "service",
+    "server": "service",
+    "client": "service",
+    "hostingservice": "service",
+    
+    # ==========================================================================
+    # INTEGRATION & CONNECTION FAMILY → integration
+    # ==========================================================================
+    "Integration": "integration",
+    "Integrations": "integration",
+    "connection": "integration",
+    "connection_type": "integration",
+    "connector": "integration",
+    "adapter": "integration",
+    "datasource": "integration",
+    "database": "integration",
+    
+    # ==========================================================================
+    # EXAMPLE & USE CASE FAMILY → example
+    # ==========================================================================
+    "Example": "example",
+    "Examples": "example",
+    "example_type": "example",
+    "example_request": "example",
+    "use_case": "example",
+    "use_case_category": "example",
+    "code_sample": "example",
+    "sample_prompt": "example",
+    
+    # ==========================================================================
+    # NODE & GRAPH FAMILY → node
+    # ==========================================================================
+    "node": "node",
+    "nodetype": "node",
+    "node_type": "node",
+    "execution_node": "node",
+    "iteration_node": "node",
+    "interaction_node": "node",
+    "utilitynode": "node",
+    
+    # ==========================================================================
+    # STEP & PROCEDURE FAMILY → step
+    # ==========================================================================
+    "Step": "step",
+    "Steps": "step",
+    "number_of_step": "step",
+    "prerequisite": "step",
+    
+    # ==========================================================================
+    # STATUS & STATE FAMILY → status
+    # ==========================================================================
+    "Status": "status",
+    "state": "status",
+    "state_type": "status",
+    "mode": "status",
+    "session_mode": "status",
+    
+    # ==========================================================================
+    # PROJECT & WORKSPACE FAMILY → project
+    # ==========================================================================
+    "Project": "project",
+    "workspace": "project",
+    "project_scope": "project",
+    "repository": "project",
+    "space": "project",
+    
+    # ==========================================================================
+    # ROLE & USER FAMILY → role
+    # ==========================================================================
+    "Role": "role",
+    "user_role": "role",
+    "team": "role",
+    "person": "role",
+    "audience": "role",
+    "stakeholder": "role",
+    "owner": "role",
+    
+    # ==========================================================================
+    # AGENT FAMILY → agent
+    # ==========================================================================
     "Agent": "agent",
     "Agents": "agent",
-    # Multi-word types
-    "Test Case": "test_case",
-    "Test Cases": "test_case",
-    "test case": "test_case",
-    "User Story": "user_story",
-    "User Stories": "user_story",
-    "user story": "user_story",
-    "Business Rule": "business_rule",
-    "business rule": "business_rule",
-    "UI Component": "ui_component",
-    "ui component": "ui_component",
-    "UI Field": "ui_field",
-    "ui field": "ui_field",
-    "Test Suite": "test_suite",
-    "test suite": "test_suite",
-    "Test Step": "test_step",
-    "test step": "test_step",
-    "Glossary Term": "glossary_term",
-    "glossary term": "glossary_term",
-    "Domain Entity": "domain_entity",
-    "domain entity": "domain_entity",
-    "Pull Request": "pull_request",
-    "pull request": "pull_request",
+    "agent_type": "agent",
+    "agent_configuration": "agent",
+    "ai_agent": "agent",
+    "public_agent": "agent",
+    
+    # ==========================================================================
+    # DATA & TYPE FAMILY → data_type
+    # ==========================================================================
+    "data_type": "data_type",
+    "datatype": "data_type",
+    "data_structure": "data_type",
+    "schema": "data_type",
+    "format": "data_type",
+    "content_type": "data_type",
+    "collection": "data_type",
+    "collectiontype": "data_type",
+    "list": "data_type",
+    "table": "data_type",
+    
+    # ==========================================================================
+    # RELEASE & VERSION FAMILY → release
+    # ==========================================================================
+    "Release": "release",
+    "version": "release",
+    "change": "release",
+    "feature_change": "release",
+    "migration": "release",
+    "deployment": "release",
+    "fix": "release",
+    
+    # ==========================================================================
+    # REFERENCE & LINK FAMILY → reference
+    # ==========================================================================
+    "Reference": "reference",
+    "reference": "reference",
+    "related_page": "reference",
+    "url": "reference",
+    "webpage": "reference",
+    "website": "reference",
+    "page": "reference",
+    "link": "reference",
+    
+    # ==========================================================================
+    # RULE & POLICY FAMILY → rule
+    # ==========================================================================
+    "Rule": "rule",
+    "rule": "rule",
+    "policy": "rule",
+    "formatting_rule": "rule",
+    "directive": "rule",
+    "requirement": "rule",
+    "specification": "rule",
+    
+    # ==========================================================================
+    # MCP FAMILY → mcp_server
+    # ==========================================================================
     "MCP Server": "mcp_server",
     "MCP Tool": "mcp_tool", 
     "MCP Resource": "mcp_resource",
-    "Use Case": "use_case",
-    "use case": "use_case",
-    "Fixed Issue": "fixed_issue",
-    "Fixed_Issue": "fixed_issue",
+    "mcp_type": "mcp_server",
+    "transport": "mcp_server",
+    
+    # ==========================================================================
+    # MISCELLANEOUS → map to closest canonical type
+    # ==========================================================================
+    "interface": "component",
+    "function": "action",
+    "method": "action",
+    "model": "concept",
+    "category": "concept",
+    "metric": "parameter",
+    "identifier": "parameter",
+    "port": "parameter",
+    "protocol": "service",
+    "security": "credential",
+    "support": "documentation",
+    "community": "documentation",
+    "contact": "reference",
+    "contactmethod": "reference",
+    "contact_information": "reference",
+    "contactinfo": "reference",
+    "building_block": "component",
+    "container": "component",
+    "instance": "entity",
+    "object": "entity",
+    "sourcetype": "data_type",
+    "input_mapping_type": "data_type",
+    "control_flow_feature": "feature",
+    "export_option": "action",
+    "export_format": "data_type",
+    "conversion": "action",
+    "customization": "configuration",
+    "viewing_option": "configuration",
+    "review_outcome": "status",
+    "goal": "feature",
+    "engagement": "action",
+    "output": "data_type",
+    "effect": "action",
+    "solution": "documentation",
+    "cause": "issue",
+    "indicator": "status",
+    "date": "parameter",
+    "screenshot": "resource",
+    "open_question": "issue",
+    "static_site_generator": "platform",
+    "theme": "configuration",
+    "theme_convention": "rule",
+    "file_naming_convention": "rule",
+    "metadata_guideline": "rule",
+    "linking_guideline": "rule",
+    "media_guideline": "rule",
+    "accessibility_guideline": "rule",
+    "page_type": "section",
+    "document_category": "section",
+    "prompt": "example",
+    "chat": "feature",
+    "ide": "platform",
+    "tagging": "action",
+    "account": "credential",
+    "installation_command": "action",
+    "usage": "documentation",
+    "mechanism": "concept",
+    "ai_component": "component",
+    "communication_method": "integration",
+    "dns_record": "configuration",
+    "tone": "rule",
+    "voice": "rule",
 }
 
 def normalize_type(entity_type: str) -> str:
     """
     Normalize entity type to canonical lowercase form.
+    
+    Aggressively consolidates types to a small set of ~25 canonical types:
+    - feature, tool, toolkit, process, concept, entity
+    - section, component, issue, action, parameter, credential
+    - resource, platform, service, integration, example, node
+    - step, status, project, role, agent, data_type, release
+    - reference, rule, documentation, configuration, mcp_server
     
     Args:
         entity_type: Raw entity type
@@ -109,23 +466,47 @@ def normalize_type(entity_type: str) -> str:
         Canonical lowercase entity type
     """
     if not entity_type:
-        return "unknown"
+        return "concept"  # Default to concept for unknown
     
-    # Check explicit mapping first
+    # Check explicit mapping first (handles most cases)
     if entity_type in TYPE_NORMALIZATION_MAP:
         return TYPE_NORMALIZATION_MAP[entity_type]
     
-    # Normalize: lowercase, replace spaces with underscores
+    # Normalize: lowercase, replace spaces/hyphens with underscores
     normalized = entity_type.lower().strip().replace(" ", "_").replace("-", "_")
     
-    # Handle plural forms by removing trailing 's' (but not 'ss' like 'class')
+    # Check normalized form in map
+    if normalized in TYPE_NORMALIZATION_MAP:
+        return TYPE_NORMALIZATION_MAP[normalized]
+    
+    # Handle plural forms
     if normalized.endswith('s') and not normalized.endswith('ss') and len(normalized) > 3:
         singular = normalized[:-1]
-        # Don't singularize common standalone types
-        if singular not in {'proces', 'clas', 'statu', 'analysi'}:
-            return singular
+        if singular in TYPE_NORMALIZATION_MAP:
+            return TYPE_NORMALIZATION_MAP[singular]
     
-    return normalized
+    # Fallback heuristics based on common suffixes/patterns
+    if '_type' in normalized or normalized.endswith('type'):
+        return "data_type"
+    if '_section' in normalized or normalized.endswith('section'):
+        return "section"
+    if '_field' in normalized or normalized.endswith('field'):
+        return "parameter"
+    if '_node' in normalized or normalized.endswith('node'):
+        return "node"
+    if '_issue' in normalized or normalized.endswith('issue'):
+        return "issue"
+    if '_guide' in normalized or normalized.endswith('guide'):
+        return "documentation"
+    if '_config' in normalized or normalized.endswith('config'):
+        return "configuration"
+    if '_tool' in normalized or normalized.endswith('tool'):
+        return "tool"
+    if '_service' in normalized or normalized.endswith('service'):
+        return "service"
+    
+    # If still unknown, map to concept (generic catch-all)
+    return "concept"
 
 
 # Relationship types for cross-source linking
