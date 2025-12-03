@@ -171,12 +171,13 @@ Answer only with step name, no need to add descrip in case none of the steps are
 """
 
     def __init__(self, client, steps: str, description: str = "", decisional_inputs: Optional[list[str]] = [],
-                 default_output: str = 'END'):
+                 default_output: str = 'END', is_node: bool = False):
         self.client = client
         self.steps = ",".join([clean_string(step) for step in steps])
         self.description = description
         self.decisional_inputs = decisional_inputs
         self.default_output = default_output if default_output != 'END' else END
+        self.is_node = is_node
 
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
         additional_info = ""
@@ -198,7 +199,8 @@ Answer only with step name, no need to add descrip in case none of the steps are
         dispatch_custom_event(
             "on_decision_edge", {"decisional_inputs": self.decisional_inputs, "state": state}, config=config
         )
-        return result
+        # support of legacy `decision` as part of node
+        return {"router_output": result} if self.is_node else result
 
 
 class TransitionalEdge(Runnable):
@@ -636,15 +638,26 @@ def create_graph(
                     tool_names=tool_names,
                     steps_limit=kwargs.get('steps_limit', 25)
                 ))
-            elif node_type == 'router':
-                # Add a RouterNode as an independent node
-                lg_builder.add_node(node_id, RouterNode(
-                    name=node_id,
-                    condition=node.get('condition', ''),
-                    routes=node.get('routes', []),
-                    default_output=node.get('default_output', 'END'),
-                    input_variables=node.get('input', ['messages'])
-                ))
+            elif node_type in ['router', 'decision']:
+                if node_type == 'router':
+                    # Add a RouterNode as an independent node
+                    lg_builder.add_node(node_id, RouterNode(
+                        name=node_id,
+                        condition=node.get('condition', ''),
+                        routes=node.get('routes', []),
+                        default_output=node.get('default_output', 'END'),
+                        input_variables=node.get('input', ['messages'])
+                    ))
+                elif node_type == 'decision':
+                    logger.info(f'Adding decision: {node["nodes"]}')
+                    lg_builder.add_node(node_id, DecisionEdge(
+                        client, node['nodes'],
+                        node.get('description', ""),
+                        decisional_inputs=node.get('decisional_inputs', ['messages']),
+                        default_output=node.get('default_output', 'END'),
+                        is_node=True
+                    ))
+
                 # Add a single conditional edge for all routes
                 lg_builder.add_conditional_edges(
                     node_id,
@@ -963,8 +976,10 @@ class LangGraphAgentRunnable(CompiledStateGraph):
 
         # Include all state values in the result
         if hasattr(config_state, 'values') and config_state.values:
+            # except of key = 'output' which is already included
             for key, value in config_state.values.items():
-                result_with_state[key] = value
+                if key != 'output':
+                    result_with_state[key] = value
 
         return result_with_state
 
