@@ -556,6 +556,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             "reindex": is_reindex,
             "indexed": metadata.get("indexed", 0),
             "updated": metadata.get("updated", 0),
+            "toolkit_id": metadata.get("toolkit_id"),
         }
         
         # Emit the event
