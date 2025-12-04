@@ -62,6 +62,47 @@ class LLMNode(BaseTool):
         
         return filtered_tools
 
+    def _get_tool_truncation_suggestions(self, tool_name: Optional[str]) -> str:
+        """
+        Get context-specific suggestions for how to reduce output from a tool.
+        
+        First checks if the tool itself provides truncation suggestions via 
+        `truncation_suggestions` attribute or `get_truncation_suggestions()` method.
+        Falls back to generic suggestions if the tool doesn't provide any.
+        
+        Args:
+            tool_name: Name of the tool that caused the context overflow
+            
+        Returns:
+            Formatted string with numbered suggestions for the specific tool
+        """
+        suggestions = None
+        
+        # Try to get suggestions from the tool itself
+        if tool_name:
+            filtered_tools = self.get_filtered_tools()
+            for tool in filtered_tools:
+                if tool.name == tool_name:
+                    # Check for truncation_suggestions attribute
+                    if hasattr(tool, 'truncation_suggestions') and tool.truncation_suggestions:
+                        suggestions = tool.truncation_suggestions
+                        break
+                    # Check for get_truncation_suggestions method
+                    elif hasattr(tool, 'get_truncation_suggestions') and callable(tool.get_truncation_suggestions):
+                        suggestions = tool.get_truncation_suggestions()
+                        break
+        
+        # Fall back to generic suggestions if tool doesn't provide any
+        if not suggestions:
+            suggestions = [
+                "Check if the tool has parameters to limit output size (e.g., max_items, max_results, max_depth)",
+                "Target a more specific path or query instead of broad searches",
+                "Break the operation into smaller, focused requests",
+            ]
+        
+        # Format as numbered list
+        return "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions))
+
     def invoke(
             self,
             state: Union[str, dict],
@@ -347,11 +388,83 @@ class LLMNode(BaseTool):
                     break
 
             except Exception as e:
-                logger.error(f"Error in LLM call during iteration {iteration}: {e}")
-                # Add error message and break the loop
-                error_msg = f"Error processing tool results in iteration {iteration}: {str(e)}"
-                new_messages.append(AIMessage(content=error_msg))
-                break
+                error_str = str(e).lower()
+                
+                # Check for context window / token limit errors
+                is_context_error = any(indicator in error_str for indicator in [
+                    'context window', 'context_window', 'token limit', 'too long',
+                    'maximum context length', 'input is too long', 'exceeds the limit',
+                    'contextwindowexceedederror', 'max_tokens', 'content too large'
+                ])
+                
+                if is_context_error:
+                    logger.warning(f"Context window exceeded during tool execution iteration {iteration}")
+                    
+                    # Find the last tool message and its associated tool name
+                    last_tool_msg_idx = None
+                    last_tool_name = None
+                    last_tool_call_id = None
+                    
+                    # First, find the last tool message
+                    for i in range(len(new_messages) - 1, -1, -1):
+                        msg = new_messages[i]
+                        if hasattr(msg, 'tool_call_id') or (hasattr(msg, 'type') and getattr(msg, 'type', None) == 'tool'):
+                            last_tool_msg_idx = i
+                            last_tool_call_id = getattr(msg, 'tool_call_id', None)
+                            break
+                    
+                    # Find the tool name from the AIMessage that requested this tool call
+                    if last_tool_call_id:
+                        for i in range(last_tool_msg_idx - 1, -1, -1):
+                            msg = new_messages[i]
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tc in msg.tool_calls:
+                                    tc_id = tc.get('id', '') if isinstance(tc, dict) else getattr(tc, 'id', '')
+                                    if tc_id == last_tool_call_id:
+                                        last_tool_name = tc.get('name', '') if isinstance(tc, dict) else getattr(tc, 'name', '')
+                                        break
+                                if last_tool_name:
+                                    break
+                    
+                    # Build dynamic suggestion based on the tool that caused the overflow
+                    tool_suggestions = self._get_tool_truncation_suggestions(last_tool_name)
+                    
+                    # Truncate the problematic tool result if found
+                    if last_tool_msg_idx is not None:
+                        from langchain_core.messages import ToolMessage
+                        original_msg = new_messages[last_tool_msg_idx]
+                        tool_call_id = getattr(original_msg, 'tool_call_id', 'unknown')
+                        
+                        # Replace with truncated message
+                        truncated_content = (
+                            f"⚠️ TOOL OUTPUT TRUNCATED - Context window exceeded\n\n"
+                            f"The tool '{last_tool_name or 'unknown'}' returned too much data for the model's context window.\n\n"
+                            f"To fix this:\n{tool_suggestions}\n\n"
+                            f"Please retry with more restrictive parameters."
+                        )
+                        truncated_msg = ToolMessage(
+                            content=truncated_content,
+                            tool_call_id=tool_call_id
+                        )
+                        new_messages[last_tool_msg_idx] = truncated_msg
+                        
+                        logger.info(f"Truncated large tool result from '{last_tool_name}' and continuing")
+                        # Continue to next iteration - the model will see the truncation message
+                        continue
+                    else:
+                        # Couldn't find tool message, add error and break
+                        error_msg = (
+                            "Context window exceeded. The conversation or tool results are too large. "
+                            "Try using tools with smaller output limits (e.g., max_items, max_depth parameters)."
+                        )
+                        new_messages.append(AIMessage(content=error_msg))
+                        break
+                else:
+                    logger.error(f"Error in LLM call during iteration {iteration}: {e}")
+                    # Add error message and break the loop
+                    error_msg = f"Error processing tool results in iteration {iteration}: {str(e)}"
+                    new_messages.append(AIMessage(content=error_msg))
+                    break
 
         # Handle max iterations
         if iteration >= self.steps_limit:

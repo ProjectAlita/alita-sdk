@@ -14,7 +14,7 @@ import hashlib
 import logging
 import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Generator
+from typing import Optional, List, Dict, Any, Generator, ClassVar
 from datetime import datetime
 from langchain_core.tools import BaseTool, ToolException
 from langchain_core.documents import Document
@@ -140,13 +140,15 @@ class ListDirectoryInput(BaseModel):
 class DirectoryTreeInput(BaseModel):
     """Input for getting a directory tree."""
     path: str = Field(default=".", description="Relative path to the directory")
-    max_depth: Optional[int] = Field(None, description="Maximum depth to traverse (None for unlimited)")
+    max_depth: Optional[int] = Field(default=3, description="Maximum depth to traverse. Default is 3 to prevent excessive output. Use None for unlimited (caution: may exceed context limits).")
+    max_items: Optional[int] = Field(default=200, description="Maximum number of files/directories to include. Default is 200 to prevent context window overflow. Use None for unlimited (caution: large directories may exceed context limits).")
 
 
 class SearchFilesInput(BaseModel):
     """Input for searching files."""
     path: str = Field(default=".", description="Relative path to search from")
     pattern: str = Field(description="Glob pattern to match (e.g., '*.py', '**/*.txt')")
+    max_results: Optional[int] = Field(default=100, description="Maximum number of results to return. Default is 100 to prevent context overflow. Use None for unlimited.")
 
 
 class DeleteFileInput(BaseModel):
@@ -220,6 +222,11 @@ class ReadFileTool(FileSystemTool):
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ReadFileInput
+    truncation_suggestions: ClassVar[List[str]] = [
+        "Use head=100 to read only the first 100 lines",
+        "Use tail=100 to read only the last 100 lines",
+        "Use filesystem_read_file_chunk with start_line and end_line for specific sections",
+    ]
     
     def _run(self, path: str, head: Optional[int] = None, tail: Optional[int] = None) -> str:
         """Read a file with optional head/tail."""
@@ -269,6 +276,10 @@ class ReadFileChunkTool(FileSystemTool):
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ReadFileChunkInput
+    truncation_suggestions: ClassVar[List[str]] = [
+        "Reduce the line range (end_line - start_line) to read fewer lines at once",
+        "Read smaller chunks sequentially if you need to process the entire file",
+    ]
     
     def _run(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
         """Read a chunk of a file by line range."""
@@ -319,6 +330,10 @@ class ReadMultipleFilesTool(FileSystemTool):
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ReadMultipleFilesInput
+    truncation_suggestions: ClassVar[List[str]] = [
+        "Read fewer files at once - split into multiple smaller batches",
+        "Use filesystem_read_file with head parameter on individual large files instead",
+    ]
     
     def _run(self, paths: List[str]) -> str:
         """Read multiple files."""
@@ -553,6 +568,10 @@ class ListDirectoryTool(FileSystemTool):
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ListDirectoryInput
+    truncation_suggestions: ClassVar[List[str]] = [
+        "List a specific subdirectory instead of the root directory",
+        "Consider using filesystem_directory_tree with max_depth=1 for hierarchical overview",
+    ]
     
     def _run(self, path: str = ".", include_sizes: bool = False, sort_by: str = "name") -> str:
         """List directory contents."""
@@ -631,14 +650,32 @@ class DirectoryTreeTool(FileSystemTool):
     description: str = (
         "Get a recursive tree view of files and directories. "
         "Shows the complete structure in an easy-to-read tree format. "
-        "Use max_depth to limit recursion depth. "
+        "IMPORTANT: For large directories, use max_depth (default: 3) and max_items (default: 200) "
+        "to prevent context window overflow. Increase these only if needed for smaller directories. "
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = DirectoryTreeInput
+    truncation_suggestions: ClassVar[List[str]] = [
+        "Use max_depth=2 to limit directory traversal depth",
+        "Use max_items=50 to limit total items returned",
+        "Target a specific subdirectory instead of the root",
+    ]
+    
+    # Track item count during tree building
+    _item_count: int = 0
+    _max_items: Optional[int] = None
+    _truncated: bool = False
     
     def _build_tree(self, directory: Path, prefix: str = "", depth: int = 0, max_depth: Optional[int] = None) -> List[str]:
-        """Recursively build directory tree."""
+        """Recursively build directory tree with item limit."""
+        # Check depth limit
         if max_depth is not None and depth >= max_depth:
+            return []
+        
+        # Check item limit
+        if self._max_items is not None and self._item_count >= self._max_items:
+            if not self._truncated:
+                self._truncated = True
             return []
         
         lines = []
@@ -646,9 +683,17 @@ class DirectoryTreeTool(FileSystemTool):
             entries = sorted(directory.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
             
             for i, entry in enumerate(entries):
+                # Check item limit before adding each entry
+                if self._max_items is not None and self._item_count >= self._max_items:
+                    if not self._truncated:
+                        self._truncated = True
+                    break
+                
                 is_last = i == len(entries) - 1
                 current_prefix = "└── " if is_last else "├── "
                 next_prefix = "    " if is_last else "│   "
+                
+                self._item_count += 1
                 
                 if entry.is_dir():
                     lines.append(f"{prefix}{current_prefix}📁 {entry.name}/")
@@ -661,8 +706,8 @@ class DirectoryTreeTool(FileSystemTool):
         
         return lines
     
-    def _run(self, path: str = ".", max_depth: Optional[int] = None) -> str:
-        """Get directory tree."""
+    def _run(self, path: str = ".", max_depth: Optional[int] = 3, max_items: Optional[int] = 200) -> str:
+        """Get directory tree with size limits to prevent context overflow."""
         try:
             target = self._resolve_path(path)
             
@@ -671,6 +716,11 @@ class DirectoryTreeTool(FileSystemTool):
             
             if not target.is_dir():
                 return f"Error: '{path}' is not a directory"
+            
+            # Reset counters for this run
+            self._item_count = 0
+            self._max_items = max_items
+            self._truncated = False
             
             # Show relative path from base directory, use '.' for root
             # This prevents confusion - files should be accessed relative to working directory
@@ -681,6 +731,12 @@ class DirectoryTreeTool(FileSystemTool):
             
             lines = [f"📁 {display_root}/"]
             lines.extend(self._build_tree(target, "", 0, max_depth))
+            
+            # Add truncation warning if limit was reached
+            if self._truncated:
+                lines.append("")
+                lines.append(f"⚠️  OUTPUT TRUNCATED: Showing {self._item_count} of more items (max_items={max_items}, max_depth={max_depth})")
+                lines.append(f"   To see more: increase max_items or max_depth, or use filesystem_list_directory on specific subdirectories")
             
             # Add note about file paths
             lines.append("")
@@ -697,13 +753,18 @@ class SearchFilesTool(FileSystemTool):
     description: str = (
         "Recursively search for files and directories matching a glob pattern. "
         "Use patterns like '*.py' for Python files in current dir, or '**/*.py' for all Python files recursively. "
-        "Returns full paths to all matching items. "
+        "Returns paths to matching items (default limit: 100 results to prevent context overflow). "
         "Only searches within allowed directories."
     )
     args_schema: type[BaseModel] = SearchFilesInput
+    truncation_suggestions: ClassVar[List[str]] = [
+        "Use max_results=50 to limit number of results",
+        "Use a more specific glob pattern (e.g., 'src/**/*.py' instead of '**/*.py')",
+        "Search in a specific subdirectory instead of the root",
+    ]
     
-    def _run(self, path: str = ".", pattern: str = "*") -> str:
-        """Search for files."""
+    def _run(self, path: str = ".", pattern: str = "*", max_results: Optional[int] = 100) -> str:
+        """Search for files with result limit."""
         try:
             target = self._resolve_path(path)
             
@@ -714,19 +775,25 @@ class SearchFilesTool(FileSystemTool):
                 return f"Error: '{path}' is not a directory"
             
             # Use glob to find matching files
-            if '**' in pattern:
-                matches = list(target.glob(pattern))
-            else:
-                matches = list(target.glob(pattern))
+            all_matches = list(target.glob(pattern))
+            total_count = len(all_matches)
             
-            if not matches:
+            if not all_matches:
                 return f"No files matching '{pattern}' found in '{path}'"
+            
+            # Apply limit
+            truncated = False
+            if max_results is not None and total_count > max_results:
+                matches = sorted(all_matches)[:max_results]
+                truncated = True
+            else:
+                matches = sorted(all_matches)
             
             # Format results
             base = Path(self.base_directory).resolve()
             results = []
             
-            for match in sorted(matches):
+            for match in matches:
                 rel_path = match.relative_to(base)
                 if match.is_dir():
                     results.append(f"📁 {rel_path}/")
@@ -734,8 +801,14 @@ class SearchFilesTool(FileSystemTool):
                     size = self._format_size(match.stat().st_size)
                     results.append(f"📄 {rel_path} ({size})")
             
-            header = f"Found {len(matches)} matches for '{pattern}':\n\n"
-            return header + "\n".join(results)
+            header = f"Found {total_count} matches for '{pattern}':\n\n"
+            output = header + "\n".join(results)
+            
+            if truncated:
+                output += f"\n\n⚠️  OUTPUT TRUNCATED: Showing {max_results} of {total_count} results (max_results={max_results})"
+                output += "\n   To see more: increase max_results or use a more specific pattern"
+            
+            return output
         except Exception as e:
             return f"Error searching files in '{path}': {str(e)}"
 

@@ -833,11 +833,19 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if not config.get("configurable", {}).get("thread_id", ""):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")
+        
+        # Check if checkpoint exists early for chat_history handling
+        checkpoint_exists = self.checkpointer and self.checkpointer.get_tuple(config)
+        
         # Handle chat history and current input properly
         if input.get('chat_history') and not input.get('messages'):
-            # Convert chat history dict messages to LangChain message objects
-            chat_history = input.pop('chat_history')
-            input['messages'] = [convert_dict_to_message(msg) for msg in chat_history]
+            if checkpoint_exists:
+                # Checkpoint already has conversation history - discard redundant chat_history
+                input.pop('chat_history', None)
+            else:
+                # No checkpoint - convert chat history dict messages to LangChain message objects
+                chat_history = input.pop('chat_history')
+                input['messages'] = [convert_dict_to_message(msg) for msg in chat_history]
 
         # handler for LLM node: if no input (Chat perspective), then take last human message
         # Track if input came from messages to handle content extraction properly
@@ -930,11 +938,14 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         
         logging.info(f"Input: {thread_id} - {input}")
         if self.checkpointer and self.checkpointer.get_tuple(config):
-            self.update_state(config, input)
             if config.pop("should_continue", False):
-                invoke_input = input
-            else:
+                # Continuing interrupted execution: update state and invoke without input
+                self.update_state(config, input)
                 invoke_input = None
+            else:
+                # New message in existing session: pass input to restart graph execution
+                # Don't use update_state + invoke(None) as that doesn't restart finished graphs
+                invoke_input = input
             result = super().invoke(invoke_input, config=config, *args, **kwargs)
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
