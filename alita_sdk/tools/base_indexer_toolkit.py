@@ -17,6 +17,7 @@ from ..runtime.utils.utils import IndexerKeywords
 logger = logging.getLogger(__name__)
 
 DEFAULT_CUT_OFF = 0.2
+INDEX_META_UPDATE_INTERVAL = 600.0
 
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
@@ -157,6 +158,16 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         clean_index = kwargs.get("clean_index")
         chunking_tool = kwargs.get("chunking_tool")
         chunking_config = kwargs.get("chunking_config")
+
+        # Store the interval in a private dict to avoid Pydantic field errors
+        if not hasattr(self, "_index_meta_config"):
+            self._index_meta_config: Dict[str, Any] = {}
+
+        self._index_meta_config["update_interval"] = kwargs.get(
+            "meta_update_interval",
+            INDEX_META_UPDATE_INTERVAL,
+        )
+
         result = {"count": 0}
         #
         try:
@@ -179,7 +190,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, index_name=index_name, result=result)
             #
             results_count = result["count"]
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count)
+            # Final update should always be forced
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count, update_force=True)
             self._emit_index_event(index_name)
             #
             return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
@@ -188,7 +200,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             # Do maximum effort at least send custom event for supposed changed status
             msg = str(e)
             try:
-                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"])
+                # Error update should also be forced
+                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"], update_force=True)
             except Exception as ie:
                 logger.error(f"Failed to update index meta status to FAILED for index '{index_name}': {ie}")
                 msg = f"{msg}; additionally failed to update index meta status to FAILED: {ie}"
@@ -248,6 +261,11 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             logger.debug(msg)
             self._log_tool_event(msg)
             result["count"] += dependent_docs_counter
+            # After each base document, try a non-forced meta update; throttling handled inside index_meta_update
+            try:
+                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_IN_PROGRESS.value, result["count"], update_force=False)
+            except Exception as exc:  # best-effort, do not break indexing
+                logger.warning(f"Failed to update index meta during indexing process for index '{index_name}': {exc}")
         if pg_vector_add_docs_chunk:
             add_documents(vectorstore=self.vectorstore, documents=pg_vector_add_docs_chunk)
 
@@ -493,7 +511,46 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)
             add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc])
 
-    def index_meta_update(self, index_name: str, state: str, result: int):
+    def index_meta_update(self, index_name: str, state: str, result: int, update_force: bool = True, interval: Optional[float] = None):
+        """Update `index_meta` document with optional time-based throttling.
+    
+        Args:
+            index_name: Index name to update meta for.
+            state: New state value for the `index_meta` record.
+            result: Number of processed documents to store in the \`updated\` field.
+            update_force: If \`True\`, perform the update unconditionally, ignoring throttling.
+                          If \`False\`, perform the update only when the effective time interval has passed.
+            interval: Optional custom interval (in seconds) for this call when \`update_force\` is \`False\`.
+                      If \`None\`, falls back to the value stored in \`self._index_meta_config["update_interval"]\`
+                      if present, otherwise uses \`INDEX_META_UPDATE_INTERVAL\`.
+        """
+        if not hasattr(self, "_index_meta_last_update_time"):
+            self._index_meta_last_update_time: Dict[str, float] = {}
+
+        if not update_force:
+            # Resolve effective interval:
+            # 1\) explicit arg
+            # 2\) value from `_index_meta_config`
+            # 3\) default constant
+            cfg_interval = None
+            if hasattr(self, "_index_meta_config"):
+                cfg_interval = self._index_meta_config.get("update_interval")
+
+            eff_interval = (
+                interval
+                if interval is not None
+                else (cfg_interval if cfg_interval is not None else INDEX_META_UPDATE_INTERVAL)
+            )
+
+            last_time = self._index_meta_last_update_time.get(index_name)
+            now = time.time()
+            if last_time is not None and (now - last_time) < eff_interval:
+                return
+            self._index_meta_last_update_time[index_name] = now
+        else:
+            # For forced updates, always refresh last update time
+            self._index_meta_last_update_time[index_name] = time.time()
+
         index_meta_raw = super().get_index_meta(index_name)
         from ..runtime.langchain.interfaces.llm_processor import add_documents
         #
