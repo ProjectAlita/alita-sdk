@@ -6,12 +6,11 @@ Following MCP specification: https://modelcontextprotocol.io/specification/2025-
 
 import logging
 import re
-import requests
 import asyncio
 from typing import List, Optional, Any, Dict, Literal, ClassVar, Union
 
 from langchain_core.tools import BaseToolkit, BaseTool
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.mcp_remote_tool import McpRemoteTool
@@ -206,6 +205,20 @@ class McpToolkit(BaseToolkit):
                         'tooltip': 'HTTP headers to send with requests (e.g. Authorization)',
                         'example': {'Authorization': 'Bearer your-api-token'}
                     }
+                )
+            ),
+            client_id=(
+                Optional[str],
+                Field(
+                    default=None,
+                    description="OAuth Client ID (if applicable)"
+                )
+            ),
+            client_secret=(
+                Optional[SecretStr],
+                Field(
+                    default=None,
+                    description="OAuth Client Secret (if applicable)"
                 )
             ),
             timeout=(
