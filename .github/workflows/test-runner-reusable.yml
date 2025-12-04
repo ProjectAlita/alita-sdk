@@ -1,8 +1,14 @@
-name: Test Execution
+name: Test Runner Reusable
 run-name: Executing test for ${{ inputs.test_cases_dir }}
 
 on:
   workflow_call:
+    inputs:
+      test_cases_dir:
+        description: 'Test cases directory (e.g., github, ado, confluence)'
+        required: true
+        type: string
+  workflow_dispatch:
     inputs:
       test_cases_dir:
         description: 'Test cases directory (e.g., github, ado, confluence)'

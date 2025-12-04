@@ -1,4 +1,4 @@
-name: Test Matrix Execution
+name: Execute toolkit AI tests
 
 on:
   pull_request:
@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has-tests: ${{ steps.set-matrix.outputs.has-tests }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,7 +20,10 @@ jobs:
       - name: Generate test matrix
         id: set-matrix
         run: |
-
+          # Generate test directories from testcases folder
+          TEST_DIRS=$(find .github/ai_native/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "Available test directories: $TEST_DIRS"
+          
           # Calculate diffs from PR if available
           if [ -n "${{ github.event.pull_request.number }}" ]; then
             echo "Fetching changed files from PR #${{ github.event.pull_request.number }}"
@@ -29,35 +33,27 @@ jobs:
             echo "Changed files from PR: $CHANGED_FILES"
             
             # Filter for alita_sdk/tools/* paths and extract toolkit names
-            FILTERED=$(echo "$CHANGED_FILES" | jq -c '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[2]] | unique')
+            CHANGED_TOOLKITS=$(echo "$CHANGED_FILES" | jq -c '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[2]] | unique')
+            echo "Changed toolkits: $CHANGED_TOOLKITS"
             
-            # Check if we got any toolkit names
+            # Filter changed toolkits to only include those present in TEST_DIRS
+            FILTERED=$(jq -n --argjson test_dirs "$TEST_DIRS" --argjson changed "$CHANGED_TOOLKITS" \
+              '$changed | map(select(. as $item | $test_dirs | index($item)))')
+            
+            # Check if we got any matching test cases
             if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
               echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
+              echo "has-tests=true" >> $GITHUB_OUTPUT
               echo "Generated matrix from PR diff: $FILTERED"
-              exit 0
-            fi
-          fi
-          
-          # Validate if input is a valid JSON array
-          if [ -n "$INPUT_ARRAY" ] && echo "$INPUT_ARRAY" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            # Filter for alita_sdk/tools/* paths and extract toolkit names
-            FILTERED=$(echo "$INPUT_ARRAY" | jq '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[-1]] | unique')
-            
-            # Check if we got any toolkit names
-            if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
-              echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
-              echo "Generated matrix: $FILTERED"
             else
-              # No toolkit paths found, use default test directories
-              TEST_DIRS=$(find .github/ai_native/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
-              echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
-              echo "Generated matrix: $TEST_DIRS"
+              echo "::error::No test cases found for the changed toolkits"
+              echo "Changed toolkits: $CHANGED_TOOLKITS"
+              echo "Available test directories: $TEST_DIRS"
+              echo "has-tests=false" >> $GITHUB_OUTPUT
             fi
           else
-            # No valid input array, use default test directories
-            TEST_DIRS=$(find .github/ai_native/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
             echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
+            echo "has-tests=true" >> $GITHUB_OUTPUT
             echo "Generated matrix: $TEST_DIRS"
           fi
         env:
@@ -65,12 +61,13 @@ jobs:
 
   test-execution:
     needs: configure-matrix
+    if: needs.configure-matrix.outputs.has-tests == 'true'
     strategy:
       fail-fast: false
       max-parallel: 5
       matrix:
         test_cases_dir: ${{ fromJson(needs.configure-matrix.outputs.matrix) }}
-    uses: ./.github/workflows/test-execution.yml
+    uses: ./.github/workflows/test-runner-reusable.yml
     with:
       test_cases_dir: ${{ matrix.test_cases_dir }}
     secrets: inherit

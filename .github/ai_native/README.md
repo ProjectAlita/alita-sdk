@@ -6,12 +6,21 @@ This directory contains the AI-native test framework for automated testing of AL
 
 ```
 .github/ai_native/
-├── testcases/           # Test case definitions
-│   ├── configs/         # Toolkit configuration files for tests
-│   └── TC-*.md          # Individual test case files
-└── results/             # Test execution results (generated)
+├── testcases/           # Test case definitions organized by toolkit
+│   ├── ado/            # Azure DevOps test cases
+│   │   ├── configs/    # ADO toolkit configurations
+│   │   └── TC-*.md     # ADO test case files
+│   ├── confluence/     # Confluence test cases
+│   │   ├── configs/    # Confluence toolkit configurations
+│   │   └── TC-*.md     # Confluence test case files
+│   ├── github/         # GitHub test cases
+│   │   ├── configs/    # GitHub toolkit configurations
+│   │   └── TC-*.md     # GitHub test case files
+│   └── indexer/        # Indexer test cases
+│       └── configs/    # Indexer toolkit configurations
+└── results/            # Test execution results (generated)
     ├── TC-*_result.json # Individual test results
-    └── summary.json     # Overall test summary
+    └── summary.json    # Overall test summary
 ```
 
 ## Test Case Format
@@ -21,47 +30,52 @@ Test cases are written in Markdown format following this structure:
 ### Example Test Case (TC-001_list_branches_tool.md)
 
 ```markdown
-# Test Case Title
+# List Branches Displays Custom Branch
 
 ## Objective
 
-Brief description of what the test verifies.
+Verify that the `list_branches_in_repo` tool correctly lists all branches in the repository and that the output includes the branch named `hello`.
 
 ## Test Data Configuration
 
-### Toolkit Settings
+### Settings
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Setting** | `value` | Description |
+| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
+| **Base URL** | `https://api.github.com` | GitHub API endpoint |
+| **Tool** | `list_branches_in_repo` | GitHub tool to execute for listing branches |
 
 ## Config
 
-path: .github\ai_native\testcases\configs\TC-001_config.json
+path: .github\ai_native\testcases\github\configs\git-config.json
 
 ## Pre-requisites
 
-- List of prerequisites
-- Environment setup requirements
+- A test repository is cloned locally and accessible
+- The repository contains at least the default branch (e.g., `main`) and a branch named `hello`
+- The testing environment has the necessary permissions and network access to run the tool
+- Valid GitHub access token with appropriate permissions for the target repository
 
 ## Test Steps & Expectations
 
-### Step 1: Action Title
+### Step 1: Execute the Tool
 
-Action description or instruction to the agent.
+Execute the `list_branches_in_repo` tool against the target repository.
 
-**Expectation:** What should happen when the step executes successfully.
+**Expectation:** The tool runs without errors and returns a textual list of branch names.
 
-### Step 2: Validation Title
+### Step 2: Verify Output
 
-Validation description or instruction.
+Review the tool's output for the presence of branch names.
 
-**Expectation:** Specific assertion (e.g., "The output contains the text 'expected_value'").
+**Expectation:** The output text contains the branch name `hello`.
 
 ## Final Result
 
-- ✅ **Pass:** Conditions for test to pass
-- ❌ **Fail:** Conditions for test to fail
+- ✅ **Pass:** If all expectations are met throughout the test steps, the objective is achieved and the test passes
+- ❌ **Fail:** If any expectation fails at any point, the test fails
 ```
 
 ## Key Components
@@ -73,10 +87,31 @@ The config section specifies the toolkit configuration file to use:
 ```markdown
 ## Config
 
-path: .github\ai_native\testcases\configs\TC-001_git-config.json
+path: .github\ai_native\testcases\github\configs\git-config.json
 ```
 
-This file contains the toolkit settings (e.g., API tokens, repository URLs, selected tools).
+This file contains the toolkit settings including the toolkit type, authentication credentials, repository details, and the list of selected tools that the test can use.
+
+Example configuration file structure:
+
+```json
+{
+  "type": "github",
+  "toolkit_name": "github",
+  "github_configuration": {
+    "access_token": "${GIT_TOOL_ACCESS_TOKEN}"
+  },
+  "repository": "VladVariushkin/agent",
+  "active_branch": "main",
+  "base_branch": "main",
+  "selected_tools": [
+    "list_branches_in_repo",
+    "get_issues",
+    "create_file",
+    "read_file"
+  ]
+}
+```
 
 ### Test Steps
 
@@ -91,32 +126,59 @@ Common expectation patterns:
 
 ## Running Tests
 
-### Execute All Test Cases
+### Execute All Test Cases in a Directory
 
 ```bash
-alita-cli agent execute-test-cases \
-    .github/agents/test-runner.agent.json \
-    .github/ai_native/testcases \
-    .github/ai_native/results
+alita agent execute-test-cases \
+    .github/agents/test-runner.agent.md \
+    --test-cases-dir .github/ai_native/testcases/github \
+    --results-dir .github/ai_native/results \
+    --data-generator .github/agents/test-data-generator.agent.md \
+    --dir .
 ```
 
-### With Custom Settings
+### Execute Specific Toolkit Tests
 
 ```bash
-alita-cli agent execute-test-cases \
-    .github/agents/test-runner.agent.json \
-    .github/ai_native/testcases \
-    .github/ai_native/results \
-    --model gpt-4o \
-    --temperature 0.0
+# GitHub tests
+alita agent execute-test-cases \
+    .github/agents/test-runner.agent.md \
+    --test-cases-dir .github/ai_native/testcases/github \
+    --results-dir .github/ai_native/results \
+    --data-generator .github/agents/test-data-generator.agent.md \
+    --dir .
+
+# Confluence tests
+alita agent execute-test-cases \
+    .github/agents/test-runner.agent.md \
+    --test-cases-dir .github/ai_native/testcases/confluence \
+    --results-dir .github/ai_native/results \
+    --data-generator .github/agents/test-data-generator.agent.md \
+    --dir .
+
+# ADO tests
+alita agent execute-test-cases \
+    .github/agents/test-runner.agent.md \
+    --test-cases-dir .github/ai_native/testcases/ado \
+    --results-dir .github/ai_native/results \
+    --data-generator .github/agents/test-data-generator.agent.md \
+    --dir .
 ```
 
-### Command Options
+### Test Individual Tools
 
-- `--model TEXT`: Override LLM model
-- `--temperature FLOAT`: Override temperature
-- `--max-tokens INTEGER`: Override max tokens
-- `--dir DIRECTORY`: Grant agent filesystem access to directory
+```bash
+# Test a specific tool directly
+alita toolkit test github \
+    --tool list_branches_in_repo \
+    --config .github/ai_native/testcases/github/configs/git-config.json
+
+# Test with parameters
+alita toolkit test confluence \
+    --tool get_page_tree \
+    --config .github/ai_native/testcases/confluence/configs/confluence-config.json \
+    --param page_id="262313"
+```
 
 ## Test Results
 
@@ -128,21 +190,31 @@ After execution, results are saved in the specified results directory:
 {
   "test_case": "List Branches Displays Custom Branch",
   "test_file": "TC-001_list_branches_tool.md",
-  "timestamp": "2025-11-28T11:54:43.022632",
+  "timestamp": "2025-12-04T11:54:43.022632",
   "agent": "Test Runner Agent",
-  "objective": "Verify that the list_branches_in_repo tool...",
-  "config_path": ".github\\ai_native\\testcases\\configs\\TC-001_git-config.json",
-  "passed": false,
+  "objective": "Verify that the list_branches_in_repo tool correctly lists all branches...",
+  "config_path": ".github\\ai_native\\testcases\\github\\configs\\git-config.json",
+  "passed": true,
   "steps": [
     {
       "step_number": 1,
       "step_title": "Execute the Tool",
       "instruction": "Execute the list_branches_in_repo tool...",
-      "output": "Here are the branches...",
+      "output": "Here are the branches: main, hello, feature-branch...",
       "error": null,
       "expectation": "The tool runs without errors...",
       "validation_passed": true,
       "validation_details": "Execution completed without errors"
+    },
+    {
+      "step_number": 2,
+      "step_title": "Verify Output",
+      "instruction": "Review the tool's output for the presence of branch names...",
+      "output": "The output contains: main, hello, feature-branch",
+      "error": null,
+      "expectation": "The output text contains the branch name 'hello'",
+      "validation_passed": true,
+      "validation_details": "Output contains 'hello'"
     }
   ]
 }
@@ -152,24 +224,33 @@ After execution, results are saved in the specified results directory:
 
 ```json
 {
-  "timestamp": "2025-11-28T11:54:43.029932",
+  "timestamp": "2025-12-04T11:54:43.029932",
   "agent": "Test Runner Agent",
-  "total_tests": 1,
-  "passed": 0,
-  "failed": 1,
-  "pass_rate": 0.0,
+  "total_tests": 10,
+  "passed": 8,
+  "failed": 2,
+  "pass_rate": 80.0,
   "test_results": [...]
 }
 ```
 
 ## Writing New Test Cases
 
-1. Create a new file: `TC-XXX_description.md` in the testcases directory
-2. Follow the test case format above
-3. Create a toolkit config file in `testcases/configs/` if needed
-4. Reference the config in the test case's Config section
-5. Define clear test steps with specific expectations
-6. Run the test using the execute-test-cases command
+1. **Choose the appropriate toolkit directory**: Create test case in `testcases/<toolkit_name>/` (e.g., `github`, `ado`, `confluence`)
+2. **Create test case file**: Name it `TC-XXX_description.md` following the numbering convention
+3. **Create or reuse config file**: Place toolkit config in `testcases/<toolkit_name>/configs/`
+4. **Follow the test case format**: Include all required sections (Objective, Config, Pre-requisites, Test Steps, Final Result)
+5. **Define clear expectations**: Make assertions specific and measurable
+6. **Run the test**: Use the execute-test-cases command to validate
+
+## Available Toolkits
+
+The test framework currently supports the following toolkits:
+
+- **GitHub** (`testcases/github/`) - GitHub API operations, branches, PRs, issues, files
+- **Azure DevOps** (`testcases/ado/`) - ADO repositories, branches, PRs, files
+- **Confluence** (`testcases/confluence/`) - Confluence pages, search, attachments
+- **Indexer** (`testcases/indexer/`) - Code and document indexing operations
 
 ## Validation Rules
 
@@ -189,21 +270,40 @@ The test framework uses pattern matching to validate outputs:
 
 1. **One Concept Per Test**: Each test case should verify one specific functionality
 2. **Clear Expectations**: Make assertions specific and measurable
-3. **Isolated Configs**: Each test should have its own config file to avoid conflicts
-4. **Descriptive Names**: Use clear, descriptive file names (TC-XXX_what_it_tests.md)
-5. **Document Prerequisites**: List all required setup in the Pre-requisites section
-6. **Incremental Steps**: Break complex tests into smaller, validatable steps
+3. **Organized by Toolkit**: Place test cases in the appropriate toolkit directory
+4. **Isolated Configs**: Each toolkit should have its own config files to avoid conflicts
+5. **Descriptive Names**: Use clear, descriptive file names (TC-XXX_what_it_tests.md)
+6. **Document Prerequisites**: List all required setup in the Pre-requisites section
+7. **Incremental Steps**: Break complex tests into smaller, validatable steps
+8. **Environment Variables**: Use environment variable placeholders (e.g., `${GIT_TOOL_ACCESS_TOKEN}`) for sensitive data
 
 ## CI/CD Integration
 
-The execute-test-cases command returns a non-zero exit code when tests fail, making it suitable for CI/CD pipelines:
+The test framework integrates with GitHub Actions for automated testing. The workflow supports:
+
+### Matrix Execution
+
+Tests are automatically selected based on changed files in PRs:
+
+```yaml
+# .github/workflows/test-matrix-execution.yml
+- When a PR changes files in alita_sdk/tools/github/, only GitHub tests run
+- When a PR changes files in alita_sdk/tools/confluence/, only Confluence tests run
+- Otherwise, all test suites run
+```
+
+### Manual Execution
+
+The execute-test-cases command returns a non-zero exit code when tests fail:
 
 ```bash
 # In your CI/CD script
-alita-cli agent execute-test-cases \
-    .github/agents/test-runner.agent.json \
-    .github/ai_native/testcases \
-    .github/ai_native/results
+alita agent execute-test-cases \
+    .github/agents/test-runner.agent.md \
+    --test-cases-dir .github/ai_native/testcases/github \
+    --results-dir .github/ai_native/results \
+    --data-generator .github/agents/test-data-generator.agent.md \
+    --dir .
 
 # Exit code 0 = all tests passed
 # Exit code 1 = one or more tests failed
@@ -215,9 +315,10 @@ alita-cli agent execute-test-cases \
 
 If you see: `⚠ Warning: Config file not found`
 
-- Check the path in the Config section
+- Check the path in the Config section matches the actual file location
 - Ensure the path is relative to the workspace root
-- Use forward slashes (/) or backslashes (\\) consistently
+- Use the correct path format: `.github/ai_native/testcases/<toolkit>/configs/<config-file>.json`
+- Verify the config file exists in the toolkit's configs directory
 
 ### Tool Not Available
 
