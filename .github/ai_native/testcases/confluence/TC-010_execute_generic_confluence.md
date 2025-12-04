@@ -10,22 +10,22 @@ Verify that the `execute_generic_confluence` tool correctly executes generic Con
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Space** | `MFS` | Target Confluence space key |
-| **Cloud** | `true` | Using Confluence Cloud instance |
-| **Username** | `variushkin@gmail.com` | Confluence user email |
+| **Space** | `AT` | Target Confluence space key |
+| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
 | **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
-| **Base URL** | `https://variushkin.atlassian.net` | Confluence instance URL |
+| **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `execute_generic_confluence` | Confluence tool to execute generic API calls |
 | **Method** | `GET` | HTTP method to use |
-| **Relative URL** | `/rest/api/space/MFS` | Relative API path |
+| **Relative URL** | `/rest/api/space/AT` | Relative API path |
 
 ## Config
 
 path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+generateTestData: false
 
 ## Pre-requisites
 
-- A Confluence space `MFS` exists and is accessible
+- A Confluence space `AT` exists and is accessible
 - Valid Confluence API token with appropriate permissions
 - Network access to Confluence REST API
 
@@ -33,7 +33,7 @@ path: .github\ai_native\testcases\confluence\configs\confluence-config.json
 
 ### Step 1: Execute the Tool
 
-Execute the `execute_generic_confluence` tool with method `GET` and relative_url `/rest/api/space/MFS`.
+Execute the `execute_generic_confluence` tool with method `GET` and relative_url `/rest/api/space/AT`.
 
 **Expectation:** The tool runs without errors and returns API response.
 

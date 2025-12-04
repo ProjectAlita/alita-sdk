@@ -247,7 +247,7 @@ def validate_test_output(output: str, expectation: str) -> tuple[bool, str]:
 
 
 def _build_bulk_data_gen_prompt(parsed_test_cases: list) -> str:
-    """Build consolidated prompt for bulk test data generation."""
+    """Build consolidated requirements text for bulk test data generation."""
     requirements = []
     for idx, tc in enumerate(parsed_test_cases, 1):
         test_case = tc['data']
@@ -268,29 +268,16 @@ def _build_bulk_data_gen_prompt(parsed_test_cases: list) -> str:
         
         requirements.append("\n".join(parts))
     
-    return f"""You are a test data generator. Generate test data for ALL the following test cases in one comprehensive operation.
-
-You have access to GitHub tools and filesystem tools. Create all required test data efficiently.
-
-{'='*60}
+    return f"""{'='*60}
 
 {chr(10).join(requirements)}
 
-{'='*60}
-
-IMPORTANT INSTRUCTIONS:
-1. Process ALL test cases above in a single execution
-2. Create test data for each test case according to its Pre-requisites
-3. Track generated values (like PR numbers, branch names) for later reference
-4. At the end, summarize what was created for each test case
-5. Store important values like {{{{TEST_PR_NUMBER}}}}, {{{{TEST_PR_TITLE}}}} in your response
-
-Execute the data generation now."""
+{'='*60}"""
 
 
 def _build_bulk_execution_prompt(parsed_test_cases: list) -> str:
     """Build consolidated prompt for bulk test execution."""
-    parts = ["Execute ALL the following test cases sequentially. For each test case, execute all its steps and report results.\n"]
+    parts = []
     
     for idx, tc_info in enumerate(parsed_test_cases, 1):
         test_case = tc_info['data']
@@ -305,14 +292,6 @@ def _build_bulk_execution_prompt(parsed_test_cases: list) -> str:
                     parts.append(f"Expected Result: {step['expectation']}")
         else:
             parts.append("\n(No steps defined)")
-    
-    parts.append(f"\n\n{'='*80}\nIMPORTANT INSTRUCTIONS:\n{'='*80}")
-    parts.append(f"""1. Execute ALL {len(parsed_test_cases)} test cases above sequentially
-2. For each test case, execute all its steps in order
-3. Use the appropriate tools to complete each task
-4. After executing all test cases, provide a summary
-
-Execute all test cases now and provide detailed results for each.""")
     
     return "\n".join(parts)
 
@@ -2501,6 +2480,8 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
               help='Directory containing test case files')
 @click.option('--results-dir', required=True, type=click.Path(file_okay=False, dir_okay=True),
               help='Directory where test results will be saved')
+@click.option('--test-case', 'test_case_files', multiple=True,
+              help='Specific test case file(s) to execute (e.g., TC-001.md). Can specify multiple times. If not specified, executes all test cases.')
 @click.option('--model', help='Override LLM model')
 @click.option('--temperature', type=float, help='Override temperature')
 @click.option('--max-tokens', type=int, help='Override max tokens')
@@ -2512,7 +2493,7 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
               help='Skip test data generation step')
 @click.pass_context
 def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir: str,
-                      model: Optional[str], temperature: Optional[float], 
+                      test_case_files: tuple, model: Optional[str], temperature: Optional[float], 
                       max_tokens: Optional[int], work_dir: Optional[str],
                       data_generator: Optional[str], skip_data_generation: bool):
     """
@@ -2539,6 +2520,14 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
             --test-cases-dir .github/ai_native/testcases \\
             --results-dir .github/ai_native/results \\
             --data-generator .github/agents/test-data-generator.agent.json
+        
+        # Execute specific test cases
+        alita-cli agent execute-test-cases \\
+            .github/agents/test-runner.agent.json \\
+            --test-cases-dir .github/ai_native/testcases \\
+            --results-dir .github/ai_native/results \\
+            --test-case TC-001.md \\
+            --test-case TC-002.md
         
         # Execute without data generation
         alita-cli agent execute-test-cases \\
@@ -2568,15 +2557,38 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
         
         # Find all test case files (recursively search subdirectories)
         test_cases_path = Path(test_cases_dir)
-        test_case_files = sorted(test_cases_path.rglob('TC-*.md'))
         
-        if not test_case_files:
-            console.print(f"[yellow]No test case files found in {test_cases_dir}[/yellow]")
+        # Filter test cases based on --test-case options
+        if test_case_files:
+            # User specified specific test case files
+            test_case_files_set = set(test_case_files)
+            all_test_cases = sorted(test_cases_path.rglob('TC-*.md'))
+            test_case_files_list = [
+                tc for tc in all_test_cases 
+                if tc.name in test_case_files_set
+            ]
+            
+            # Check if all specified files were found
+            found_names = {tc.name for tc in test_case_files_list}
+            not_found = test_case_files_set - found_names
+            if not_found:
+                console.print(f"[yellow]⚠ Warning: Test case files not found: {', '.join(not_found)}[/yellow]")
+        else:
+            # Execute all test cases
+            test_case_files_list = sorted(test_cases_path.rglob('TC-*.md'))
+        
+        if not test_case_files_list:
+            if test_case_files:
+                console.print(f"[yellow]No matching test case files found in {test_cases_dir}[/yellow]")
+            else:
+                console.print(f"[yellow]No test case files found in {test_cases_dir}[/yellow]")
             return
         
         console.print(f"\n[bold cyan]🧪 Test Execution Started[/bold cyan]")
         console.print(f"Agent: [bold]{agent_name}[/bold]")
-        console.print(f"Test Cases: {len(test_case_files)}")
+        console.print(f"Test Cases: {len(test_case_files_list)}")
+        if test_case_files:
+            console.print(f"Selected: [cyan]{', '.join(test_case_files)}[/cyan]")
         console.print(f"Results Directory: {results_dir}\n")
         
         data_gen_def = None
@@ -2601,7 +2613,7 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
         
         # Parse all test cases upfront for bulk data generation
         parsed_test_cases = []
-        for test_file in test_case_files:
+        for test_file in test_case_files_list:
             try:
                 test_case = parse_test_case(str(test_file))
                 parsed_test_cases.append({
@@ -2626,6 +2638,8 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
             
             bulk_data_gen_prompt = _build_bulk_data_gen_prompt(test_cases_needing_data_gen)
             
+            console.print(f"Executing test data generation prompt {bulk_data_gen_prompt}\n")
+
             try:
                 # Setup data generator agent
                 from langgraph.checkpoint.sqlite import SqliteSaver

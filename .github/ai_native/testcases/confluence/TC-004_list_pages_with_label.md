@@ -10,11 +10,10 @@ Verify that the `list_pages_with_label` tool correctly retrieves a list of page 
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Space** | `MFS` | Target Confluence space key |
-| **Cloud** | `true` | Using Confluence Cloud instance |
-| **Username** | `variushkin@gmail.com` | Confluence user email |
+| **Space** | `AT` | Target Confluence space key |
+| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
 | **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
-| **Base URL** | `https://variushkin.atlassian.net` | Confluence instance URL |
+| **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `list_pages_with_label` | Confluence tool to execute for listing labeled pages |
 | **Label** | `test-label` | Label to filter pages |
 
@@ -24,7 +23,7 @@ path: .github\ai_native\testcases\confluence\configs\confluence-config.json
 
 ## Pre-requisites
 
-- A Confluence space `MFS` exists and is accessible
+- A Confluence space `AT` exists and is accessible
 - Valid Confluence API token with read permissions
 - At least one page exists with the label `test-label`
 

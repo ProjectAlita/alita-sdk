@@ -1,6 +1,10 @@
 name: Test Matrix Execution
 
 on:
+  pull_request:
+     types: [opened, synchronize]
+     branches:
+       - main
   push:
     branches:
       - ai_test
@@ -18,10 +22,49 @@ jobs:
       - name: Generate test matrix
         id: set-matrix
         run: |
-          # Get all directories in .github/ai_native/testcases
-          TEST_DIRS=$(find .github/ai_native/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
-          echo "Generated matrix: $TEST_DIRS"
+
+          # Calculate diffs from PR if available
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            echo "Fetching changed files from PR #${{ github.event.pull_request.number }}"
+            
+            # Fetch the changed files from the PR
+            CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "Changed files from PR: $CHANGED_FILES"
+            
+            # Filter for alita_sdk/tools/* paths and extract toolkit names
+            FILTERED=$(echo "$CHANGED_FILES" | jq '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[2]] | unique')
+            
+            # Check if we got any toolkit names
+            if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
+              echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
+              echo "Generated matrix from PR diff: $FILTERED"
+              exit 0
+            fi
+          fi
+          
+          # Validate if input is a valid JSON array
+          if [ -n "$INPUT_ARRAY" ] && echo "$INPUT_ARRAY" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            # Filter for alita_sdk/tools/* paths and extract toolkit names
+            FILTERED=$(echo "$INPUT_ARRAY" | jq '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[-1]] | unique')
+            
+            # Check if we got any toolkit names
+            if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
+              echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
+              echo "Generated matrix: $FILTERED"
+            else
+              # No toolkit paths found, use default test directories
+              TEST_DIRS=$(find .github/ai_native/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
+              echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
+              echo "Generated matrix: $TEST_DIRS"
+            fi
+          else
+            # No valid input array, use default test directories
+            TEST_DIRS=$(find .github/ai_native/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
+            echo "Generated matrix: $TEST_DIRS"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   test-execution:
     needs: configure-matrix

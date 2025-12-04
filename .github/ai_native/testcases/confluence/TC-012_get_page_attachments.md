@@ -10,29 +10,30 @@ Verify that the `get_page_attachments` tool correctly retrieves all attachments 
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Space** | `MFS` | Target Confluence space key |
-| **Cloud** | `true` | Using Confluence Cloud instance |
-| **Username** | `variushkin@gmail.com` | Confluence user email |
+| **Space** | `AT` | Target Confluence space key |
+| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
 | **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
-| **Base URL** | `https://variushkin.atlassian.net` | Confluence instance URL |
+| **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `get_page_attachments` | Confluence tool to execute for retrieving attachments |
-| **Page ID** | `262313` | ID of the page with attachments |
+| **Page ID** | 104693762 | ID of the page with attachments |
 
 ## Config
 
 path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+generateTestData: false
 
 ## Pre-requisites
 
-- A Confluence space `MFS` exists and is accessible
+- A Confluence space `AT` exists and is accessible
 - Valid Confluence API token with read permissions
-- A page with ID `262313` exists and has at least one attachment
+- A page with ID 104693762 exists and has at least one attachment
+- If attachement is not present, add one
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute the `get_page_attachments` tool with page_id parameter set to `262313`.
+Execute the `get_page_attachments` tool with page_id parameter set to `104693762`.
 
 **Expectation:** The tool runs without errors and returns attachment information.
 

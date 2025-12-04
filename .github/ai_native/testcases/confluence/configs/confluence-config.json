@@ -1,9 +1,9 @@
 {
   "type": "confluence",
-  "toolkit_name": "MFS",
+  "toolkit_name": "AT",
   "cloud": true,
   "limit": 5,
-  "space": "MFS",
+  "space": "AT",
   "test_params": {
     "get_page_tree": {
       "page_id": "262313"
