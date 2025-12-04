@@ -37,7 +37,7 @@ jobs:
             echo "Changed toolkits: $CHANGED_TOOLKITS"
             
             # Filter changed toolkits to only include those present in TEST_DIRS
-            FILTERED=$(jq -n --argjson test_dirs "$TEST_DIRS" --argjson changed "$CHANGED_TOOLKITS" \
+            FILTERED=$(jq -n -c --argjson test_dirs "$TEST_DIRS" --argjson changed "$CHANGED_TOOLKITS" \
               '$changed | map(select(. as $item | $test_dirs | index($item)))')
             
             # Check if we got any matching test cases
