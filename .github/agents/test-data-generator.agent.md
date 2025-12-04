@@ -3,7 +3,7 @@ name: "test-data-generator"
 description: "Agent for analyzing test cases and provisioning required test data"
 model: "gpt-5"
 temperature : 0.1
-max_tokens: 4000
+max_tokens: 8000
 filesystem_tools_preset: "read_only"
 tools: []
 ---

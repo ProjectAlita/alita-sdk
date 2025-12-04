@@ -3,7 +3,7 @@ name: "test-runner"
 description: "Agent for testing toolkit functionality"
 model: "gpt-5"
 temperature : 0.1
-max_tokens: 4000
+max_tokens: 10000
 filesystem_tools_preset: "read_only"
 tools: []
 ---

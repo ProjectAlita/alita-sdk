@@ -2867,11 +2867,6 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
             json.dump(structured_report, f, indent=2)
         console.print(f"[green]✓ Summary saved to {summary_file}[/green]\n")
         
-        # Display structured report
-        console.print(f"[bold cyan]Structured Report:[/bold cyan]")
-        console.print(json.dumps(structured_report, indent=2))
-        console.print()
-        
         # Exit with error code if any tests failed
         if failed_tests > 0:
             sys.exit(1)
