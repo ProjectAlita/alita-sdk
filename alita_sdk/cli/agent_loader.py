@@ -181,8 +181,6 @@ def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: list,
             'model_name': llm_model,
             'max_tokens': llm_max_tokens,
             'temperature': llm_temperature,
-            'top_p': 1.0,
-            'top_k': 0,
             'integration_uid': None,
             'indexer_config': {
                 'ai_model': 'langchain_openai.ChatOpenAI',

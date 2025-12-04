@@ -28,7 +28,7 @@ class ApplicationToolkit(BaseToolkit):
         version_details = client.get_app_version_details(application_id, application_version_id)
         model_settings = {
             "max_tokens": version_details['llm_settings']['max_tokens'],
-            "top_p": version_details['llm_settings']['top_p'],
+            "reasoning_effort": version_details['llm_settings'].get('reasoning_effort'),
             "temperature": version_details['llm_settings']['temperature'],
         }
 
