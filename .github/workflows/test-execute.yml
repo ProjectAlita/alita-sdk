@@ -44,7 +44,7 @@ jobs:
             if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
               echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
               echo "has-tests=true" >> $GITHUB_OUTPUT
-              echo "Generated matrix from PR diff: $FILTERED"
+              echo "::notice::Generated matrix from PR diff: $FILTERED"
             else
               echo "::error::No test cases found for the changed toolkits"
               echo "Changed toolkits: $CHANGED_TOOLKITS"
@@ -54,7 +54,7 @@ jobs:
           else
             echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
             echo "has-tests=true" >> $GITHUB_OUTPUT
-            echo "Generated matrix: $TEST_DIRS"
+            echo "::notice::Generated matrix: $TEST_DIRS"
           fi
         env:
           GH_TOKEN: ${{ github.token }}

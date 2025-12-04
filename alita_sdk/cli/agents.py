@@ -2741,12 +2741,15 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 console.print(f"[bold yellow]✅ Validating all test cases...[/bold yellow]\n")
                 
                 validation_prompt = _build_validation_prompt(parsed_test_cases, all_execution_output)
+
+                console.print(f"[dim]{validation_prompt}[/dim]\n")
                 
                 with console.status("[yellow]Validating all results...[/yellow]", spinner="dots"):
                     validation_result = agent_executor.invoke({
                         "input": validation_prompt,
                         "chat_history": chat_history
                     })
+
                 validation_output = extract_output_from_result(validation_result)
                 
                 console.print(f"[dim]Validation Response: {validation_output}...[/dim]\n")
