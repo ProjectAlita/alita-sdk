@@ -221,6 +221,13 @@ class McpToolkit(BaseToolkit):
                     description="OAuth Client Secret (if applicable)"
                 )
             ),
+            scopes=(
+                Optional[List[str]],
+                Field(
+                    default=None,
+                    description="OAuth Scopes (if applicable)"
+                )
+            ),
             timeout=(
                 Union[int, str], # TODO: remove one I will figure out why UI sends str
                 Field(
