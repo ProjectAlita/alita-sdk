@@ -1871,6 +1871,10 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     continue
                 
                 # Execute agent
+                # Track if history was already added during continuation handling
+                history_already_added = False
+                original_user_input = user_input  # Preserve for history tracking
+                
                 if (is_direct or is_local or is_inventory) and agent_executor is None:
                     # Local agent without tools: use direct LLM call with streaming
                     system_prompt = agent_def.get('system_prompt', '')
@@ -1944,11 +1948,15 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     from langchain_core.runnables import RunnableConfig
                     from langgraph.errors import GraphRecursionError
                     
-                    invoke_config = None
+                    # Initialize invoke_config with thread_id for checkpointing
+                    # This ensures the same thread is used across continuations
+                    invoke_config = RunnableConfig(
+                        configurable={"thread_id": current_session_id}
+                    )
                     cli_callback = None
                     if show_verbose:
                         cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
-                        invoke_config = RunnableConfig(callbacks=[cli_callback])
+                        invoke_config["callbacks"] = [cli_callback]
                     
                     # Track recursion continuation state
                     continue_from_recursion = False
@@ -2021,14 +2029,31 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                     # Continue - send a follow-up message to resume
                                     console.print("\n[cyan]Continuing execution...[/cyan]\n")
                                     
-                                    # Add current output to history first
-                                    chat_history.append({"role": "user", "content": user_input})
-                                    chat_history.append({"role": "assistant", "content": output})
-                                    ctx_manager.add_message("user", user_input)
-                                    ctx_manager.add_message("assistant", output)
+                                    # Clean up the output - remove the tool limit warning message
+                                    clean_output = output
+                                    if "Maximum tool execution iterations" in output:
+                                        # Strip the warning from the end of the output
+                                        lines = output.split('\n')
+                                        clean_lines = [l for l in lines if "Maximum tool execution iterations" not in l and "Stopping tool execution" not in l]
+                                        clean_output = '\n'.join(clean_lines).strip()
                                     
-                                    # Set new input to continue and retry the invoke
-                                    user_input = "Continue from where you left off. Complete the remaining steps of the task."
+                                    # Add current output to history first (without the warning)
+                                    # Use original user input for first continuation, current for subsequent
+                                    history_input = original_user_input if not history_already_added else user_input
+                                    if clean_output:
+                                        chat_history.append({"role": "user", "content": history_input})
+                                        chat_history.append({"role": "assistant", "content": clean_output})
+                                        ctx_manager.add_message("user", history_input)
+                                        ctx_manager.add_message("assistant", clean_output)
+                                        history_already_added = True
+                                    
+                                    # Set new input to continue with a more explicit continuation message
+                                    # Include context about the task limit to help the agent understand
+                                    user_input = (
+                                        "The previous response was interrupted due to reaching the tool execution limit. "
+                                        "Continue from where you left off and complete the remaining steps of the original task. "
+                                        "Focus on what still needs to be done - do not repeat completed work."
+                                    )
                                     continue  # Retry the invoke in this inner loop
                                     
                                 elif choice == 's':
@@ -2081,8 +2106,12 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                 continue_from_recursion = True
                                 console.print("\n[cyan]Continuing from last checkpoint...[/cyan]\n")
                                 
-                                # Modify the input to signal continuation
-                                user_input = "Continue from where you left off. Complete the remaining steps of the task."
+                                # More explicit continuation message
+                                user_input = (
+                                    "The previous response was interrupted due to reaching the step limit. "
+                                    "Continue from where you left off and complete the remaining steps of the original task. "
+                                    "Focus on what still needs to be done - do not repeat completed work."
+                                )
                                 continue  # Retry the invoke
                                 
                             elif choice == 's':
@@ -2110,13 +2139,20 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         console.print(output)
                     console.print()  # Add spacing after response
                 
-                # Update chat history and context manager
-                chat_history.append({"role": "user", "content": user_input})
-                chat_history.append({"role": "assistant", "content": output})
-                
-                # Add messages to context manager for token tracking and pruning
-                ctx_manager.add_message("user", user_input)
-                ctx_manager.add_message("assistant", output)
+                # Update chat history and context manager (skip if already added during continuation)
+                if not history_already_added:
+                    chat_history.append({"role": "user", "content": original_user_input})
+                    chat_history.append({"role": "assistant", "content": output})
+                    
+                    # Add messages to context manager for token tracking and pruning
+                    ctx_manager.add_message("user", original_user_input)
+                    ctx_manager.add_message("assistant", output)
+                else:
+                    # During continuation, add the final response with continuation message
+                    chat_history.append({"role": "user", "content": user_input})
+                    chat_history.append({"role": "assistant", "content": output})
+                    ctx_manager.add_message("user", user_input)
+                    ctx_manager.add_message("assistant", output)
                 
             except KeyboardInterrupt:
                 console.print("\n\n[yellow]Interrupted. Type 'exit' to quit or continue chatting.[/yellow]")

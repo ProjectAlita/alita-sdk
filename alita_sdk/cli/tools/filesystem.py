@@ -16,11 +16,43 @@ import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Generator
 from datetime import datetime
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from langchain_core.documents import Document
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+# Maximum recommended content size for single write operations (in characters)
+MAX_RECOMMENDED_CONTENT_SIZE = 5000  # ~5KB, roughly 1,200-1,500 tokens
+
+# Helpful error message for truncated content
+CONTENT_TRUNCATED_ERROR = """
+⚠️  CONTENT FIELD MISSING - OUTPUT TRUNCATED
+
+Your tool call was cut off because the content was too large for the context window.
+The JSON was truncated, leaving the 'content' field incomplete or missing.
+
+🔧 HOW TO FIX THIS:
+
+1. **Use incremental writes** - Don't write large files in one call:
+   - First: filesystem_write_file(path, "# Header\\nimport x\\n\\n")
+   - Then: filesystem_append_file(path, "def func1():\\n    ...\\n\\n")
+   - Then: filesystem_append_file(path, "def func2():\\n    ...\\n\\n")
+
+2. **Keep each chunk small** - Under 2000 characters per call
+
+3. **Structure first, details later**:
+   - Write skeleton/structure first
+   - Add implementations section by section
+
+4. **For documentation/reports**:
+   - Write one section at a time
+   - Use append_file for each new section
+
+❌ DON'T: Try to write the entire file content again
+✅ DO: Break it into 3-5 smaller append_file calls
+"""
 
 
 class ReadFileInput(BaseModel):
@@ -57,13 +89,38 @@ class ReadMultipleFilesInput(BaseModel):
 class WriteFileInput(BaseModel):
     """Input for writing to a file."""
     path: str = Field(description="Relative path to the file to write")
-    content: str = Field(description="Content to write to the file")
+    content: Optional[str] = Field(
+        default=None,
+        description="Content to write to the file. REQUIRED - this field cannot be empty or omitted."
+    )
+    
+    @model_validator(mode='after')
+    def validate_content_required(self):
+        """Provide helpful error message when content is missing or truncated."""
+        if self.content is None:
+            raise ToolException(CONTENT_TRUNCATED_ERROR)
+        if len(self.content) > MAX_RECOMMENDED_CONTENT_SIZE:
+            logger.warning(
+                f"Content is very large ({len(self.content)} chars). Consider using append_file "
+                "for incremental writes to avoid truncation issues."
+            )
+        return self
 
 
 class AppendFileInput(BaseModel):
     """Input for appending to a file."""
     path: str = Field(description="Relative path to the file to append to")
-    content: str = Field(description="Content to append to the end of the file")
+    content: Optional[str] = Field(
+        default=None,
+        description="Content to append to the end of the file. REQUIRED - this field cannot be empty or omitted."
+    )
+    
+    @model_validator(mode='after')
+    def validate_content_required(self):
+        """Provide helpful error message when content is missing or truncated."""
+        if self.content is None:
+            raise ToolException(CONTENT_TRUNCATED_ERROR)
+        return self
 
 
 class EditFileInput(BaseModel):
@@ -547,13 +604,23 @@ class ListDirectoryTool(FileSystemTool):
             
             result = "\n".join(lines)
             
+            # Add header showing the listing context
+            if path in (".", "", "./"):
+                header = "Contents of working directory (./):\n\n"
+            else:
+                header = f"Contents of {path}/:\n\n"
+            result = header + result
+            
             if include_sizes:
                 summary = f"\n\nTotal: {total_files} files, {total_dirs} directories"
                 if total_files > 0:
                     summary += f"\nCombined size: {self._format_size(total_size)}"
                 result += summary
             
-            return result if result else "Directory is empty"
+            # Add note about how to access files
+            result += "\n\nNote: Access files using paths shown above (e.g., 'agents/file.md' for items in agents/ directory)"
+            
+            return result if lines else "Directory is empty"
         except Exception as e:
             return f"Error listing directory '{path}': {str(e)}"
 
@@ -605,8 +672,19 @@ class DirectoryTreeTool(FileSystemTool):
             if not target.is_dir():
                 return f"Error: '{path}' is not a directory"
             
-            lines = [f"📁 {target.name or path}/"]
+            # Show relative path from base directory, use '.' for root
+            # This prevents confusion - files should be accessed relative to working directory
+            if path in (".", "", "./"):
+                display_root = "."  # Root of working directory
+            else:
+                display_root = path.rstrip('/')
+            
+            lines = [f"📁 {display_root}/"]
             lines.extend(self._build_tree(target, "", 0, max_depth))
+            
+            # Add note about file paths
+            lines.append("")
+            lines.append("Note: Use paths relative to working directory (e.g., 'agents/file.md', not including the root directory name)")
             
             return "\n".join(lines)
         except Exception as e:
