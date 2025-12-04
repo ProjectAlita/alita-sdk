@@ -5,9 +5,6 @@ on:
      types: [opened, synchronize]
      branches:
        - main
-  push:
-    branches:
-      - ai_test
   workflow_dispatch:
 
 jobs:
@@ -32,7 +29,7 @@ jobs:
             echo "Changed files from PR: $CHANGED_FILES"
             
             # Filter for alita_sdk/tools/* paths and extract toolkit names
-            FILTERED=$(echo "$CHANGED_FILES" | jq '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[2]] | unique')
+            FILTERED=$(echo "$CHANGED_FILES" | jq -c '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[2]] | unique')
             
             # Check if we got any toolkit names
             if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
