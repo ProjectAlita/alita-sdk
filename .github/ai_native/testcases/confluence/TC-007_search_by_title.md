@@ -19,7 +19,7 @@ Verify that the `search_by_title` tool correctly searches for Confluence pages b
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

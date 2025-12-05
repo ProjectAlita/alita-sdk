@@ -19,7 +19,7 @@ Verify that the `get_page_with_image_descriptions` tool correctly retrieves a Co
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

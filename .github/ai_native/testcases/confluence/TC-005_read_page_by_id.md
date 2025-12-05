@@ -19,7 +19,7 @@ Verify that the `read_page_by_id` tool correctly retrieves the content of a Conf
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

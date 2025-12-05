@@ -19,7 +19,7 @@ Verify that the `get_page_tree` tool correctly retrieves the complete hierarchic
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

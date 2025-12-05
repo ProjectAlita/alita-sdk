@@ -18,7 +18,7 @@ Verify that the `list_collections` tool correctly retrieves a list of all collec
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 
 ## Pre-requisites
 

@@ -21,7 +21,7 @@ Verify that the `read_file` tool correctly retrieves the content of a specific f
 
 ## Config
 
-path: .github\ai_native\testcases\ado\configs\ado-config.json
+path: .alita\tool_configs\ado-config.json
 generateTestData : false
 
 ## Pre-requisites

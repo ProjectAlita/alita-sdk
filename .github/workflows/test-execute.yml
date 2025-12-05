@@ -32,24 +32,32 @@ jobs:
             CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only | jq -R -s -c 'split("\n") | map(select(length > 0))')
             echo "Changed files from PR: $CHANGED_FILES"
             
-            # Filter for alita_sdk/tools/* paths and extract toolkit names
-            CHANGED_TOOLKITS=$(echo "$CHANGED_FILES" | jq -c '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[2]] | unique')
-            echo "Changed toolkits: $CHANGED_TOOLKITS"
-            
-            # Filter changed toolkits to only include those present in TEST_DIRS
-            FILTERED=$(jq -n -c --argjson test_dirs "$TEST_DIRS" --argjson changed "$CHANGED_TOOLKITS" \
-              '$changed | map(select(. as $item | $test_dirs | index($item)))')
-            
-            # Check if we got any matching test cases
-            if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
-              echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
+            # Check if pyproject.toml was changed
+            if echo "$CHANGED_FILES" | jq -e 'any(. == "pyproject.toml")' > /dev/null; then
+              echo "::notice::pyproject.toml was changed, running all tests"
+              echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
               echo "has-tests=true" >> $GITHUB_OUTPUT
-              echo "::notice::Generated matrix from PR diff: $FILTERED"
+              echo "::notice::Generated matrix: $TEST_DIRS"
             else
-              echo "::error::No test cases found for the changed toolkits"
+              # Filter for alita_sdk/tools/* paths and extract toolkit names
+              CHANGED_TOOLKITS=$(echo "$CHANGED_FILES" | jq -c '[.[] | select(startswith("alita_sdk/tools/")) | split("/")[2]] | unique')
               echo "Changed toolkits: $CHANGED_TOOLKITS"
-              echo "Available test directories: $TEST_DIRS"
-              echo "has-tests=false" >> $GITHUB_OUTPUT
+              
+              # Filter changed toolkits to only include those present in TEST_DIRS
+              FILTERED=$(jq -n -c --argjson test_dirs "$TEST_DIRS" --argjson changed "$CHANGED_TOOLKITS" \
+                '$changed | map(select(. as $item | $test_dirs | index($item)))')
+              
+              # Check if we got any matching test cases
+              if [ "$(echo "$FILTERED" | jq 'length')" -gt 0 ]; then
+                echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
+                echo "has-tests=true" >> $GITHUB_OUTPUT
+                echo "::notice::Generated matrix from PR diff: $FILTERED"
+              else
+                echo "::error::No test cases found for the changed toolkits"
+                echo "Changed toolkits: $CHANGED_TOOLKITS"
+                echo "Available test directories: $TEST_DIRS"
+                echo "has-tests=false" >> $GITHUB_OUTPUT
+              fi
             fi
           else
             echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT

@@ -20,7 +20,7 @@ Verify that the `list_branches_in_repo` tool correctly retrieves a list of branc
 
 ## Config
 
-path: .github\ai_native\testcases\ado\configs\ado-config.json
+path: .alita\tool_configs\ado-config.json
 generateTestData : false
 
 ## Pre-requisites

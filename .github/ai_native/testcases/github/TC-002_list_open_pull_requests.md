@@ -17,7 +17,7 @@ Verify that the `list_open_pull_requests` tool correctly retrieves and displays 
 
 ## Config
 
-path: .github\ai_native\testcases\github\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Pre-requisites
 

@@ -30,7 +30,7 @@ Verify that the `update_file` tool correctly updates an existing file's content 
 
 ## Config
 
-path: .github\ai_native\testcases\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Test Steps & Expectations
 

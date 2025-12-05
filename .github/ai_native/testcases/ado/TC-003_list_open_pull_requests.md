@@ -20,7 +20,7 @@ Verify that the `list_open_pull_requests` tool correctly retrieves a list of ope
 
 ## Config
 
-path: .github\ai_native\testcases\ado\configs\ado-config.json
+path: .alita\tool_configs\ado-config.json
 generateTestData : false
 
 ## Pre-requisites

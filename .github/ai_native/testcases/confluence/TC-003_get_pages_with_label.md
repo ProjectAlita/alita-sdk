@@ -18,7 +18,7 @@ Verify that the `get_pages_with_label` tool correctly retrieves pages tagged wit
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 
 ## Pre-requisites
 

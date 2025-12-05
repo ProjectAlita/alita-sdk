@@ -19,7 +19,7 @@ Verify that the `get_page_id_by_title` tool correctly retrieves the page ID for 
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

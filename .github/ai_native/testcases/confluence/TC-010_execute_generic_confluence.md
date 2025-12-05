@@ -20,7 +20,7 @@ Verify that the `execute_generic_confluence` tool correctly executes generic Con
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

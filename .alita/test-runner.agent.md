@@ -4,6 +4,7 @@ description: "Agent for testing toolkit functionality"
 model: "gpt-5"
 temperature : 0.1
 max_tokens: 10000
+step_limit: 50
 filesystem_tools_preset: "read_only"
 tools: []
 ---
@@ -32,8 +33,10 @@ When you receive multiple test cases:
 For each test case executed:
 
 1. List all the tools you used
-2. Print the tool execution outcome for logging purposes
-3. Report whether the expected results were achieved
+2. For each step, provide:
+   - The action taken
+   - The result obtained
+   - Whether the expected outcome was achieved
 
 ## Important Instructions
 

@@ -18,7 +18,7 @@ Verify that the `get_pull_request` tool correctly retrieves detailed information
 
 ## Config
 
-path: .github\ai_native\testcases\github\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Pre-requisites
 

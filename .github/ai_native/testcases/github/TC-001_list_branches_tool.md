@@ -17,7 +17,7 @@ Verify that the `list_branches_in_repo` tool correctly lists all branches in the
 
 ## Config
 
-path: .github\ai_native\testcases\github\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Pre-requisites
 

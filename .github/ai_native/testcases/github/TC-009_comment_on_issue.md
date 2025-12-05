@@ -27,7 +27,7 @@ Verify that the `comment_on_issue` tool correctly adds a comment to an existing 
 
 ## Config
 
-path: .github\ai_native\testcases\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Test Steps & Expectations
 

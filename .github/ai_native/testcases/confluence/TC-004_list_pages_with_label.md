@@ -19,7 +19,7 @@ Verify that the `list_pages_with_label` tool correctly retrieves a list of page 
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 
 ## Pre-requisites
 

@@ -19,7 +19,7 @@ Verify that the `site_search` tool correctly performs a site-wide search in Conf
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

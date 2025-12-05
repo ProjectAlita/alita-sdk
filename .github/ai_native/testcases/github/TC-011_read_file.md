@@ -28,13 +28,16 @@ Verify that the `read_file` tool correctly retrieves the content of a file from 
 
 ## Config
 
-path: .github\ai_native\testcases\configs\git-config.json
+path: .alita\tool_configs\git-config.json
+generateTestData: false
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool with Default Branch
 
-Execute the `read_file` tool with file path `{{TEST_FILE_PATH}}` using the active branch (default).
+List all the tools you have
+
+Execute the `read_file` tool from GitHub with file path `.gitignore` using main branch.
 
 **Expectation:** The tool runs without errors and returns the file content as a string.
 
@@ -42,4 +45,4 @@ Execute the `read_file` tool with file path `{{TEST_FILE_PATH}}` using the activ
 
 Review the returned content to ensure it matches the expected file content.
 
-**Expectation:** The output should be a string containing the file content. If the expected content is known (`{{TEST_FILE_EXPECTED_CONTENT}}`), it should match exactly.
+**Expectation:** The output should be a string containing the file content and should contain signoz/clickhouse/user_scripts/histogramQuantile

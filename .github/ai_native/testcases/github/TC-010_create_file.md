@@ -29,7 +29,7 @@ Verify that the `create_file` tool correctly creates a new file with specified c
 
 ## Config
 
-path: .github\ai_native\testcases\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Test Steps & Expectations
 

@@ -25,7 +25,7 @@ Verify that the `get_issues` tool correctly retrieves a list of issues from a Gi
 
 ## Config
 
-path: .github\ai_native\testcases\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Test Steps & Expectations
 

@@ -19,7 +19,7 @@ Verify that the `search_pages` tool correctly searches for pages in Confluence b
 
 ## Config
 
-path: .github\ai_native\testcases\confluence\configs\confluence-config.json
+path: .alita\tool_configs\confluence-config.json
 generateTestData: false
 
 ## Pre-requisites

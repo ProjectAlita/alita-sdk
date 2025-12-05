@@ -25,7 +25,7 @@ Verify that the `get_issue` tool correctly retrieves detailed information about 
 
 ## Config
 
-path: .github\ai_native\testcases\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Test Steps & Expectations
 
