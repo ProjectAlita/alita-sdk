@@ -16,7 +16,7 @@ Supports comprehensive entity types across multiple layers:
 import json
 import logging
 import hashlib
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, Union, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -670,18 +670,20 @@ class EntityExtractor:
         documents: List[Document],
         schema: Optional[Dict[str, Any]] = None,
         skip_on_error: bool = False
-    ) -> List[Dict[str, Any]]:
+    ) -> Union[List[Dict[str, Any]], Tuple[List[Dict[str, Any]], List[str]]]:
         """
         Extract entities from multiple documents with deduplication.
         
         Args:
             documents: List of documents to extract from
             schema: Optional schema to guide extraction
-            skip_on_error: If True, skip documents that fail extraction after retries.
+            skip_on_error: If True, skip documents that fail extraction after retries
+                          and return tuple of (entities, failed_file_paths).
                           If False (default), raise exception on first failure.
         
         Returns:
-            List of extracted entities
+            If skip_on_error=False: List of extracted entities
+            If skip_on_error=True: Tuple of (entities, failed_file_paths)
         """
         all_entities = []
         failed_docs = []
@@ -703,6 +705,10 @@ class EntityExtractor:
         
         # Deduplicate
         deduped = self._deduplicate_entities(all_entities)
+        
+        # Return tuple when skip_on_error is enabled so caller can track failures
+        if skip_on_error:
+            return deduped, failed_docs
         
         return deduped
     

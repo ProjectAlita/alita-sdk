@@ -14,6 +14,13 @@ Usage:
     # Use a config file for LLM/embedding/guardrails settings
     alita inventory ingest --toolkit ./github.json -g ./graph.json --config ingestion-config.yml
     
+    # Check ingestion status (failed files, progress)
+    alita inventory status --graph ./graph.json --name my-source
+    
+    # Retry failed files from previous ingestion
+    alita inventory retry --dir ./my-project -g ./graph.json --name my-source
+    alita inventory retry --dir ./my-project -g ./graph.json --name my-source --force
+    
     # Generate config template
     alita inventory init-config
     
@@ -273,6 +280,12 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
             click.echo(f"   Relations extracted: {result.relations_added}")
             click.echo(f"   Duration: {result.duration_seconds:.1f}s")
             click.echo(f"   Graph saved to: {graph}")
+            
+            # Show failed documents info if any
+            if result.failed_documents:
+                click.echo(f"\n⚠️  {len(result.failed_documents)} documents failed to process")
+                click.echo(f"   Run 'alita inventory status -g {graph} -n {source_name}' to see details")
+                click.echo(f"   Run 'alita inventory retry ...' to retry failed files")
         else:
             click.echo(f"\n❌ Ingestion failed!")
             for error in result.errors:
@@ -282,6 +295,304 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
     except Exception as e:
         logger.exception("Ingestion failed")
         raise click.ClickException(str(e))
+
+
+@inventory.command('retry')
+@click.option('--toolkit', '-t', type=click.Path(exists=True),
+              help='Path to toolkit config JSON (e.g., .alita/tools/github.json)')
+@click.option('--dir', '-d', 'directory', type=click.Path(exists=True, file_okay=False, dir_okay=True),
+              help='Local directory to ingest (alternative to --toolkit for local files)')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Path to graph JSON file')
+@click.option('--config', '-c', type=click.Path(exists=True),
+              help='Path to YAML/JSON config file for LLM, embeddings, guardrails')
+@click.option('--no-relations', is_flag=True,
+              help='Skip relation extraction (faster)')
+@click.option('--model', '-m', default=None,
+              help='LLM model name (overrides config file)')
+@click.option('--name', '-n', required=True,
+              help='Source name (must match the name used during original ingestion)')
+@click.option('--force', '-f', is_flag=True,
+              help='Retry all failed files regardless of attempt count')
+@click.option('--recursive/--no-recursive', default=True,
+              help='Recursively scan subdirectories (default: recursive)')
+@click.pass_context
+def retry(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
+          config: Optional[str], no_relations: bool, model: Optional[str],
+          name: str, force: bool, recursive: bool):
+    """
+    Retry ingestion for files that failed in a previous run.
+    
+    Reads the checkpoint file to find failed files and re-ingests them.
+    Use --force to retry all failed files regardless of previous attempt count.
+    
+    Examples:
+    
+        # Retry failed files from local directory ingestion
+        alita inventory retry --dir ./my-project -g ./graph.json -n my-source
+        
+        # Force retry all failed files (ignore attempt count)
+        alita inventory retry --dir ./my-project -g ./graph.json -n my-source --force
+        
+        # Retry with toolkit config
+        alita inventory retry -t .alita/tools/github.json -g ./graph.json -n github-repo
+    """
+    # Validate: must have either --toolkit or --dir
+    if not toolkit and not directory:
+        raise click.ClickException("Must specify either --toolkit or --dir")
+    
+    if toolkit and directory:
+        raise click.ClickException("Cannot use both --toolkit and --dir. Choose one.")
+    
+    # Check if checkpoint exists
+    checkpoint_path = _get_checkpoint_path(graph, name)
+    if not os.path.exists(checkpoint_path):
+        click.echo(f"\n❌ No checkpoint found for source '{name}'")
+        click.echo(f"   Expected checkpoint: {checkpoint_path}")
+        click.echo(f"\n   This could mean:")
+        click.echo(f"   - No previous ingestion was run with --name '{name}'")
+        click.echo(f"   - The previous ingestion completed successfully (checkpoint cleared)")
+        click.echo(f"   - The checkpoint was manually deleted")
+        sys.exit(1)
+    
+    # Load checkpoint to get failed files
+    try:
+        with open(checkpoint_path, 'r') as f:
+            checkpoint_data = json.load(f)
+    except Exception as e:
+        raise click.ClickException(f"Failed to load checkpoint: {e}")
+    
+    failed_files = checkpoint_data.get('failed_files', [])
+    
+    if not failed_files:
+        click.echo(f"\n✅ No failed files to retry for source '{name}'")
+        click.echo(f"   Processed files: {len(checkpoint_data.get('processed_files', []))}")
+        # Clear checkpoint since there's nothing to retry
+        os.remove(checkpoint_path)
+        click.echo(f"   Checkpoint cleared.")
+        return
+    
+    # Get files to retry
+    if force:
+        # Retry all failed files
+        files_to_retry = [f['file_path'] for f in failed_files]
+        click.echo(f"\n🔄 Force retrying ALL {len(files_to_retry)} failed files...")
+    else:
+        # Only retry files under max attempts (default: 3)
+        max_attempts = 3
+        files_to_retry = [
+            f['file_path'] for f in failed_files
+            if f.get('attempts', 1) < max_attempts
+        ]
+        skipped = len(failed_files) - len(files_to_retry)
+        if skipped > 0:
+            click.echo(f"\n⚠️  Skipping {skipped} files that exceeded {max_attempts} attempts")
+            click.echo(f"   Use --force to retry all failed files")
+        
+        if not files_to_retry:
+            click.echo(f"\n❌ No files eligible for retry (all exceeded max attempts)")
+            click.echo(f"   Use --force to retry anyway")
+            sys.exit(1)
+        
+        click.echo(f"\n🔄 Retrying {len(files_to_retry)} failed files...")
+    
+    # Handle --dir mode (simple local directory ingestion)
+    if directory:
+        from pathlib import Path
+        dir_path = Path(directory).resolve()
+        source_type = 'filesystem'
+        
+        click.echo(f"📂 Source directory: {dir_path}")
+        
+        # Create a simple toolkit config for the directory
+        toolkit_config = {
+            'type': 'filesystem',
+            'toolkit_name': name,
+            'base_directory': str(dir_path),
+            'recursive': recursive,
+        }
+    else:
+        # Load toolkit config
+        toolkit_config = _load_toolkit_config(toolkit)
+        source_type = toolkit_config.get('type', 'unknown')
+        click.echo(f"📦 Source toolkit: {source_type}")
+    
+    # Progress callback
+    def progress(message: str, phase: str):
+        click.echo(f"  [{phase}] {message}")
+    
+    try:
+        from alita_sdk.community.inventory import IngestionPipeline, IngestionConfig
+        
+        # Load configuration
+        if config:
+            click.echo(f"📋 Loading config from {config}")
+            if config.endswith('.yml') or config.endswith('.yaml'):
+                ingestion_config = IngestionConfig.from_yaml(config)
+            else:
+                ingestion_config = IngestionConfig.from_json(config)
+            
+            if model:
+                ingestion_config.llm_model = model
+            
+            ingestion_config.graph_path = graph
+            llm = _get_llm(ctx, ingestion_config.llm_model, ingestion_config.temperature)
+            
+            pipeline = IngestionPipeline(
+                llm=llm,
+                graph_path=ingestion_config.graph_path,
+                guardrails=ingestion_config.guardrails,
+            )
+        else:
+            click.echo("📋 Loading config from environment")
+            llm = _get_llm(ctx, model)
+            pipeline = IngestionPipeline(
+                llm=llm,
+                graph_path=graph,
+            )
+        
+        pipeline.progress_callback = progress
+        
+        # Get source toolkit and register it
+        source_toolkit = _get_source_toolkit(toolkit_config)
+        
+        import uuid
+        cli_runnable_config = {
+            'run_id': uuid.uuid4(),
+            'tags': ['cli', 'inventory', 'retry'],
+        }
+        
+        if hasattr(source_toolkit, 'set_runnable_config'):
+            source_toolkit.set_runnable_config(cli_runnable_config)
+        
+        pipeline.register_toolkit(name, source_toolkit)
+        
+        # Run delta update for failed files
+        result = pipeline.delta_update(
+            source=name,
+            file_paths=files_to_retry,
+            extract_relations=not no_relations,
+        )
+        
+        # Show result
+        if result.success:
+            click.echo(f"\n✅ Retry complete!")
+            click.echo(f"   Files retried: {len(files_to_retry)}")
+            click.echo(f"   Documents processed: {result.documents_processed}")
+            click.echo(f"   Entities added: {result.entities_added}")
+            click.echo(f"   Relations added: {result.relations_added}")
+            click.echo(f"   Duration: {result.duration_seconds:.1f}s")
+            
+            # Check if there are still failed files
+            if result.failed_documents:
+                click.echo(f"\n⚠️  {len(result.failed_documents)} files still failing")
+                click.echo(f"   Run 'alita inventory status -g {graph} -n {name}' to see details")
+            else:
+                # All retries succeeded - clear checkpoint
+                if os.path.exists(checkpoint_path):
+                    os.remove(checkpoint_path)
+                    click.echo(f"\n🧹 Checkpoint cleared (all files processed successfully)")
+        else:
+            click.echo(f"\n❌ Retry failed!")
+            for error in result.errors:
+                click.echo(f"   Error: {error}")
+            sys.exit(1)
+            
+    except Exception as e:
+        logger.exception("Retry failed")
+        raise click.ClickException(str(e))
+
+
+@inventory.command('status')
+@click.option('--graph', '-g', required=True, type=click.Path(),
+              help='Path to graph JSON file')
+@click.option('--name', '-n', required=True,
+              help='Source name to check status for')
+def status(graph: str, name: str):
+    """
+    Show ingestion checkpoint status for a source.
+    
+    Displays information about the last ingestion run including:
+    - Number of processed files
+    - Number of failed files
+    - Current phase
+    - Timestamps
+    
+    Example:
+        alita inventory status -g ./graph.json -n my-source
+    """
+    checkpoint_path = _get_checkpoint_path(graph, name)
+    
+    if not os.path.exists(checkpoint_path):
+        click.echo(f"\n❌ No checkpoint found for source '{name}'")
+        click.echo(f"   Expected: {checkpoint_path}")
+        click.echo(f"\n   No active or failed ingestion for this source.")
+        sys.exit(1)
+    
+    try:
+        with open(checkpoint_path, 'r') as f:
+            checkpoint = json.load(f)
+    except Exception as e:
+        raise click.ClickException(f"Failed to load checkpoint: {e}")
+    
+    click.echo(f"\n📋 Ingestion Status for '{name}'")
+    click.echo(f"   Checkpoint: {checkpoint_path}")
+    
+    click.echo(f"\n   Run ID: {checkpoint.get('run_id', 'unknown')}")
+    click.echo(f"   Phase: {checkpoint.get('phase', 'unknown')}")
+    click.echo(f"   Completed: {'Yes' if checkpoint.get('completed') else 'No'}")
+    
+    click.echo(f"\n   Started: {checkpoint.get('started_at', 'unknown')}")
+    click.echo(f"   Updated: {checkpoint.get('updated_at', 'unknown')}")
+    
+    processed_files = checkpoint.get('processed_files', [])
+    failed_files = checkpoint.get('failed_files', [])
+    
+    click.echo(f"\n   📊 Progress:")
+    click.echo(f"      Documents processed: {checkpoint.get('documents_processed', 0)}")
+    click.echo(f"      Entities added: {checkpoint.get('entities_added', 0)}")
+    click.echo(f"      Relations added: {checkpoint.get('relations_added', 0)}")
+    
+    click.echo(f"\n   📁 Files:")
+    click.echo(f"      Processed: {len(processed_files)}")
+    click.echo(f"      Failed: {len(failed_files)}")
+    
+    if failed_files:
+        # Count by attempts
+        by_attempts = {}
+        for f in failed_files:
+            attempts = f.get('attempts', 1)
+            by_attempts[attempts] = by_attempts.get(attempts, 0) + 1
+        
+        click.echo(f"\n   ❌ Failed files by attempt count:")
+        for attempts, count in sorted(by_attempts.items()):
+            click.echo(f"      {attempts} attempt(s): {count} files")
+        
+        # Show sample errors
+        click.echo(f"\n   📝 Sample errors (first 3):")
+        for f in failed_files[:3]:
+            file_path = f.get('file_path', 'unknown')
+            error = f.get('error', f.get('last_error', 'unknown error'))
+            # Truncate long paths and errors
+            if len(file_path) > 50:
+                file_path = '...' + file_path[-47:]
+            if len(error) > 60:
+                error = error[:57] + '...'
+            click.echo(f"      - {file_path}")
+            click.echo(f"        Error: {error}")
+    
+    errors = checkpoint.get('errors', [])
+    if errors:
+        click.echo(f"\n   ⚠️  Run errors:")
+        for error in errors[:3]:
+            click.echo(f"      - {error[:80]}{'...' if len(error) > 80 else ''}")
+    
+    if failed_files:
+        click.echo(f"\n   💡 To retry failed files:")
+        click.echo(f"      alita inventory retry --dir <path> -g {graph} -n {name}")
+        click.echo(f"      alita inventory retry --dir <path> -g {graph} -n {name} --force")
+    
+    click.echo()
 
 
 @inventory.command('stats')
@@ -643,6 +954,25 @@ def enrich(graph: str, output: Optional[str], deduplicate: bool, cross_source: b
 
 
 # ========== Helper Functions ==========
+
+def _get_checkpoint_path(graph: str, source_name: str) -> str:
+    """
+    Get the checkpoint file path for a source.
+    
+    Checkpoint files are stored in the same directory as the graph file,
+    with naming pattern: .ingestion-checkpoint-{source_name}.json
+    
+    Args:
+        graph: Path to the graph JSON file
+        source_name: Name of the source toolkit
+        
+    Returns:
+        Absolute path to the checkpoint file
+    """
+    graph_path = Path(graph).resolve()
+    graph_dir = graph_path.parent
+    return str(graph_dir / f".ingestion-checkpoint-{source_name}.json")
+
 
 def _load_toolkit_config(toolkit_path: str) -> Dict[str, Any]:
     """

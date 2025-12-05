@@ -41,7 +41,7 @@ import hashlib
 import re
 import time
 from pathlib import Path
-from typing import Any, Optional, List, Dict, Generator, Callable, TYPE_CHECKING
+from typing import Any, Optional, List, Dict, Generator, Callable, TYPE_CHECKING, Tuple
 from datetime import datetime
 
 from pydantic import BaseModel, Field, PrivateAttr
@@ -618,10 +618,15 @@ class IngestionPipeline(BaseModel):
         doc: Document, 
         source_toolkit: str,
         schema: Optional[Dict] = None
-    ) -> List[Dict[str, Any]]:
-        """Extract entities from a single document."""
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Extract entities from a single document.
+        
+        Returns:
+            Tuple of (entities, failed_file_paths) - failed_file_paths contains
+            the file path if extraction failed, empty list otherwise.
+        """
         if not self._entity_extractor:
-            return []
+            return [], []
         
         file_path = (doc.metadata.get('file_path') or 
                     doc.metadata.get('file_name') or 
@@ -630,8 +635,8 @@ class IngestionPipeline(BaseModel):
         # Get chunk position info for line number adjustment
         start_line = doc.metadata.get('start_line') or doc.metadata.get('line_start')
         
-        # Extract entities - skip_on_error=True allows ingestion to continue if extraction fails
-        extracted = self._entity_extractor.extract_batch([doc], schema=schema, skip_on_error=True)
+        # Extract entities - skip_on_error=True returns (entities, failed_docs)
+        extracted, failed_docs = self._entity_extractor.extract_batch([doc], schema=schema, skip_on_error=True)
         
         entities = []
         for entity in extracted:
@@ -676,7 +681,7 @@ class IngestionPipeline(BaseModel):
                 'source_doc': doc,  # Keep for relation extraction
             })
         
-        return entities
+        return entities, failed_docs
     
     def _extract_relations(
         self, 
@@ -888,7 +893,14 @@ class IngestionPipeline(BaseModel):
                 
                 # Extract entities from this document with error handling
                 try:
-                    entities = self._extract_entities_from_doc(normalized, source, schema)
+                    entities, extraction_failures = self._extract_entities_from_doc(normalized, source, schema)
+                    
+                    # Handle extraction failures (documents skipped during extraction)
+                    if extraction_failures:
+                        for failed_path in extraction_failures:
+                            checkpoint.mark_file_failed(failed_path, "Extraction failed after retries")
+                            if failed_path not in result.failed_documents:
+                                result.failed_documents.append(failed_path)
                     
                     # Add to graph
                     for entity in entities:
@@ -902,8 +914,9 @@ class IngestionPipeline(BaseModel):
                         result.entities_added += 1
                         all_entities.append(entity)
                     
-                    # Mark file as successfully processed
-                    checkpoint.mark_file_processed(file_path)
+                    # Mark file as successfully processed only if no extraction failures
+                    if not extraction_failures:
+                        checkpoint.mark_file_processed(file_path)
                     
                 except Exception as e:
                     error_msg = str(e)
@@ -1060,7 +1073,13 @@ class IngestionPipeline(BaseModel):
                     continue
                 
                 result.documents_processed += 1
-                entities = self._extract_entities_from_doc(normalized, source, schema)
+                entities, extraction_failures = self._extract_entities_from_doc(normalized, source, schema)
+                
+                # Track extraction failures
+                if extraction_failures:
+                    for failed_path in extraction_failures:
+                        if failed_path not in result.failed_documents:
+                            result.failed_documents.append(failed_path)
                 
                 for entity in entities:
                     self._knowledge_graph.add_entity(
