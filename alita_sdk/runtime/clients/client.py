@@ -1032,6 +1032,10 @@ class AlitaClient:
                 }
 
         except Exception as e:
+            # Re-raise McpAuthorizationRequired to allow proper handling upstream
+            from ..utils.mcp_oauth import McpAuthorizationRequired
+            if isinstance(e, McpAuthorizationRequired):
+                raise
             logger = logging.getLogger(__name__)
             logger.error(f"Error in test_toolkit_tool: {str(e)}")
             return {
