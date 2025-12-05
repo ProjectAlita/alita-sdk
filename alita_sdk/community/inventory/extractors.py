@@ -57,9 +57,33 @@ ENTITY_TAXONOMY = {
         "description": "APIs and services",
         "types": [
             {"name": "service", "description": "Software service or microservice", "properties": ["name", "description", "tech_stack", "owner_team"]},
-            {"name": "api", "description": "API specification or contract", "properties": ["name", "description", "version", "auth_schema", "base_url"]},
-            {"name": "endpoint", "description": "API endpoint", "properties": ["name", "method", "path", "request_schema", "response_schema", "auth_required"]},
-            {"name": "payload", "description": "API request/response payload structure", "properties": ["name", "schema_type", "fields", "required_fields"]},
+            
+            # REST API types
+            {"name": "rest_api", "description": "REST API specification", "properties": ["name", "description", "version", "auth_schema", "base_url", "content_type"]},
+            {"name": "rest_endpoint", "description": "REST API endpoint", "properties": ["name", "method", "path", "request_schema", "response_schema", "auth_required", "status_codes"]},
+            {"name": "rest_resource", "description": "REST resource or entity", "properties": ["name", "path", "operations", "schema"]},
+            
+            # GraphQL types
+            {"name": "graphql_api", "description": "GraphQL API schema", "properties": ["name", "description", "version", "endpoint", "auth_schema"]},
+            {"name": "graphql_query", "description": "GraphQL query operation", "properties": ["name", "description", "arguments", "return_type", "fields"]},
+            {"name": "graphql_mutation", "description": "GraphQL mutation operation", "properties": ["name", "description", "arguments", "return_type", "side_effects"]},
+            {"name": "graphql_subscription", "description": "GraphQL subscription for real-time updates", "properties": ["name", "description", "arguments", "event_type", "payload_type"]},
+            {"name": "graphql_type", "description": "GraphQL type definition", "properties": ["name", "description", "fields", "interfaces", "directives"]},
+            
+            # gRPC types
+            {"name": "grpc_service", "description": "gRPC service definition", "properties": ["name", "description", "package", "methods", "options"]},
+            {"name": "grpc_method", "description": "gRPC method (unary, streaming)", "properties": ["name", "description", "request_type", "response_type", "streaming_type"]},
+            {"name": "protobuf_message", "description": "Protocol Buffer message definition", "properties": ["name", "description", "fields", "nested_types", "options"]},
+            
+            # Event-driven types
+            {"name": "event_bus", "description": "Event bus or message broker", "properties": ["name", "description", "technology", "topics", "partitions"]},
+            {"name": "event_type", "description": "Event type or message schema", "properties": ["name", "description", "version", "schema", "payload_fields", "routing_key"]},
+            {"name": "event_producer", "description": "Service that publishes events", "properties": ["name", "description", "event_types", "topic", "parent_service"]},
+            {"name": "event_consumer", "description": "Service that subscribes to events", "properties": ["name", "description", "event_types", "topic", "handler", "parent_service"]},
+            {"name": "event_handler", "description": "Handler for processing specific event", "properties": ["name", "description", "event_type", "processing_logic", "error_handling"]},
+            
+            # Generic/Legacy fallbacks
+            {"name": "payload", "description": "Generic request/response payload structure", "properties": ["name", "schema_type", "fields", "required_fields"]},
             {"name": "integration", "description": "External system integration", "properties": ["name", "description", "protocol", "external_system", "direction"]},
         ]
     },
@@ -147,10 +171,17 @@ RELATIONSHIP_TAXONOMY = {
     "behavioral": {
         "description": "Behavioral and runtime relationships",
         "types": [
-            {"name": "calls", "description": "Invokes or calls", "examples": ["function calls function", "service calls api"]},
-            {"name": "triggers", "description": "Triggers event or action", "examples": ["business_rule triggers workflow", "event triggers handler"]},
+            {"name": "calls", "description": "Invokes or calls", "examples": ["function calls function", "service calls rest_endpoint", "service calls grpc_method"]},
+            {"name": "invokes", "description": "Invokes REST/gRPC method", "examples": ["service invokes rest_endpoint", "function invokes grpc_method"]},
+            {"name": "queries", "description": "Executes GraphQL query", "examples": ["service queries graphql_query", "ui queries graphql_api"]},
+            {"name": "mutates", "description": "Executes GraphQL mutation", "examples": ["service mutates graphql_mutation", "form mutates graphql_api"]},
+            {"name": "subscribes_to", "description": "Subscribes to GraphQL subscription or event", "examples": ["service subscribes_to graphql_subscription", "event_consumer subscribes_to event_type"]},
+            {"name": "publishes", "description": "Publishes event to bus", "examples": ["event_producer publishes event_type", "service publishes event_bus"]},
+            {"name": "consumes", "description": "Consumes event from bus", "examples": ["event_consumer consumes event_type", "event_handler consumes event_bus"]},
+            {"name": "handles", "description": "Handles event or message", "examples": ["event_handler handles event_type", "service handles event"]},
+            {"name": "triggers", "description": "Triggers event or action", "examples": ["business_rule triggers workflow", "event triggers handler", "rest_endpoint triggers event_producer"]},
             {"name": "depends_on", "description": "Runtime dependency", "examples": ["service depends_on service", "feature depends_on feature"]},
-            {"name": "uses", "description": "Uses or references", "examples": ["endpoint uses payload", "test_case uses test_data"]},
+            {"name": "uses", "description": "Uses or references", "examples": ["rest_endpoint uses payload", "test_case uses test_data", "grpc_method uses protobuf_message"]},
         ]
     },
     "data_lineage": {

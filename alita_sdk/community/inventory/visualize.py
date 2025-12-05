@@ -733,6 +733,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             source: l.source,
             target: l.target,
             type: l.relation_type || 'related',
+            source_toolkit: l.source_toolkit,
+            discovered_in_file: l.discovered_in_file,
             ...l
         }));
         
@@ -915,7 +917,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .join('line')
             .attr('class', 'link')
             .attr('stroke', d => getRelationColor(d.type))
-            .attr('marker-end', 'url(#arrow)');
+            .attr('marker-end', 'url(#arrow)')
+            .on('mouseover', function(event, d) {
+                // Show tooltip for relations
+                tooltip
+                    .style('display', 'block')
+                    .style('left', (event.pageX + 10) + 'px')
+                    .style('top', (event.pageY + 10) + 'px')
+                    .html(`
+                        <h4>${d.type}</h4>
+                        ${d.source_toolkit ? `<div><strong>Source:</strong> ${d.source_toolkit}</div>` : ''}
+                        ${d.discovered_in_file ? `<div><strong>File:</strong> ${d.discovered_in_file}</div>` : ''}
+                        ${d.confidence ? `<div><strong>Confidence:</strong> ${(d.confidence * 100).toFixed(0)}%</div>` : ''}
+                    `);
+                // Highlight the link
+                d3.select(this).attr('stroke-width', 3).attr('stroke-opacity', 1);
+            })
+            .on('mouseout', function() {
+                tooltip.style('display', 'none');
+                // Reset link appearance
+                d3.select(this).attr('stroke-width', 1.5).attr('stroke-opacity', 0.4);
+            });
         
         // Draw nodes
         const node = g.append('g')
@@ -1297,26 +1319,35 @@ def generate_visualization(
     if 'edges' in graph_data and 'links' not in graph_data:
         graph_data['links'] = graph_data.pop('edges')
     
-    # Prepare data for JavaScript
-    graph_json = json.dumps(graph_data, default=str)
-    type_colors_json = json.dumps(TYPE_COLORS)
-    relation_colors_json = json.dumps(RELATION_COLORS)
+    # Prepare data for JavaScript - properly escape for embedding in HTML
+    # Convert to JSON strings that will be valid JavaScript
+    graph_json = json.dumps(graph_data, default=str, ensure_ascii=True)
+    type_colors_json = json.dumps(TYPE_COLORS, ensure_ascii=True)
+    relation_colors_json = json.dumps(RELATION_COLORS, ensure_ascii=True)
     
-    # Generate HTML
-    html = HTML_TEMPLATE.replace('GRAPH_DATA_PLACEHOLDER', graph_json)
+    # Escape special HTML characters that could break the script tag
+    # This prevents issues with large JSON data containing HTML-like content
+    graph_json = graph_json.replace('</', '<\\/')
+    type_colors_json = type_colors_json.replace('</', '<\\/')
+    relation_colors_json = relation_colors_json.replace('</', '<\\/')
+    
+    # Generate HTML - build valid HTML structure first
+    html = HTML_TEMPLATE.replace('<title>Knowledge Graph Visualization</title>', 
+                                f'<title>{title}</title>')
+    
+    # Now inject the properly escaped JSON data into the script placeholders
+    html = html.replace('GRAPH_DATA_PLACEHOLDER', graph_json)
     html = html.replace('TYPE_COLORS_PLACEHOLDER', type_colors_json)
     html = html.replace('RELATION_COLORS_PLACEHOLDER', relation_colors_json)
-    html = html.replace('<title>Knowledge Graph Visualization</title>', 
-                        f'<title>{title}</title>')
     
     # Write output
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
     
-    logger.info(f"Generated visualization: {output_path}")
+    logger.info(f"Generated visualization: {output_path} ({len(html)} bytes)")
     return str(output_path)
 
 

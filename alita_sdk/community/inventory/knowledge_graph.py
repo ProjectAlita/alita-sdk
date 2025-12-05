@@ -512,6 +512,102 @@ class KnowledgeGraph:
             return True
         return False
     
+    def get_relations_by_source(
+        self, 
+        source_toolkit: str,
+        relation_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all relations from a specific source toolkit.
+        
+        Args:
+            source_toolkit: Name of source toolkit (e.g., 'github', 'jira')
+            relation_type: Optional filter by relation type
+            
+        Returns:
+            List of relations with their properties
+        """
+        relations = []
+        
+        for source, target, data in self._graph.edges(data=True):
+            # Check if this relation is from the specified source
+            rel_source = data.get('source_toolkit')
+            if rel_source == source_toolkit:
+                # Filter by relation type if specified
+                if relation_type is None or data.get('relation_type') == relation_type:
+                    relations.append({
+                        'source': source,
+                        'target': target,
+                        'relation_type': data.get('relation_type'),
+                        'source_toolkit': rel_source,
+                        'properties': {k: v for k, v in data.items() 
+                                     if k not in ('relation_type', 'source_toolkit')}
+                    })
+        
+        return relations
+    
+    def get_cross_source_relations(self) -> List[Dict[str, Any]]:
+        """
+        Get relations that connect entities from different sources.
+        
+        These are particularly valuable for understanding how different
+        data sources relate to each other (e.g., Jira ticket references GitHub PR).
+        
+        Returns:
+            List of cross-source relations
+        """
+        cross_source = []
+        
+        for source, target, data in self._graph.edges(data=True):
+            source_node = self._graph.nodes.get(source, {})
+            target_node = self._graph.nodes.get(target, {})
+            
+            # Get source toolkits from entity citations
+            source_citations = source_node.get('citations', [])
+            target_citations = target_node.get('citations', [])
+            
+            if not source_citations or not target_citations:
+                continue
+            
+            # Get unique source toolkits for each entity
+            source_toolkits = set()
+            target_toolkits = set()
+            
+            for citation in source_citations:
+                if isinstance(citation, dict):
+                    toolkit = citation.get('source_toolkit')
+                elif hasattr(citation, 'source_toolkit'):
+                    toolkit = citation.source_toolkit
+                else:
+                    toolkit = None
+                if toolkit:
+                    source_toolkits.add(toolkit)
+            
+            for citation in target_citations:
+                if isinstance(citation, dict):
+                    toolkit = citation.get('source_toolkit')
+                elif hasattr(citation, 'source_toolkit'):
+                    toolkit = citation.source_toolkit
+                else:
+                    toolkit = None
+                if toolkit:
+                    target_toolkits.add(toolkit)
+            
+            # Check if entities come from different sources
+            if source_toolkits and target_toolkits and source_toolkits != target_toolkits:
+                cross_source.append({
+                    'source': source,
+                    'target': target,
+                    'source_toolkits': list(source_toolkits),
+                    'target_toolkits': list(target_toolkits),
+                    'relation_type': data.get('relation_type'),
+                    'relation_source': data.get('source_toolkit'),
+                    'properties': {k: v for k, v in data.items() 
+                                 if k not in ('relation_type', 'source_toolkit')}
+                })
+        
+        return cross_source
+    
     # ========== Graph Analysis ==========
     
     def get_neighbors(
@@ -1069,6 +1165,7 @@ class KnowledgeGraph:
         entity_types = defaultdict(int)
         relation_types = defaultdict(int)
         sources = set()
+        relations_by_source = defaultdict(int)
         
         for _, data in self._graph.nodes(data=True):
             if 'type' in data:
@@ -1080,6 +1177,10 @@ class KnowledgeGraph:
         for _, _, data in self._graph.edges(data=True):
             if 'relation_type' in data:
                 relation_types[data['relation_type']] += 1
+            # Track relations by source
+            rel_source = data.get('source_toolkit')
+            if rel_source:
+                relations_by_source[rel_source] += 1
         
         return {
             'node_count': self._graph.number_of_nodes(),
@@ -1087,6 +1188,8 @@ class KnowledgeGraph:
             'entity_types': dict(entity_types),
             'relation_types': dict(relation_types),
             'source_toolkits': sorted(sources),
+            'relations_by_source': dict(relations_by_source),
+            'cross_source_relations': len(self.get_cross_source_relations()),
             'last_saved': self._metadata.get('last_saved'),
         }
     

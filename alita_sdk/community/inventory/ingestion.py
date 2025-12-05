@@ -8,9 +8,18 @@ from source code repositories. It is NOT a toolkit - it's a defined process that
 2. Fetches documents via their loader() methods
 3. Extracts entities using LLM
 4. Extracts relations between entities
-5. Persists the graph to JSON
+5. Tracks source information for both entities (via citations) and relations
+6. Persists the graph to JSON
 
 The result is a graph dump that can be queried by the RetrievalToolkit.
+
+Multi-Source Support:
+- Entities from different sources are merged when they have the same (type, name)
+- Each entity maintains citations from all sources that reference it
+- Relations are tagged with source_toolkit to track which source created them
+- Cross-source relations are automatically tracked (e.g., Jira ticket -> GitHub PR)
+- Query relations by source: graph.get_relations_by_source('github')
+- Find cross-source relations: graph.get_cross_source_relations()
 
 Usage:
     # With full configuration
@@ -40,6 +49,8 @@ import logging
 import hashlib
 import re
 import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional, List, Dict, Generator, Callable, TYPE_CHECKING, Tuple
 from datetime import datetime
@@ -217,8 +228,10 @@ class IngestionCheckpoint(BaseModel):
     entities_added: int = 0
     relations_added: int = 0
     
-    # Processed document tracking (file paths that have been successfully processed)
-    processed_files: List[str] = Field(default_factory=list)
+    # Processed document tracking with content hashes for incremental updates
+    # Maps file_path -> content_hash (allows detecting changed files)
+    processed_files: List[str] = Field(default_factory=list)  # Legacy: just paths
+    file_hashes: Dict[str, str] = Field(default_factory=dict)  # New: path -> content_hash
     
     # Failed document tracking for retry
     failed_files: List[Dict[str, Any]] = Field(default_factory=list)  # [{file_path, error, attempts}]
@@ -280,10 +293,12 @@ class IngestionCheckpoint(BaseModel):
             logger.warning(f"Failed to load checkpoint: {e}")
             return None
     
-    def mark_file_processed(self, file_path: str) -> None:
-        """Mark a file as successfully processed."""
+    def mark_file_processed(self, file_path: str, content_hash: Optional[str] = None) -> None:
+        """Mark a file as successfully processed with optional content hash."""
         if file_path not in self.processed_files:
             self.processed_files.append(file_path)
+        if content_hash:
+            self.file_hashes[file_path] = content_hash
     
     def mark_file_failed(self, file_path: str, error: str) -> None:
         """Mark a file as failed with error details."""
@@ -303,6 +318,23 @@ class IngestionCheckpoint(BaseModel):
     def is_file_processed(self, file_path: str) -> bool:
         """Check if a file has already been processed."""
         return file_path in self.processed_files
+    
+    def has_file_changed(self, file_path: str, content_hash: str) -> bool:
+        """
+        Check if a file has changed since last processing.
+        
+        Returns True if:
+        - File was never processed before
+        - File was processed but we don't have its hash (legacy)
+        - File content hash differs from stored hash
+        """
+        if file_path not in self.file_hashes:
+            return True  # Never seen or no hash stored
+        return self.file_hashes.get(file_path) != content_hash
+    
+    def get_file_hash(self, file_path: str) -> Optional[str]:
+        """Get stored content hash for a file."""
+        return self.file_hashes.get(file_path)
     
     def get_retry_files(self, max_attempts: int = 3) -> List[str]:
         """Get files that should be retried (under max attempts)."""
@@ -369,6 +401,16 @@ class IngestionPipeline(BaseModel):
     checkpoint_interval: int = Field(
         default=10,
         description="Save checkpoint every N documents processed"
+    )
+    
+    # Parallel processing configuration
+    max_parallel_extractions: int = Field(
+        default=10,
+        description="Maximum number of parallel entity extraction requests (default: 10)"
+    )
+    batch_size: int = Field(
+        default=10,
+        description="Number of documents to process in each parallel batch (default: 10)"
     )
     
     # Progress callback (optional)
@@ -551,6 +593,57 @@ class IngestionPipeline(BaseModel):
         except Exception as e:
             logger.warning(f"Failed to clear checkpoint: {e}")
     
+    def clear_checkpoint(self, source: str) -> bool:
+        """
+        Clear checkpoint for a source to force fresh ingestion.
+        
+        Use this when you want to re-ingest everything from scratch,
+        ignoring previous file hashes and processing state.
+        
+        Args:
+            source: Name of source toolkit
+            
+        Returns:
+            True if checkpoint was cleared, False if no checkpoint existed
+        """
+        checkpoint_path = Path(self._get_checkpoint_path(source))
+        if checkpoint_path.exists():
+            self._clear_checkpoint(source)
+            self._log_progress(f"🗑️ Cleared checkpoint for {source}", "reset")
+            return True
+        return False
+    
+    def get_checkpoint_info(self, source: str) -> Optional[Dict[str, Any]]:
+        """
+        Get information about existing checkpoint for a source.
+        
+        Useful for checking if incremental update is available and
+        how many files are being tracked.
+        
+        Args:
+            source: Name of source toolkit
+            
+        Returns:
+            Dict with checkpoint info or None if no checkpoint exists
+        """
+        checkpoint = self._load_checkpoint(source)
+        if not checkpoint:
+            return None
+        
+        return {
+            'run_id': checkpoint.run_id,
+            'completed': checkpoint.completed,
+            'phase': checkpoint.phase,
+            'started_at': checkpoint.started_at,
+            'updated_at': checkpoint.updated_at,
+            'documents_processed': checkpoint.documents_processed,
+            'entities_added': checkpoint.entities_added,
+            'relations_added': checkpoint.relations_added,
+            'files_tracked': len(checkpoint.file_hashes),
+            'files_processed': len(checkpoint.processed_files),
+            'files_failed': len(checkpoint.failed_files),
+        }
+    
     def _generate_entity_id(self, entity_type: str, name: str, file_path: str = None) -> str:
         """
         Generate unique entity ID.
@@ -683,6 +776,110 @@ class IngestionPipeline(BaseModel):
         
         return entities, failed_docs
     
+    def _process_documents_batch(
+        self,
+        documents: List[Document],
+        source_toolkit: str,
+        schema: Optional[Dict] = None
+    ) -> Tuple[List[Dict[str, Any]], List[str], Dict[str, str]]:
+        """
+        Process a batch of documents in parallel for entity extraction.
+        
+        Args:
+            documents: List of documents to process
+            source_toolkit: Source toolkit name
+            schema: Optional schema for extraction
+            
+        Returns:
+            Tuple of (all_entities, failed_files, file_hashes) where:
+            - all_entities: Combined list of entities from all documents
+            - failed_files: List of file paths that failed extraction
+            - file_hashes: Dict mapping file_path to content_hash
+        """
+        all_entities = []
+        failed_files = []
+        file_hashes = {}
+        
+        # Use ThreadPoolExecutor for parallel extraction
+        with ThreadPoolExecutor(max_workers=self.max_parallel_extractions) as executor:
+            # Submit all extraction tasks
+            future_to_doc = {
+                executor.submit(self._extract_entities_from_doc, doc, source_toolkit, schema): doc
+                for doc in documents
+            }
+            
+            # Process completed tasks as they finish
+            for future in as_completed(future_to_doc):
+                doc = future_to_doc[future]
+                file_path = (doc.metadata.get('file_path') or 
+                            doc.metadata.get('file_name') or 
+                            doc.metadata.get('source', 'unknown'))
+                
+                try:
+                    entities, extraction_failures = future.result()
+                    
+                    # Track content hash
+                    content_hash = hashlib.sha256(doc.page_content.encode()).hexdigest()
+                    file_hashes[file_path] = content_hash
+                    
+                    # Add entities to batch results
+                    all_entities.extend(entities)
+                    
+                    # Track failures
+                    if extraction_failures:
+                        failed_files.extend(extraction_failures)
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to process document '{file_path}': {e}")
+                    failed_files.append(file_path)
+        
+        return all_entities, failed_files, file_hashes
+    
+    def _process_batch_and_update_graph(
+        self,
+        doc_batch: List[Document],
+        source: str,
+        schema: Optional[Dict],
+        checkpoint: IngestionCheckpoint,
+        result: IngestionResult,
+        all_entities: List[Dict[str, Any]],
+        is_incremental_update: bool
+    ) -> None:
+        """
+        Process a batch of documents in parallel and update the graph.
+        
+        This method extracts entities from all documents in the batch concurrently,
+        then adds them to the graph sequentially (graph operations are not thread-safe).
+        """
+        # Extract entities from all docs in parallel
+        batch_entities, failed_files, file_hashes = self._process_documents_batch(
+            doc_batch, source, schema
+        )
+        
+        # Update graph with batch results (sequential - graph is not thread-safe)
+        for entity in batch_entities:
+            self._knowledge_graph.add_entity(
+                entity_id=entity['id'],
+                name=entity['name'],
+                entity_type=entity['type'],
+                citation=entity['citation'],
+                properties=entity['properties']
+            )
+            result.entities_added += 1
+            all_entities.append(entity)
+        
+        # Update checkpoint with processed files and hashes
+        for file_path, content_hash in file_hashes.items():
+            if file_path not in failed_files:
+                checkpoint.mark_file_processed(file_path, content_hash)
+            result.documents_processed += 1
+        
+        # Track failed files
+        for failed_file in failed_files:
+            checkpoint.mark_file_failed(failed_file, "Entity extraction failed")
+            if failed_file not in result.failed_documents:
+                result.failed_documents.append(failed_file)
+    
     def _extract_relations(
         self, 
         entities: List[Dict[str, Any]],
@@ -755,6 +952,18 @@ class IngestionPipeline(BaseModel):
                 doc, entity_dicts, schema=schema, confidence_threshold=0.5,
                 all_entities=all_entity_dicts
             )
+            
+            # Add source tracking to each relation
+            # Get source_toolkit from first entity in file
+            source_toolkit = file_entities[0].get('source_toolkit') if file_entities else None
+            for rel in file_relations:
+                if source_toolkit:
+                    # Add source_toolkit to properties for tracking
+                    if 'properties' not in rel:
+                        rel['properties'] = {}
+                    rel['properties']['source_toolkit'] = source_toolkit
+                    rel['properties']['discovered_in_file'] = file_path
+            
             relations.extend(file_relations)
             
             # Log progress periodically (every 10 files or at specific percentages)
@@ -823,20 +1032,36 @@ class IngestionPipeline(BaseModel):
         
         # Try to load existing checkpoint if resume is enabled
         checkpoint = None
+        is_incremental_update = False
         if resume:
             checkpoint = self._load_checkpoint(source)
-            if checkpoint and not checkpoint.completed:
-                self._log_progress(
-                    f"📋 Resuming from checkpoint: {checkpoint.documents_processed} docs already processed",
-                    "resume"
-                )
-                result.resumed_from_checkpoint = True
-                # Restore progress from checkpoint
-                result.documents_processed = checkpoint.documents_processed
-                result.entities_added = checkpoint.entities_added
+            if checkpoint:
+                if checkpoint.completed:
+                    # Completed checkpoint - use for incremental update
+                    is_incremental_update = True
+                    num_tracked = len(checkpoint.file_hashes)
+                    self._log_progress(
+                        f"📋 Incremental update: tracking {num_tracked} files for changes",
+                        "incremental"
+                    )
+                    # Reset counters for new run but keep file hashes
+                    checkpoint.completed = False
+                    checkpoint.phase = "extract"
+                    checkpoint.pending_entities = []
+                    checkpoint.errors = []
+                else:
+                    # Incomplete checkpoint - resume from failure
+                    self._log_progress(
+                        f"📋 Resuming from checkpoint: {checkpoint.documents_processed} docs already processed",
+                        "resume"
+                    )
+                    result.resumed_from_checkpoint = True
+                    # Restore progress from checkpoint
+                    result.documents_processed = checkpoint.documents_processed
+                    result.entities_added = checkpoint.entities_added
         
-        # Create new checkpoint if not resuming
-        if not checkpoint or checkpoint.completed:
+        # Create new checkpoint if no existing one
+        if not checkpoint:
             checkpoint = IngestionCheckpoint.create(
                 source=source,
                 branch=branch,
@@ -874,14 +1099,26 @@ class IngestionPipeline(BaseModel):
             all_entities = list(checkpoint.pending_entities) if checkpoint.pending_entities else []
             
             checkpoint.phase = "extract"
-            self._log_progress("🔍 Extracting entities...", "extract")
+            self._log_progress(
+                f"🔍 Extracting entities (parallel batches of {self.batch_size}, "
+                f"max {self.max_parallel_extractions} concurrent)...",
+                "extract"
+            )
             
-            docs_in_batch = 0
+            # Collect documents into batches for parallel processing
+            doc_batch = []
+            total_batches_processed = 0
             
-            # Process documents
+            # Process documents in parallel batches
             for doc in documents:
                 # Check document limit (for testing)
                 if max_documents and result.documents_processed >= max_documents:
+                    # Process remaining batch if any
+                    if doc_batch:
+                        self._process_batch_and_update_graph(
+                            doc_batch, source, schema, checkpoint, result, 
+                            all_entities, is_incremental_update
+                        )
                     self._log_progress(
                         f"⚠️ Reached document limit ({max_documents}), stopping...",
                         "limit"
@@ -897,67 +1134,73 @@ class IngestionPipeline(BaseModel):
                             normalized.metadata.get('file_name') or 
                             normalized.metadata.get('source', 'unknown'))
                 
-                # Skip if already processed (resuming from checkpoint)
-                if checkpoint.is_file_processed(file_path):
+                # For incremental updates, check if file changed
+                if is_incremental_update:
+                    content_hash = hashlib.sha256(normalized.page_content.encode()).hexdigest()
+                    if not checkpoint.has_file_changed(file_path, content_hash):
+                        result.documents_skipped += 1
+                        continue
+                    else:
+                        # File has changed - remove old entities before reprocessing
+                        removed = self._knowledge_graph.remove_entities_by_file(file_path)
+                        if removed > 0:
+                            result.entities_removed += removed
+                            logger.debug(f"Removed {removed} stale entities from {file_path}")
+                
+                # Skip if already processed in current run (resuming from checkpoint)
+                if not is_incremental_update and checkpoint.is_file_processed(file_path):
                     result.documents_skipped += 1
                     continue
                 
-                result.documents_processed += 1
-                docs_in_batch += 1
+                # Add to current batch
+                doc_batch.append(normalized)
                 
-                # Extract entities from this document with error handling
-                try:
-                    entities, extraction_failures = self._extract_entities_from_doc(normalized, source, schema)
+                # Process batch when it reaches batch_size
+                if len(doc_batch) >= self.batch_size:
+                    batch_num = total_batches_processed + 1
+                    self._log_progress(
+                        f"⚡ Processing batch {batch_num} ({len(doc_batch)} documents in parallel)...",
+                        "batch"
+                    )
                     
-                    # Handle extraction failures (documents skipped during extraction)
-                    if extraction_failures:
-                        for failed_path in extraction_failures:
-                            checkpoint.mark_file_failed(failed_path, "Extraction failed after retries")
-                            if failed_path not in result.failed_documents:
-                                result.failed_documents.append(failed_path)
+                    self._process_batch_and_update_graph(
+                        doc_batch, source, schema, checkpoint, result, 
+                        all_entities, is_incremental_update
+                    )
                     
-                    # Add to graph
-                    for entity in entities:
-                        self._knowledge_graph.add_entity(
-                            entity_id=entity['id'],
-                            name=entity['name'],
-                            entity_type=entity['type'],
-                            citation=entity['citation'],
-                            properties=entity['properties']
-                        )
-                        result.entities_added += 1
-                        all_entities.append(entity)
+                    total_batches_processed += 1
+                    doc_batch = []  # Reset batch
                     
-                    # Mark file as successfully processed only if no extraction failures
-                    if not extraction_failures:
-                        checkpoint.mark_file_processed(file_path)
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    logger.warning(f"Failed to process document '{file_path}': {error_msg}")
-                    checkpoint.mark_file_failed(file_path, error_msg)
-                    result.failed_documents.append(file_path)
-                    # Continue with next document
-                    continue
-                
-                # Save checkpoint periodically
-                if docs_in_batch % self.checkpoint_interval == 0:
+                    # Save checkpoint after each batch
                     checkpoint.documents_processed = result.documents_processed
                     checkpoint.entities_added = result.entities_added
                     self._save_checkpoint(checkpoint)
-                    self._auto_save()  # Also save graph
+                    self._auto_save()
                     
                     self._log_progress(
                         f"📄 Processed {result.documents_processed} docs | "
                         f"📊 {result.entities_added} entities | 💾 Checkpoint saved",
                         "progress"
                     )
-                elif result.documents_processed % 10 == 0:
-                    self._log_progress(
-                        f"📄 Processed {result.documents_processed} docs | "
-                        f"📊 {result.entities_added} entities",
-                        "progress"
-                    )
+            
+            # Process remaining documents in final batch
+            if doc_batch:
+                batch_num = total_batches_processed + 1
+                self._log_progress(
+                    f"⚡ Processing final batch {batch_num} ({len(doc_batch)} documents)...",
+                    "batch"
+                )
+                self._process_batch_and_update_graph(
+                    doc_batch, source, schema, checkpoint, result, 
+                    all_entities, is_incremental_update
+                )
+            
+            # Report skipped files before relation extraction
+            if result.documents_skipped > 0:
+                self._log_progress(
+                    f"⏭️ Skipped {result.documents_skipped} unchanged files",
+                    "progress"
+                )
             
             # Update checkpoint before relation extraction
             checkpoint.documents_processed = result.documents_processed
@@ -990,11 +1233,17 @@ class IngestionPipeline(BaseModel):
                 relations = self._extract_relations(all_entities, schema, all_graph_entities=graph_entities)
                 
                 for rel in relations:
+                    # Merge source information into properties
+                    properties = rel.get('properties', {})
+                    if 'source_toolkit' not in properties:
+                        # Fallback: add current source if not already set
+                        properties['source_toolkit'] = source
+                    
                     success = self._knowledge_graph.add_relation(
                         source_id=rel.get('source_id'),
                         target_id=rel.get('target_id'),
                         relation_type=rel.get('relation_type', 'RELATED_TO'),
-                        properties=rel.get('properties', {})
+                        properties=properties
                     )
                     if success:
                         result.relations_added += 1
@@ -1002,12 +1251,13 @@ class IngestionPipeline(BaseModel):
             # Save final graph
             self._auto_save()
             
-            # Mark checkpoint as complete and clear it
+            # Mark checkpoint as complete - keep it for incremental updates
             checkpoint.completed = True
             checkpoint.phase = "complete"
             checkpoint.relations_added = result.relations_added
+            checkpoint.pending_entities = []  # Clear pending entities to save space
             self._save_checkpoint(checkpoint)
-            self._clear_checkpoint(source)  # Remove checkpoint file on success
+            # Note: We keep the checkpoint for incremental updates (file hash tracking)
             
             result.graph_stats = self._knowledge_graph.get_stats()
             result.duration_seconds = time.time() - start_time
@@ -1019,11 +1269,15 @@ class IngestionPipeline(BaseModel):
                     "warning"
                 )
             
-            self._log_progress(
+            # Build completion message
+            completion_msg = (
                 f"✅ Ingestion complete! {result.entities_added} entities, "
-                f"{result.relations_added} relations in {result.duration_seconds:.1f}s",
-                "complete"
+                f"{result.relations_added} relations in {result.duration_seconds:.1f}s"
             )
+            if result.documents_skipped > 0:
+                completion_msg += f" ({result.documents_skipped} unchanged files skipped)"
+            
+            self._log_progress(completion_msg, "complete")
             
         except Exception as e:
             logger.exception(f"Ingestion failed: {e}")
@@ -1122,11 +1376,17 @@ class IngestionPipeline(BaseModel):
                 relations = self._extract_relations(all_entities, schema, all_graph_entities=graph_entities)
                 
                 for rel in relations:
+                    # Merge source information into properties
+                    properties = rel.get('properties', {})
+                    if 'source_toolkit' not in properties:
+                        # Add current source if not already set
+                        properties['source_toolkit'] = source
+                    
                     if self._knowledge_graph.add_relation(
                         source_id=rel.get('source_id'),
                         target_id=rel.get('target_id'),
                         relation_type=rel.get('relation_type', 'RELATED_TO'),
-                        properties=rel.get('properties', {})
+                        properties=properties
                     ):
                         result.relations_added += 1
             

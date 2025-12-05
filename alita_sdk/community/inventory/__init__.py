@@ -7,7 +7,13 @@ This module provides two distinct capabilities:
    from source code repositories. NOT a toolkit - it's a defined process.
    
    Usage:
-       from alita_sdk.community.inventory import IngestionPipeline, ingest_repository
+       from alita_sdk.community.inventory import (
+           IngestionPipeline, 
+           ingest_repository,
+           PYTHON_PRESET,
+           TYPESCRIPT_PRESET,
+           get_preset
+       )
        
        # Full pipeline with config
        pipeline = IngestionPipeline(
@@ -95,6 +101,30 @@ from .extractors import (
 # Toolkit wrapper for agent integration
 from .toolkit import InventoryRetrievalToolkit
 
+# Ingestion presets
+from .presets import (
+    PYTHON_PRESET,
+    PYTHON_PRESET_WITH_TESTS,
+    JAVASCRIPT_PRESET,
+    TYPESCRIPT_PRESET,
+    REACT_PRESET,
+    NEXTJS_PRESET,
+    JAVA_PRESET,
+    SPRING_BOOT_PRESET,
+    MAVEN_PRESET,
+    GRADLE_PRESET,
+    DOTNET_PRESET,
+    CSHARP_PRESET,
+    ASPNET_PRESET,
+    FULLSTACK_JS_PRESET,
+    MONOREPO_PRESET,
+    DOCUMENTATION_PRESET,
+    PRESETS,
+    get_preset,
+    list_presets,
+    combine_presets,
+)
+
 logger = logging.getLogger(__name__)
 
 name = "inventory"
@@ -167,4 +197,26 @@ __all__ = [
     'RelationExtractor',
     'DocumentClassifier',
     'EntitySchemaDiscoverer',
+    
+    # Presets
+    'PYTHON_PRESET',
+    'PYTHON_PRESET_WITH_TESTS',
+    'JAVASCRIPT_PRESET',
+    'TYPESCRIPT_PRESET',
+    'REACT_PRESET',
+    'NEXTJS_PRESET',
+    'JAVA_PRESET',
+    'SPRING_BOOT_PRESET',
+    'MAVEN_PRESET',
+    'GRADLE_PRESET',
+    'DOTNET_PRESET',
+    'CSHARP_PRESET',
+    'ASPNET_PRESET',
+    'FULLSTACK_JS_PRESET',
+    'MONOREPO_PRESET',
+    'DOCUMENTATION_PRESET',
+    'PRESETS',
+    'get_preset',
+    'list_presets',
+    'combine_presets',
 ]

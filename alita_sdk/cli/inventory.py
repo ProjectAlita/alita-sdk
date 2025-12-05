@@ -5,7 +5,13 @@ Provides command-line interface for running knowledge graph ingestion
 from various source toolkits (GitHub, ADO, LocalGit, etc.).
 
 Usage:
-    # Ingest using a toolkit config file (preferred)
+    # List available presets
+    alita inventory presets
+    
+    # Ingest using a preset (recommended!)
+    alita inventory ingest --dir ./my-project --graph ./graph.json --preset python
+    
+    # Ingest using a toolkit config file
     alita inventory ingest --toolkit .alita/tools/github.json --graph ./graph.json -w "*.md"
     
     # Ingest from a local git repository
@@ -49,6 +55,57 @@ def inventory():
     pass
 
 
+@inventory.command('presets')
+def presets():
+    """
+    List available ingestion presets.
+    
+    Presets provide pre-configured whitelist/blacklist patterns for common
+    programming languages and project types.
+    
+    Example:
+        alita inventory presets
+    """
+    from alita_sdk.community.inventory import list_presets, get_preset
+    
+    available = list_presets()
+    
+    click.echo(f"\n📋 Available Presets ({len(available)} total):\n")
+    
+    # Group by category
+    categories = {
+        'Python': [p for p in available if 'python' in p.lower()],
+        'JavaScript/TypeScript': [p for p in available if any(x in p.lower() for x in ['javascript', 'typescript', 'react', 'next', 'node'])],
+        'Java': [p for p in available if 'java' in p.lower() or 'maven' in p.lower() or 'gradle' in p.lower() or 'spring' in p.lower()],
+        '.NET/C#': [p for p in available if 'dotnet' in p.lower() or 'csharp' in p.lower() or 'aspnet' in p.lower()],
+        'Multi-Language': [p for p in available if any(x in p.lower() for x in ['fullstack', 'monorepo', 'documentation'])],
+    }
+    
+    for category, preset_names in categories.items():
+        if not preset_names:
+            continue
+        
+        click.echo(f"  {category}:")
+        for preset_name in sorted(preset_names):
+            preset_config = get_preset(preset_name)
+            whitelist = preset_config.get('whitelist', [])
+            blacklist = preset_config.get('blacklist', [])
+            
+            # Format whitelist (show first 3 patterns)
+            wl_display = ', '.join(whitelist[:3])
+            if len(whitelist) > 3:
+                wl_display += f', ... (+{len(whitelist)-3})'
+            
+            click.echo(f"    • {preset_name:20} - {wl_display}")
+        
+        click.echo()
+    
+    click.echo("Usage:")
+    click.echo("  alita inventory ingest --dir ./my-project -g ./graph.json --preset python")
+    click.echo("  alita inventory ingest --dir ./src -g ./graph.json -p typescript -w '*.json'")
+    click.echo()
+
+
 @inventory.command('init-config')
 @click.option('--output', '-o', default='./ingestion-config.yml', type=click.Path(),
               help='Output path for config template')
@@ -78,6 +135,8 @@ def init_config(output: str):
               help='Path to output graph JSON file')
 @click.option('--config', '-c', type=click.Path(exists=True),
               help='Path to YAML/JSON config file for LLM, embeddings, guardrails')
+@click.option('--preset', '-p', default=None,
+              help='Use a preset configuration (e.g., python, typescript, java, dotnet)')
 @click.option('--whitelist', '-w', multiple=True,
               help='File patterns to include (e.g., -w "*.py" -w "*.md")')
 @click.option('--blacklist', '-x', multiple=True,
@@ -96,7 +155,7 @@ def init_config(output: str):
               help='Recursively scan subdirectories (default: recursive)')
 @click.pass_context
 def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str, 
-           config: Optional[str], whitelist: tuple, blacklist: tuple, 
+           config: Optional[str], preset: Optional[str], whitelist: tuple, blacklist: tuple, 
            no_relations: bool, model: Optional[str], limit: Optional[int], 
            fresh: bool, name: Optional[str], recursive: bool):
     """
@@ -107,8 +166,14 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
     
     Examples:
     
+        # Ingest with preset (recommended!)
+        alita inventory ingest --dir ./my-project -g ./graph.json --preset python
+        
         # Ingest local directory (simple!)
         alita inventory ingest --dir ./my-project -g ./graph.json -w "*.py" -w "*.md"
+        
+        # Combine preset with custom patterns
+        alita inventory ingest --dir ./src -g ./graph.json -p typescript -w "*.json"
         
         # Ingest with custom name
         alita inventory ingest --dir ./docs -g ./graph.json --name "my-docs"
@@ -119,6 +184,32 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
         # Ingest with LLM/guardrails config
         alita inventory ingest --dir ./src -g ./graph.json -c ./config.yml
     """
+    # Load preset configuration if specified
+    preset_whitelist = []
+    preset_blacklist = []
+    
+    if preset:
+        from alita_sdk.community.inventory import get_preset, list_presets
+        
+        try:
+            preset_config = get_preset(preset)
+            preset_whitelist = preset_config.get('whitelist', [])
+            preset_blacklist = preset_config.get('blacklist', [])
+            
+            click.echo(f"📋 Using preset: {preset}")
+            if preset_whitelist:
+                click.echo(f"   Whitelist: {', '.join(preset_whitelist)}")
+            if preset_blacklist:
+                click.echo(f"   Blacklist: {', '.join(preset_blacklist)}")
+        except ValueError as e:
+            available = ', '.join(list_presets())
+            raise click.ClickException(f"Unknown preset '{preset}'. Available: {available}")
+    
+    # Merge preset patterns with user-provided patterns
+    # User patterns are added after preset patterns (more specific)
+    final_whitelist = list(preset_whitelist) + list(whitelist)
+    final_blacklist = list(preset_blacklist) + list(blacklist)
+    
     # Validate: must have either --toolkit or --dir
     if not toolkit and not directory:
         raise click.ClickException("Must specify either --toolkit or --dir")
@@ -266,8 +357,8 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
         result = pipeline.run(
             source=source_name,
             branch=branch,
-            whitelist=list(whitelist) if whitelist else None,
-            blacklist=list(blacklist) if blacklist else None,
+            whitelist=final_whitelist if final_whitelist else None,
+            blacklist=final_blacklist if final_blacklist else None,
             extract_relations=not no_relations,
             max_documents=limit,
         )

@@ -229,18 +229,88 @@ TYPE_NORMALIZATION_MAP = {
     "product": "platform",
     
     # ==========================================================================
-    # SERVICE & API FAMILY → service
+    # SERVICE & API FAMILY → Keep distinct types for different communication patterns
     # ==========================================================================
     "Service": "service",
     "Services": "service",
-    "api": "service",
-    "API": "service",
-    "api_endpoint": "service",
-    "endpoint": "service",
+    "Microservice": "service",
+    "microservice": "service",
     "web_service": "service",
     "server": "service",
     "client": "service",
     "hostingservice": "service",
+    
+    # REST API (do NOT normalize to generic 'service')
+    "REST API": "rest_api",
+    "rest_api": "rest_api",
+    "restapi": "rest_api",
+    "REST": "rest_api",
+    "api": "rest_api",  # Generic 'api' defaults to REST (most common)
+    "API": "rest_api",
+    "OpenAPI": "rest_api",
+    "openapi": "rest_api",
+    "swagger": "rest_api",
+    "REST Endpoint": "rest_endpoint",
+    "rest_endpoint": "rest_endpoint",
+    "endpoint": "rest_endpoint",
+    "api_endpoint": "rest_endpoint",
+    "http_endpoint": "rest_endpoint",
+    "rest_resource": "rest_resource",
+    "resource": "rest_resource",
+    
+    # GraphQL (do NOT normalize to 'service')
+    "GraphQL API": "graphql_api",
+    "graphql_api": "graphql_api",
+    "graphql": "graphql_api",
+    "GraphQL": "graphql_api",
+    "graphql_schema": "graphql_api",
+    "GraphQL Query": "graphql_query",
+    "graphql_query": "graphql_query",
+    "query": "graphql_query",  # Context-dependent, use cautiously
+    "GraphQL Mutation": "graphql_mutation",
+    "graphql_mutation": "graphql_mutation",
+    "mutation": "graphql_mutation",
+    "GraphQL Subscription": "graphql_subscription",
+    "graphql_subscription": "graphql_subscription",
+    "subscription": "graphql_subscription",
+    "GraphQL Type": "graphql_type",
+    "graphql_type": "graphql_type",
+    
+    # gRPC (do NOT normalize to 'service')
+    "gRPC Service": "grpc_service",
+    "grpc_service": "grpc_service",
+    "grpc": "grpc_service",
+    "gRPC": "grpc_service",
+    "gRPC Method": "grpc_method",
+    "grpc_method": "grpc_method",
+    "rpc_method": "grpc_method",
+    "protobuf_message": "protobuf_message",
+    "protobuf": "protobuf_message",
+    "proto_message": "protobuf_message",
+    "Protocol Buffer": "protobuf_message",
+    
+    # Event-Driven Architecture (do NOT normalize to 'service')
+    "Event Bus": "event_bus",
+    "event_bus": "event_bus",
+    "message_broker": "event_bus",
+    "message_queue": "event_bus",
+    "kafka": "event_bus",
+    "rabbitmq": "event_bus",
+    "Event Type": "event_type",
+    "event_type": "event_type",
+    "event": "event_type",
+    "message_type": "event_type",
+    "Event Producer": "event_producer",
+    "event_producer": "event_producer",
+    "publisher": "event_producer",
+    "Event Consumer": "event_consumer",
+    "event_consumer": "event_consumer",
+    "subscriber": "event_consumer",
+    "listener": "event_consumer",
+    "Event Handler": "event_handler",
+    "event_handler": "event_handler",
+    "message_handler": "event_handler",
+    "handler": "event_handler",
     
     # ==========================================================================
     # INTEGRATION & CONNECTION FAMILY → integration
@@ -552,12 +622,36 @@ TYPE_PRIORITY = {
     "variable": 94,
     "configuration": 93,
     
-    # Service layer
+    # Service layer - specific communication patterns have higher priority than generic
     "service": 90,
-    "api": 89,
-    "endpoint": 88,
-    "integration": 87,
-    "payload": 86,
+    
+    # REST API types
+    "rest_api": 89,
+    "rest_endpoint": 88,
+    "rest_resource": 87,
+    
+    # GraphQL types
+    "graphql_api": 89,
+    "graphql_mutation": 88,
+    "graphql_query": 87,
+    "graphql_subscription": 86,
+    "graphql_type": 85,
+    
+    # gRPC types
+    "grpc_service": 89,
+    "grpc_method": 88,
+    "protobuf_message": 87,
+    
+    # Event-driven types
+    "event_bus": 89,
+    "event_type": 88,
+    "event_producer": 87,
+    "event_consumer": 87,
+    "event_handler": 86,
+    
+    # Generic fallbacks (lower priority)
+    "integration": 84,
+    "payload": 83,
     
     # Data layer
     "database": 85,
@@ -654,21 +748,32 @@ NON_MERGEABLE_TYPES = {
 # These are context-dependent - same name in different files means different things
 # e.g., "Get Tests" tool in Xray toolkit != "Get Tests" tool in Zephyr toolkit
 NEVER_DEDUPLICATE_TYPES = {
-    "tool",           # Tools belong to specific toolkits
-    "property",       # Properties belong to specific entities
-    "properties",     # Same as above
-    "parameter",      # Parameters belong to specific functions/methods
-    "argument",       # Arguments belong to specific functions
-    "field",          # Fields belong to specific tables/forms
-    "column",         # Columns belong to specific tables
-    "attribute",      # Attributes belong to specific entities
-    "option",         # Options belong to specific settings
-    "setting",        # Settings may have same name in different contexts
-    "step",           # Steps belong to specific workflows/processes
-    "test_step",      # Test steps belong to specific test cases
-    "ui_field",       # UI fields belong to specific screens
-    "endpoint",       # Endpoints may have same path in different APIs
-    "method",         # Methods belong to specific classes
+    "tool",                  # Tools belong to specific toolkits
+    "property",              # Properties belong to specific entities
+    "properties",            # Same as above
+    "parameter",             # Parameters belong to specific functions/methods
+    "argument",              # Arguments belong to specific functions
+    "field",                 # Fields belong to specific tables/forms
+    "column",                # Columns belong to specific tables
+    "attribute",             # Attributes belong to specific entities
+    "option",                # Options belong to specific settings
+    "setting",               # Settings may have same name in different contexts
+    "step",                  # Steps belong to specific workflows/processes
+    "test_step",             # Test steps belong to specific test cases
+    "ui_field",              # UI fields belong to specific screens
+    "method",                # Methods belong to specific classes
+    
+    # API types - same name can exist in different API contexts
+    "rest_endpoint",         # /users endpoint in API A != /users in API B
+    "rest_resource",         # Same resource name in different REST APIs
+    "graphql_query",         # Same query name in different GraphQL schemas
+    "graphql_mutation",      # Same mutation name in different GraphQL schemas
+    "graphql_subscription",  # Same subscription in different GraphQL schemas
+    "graphql_type",          # Same type name in different GraphQL schemas
+    "grpc_method",           # Same method name in different gRPC services
+    "protobuf_message",      # Same message name in different proto files
+    "event_type",            # Same event name in different event busses
+    "event_handler",         # Same handler name in different services
 }
 
 

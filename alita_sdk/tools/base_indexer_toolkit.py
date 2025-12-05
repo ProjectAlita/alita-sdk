@@ -518,12 +518,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         Args:
             index_name: Index name to update meta for.
             state: New state value for the `index_meta` record.
-            result: Number of processed documents to store in the \`updated\` field.
-            update_force: If \`True\`, perform the update unconditionally, ignoring throttling.
-                          If \`False\`, perform the update only when the effective time interval has passed.
-            interval: Optional custom interval (in seconds) for this call when \`update_force\` is \`False\`.
-                      If \`None\`, falls back to the value stored in \`self._index_meta_config["update_interval"]\`
-                      if present, otherwise uses \`INDEX_META_UPDATE_INTERVAL\`.
+            result: Number of processed documents to store in the `updated` field.
+            update_force: If `True`, perform the update unconditionally, ignoring throttling.
+                          If `False`, perform the update only when the effective time interval has passed.
+            interval: Optional custom interval (in seconds) for this call when `update_force` is `False`.
+                      If `None`, falls back to the value stored in `self._index_meta_config["update_interval"]`
+                      if present, otherwise uses `INDEX_META_UPDATE_INTERVAL`.
         """
         if not hasattr(self, "_index_meta_last_update_time"):
             self._index_meta_last_update_time: Dict[str, float] = {}
