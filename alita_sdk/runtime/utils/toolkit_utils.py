@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any], 
                                    llm_client: Any, 
-                                   alita_client: Optional[Any] = None) -> List[Any]:
+                                   alita_client: Optional[Any] = None,
+                                   mcp_tokens: Optional[Dict[str, Any]] = None) -> List[Any]:
     """
     Instantiate a toolkit with LLM client support.
     
@@ -22,7 +23,8 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
     Args:
         toolkit_config: Configuration dictionary for the toolkit
         llm_client: LLM client instance for tools that need LLM capabilities
-        client: Optional additional client instance
+        alita_client: Optional additional client instance
+        mcp_tokens: Optional dictionary of MCP OAuth tokens by server URL
     
     Returns:
         List of instantiated tools from the toolkit
@@ -60,8 +62,8 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
         }
         
         # Get tools using the toolkit configuration with clients
-        # Parameter order: get_tools(tools_list, alita_client, llm, memory_store)
-        tools = get_tools([tool_config], alita_client, llm_client)
+        # Parameter order: get_tools(tools_list, alita_client, llm, memory_store, debug_mode, mcp_tokens)
+        tools = get_tools([tool_config], alita_client, llm_client, mcp_tokens=mcp_tokens)
         
         if not tools:
             logger.warning(f"No tools returned for toolkit {toolkit_name}")

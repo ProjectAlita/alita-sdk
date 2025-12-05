@@ -659,7 +659,7 @@ class AlitaClient:
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,
                           runtime_config: dict = None, llm_model: str = None,
-                          llm_config: dict = None) -> dict:
+                          llm_config: dict = None, mcp_tokens: dict = None) -> dict:
         """
         Test a single tool from a toolkit with given parameters and runtime callbacks.
 
@@ -678,6 +678,7 @@ class AlitaClient:
                 - configurable: Additional configuration parameters
                 - tags: Tags for the execution
             llm_model: Name of the LLM model to use (default: 'gpt-4o-mini')
+            mcp_tokens: Optional dictionary of MCP OAuth tokens by server URL
             llm_config: Configuration for the LLM containing:
                 - max_tokens: Maximum tokens for response (default: 1000)
                 - temperature: Temperature for response generation (default: 0.1)
@@ -797,7 +798,7 @@ class AlitaClient:
 
             # Instantiate the toolkit with client and LLM support
             try:
-                tools = instantiate_toolkit_with_client(toolkit_config, llm, self)
+                tools = instantiate_toolkit_with_client(toolkit_config, llm, self, mcp_tokens=mcp_tokens)
             except Exception as toolkit_error:
                 # Re-raise McpAuthorizationRequired to allow proper handling upstream
                 from ..utils.mcp_oauth import McpAuthorizationRequired
