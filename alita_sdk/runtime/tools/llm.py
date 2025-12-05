@@ -243,12 +243,24 @@ class LLMNode(BaseTool):
         
         For MCP tools with persistent sessions, we reuse the same event loop
         that was used to create the MCP client and sessions (set by CLI).
+
+        When running in Streamlit context, propagates the script run context
+        to worker threads to prevent NoSessionContext errors.
         """
         try:
             loop = asyncio.get_running_loop()
             # Already in async context - run in thread with new loop
             import threading
             
+            # Try to capture Streamlit context from current thread
+            streamlit_ctx = None
+            add_script_run_ctx = None
+            try:
+                from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ctx
+                streamlit_ctx = get_script_run_ctx()
+            except (ImportError, Exception) as e:
+                logger.debug(f"Streamlit context not available or failed to capture: {e}")
+
             result_container = []
             
             def run_in_thread():
@@ -260,6 +272,15 @@ class LLMNode(BaseTool):
                     new_loop.close()
             
             thread = threading.Thread(target=run_in_thread)
+
+            # Propagate Streamlit context to the worker thread if available
+            if streamlit_ctx is not None and add_script_run_ctx is not None:
+                try:
+                    add_script_run_ctx(thread, streamlit_ctx)
+                    logger.debug("Successfully propagated Streamlit context to worker thread")
+                except Exception as e:
+                    logger.warning(f"Failed to propagate Streamlit context to worker thread: {e}")
+
             thread.start()
             thread.join()
             return result_container[0] if result_container else None
