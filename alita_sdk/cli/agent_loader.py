@@ -8,6 +8,7 @@ import json
 import yaml
 from pathlib import Path
 from typing import Dict, Any
+from pydantic import SecretStr
 
 from .config import substitute_env_vars
 
@@ -85,6 +86,25 @@ def load_agent_definition(file_path: str) -> Dict[str, Any]:
     raise ValueError(f"Unsupported file format: {path.suffix}")
 
 
+def unwrap_secrets(obj: Any) -> Any:
+    """
+    Recursively unwrap pydantic SecretStr values into plain strings.
+
+    Handles nested dicts, lists, tuples, and sets while preserving structure.
+    """
+    if isinstance(obj, SecretStr):
+        return obj.get_secret_value()
+    if isinstance(obj, dict):
+        return {k: unwrap_secrets(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [unwrap_secrets(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(unwrap_secrets(v) for v in obj)
+    if isinstance(obj, set):
+        return {unwrap_secrets(v) for v in obj}
+    return obj
+
+
 def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: list, 
                                llm_model: str, llm_temperature: float, llm_max_tokens: int) -> Dict[str, Any]:
     """
@@ -128,12 +148,13 @@ def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: list,
                     if hasattr(toolkit_class, 'toolkit_config_schema'):
                         schema = toolkit_class.toolkit_config_schema()
                         validated_config = schema(**toolkit_config)
-                        # validated_dict = validated_config.model_dump()
-                        # validated_dict['type'] = toolkit_config.get('type')
-                        # validated_dict['toolkit_name'] = toolkit_config.get('toolkit_name')
-                        # validated_toolkit_configs.append(validated_dict)
-
-                    validated_toolkit_configs.append(toolkit_config)
+                        # Use python mode so SecretStr remains as objects, then unwrap recursively
+                        validated_dict = unwrap_secrets(validated_config.model_dump(mode="python"))
+                        validated_dict['type'] = toolkit_config.get('type')
+                        validated_dict['toolkit_name'] = toolkit_config.get('toolkit_name')
+                        validated_toolkit_configs.append(validated_dict)
+                    else:
+                        validated_toolkit_configs.append(toolkit_config)
                 else:
                     validated_toolkit_configs.append(toolkit_config)
             except Exception:
