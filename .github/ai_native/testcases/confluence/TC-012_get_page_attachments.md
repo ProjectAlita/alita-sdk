@@ -41,4 +41,8 @@ Execute the `get_page_attachments` tool with page_id parameter set to `104693762
 
 Verify that the output contains a list of attachment dictionaries with metadata, comments, content, and llm_analysis keys.
 
-**Expectation:** The output is a list of dictionaries, each containing attachment metadata (id, title, mediaType, fileSize, creator, created, updated), comments, content (truncated to max_content_length), and llm_analysis for supported file types.
+**Expectation:** The output is a list of dictionaries, and contains 
+- metadata:
+  - name: test_attachment.txt
+  - size: 25
+  - creator: Vladyslav Variushkin

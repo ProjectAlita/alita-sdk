@@ -41,4 +41,4 @@ Execute the `get_page_with_image_descriptions` tool with page_id parameter set t
 
 Verify that the output contains page content in markdown format with image descriptions instead of image references.
 
-**Expectation:** The output is a string containing the page content with textual descriptions of image which is a field with green corn 
+**Expectation:** The output is a string containing the actual immage describes field with green crops. Make sure that the description matches contextually.  
