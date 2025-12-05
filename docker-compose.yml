@@ -20,6 +20,7 @@ services:
       - PYTHONPATH=/app
     volumes:
       - ./.github:/app/.github
+      - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk
     command: >
       sh -c "alita agent execute-test-cases
