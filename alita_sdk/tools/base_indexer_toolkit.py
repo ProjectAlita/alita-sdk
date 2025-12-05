@@ -164,6 +164,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 self._clean_index(index_name)
             #
             self.index_meta_init(index_name, kwargs)
+            self._emit_index_event(index_name)
             #
             self._log_tool_event(f"Indexing data into collection with suffix '{index_name}'. It can take some time...")
             self._log_tool_event(f"Loading the documents to index...{kwargs}")
