@@ -105,8 +105,7 @@ class PreloadedChatModel(BaseChatModel):  # pylint: disable=R0903
     model_name: str = ""
     max_tokens: Optional[int] = 256
     temperature: Optional[float] = 0.9
-    top_p: Optional[float] = 0.9
-    top_k: Optional[int] = 20
+    reasoning_effort: Optional[str] = None
     token_limit: Optional[int] = 1024
 
     _local_streams: Any = PrivateAttr()
@@ -252,8 +251,7 @@ class PreloadedChatModel(BaseChatModel):  # pylint: disable=R0903
             "return_full_text": False,
             "temperature": self.temperature,
             "do_sample": True,
-            "top_k": self.top_k,
-            "top_p": self.top_p,
+            "reasoning_effort": self.reasoning_effort
         }
         #
         try:
@@ -302,8 +300,6 @@ class PreloadedChatModel(BaseChatModel):  # pylint: disable=R0903
             "return_full_text": False,
             "temperature": self.temperature,
             "do_sample": True,
-            "top_k": self.top_k,
-            "top_p": self.top_p,
         }
         #
         while True:

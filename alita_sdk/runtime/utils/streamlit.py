@@ -287,7 +287,6 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                     model_config={
                         "temperature": 0.1,
                         "max_tokens": 1000,
-                        "top_p": 1.0
                     }
                 )
             except Exception as e:
@@ -1256,7 +1255,6 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                     model_config={
                         "temperature": 0.1,
                         "max_tokens": 1000,
-                        "top_p": 1.0
                     }
                 )
             except Exception as e:
@@ -1387,20 +1385,18 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                                 help="Maximum number of tokens in the AI response"
                             )
                             
-                            top_p = st.slider(
-                                "Top-p:",
-                                min_value=0.1,
-                                max_value=1.0,
-                                value=1.0,
-                                step=0.1,
-                                help="Controls diversity via nucleus sampling"
+                            reasoning_effort = st.selectbox(
+                                "Reasoning effort:",
+                                options=['null', 'low', 'medium', 'high'],
+                                index=0,
+                                help="Higher effort better reasoning, slower response"
                             )
                         
                         # Create LLM config
                         llm_config = {
                             'max_tokens': max_tokens,
                             'temperature': temperature,
-                            'top_p': top_p
+                            'reasoning_effort': reasoning_effort
                         }
                         
                         col1, col2 = st.columns([3, 1])

@@ -204,7 +204,6 @@ def toolkit_test(ctx, toolkit_type: str, tool: str, config_file, params,
         llm_config = {
             'temperature': temperature,
             'max_tokens': max_tokens,
-            'top_p': 1.0
         }
         
         # Execute test

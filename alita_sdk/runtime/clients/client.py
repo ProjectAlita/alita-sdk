@@ -243,6 +243,7 @@ class AlitaClient:
             "stream_usage": model_config.get("stream_usage", True),
             "max_tokens": model_config.get("max_tokens", None),
             "temperature": model_config.get("temperature"),
+            "reasoning_effort": model_config.get("reasoning_effort"),
             "max_retries": model_config.get("max_retries", 3),
             "seed": model_config.get("seed", None),
             "openai_organization": str(self.project_id),
@@ -361,7 +362,7 @@ class AlitaClient:
                 model_name=data['llm_settings']['model_name'],
                 model_config={
                     "max_tokens": data['llm_settings']['max_tokens'],
-                    "top_p": data['llm_settings']['top_p'],
+                    "reasoning_effort": data['llm_settings'].get('reasoning_effort'),
                     "temperature": data['llm_settings']['temperature'],
                     "model_project_id": data['llm_settings'].get('model_project_id'),
                 }
@@ -725,7 +726,6 @@ class AlitaClient:
             llm_config = {
                 'max_tokens': 1024,
                 'temperature': 0.1,
-                'top_p': 1.0
             }
         import logging
         logger = logging.getLogger(__name__)
