@@ -648,11 +648,10 @@ class EntityExtractor:
                 attempt_num = attempt + 1
                 
                 if attempt_num < self.max_retries:
-                    # Calculate delay with exponential backoff
-                    delay = self.retry_delay * (2 ** attempt)
+                    delay = 10 * attempt_num
                     logger.warning(
                         f"Entity extraction failed for '{file_path}' (attempt {attempt_num}/{self.max_retries}): {e}. "
-                        f"Retrying in {delay:.1f}s..."
+                        f"Retrying in {delay}s..."
                     )
                     time.sleep(delay)
                 else:
@@ -926,10 +925,11 @@ class RelationExtractor:
                 attempt_num = attempt + 1
                 
                 if attempt_num < self.max_retries:
-                    delay = self.retry_delay * (2 ** attempt)
+                    # Exponential backoff: 10^0=1s, 10^1=10s, 10^2=100s
+                    delay = 10 ** attempt
                     logger.warning(
                         f"Relation extraction failed for '{file_path}' (attempt {attempt_num}/{self.max_retries}): {e}. "
-                        f"Retrying in {delay:.1f}s..."
+                        f"Retrying in {delay}s..."
                     )
                     time.sleep(delay)
                 else:
