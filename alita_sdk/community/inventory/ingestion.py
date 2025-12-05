@@ -723,11 +723,15 @@ class IngestionPipeline(BaseModel):
                 by_file[fpath] = []
             by_file[fpath].append(ent)
         
-        # Extract relations within each file
-        for file_path, file_entities in by_file.items():
-            if len(file_entities) < 2:
-                continue
-            
+        # Filter files with enough entities for relation extraction
+        files_to_process = [(fp, ents) for fp, ents in by_file.items() if len(ents) >= 2]
+        total_files = len(files_to_process)
+        
+        if total_files == 0:
+            return []
+        
+        # Extract relations within each file with progress reporting
+        for file_idx, (file_path, file_entities) in enumerate(files_to_process):
             # Use first entity's doc for context
             doc = file_entities[0].get('source_doc')
             if not doc:
@@ -752,6 +756,16 @@ class IngestionPipeline(BaseModel):
                 all_entities=all_entity_dicts
             )
             relations.extend(file_relations)
+            
+            # Log progress periodically (every 10 files or at specific percentages)
+            files_done = file_idx + 1
+            if files_done % 10 == 0 or files_done == total_files or files_done == 1:
+                pct = (files_done / total_files) * 100
+                self._log_progress(
+                    f"🔗 Relations: {files_done}/{total_files} files ({pct:.0f}%) | "
+                    f"Found {len(relations)} relations so far",
+                    "relations"
+                )
         
         return relations
     
@@ -1099,8 +1113,13 @@ class IngestionPipeline(BaseModel):
                     )
             
             if extract_relations and all_entities:
-                self._log_progress(f"🔗 Extracting relations...", "relations")
-                relations = self._extract_relations(all_entities, schema)
+                graph_entities = self._knowledge_graph.get_all_entities()
+                self._log_progress(
+                    f"🔗 Extracting relations from {len(all_entities)} new entities "
+                    f"(graph has {len(graph_entities)} total)...",
+                    "relations"
+                )
+                relations = self._extract_relations(all_entities, schema, all_graph_entities=graph_entities)
                 
                 for rel in relations:
                     if self._knowledge_graph.add_relation(
