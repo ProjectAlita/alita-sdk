@@ -1,0 +1,36 @@
+{
+  "type": "ado_repos",
+  "toolkit_name": "ADO",
+  "limit": 5,
+  "base_branch": "main",
+  "active_branch": "main",
+  "selected_tools": [
+    "list_branches_in_repo",
+    "set_active_branch",
+    "list_files",
+    "list_open_pull_requests",
+    "get_pull_request",
+    "list_pull_request_files",
+    "create_branch",
+    "read_file",
+    "create_file",
+    "update_file",
+    "delete_file",
+    "get_work_items",
+    "comment_on_pull_request",
+    "create_pull_request",
+    "get_commits",
+    "index_data",
+    "search_index",
+    "remove_index",
+    "list_collections"
+  ],
+  "ado_repos_configuration": {
+    "repository_id": "${ADO_REPOSITORY_ID}",
+    "ado_configuration": {
+      "token": "${ADO_TOKEN}",
+      "project": "${ADO_PROJECT}",
+      "organization_url": "${ADO_ORGANIZATION_URL}"
+    }
+  }
+}

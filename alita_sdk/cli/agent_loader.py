@@ -128,12 +128,12 @@ def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: list,
                     if hasattr(toolkit_class, 'toolkit_config_schema'):
                         schema = toolkit_class.toolkit_config_schema()
                         validated_config = schema(**toolkit_config)
-                        validated_dict = validated_config.model_dump()
-                        validated_dict['type'] = toolkit_config.get('type')
-                        validated_dict['toolkit_name'] = toolkit_config.get('toolkit_name')
-                        validated_toolkit_configs.append(validated_dict)
-                    else:
-                        validated_toolkit_configs.append(toolkit_config)
+                        # validated_dict = validated_config.model_dump()
+                        # validated_dict['type'] = toolkit_config.get('type')
+                        # validated_dict['toolkit_name'] = toolkit_config.get('toolkit_name')
+                        # validated_toolkit_configs.append(validated_dict)
+
+                    validated_toolkit_configs.append(toolkit_config)
                 else:
                     validated_toolkit_configs.append(toolkit_config)
             except Exception:
@@ -168,7 +168,6 @@ def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: list,
                 'settings': toolkit_config,
                 'selected_tools': toolkit_config.get('selected_tools', [])
             })
-    
     return {
         'instructions': agent_def.get('system_prompt', ''),
         'tools': tools,

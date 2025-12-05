@@ -11,8 +11,10 @@ import json
 import logging
 import sqlite3
 import sys
+import re
 from typing import Optional, Dict, Any, List
 from pathlib import Path
+from datetime import datetime
 import yaml
 
 from rich.console import Console
@@ -39,6 +41,335 @@ logger = logging.getLogger(__name__)
 
 # Create a rich console for beautiful output
 console = Console()
+
+
+def resolve_toolkit_config_path(config_path_str: str, test_file: Path, test_cases_dir: Path) -> Optional[str]:
+    """
+    Resolve toolkit configuration file path from test case.
+    
+    Tries multiple locations in order:
+    1. Absolute path
+    2. Relative to test case file directory
+    3. Relative to test cases directory
+    4. Relative to workspace root
+    
+    Args:
+        config_path_str: Config path from test case
+        test_file: Path to the test case file
+        test_cases_dir: Path to test cases directory
+        
+    Returns:
+        Absolute path to config file if found, None otherwise
+    """
+    if not config_path_str:
+        return None
+    
+    # Normalize path separators
+    config_path_str = config_path_str.replace('\\', '/')
+    
+    # Try absolute path first
+    config_path = Path(config_path_str)
+    if config_path.is_absolute() and config_path.exists():
+        return str(config_path)
+    
+    # Try relative to test case file directory
+    config_path = test_file.parent / config_path_str
+    if config_path.exists():
+        return str(config_path)
+    
+    # Try relative to test_cases_dir
+    config_path = test_cases_dir / config_path_str
+    if config_path.exists():
+        return str(config_path)
+    
+    # Try relative to workspace root
+    workspace_root = Path.cwd()
+    config_path = workspace_root / config_path_str
+    if config_path.exists():
+        return str(config_path)
+    
+    return None
+
+
+def parse_test_case(test_case_path: str) -> Dict[str, Any]:
+    """
+    Parse a test case markdown file to extract configuration, steps, and expectations.
+    
+    Args:
+        test_case_path: Path to the test case markdown file
+        
+    Returns:
+        Dictionary containing:
+        - name: Test case name
+        - objective: Test objective
+        - config_path: Path to toolkit config file
+        - generate_test_data: Boolean flag indicating if test data generation is needed (default: True)
+        - test_data_config: Dictionary of test data configuration from table
+        - prerequisites: Pre-requisites section text
+        - variables: List of variable placeholders found (e.g., {{TEST_PR_NUMBER}})
+        - steps: List of test steps with their descriptions
+        - expectations: List of expectations/assertions
+    """
+    path = Path(test_case_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Test case not found: {test_case_path}")
+    
+    content = path.read_text(encoding='utf-8')
+    
+    # Extract test case name from the first heading
+    name_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+    name = name_match.group(1) if name_match else path.stem
+    
+    # Extract objective
+    objective_match = re.search(r'##\s+Objective\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
+    objective = objective_match.group(1).strip() if objective_match else ""
+    
+    # Extract config path and generateTestData flag
+    config_section_match = re.search(r'##\s+Config\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
+    config_path = None
+    generate_test_data = True  # Default to True if not specified
+    
+    if config_section_match:
+        config_section = config_section_match.group(1)
+        # Extract path
+        path_match = re.search(r'path:\s*(.+?)(?=\n|$)', config_section, re.MULTILINE)
+        if path_match:
+            config_path = path_match.group(1).strip()
+        
+        # Extract generateTestData flag
+        gen_data_match = re.search(r'generateTestData\s*:\s*(true|false)', config_section, re.IGNORECASE)
+        if gen_data_match:
+            generate_test_data = gen_data_match.group(1).lower() == 'true'
+    
+    # Extract Test Data Configuration table
+    test_data_config = {}
+    config_section_match = re.search(r'##\s+Test Data Configuration\s*\n(.+?)(?=\n##|\Z)', content, re.DOTALL)
+    if config_section_match:
+        config_section = config_section_match.group(1)
+        # Parse markdown table (format: | Parameter | Value | Description |)
+        table_rows = re.findall(r'\|\s*\*\*([^*]+)\*\*\s*\|\s*`?([^|`]+)`?\s*\|', config_section)
+        for param, value in table_rows:
+            test_data_config[param.strip()] = value.strip()
+    
+    # Extract Pre-requisites section
+    prerequisites = ""
+    prereq_match = re.search(r'##\s+Pre-requisites\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
+    if prereq_match:
+        prerequisites = prereq_match.group(1).strip()
+    
+    # Find all variable placeholders ({{VARIABLE_NAME}})
+    variables = list(set(re.findall(r'\{\{([A-Z_]+)\}\}', content)))
+    
+    # Extract test steps and expectations
+    steps = []
+    expectations = []
+    
+    # Find all Step sections
+    step_pattern = r'###\s+Step\s+(\d+):\s+(.+?)\n\n(.+?)(?=\n\n###|\n\n##|\Z)'
+    for step_match in re.finditer(step_pattern, content, re.DOTALL):
+        step_num = step_match.group(1)
+        step_title = step_match.group(2).strip()
+        step_content = step_match.group(3).strip()
+        
+        # Extract the actual instruction (first paragraph before "Expectation:")
+        instruction_match = re.search(r'(.+?)(?=\n\n\*\*Expectation:\*\*|\Z)', step_content, re.DOTALL)
+        instruction = instruction_match.group(1).strip() if instruction_match else step_content
+        
+        # Extract expectation if present
+        expectation_match = re.search(r'\*\*Expectation:\*\*\s+(.+)', step_content, re.DOTALL)
+        expectation = expectation_match.group(1).strip() if expectation_match else None
+        
+        steps.append({
+            'number': int(step_num),
+            'title': step_title,
+            'instruction': instruction,
+            'expectation': expectation
+        })
+        
+        if expectation:
+            expectations.append({
+                'step': int(step_num),
+                'description': expectation
+            })
+    
+    return {
+        'name': name,
+        'objective': objective,
+        'config_path': config_path,
+        'generate_test_data': generate_test_data,
+        'test_data_config': test_data_config,
+        'prerequisites': prerequisites,
+        'variables': variables,
+        'steps': steps,
+        'expectations': expectations
+    }
+
+
+def validate_test_output(output: str, expectation: str) -> tuple[bool, str]:
+    """
+    Validate test output against expectations.
+    
+    Args:
+        output: The actual output from the agent
+        expectation: The expected result description
+        
+    Returns:
+        Tuple of (passed: bool, details: str)
+    """
+    # Simple keyword-based validation
+    # Extract key phrases from expectation
+    
+    # Common patterns in expectations
+    if "contains" in expectation.lower():
+        # Extract what should be contained
+        contains_match = re.search(r'contains.*?["`]([^"`]+)["`]', expectation, re.IGNORECASE)
+        if contains_match:
+            expected_text = contains_match.group(1)
+            if expected_text in output:
+                return True, f"Output contains expected text: '{expected_text}'"
+            else:
+                return False, f"Output does not contain expected text: '{expected_text}'"
+    
+    if "without errors" in expectation.lower() or "runs without errors" in expectation.lower():
+        # Check for common error indicators
+        error_indicators = ['error', 'exception', 'failed', 'traceback']
+        has_error = any(indicator in output.lower() for indicator in error_indicators)
+        if not has_error:
+            return True, "Execution completed without errors"
+        else:
+            return False, "Execution encountered errors"
+    
+    # Default: assume pass if output is non-empty
+    if output and len(output.strip()) > 0:
+        return True, "Output generated successfully"
+    
+    return False, "No output generated"
+
+
+def _build_bulk_data_gen_prompt(parsed_test_cases: list) -> str:
+    """Build consolidated requirements text for bulk test data generation."""
+    requirements = []
+    for idx, tc in enumerate(parsed_test_cases, 1):
+        test_case = tc['data']
+        test_file = tc['file']
+        
+        parts = [f"Test Case #{idx}: {test_case['name']}", f"File: {test_file.name}", ""]
+        
+        if test_case.get('test_data_config'):
+            parts.append("Test Data Configuration:")
+            for param, value in test_case['test_data_config'].items():
+                parts.append(f"  - {param}: {value}")
+        
+        if test_case.get('prerequisites'):
+            parts.append(f"\nPre-requisites:\n{test_case['prerequisites']}")
+        
+        if test_case.get('variables'):
+            parts.append(f"\nVariables to generate: {', '.join(test_case['variables'])}")
+        
+        requirements.append("\n".join(parts))
+    
+    return f"""{'='*60}
+
+{chr(10).join(requirements)}
+
+{'='*60}"""
+
+
+def _build_bulk_execution_prompt(parsed_test_cases: list) -> str:
+    """Build consolidated prompt for bulk test execution."""
+    parts = []
+    
+    for idx, tc_info in enumerate(parsed_test_cases, 1):
+        test_case = tc_info['data']
+        test_file = tc_info['file']
+        
+        parts.append(f"\n{'='*80}\nTEST CASE #{idx}: {test_case['name']}\nFile: {test_file.name}\n{'='*80}")
+        
+        if test_case['steps']:
+            for step in test_case['steps']:
+                parts.append(f"\nStep {step['number']}: {step['title']}\n{step['instruction']}")
+                if step['expectation']:
+                    parts.append(f"Expected Result: {step['expectation']}")
+        else:
+            parts.append("\n(No steps defined)")
+    
+    return "\n".join(parts)
+
+
+def _build_validation_prompt(parsed_test_cases: list, execution_output: str) -> str:
+    """Build prompt for bulk validation of test results."""
+    parts = ["You are a test validator. Review the test execution results and validate each test case.\n\nTest Cases to Validate:\n"]
+    
+    for idx, tc_info in enumerate(parsed_test_cases, 1):
+        test_case = tc_info['data']
+        parts.append(f"\nTest Case #{idx}: {test_case['name']}")
+        if test_case['steps']:
+            for step in test_case['steps']:
+                parts.append(f"  Step {step['number']}: {step['title']}")
+                if step['expectation']:
+                    parts.append(f"  Expected: {step['expectation']}")
+    
+    parts.append(f"\n\nActual Execution Results:\n{execution_output}\n")
+    parts.append(f"""\nBased on the execution results above, validate each test case.
+
+Respond with valid JSON in this EXACT format:
+{{
+  "test_cases": [
+    {{
+      "test_number": 1,
+      "test_name": "<test case name>",
+      "steps": [
+        {{"step_number": 1, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}},
+        {{"step_number": 2, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}}
+      ]
+    }},
+    {{
+      "test_number": 2,
+      "test_name": "<test case name>",
+      "steps": [...]
+    }}
+  ]
+}}
+
+Validate all {len(parsed_test_cases)} test cases and their steps.""")
+    
+    return "\n".join(parts)
+
+
+def _extract_json_from_text(text: str) -> dict:
+    """Extract JSON object from text using brace counting."""
+    start_idx = text.find('{')
+    if start_idx == -1:
+        raise ValueError("No JSON found in text")
+    
+    brace_count = 0
+    end_idx = -1
+    for i, char in enumerate(text[start_idx:], start=start_idx):
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                end_idx = i + 1
+                break
+    
+    if end_idx == -1:
+        raise ValueError("Could not find matching closing brace")
+    
+    return json.loads(text[start_idx:end_idx])
+
+
+def _create_fallback_results(parsed_test_cases: list) -> tuple[list, int, int, int]:
+    """Create fallback results when execution/validation fails."""
+    test_results = []
+    for tc_info in parsed_test_cases:
+        test_results.append({
+            'title': tc_info['data']['name'],
+            'passed': False,
+            'file': tc_info['file'].name,
+            'step_results': []
+        })
+    return test_results, len(parsed_test_cases), 0, len(parsed_test_cases)
 
 
 def _get_alita_system_prompt(config) -> str:
@@ -2524,3 +2855,415 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
         )
         console.print(error_panel, style="red")
         raise click.Abort()
+
+
+@agent.command('execute-test-cases')
+@click.argument('agent_source')
+@click.option('--test-cases-dir', required=True, type=click.Path(exists=True, file_okay=False, dir_okay=True),
+              help='Directory containing test case files')
+@click.option('--results-dir', required=True, type=click.Path(file_okay=False, dir_okay=True),
+              help='Directory where test results will be saved')
+@click.option('--test-case', 'test_case_files', multiple=True,
+              help='Specific test case file(s) to execute (e.g., TC-001.md). Can specify multiple times. If not specified, executes all test cases.')
+@click.option('--model', help='Override LLM model')
+@click.option('--temperature', type=float, help='Override temperature')
+@click.option('--max-tokens', type=int, help='Override max tokens')
+@click.option('--dir', 'work_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True),
+              help='Grant agent filesystem access to this directory')
+@click.option('--data-generator', type=click.Path(exists=True),
+              help='Path to test data generator agent definition file')
+@click.option('--skip-data-generation', is_flag=True,
+              help='Skip test data generation step')
+@click.pass_context
+def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir: str,
+                      test_case_files: tuple, model: Optional[str], temperature: Optional[float], 
+                      max_tokens: Optional[int], work_dir: Optional[str],
+                      data_generator: Optional[str], skip_data_generation: bool):
+    """
+    Execute test cases from a directory and save results.
+    
+    This command:
+    1. (Optional) Executes test data generator agent to provision test data
+    2. Scans TEST_CASES_DIR for test case markdown files (TC-*.md)
+    3. For each test case:
+       - Parses the test case to extract config, steps, and expectations
+       - Loads the agent with the toolkit config specified in the test case
+       - Executes each test step
+       - Validates output against expectations
+       - Generates a test result file
+    4. Saves all results to RESULTS_DIR
+    
+    AGENT_SOURCE: Path to agent definition file (e.g., .github/agents/test-runner.agent.md)
+    
+    Examples:
+    
+        # Execute all test cases with data generator
+        alita-cli agent execute-test-cases \\
+            .github/agents/test-runner.agent.json \\
+            --test-cases-dir .github/ai_native/testcases \\
+            --results-dir .github/ai_native/results \\
+            --data-generator .github/agents/test-data-generator.agent.json
+        
+        # Execute specific test cases
+        alita-cli agent execute-test-cases \\
+            .github/agents/test-runner.agent.json \\
+            --test-cases-dir .github/ai_native/testcases \\
+            --results-dir .github/ai_native/results \\
+            --test-case TC-001.md \\
+            --test-case TC-002.md
+        
+        # Execute without data generation
+        alita-cli agent execute-test-cases \\
+            .github/agents/test-runner.agent.json \\
+            --test-cases-dir .github/ai_native/testcases \\
+            --results-dir .github/ai_native/results \\
+            --skip-data-generation
+        
+        # With custom model and temperature
+        alita-cli agent execute-test-cases \\
+            .github/agents/test-runner.agent.json \\
+            --test-cases-dir .github/ai_native/testcases \\
+            --results-dir .github/ai_native/results \\
+            --model gpt-4o \\
+            --temperature 0.0
+    """
+    config = ctx.obj['config']
+    client = get_client(ctx)
+    
+    try:        
+        # Load agent definition
+        if not Path(agent_source).exists():
+            raise click.ClickException(f"Agent definition not found: {agent_source}")
+        
+        agent_def = load_agent_definition(agent_source)
+        agent_name = agent_def.get('name', Path(agent_source).stem)
+        
+        # Find all test case files (recursively search subdirectories)
+        test_cases_path = Path(test_cases_dir)
+        
+        # Filter test cases based on --test-case options
+        if test_case_files:
+            # User specified specific test case files
+            test_case_files_set = set(test_case_files)
+            all_test_cases = sorted(test_cases_path.rglob('TC-*.md'))
+            test_case_files_list = [
+                tc for tc in all_test_cases 
+                if tc.name in test_case_files_set
+            ]
+            
+            # Check if all specified files were found
+            found_names = {tc.name for tc in test_case_files_list}
+            not_found = test_case_files_set - found_names
+            if not_found:
+                console.print(f"[yellow]⚠ Warning: Test case files not found: {', '.join(not_found)}[/yellow]")
+        else:
+            # Execute all test cases
+            test_case_files_list = sorted(test_cases_path.rglob('TC-*.md'))
+        
+        if not test_case_files_list:
+            if test_case_files:
+                console.print(f"[yellow]No matching test case files found in {test_cases_dir}[/yellow]")
+            else:
+                console.print(f"[yellow]No test case files found in {test_cases_dir}[/yellow]")
+            return
+        
+        console.print(f"\n[bold cyan]🧪 Test Execution Started[/bold cyan]")
+        console.print(f"Agent: [bold]{agent_name}[/bold]")
+        console.print(f"Test Cases: {len(test_case_files_list)}")
+        if test_case_files:
+            console.print(f"Selected: [cyan]{', '.join(test_case_files)}[/cyan]")
+        console.print(f"Results Directory: {results_dir}\n")
+        
+        data_gen_def = None
+        if data_generator and not skip_data_generation:
+            try:
+                data_gen_def = load_agent_definition(data_generator)
+                data_gen_name = data_gen_def.get('name', Path(data_generator).stem)
+                console.print(f"Data Generator Agent: [bold]{data_gen_name}[/bold]\n")
+            except Exception as e:
+                console.print(f"[yellow]⚠ Warning: Failed to setup data generator: {e}[/yellow]")
+                console.print("[yellow]Continuing with test execution...[/yellow]\n")
+                logger.debug(f"Data generator setup error: {e}", exc_info=True)
+        
+        # Track overall results
+        total_tests = 0
+        passed_tests = 0
+        failed_tests = 0
+        test_results = []  # Store structured results for final report
+        
+        # Store bulk data generation chat history to pass to test executors
+        bulk_gen_chat_history = []
+        
+        # Parse all test cases upfront for bulk data generation
+        parsed_test_cases = []
+        for test_file in test_case_files_list:
+            try:
+                test_case = parse_test_case(str(test_file))
+                parsed_test_cases.append({
+                    'file': test_file,
+                    'data': test_case
+                })
+            except Exception as e:
+                console.print(f"[yellow]⚠ Warning: Failed to parse {test_file.name}: {e}[/yellow]")
+                logger.debug(f"Parse error for {test_file.name}: {e}", exc_info=True)
+        
+        # Filter test cases that need data generation
+        test_cases_needing_data_gen = [
+            tc for tc in parsed_test_cases 
+            if tc['data'].get('generate_test_data', True)
+        ]
+        
+        # Bulk test data generation (if enabled)
+        if data_gen_def and not skip_data_generation and test_cases_needing_data_gen:
+            console.print(f"\n[bold yellow]🔧 Bulk Test Data Generation[/bold yellow]")
+            console.print(f"Generating test data for {len(test_cases_needing_data_gen)} test cases...\n")
+            console.print(f"[dim]Skipping {len(parsed_test_cases) - len(test_cases_needing_data_gen)} test cases with generateTestData: false[/dim]\n")
+            
+            bulk_data_gen_prompt = _build_bulk_data_gen_prompt(test_cases_needing_data_gen)
+            
+            console.print(f"Executing test data generation prompt {bulk_data_gen_prompt}\n")
+
+            try:
+                # Setup data generator agent
+                from langgraph.checkpoint.sqlite import SqliteSaver
+                bulk_memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+                
+                # Use first test case's config or empty tuple
+                first_config_path = None
+                if parsed_test_cases:
+                    first_tc = parsed_test_cases[0]
+                    first_config_path = resolve_toolkit_config_path(
+                        first_tc['data'].get('config_path', ''),
+                        first_tc['file'],
+                        test_cases_path
+                    )
+                
+                data_gen_config_tuple = (first_config_path,) if first_config_path else ()
+                data_gen_executor, _, _, _, _, _, _ = _setup_local_agent_executor(
+                    client, data_gen_def, data_gen_config_tuple, config,
+                    model, temperature, max_tokens, bulk_memory, work_dir
+                )
+                
+                if data_gen_executor:
+                    with console.status("[yellow]Generating test data for all test cases...[/yellow]", spinner="dots"):
+                        bulk_gen_result = data_gen_executor.invoke({
+                            "input": bulk_data_gen_prompt,
+                            "chat_history": []
+                        })
+                    bulk_gen_output = extract_output_from_result(bulk_gen_result)
+                    console.print(f"[green]✓ Bulk test data generation completed[/green]")
+                    console.print(f"[dim]{bulk_gen_output}...[/dim]\n")
+                    
+                    # Store chat history from data generation to pass to test executors
+                    bulk_gen_chat_history = [
+                        {"role": "user", "content": bulk_data_gen_prompt},
+                        {"role": "assistant", "content": bulk_gen_output}
+                    ]
+                else:
+                    console.print(f"[yellow]⚠ Warning: Data generator has no executor[/yellow]\n")
+            except Exception as e:
+                console.print(f"[yellow]⚠ Warning: Bulk data generation failed: {e}[/yellow]")
+                console.print("[yellow]Continuing with test execution...[/yellow]\n")
+                logger.debug(f"Bulk data generation error: {e}", exc_info=True)
+        
+        # Execute ALL test cases in one bulk operation
+        if not parsed_test_cases:
+            console.print("[yellow]No test cases to execute[/yellow]")
+            return
+        
+        console.print(f"\n[bold yellow]📋 Executing ALL test cases in bulk...[/bold yellow]\n")
+        
+        # Use first test case's config for agent setup
+        first_tc = parsed_test_cases[0]
+        first_test_file = first_tc['file']
+        toolkit_config_path = resolve_toolkit_config_path(
+            first_tc['data'].get('config_path', ''),
+            first_test_file,
+            test_cases_path
+        )
+        toolkit_config_tuple = (toolkit_config_path,) if toolkit_config_path else ()
+        
+        # Create memory for bulk execution
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+        
+        # Initialize chat history with bulk data generation context
+        chat_history = bulk_gen_chat_history.copy()
+        
+        # Setup agent executor
+        agent_executor, _, _, _, _, _, _ = _setup_local_agent_executor(
+            client, agent_def, toolkit_config_tuple, config, model, temperature, max_tokens, memory, work_dir
+        )
+        
+        # Build bulk execution prompt
+        bulk_all_prompt = _build_bulk_execution_prompt(parsed_test_cases)
+
+        console.print(f"Executing the prompt: {bulk_all_prompt}\n")
+        
+        # Execute all test cases in bulk
+        test_results = []
+        all_execution_output = ""
+        
+        try:
+            if agent_executor:
+                with console.status(f"[yellow]Executing {len(parsed_test_cases)} test cases in bulk...[/yellow]", spinner="dots"):
+                    bulk_result = agent_executor.invoke({
+                        "input": bulk_all_prompt,
+                        "chat_history": chat_history
+                    })
+                all_execution_output = extract_output_from_result(bulk_result)
+                
+                console.print(f"[green]✓ All test cases executed[/green]")
+                console.print(f"[dim]{all_execution_output}...[/dim]\n")
+                
+                # Update chat history
+                chat_history.append({"role": "user", "content": bulk_all_prompt})
+                chat_history.append({"role": "assistant", "content": all_execution_output})
+                
+                # Now validate ALL test cases in bulk
+                console.print(f"[bold yellow]✅ Validating all test cases...[/bold yellow]\n")
+                
+                validation_prompt = _build_validation_prompt(parsed_test_cases, all_execution_output)
+
+                console.print(f"[dim]{validation_prompt}[/dim]\n")
+                
+                with console.status("[yellow]Validating all results...[/yellow]", spinner="dots"):
+                    validation_result = agent_executor.invoke({
+                        "input": validation_prompt,
+                        "chat_history": chat_history
+                    })
+
+                validation_output = extract_output_from_result(validation_result)
+                
+                console.print(f"[dim]Validation Response: {validation_output}...[/dim]\n")
+                
+                # Parse validation JSON
+                try:
+                    validation_json = _extract_json_from_text(validation_output)
+                    test_cases_results = validation_json.get('test_cases', [])
+                    
+                    # Process results for each test case
+                    total_tests = 0
+                    passed_tests = 0
+                    failed_tests = 0
+                    
+                    for tc_result in test_cases_results:
+                        test_name = tc_result.get('test_name', f"Test #{tc_result.get('test_number', '?')}")
+                        step_results = tc_result.get('steps', [])
+                        
+                        # Determine if test passed (all steps must pass)
+                        test_passed = all(step.get('passed', False) for step in step_results) if step_results else False
+                        
+                        total_tests += 1
+                        if test_passed:
+                            passed_tests += 1
+                            console.print(f"[bold green]✅ Test PASSED: {test_name}[/bold green]")
+                        else:
+                            failed_tests += 1
+                            console.print(f"[bold red]❌ Test FAILED: {test_name}[/bold red]")
+                        
+                        # Display individual step results
+                        for step_result in step_results:
+                            step_num = step_result.get('step_number')
+                            step_title = step_result.get('title', '')
+                            passed = step_result.get('passed', False)
+                            details = step_result.get('details', '')
+                            
+                            if passed:
+                                console.print(f"  [green]✓ Step {step_num}: {step_title}[/green]")
+                                console.print(f"  [dim]{details}[/dim]")
+                            else:
+                                console.print(f"  [red]✗ Step {step_num}: {step_title}[/red]")
+                                console.print(f"  [dim]{details}[/dim]")
+                        
+                        console.print()
+                        
+                        # Store result
+                        test_results.append({
+                            'title': test_name,
+                            'passed': test_passed,
+                            'file': parsed_test_cases[tc_result.get('test_number', 1) - 1]['file'].name if tc_result.get('test_number', 1) - 1 < len(parsed_test_cases) else 'unknown',
+                            'step_results': step_results
+                        })
+                    
+                except Exception as e:
+                    logger.debug(f"Validation parsing failed: {e}")
+                    console.print(f"[yellow]⚠ Warning: Could not parse validation results: {e}[/yellow]\n")
+                    test_results, total_tests, passed_tests, failed_tests = _create_fallback_results(parsed_test_cases)
+            else:
+                console.print(f"[red]✗ No agent executor available[/red]\n")
+                test_results, total_tests, passed_tests, failed_tests = _create_fallback_results(parsed_test_cases)
+                    
+        except Exception as e:
+            console.print(f"[red]✗ Bulk execution failed: {e}[/red]\n")
+            logger.debug(f"Bulk execution error: {e}", exc_info=True)
+            test_results, total_tests, passed_tests, failed_tests = _create_fallback_results(parsed_test_cases)
+                
+        # Generate summary report
+        console.print(f"\n[bold]{'='*60}[/bold]")
+        console.print(f"[bold cyan]📊 Test Execution Summary[/bold cyan]")
+        console.print(f"[bold]{'='*60}[/bold]\n")
+        
+        summary_table = Table(box=box.ROUNDED, border_style="cyan")
+        summary_table.add_column("Metric", style="bold")
+        summary_table.add_column("Value", justify="right")
+        
+        summary_table.add_row("Total Tests", str(total_tests))
+        summary_table.add_row("Passed", f"[green]{passed_tests}[/green]")
+        summary_table.add_row("Failed", f"[red]{failed_tests}[/red]")
+        
+        if total_tests > 0:
+            pass_rate = (passed_tests / total_tests) * 100
+            summary_table.add_row("Pass Rate", f"{pass_rate:.1f}%")
+        
+        console.print(summary_table)
+        
+        # Generate structured JSON report
+        overall_result = "pass" if failed_tests == 0 else "fail"
+        
+        structured_report = {
+            "test_cases": [
+                {
+                    "title": r['title'], 
+                    "passed": r['passed'],
+                    "steps": r.get('step_results', [])
+                } 
+                for r in test_results
+            ],
+            "overall_result": overall_result,
+            "summary": {
+                "total_tests": total_tests,
+                "passed": passed_tests,
+                "failed": failed_tests,
+                "pass_rate": f"{pass_rate:.1f}%" if total_tests > 0 else "0%"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Save structured report
+        results_path = Path(results_dir)
+        results_path.mkdir(parents=True, exist_ok=True)
+        summary_file = results_path / "test_execution_summary.json"
+        
+        console.print(f"\n[bold yellow]💾 Saving test execution summary...[/bold yellow]")
+        with open(summary_file, 'w') as f:
+            json.dump(structured_report, f, indent=2)
+        console.print(f"[green]✓ Summary saved to {summary_file}[/green]\n")
+        
+        # Exit with error code if any tests failed
+        if failed_tests > 0:
+            sys.exit(1)
+    
+    except click.ClickException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to execute test cases")
+        error_panel = Panel(
+            str(e),
+            title="Error",
+            border_style="red",
+            box=box.ROUNDED
+        )
+        console.print(error_panel, style="red")
+        raise click.Abort()
+
