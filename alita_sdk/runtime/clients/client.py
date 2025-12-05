@@ -358,10 +358,14 @@ class AlitaClient:
                 if var['name'] in application_variables:
                     var.update(application_variables[var['name']])
         if llm is None:
+            max_tokens = data['llm_settings'].get('max_tokens', 4000)
+            if max_tokens == -1:
+                # default nuber for case when auto is selected for agent
+                max_tokens = 4000
             llm = self.get_llm(
                 model_name=data['llm_settings']['model_name'],
                 model_config={
-                    "max_tokens": data['llm_settings']['max_tokens'],
+                    "max_tokens": max_tokens,
                     "reasoning_effort": data['llm_settings'].get('reasoning_effort'),
                     "temperature": data['llm_settings']['temperature'],
                     "model_project_id": data['llm_settings'].get('model_project_id'),
