@@ -7,6 +7,7 @@ from alita_sdk.tools.base_indexer_toolkit import BaseIndexerToolkit
 
 class NonCodeIndexerToolkit(BaseIndexerToolkit):
     def _get_indexed_data(self, index_name: str):
+        self._ensure_vectorstore_initialized()
         if not self.vector_adapter:
             raise ToolException("Vector adapter is not initialized. "
                              "Check your configuration: embedding_model and vectorstore_type.")

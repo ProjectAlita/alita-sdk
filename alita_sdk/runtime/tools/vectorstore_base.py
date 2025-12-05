@@ -155,15 +155,45 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         if values.get('alita') and values.get('embedding_model'):
             values['embeddings'] = values.get('alita').get_embeddings(values.get('embedding_model'))
 
-        if values.get('vectorstore_type') and values.get('vectorstore_params') and values.get('embedding_model'):
-            values['vectorstore'] = get_vectorstore(values['vectorstore_type'], values['vectorstore_params'], embedding_func=values['embeddings'])
-            # Initialize the new vector adapter
-            values['vector_adapter'] = VectorStoreAdapterFactory.create_adapter(values['vectorstore_type'])
-            logger.debug(f"Vectorstore wrapper initialized: {values}")
+        # Lazy initialization: vectorstore and vector_adapter are initialized on-demand
+        # This prevents errors when using non-index tools with broken/missing vector DB
         return values
+
+    def _ensure_vectorstore_initialized(self):
+        """Lazily initialize vectorstore and vector_adapter when needed for index operations."""
+        if self.vectorstore is None:
+            if not self.vectorstore_type or not self.vectorstore_params:
+                raise ToolException(
+                    "Vector store is not configured. "
+                    "Please ensure embedding_model and pgvector_configuration are provided."
+                )
+
+            from ..langchain.interfaces.llm_processor import get_vectorstore
+            try:
+                self.vectorstore = get_vectorstore(
+                    self.vectorstore_type,
+                    self.vectorstore_params,
+                    embedding_func=self.embeddings
+                )
+                logger.debug(f"Vectorstore initialized: {self.vectorstore_type}")
+            except Exception as e:
+                raise ToolException(
+                    f"Failed to initialize vector store: {str(e)}. "
+                    "Check your vector database configuration and connection."
+                )
+
+        if self.vector_adapter is None:
+            try:
+                self.vector_adapter = VectorStoreAdapterFactory.create_adapter(self.vectorstore_type)
+                logger.debug(f"Vector adapter initialized: {self.vectorstore_type}")
+            except Exception as e:
+                raise ToolException(
+                    f"Failed to initialize vector adapter: {str(e)}"
+                )
 
     def _init_pg_helper(self, language='english'):
         """Initialize PGVector helper if needed and not already initialized"""
+        self._ensure_vectorstore_initialized()
         if self.pg_helper is None and hasattr(self.vectorstore, 'connection_string') and hasattr(self.vectorstore, 'collection_name'):
             try:
                 from .pgvector_search import PGVectorSearch
@@ -192,6 +222,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         Raises:
             ToolException: When DataException occurs or other search errors
         """
+        self._ensure_vectorstore_initialized()
         try:
             return self.vectorstore.similarity_search_with_score(
                 query, filter=filter, k=k
@@ -210,19 +241,21 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
 
     def list_collections(self) -> List[str]:
         """List all collections in the vectorstore."""
-
+        self._ensure_vectorstore_initialized()
         collections = self.vector_adapter.list_collections(self)
         if not collections:
             return "No indexed collections"
         return collections
 
     def get_index_meta(self, index_name: str):
+        self._ensure_vectorstore_initialized()
         index_metas = self.vector_adapter.get_index_meta(self, index_name)
         if len(index_metas) > 1:
             raise RuntimeError(f"Multiple index_meta documents found: {index_metas}")
         return index_metas[0] if index_metas else None
 
     def get_indexed_count(self, index_name: str) -> int:
+        self._ensure_vectorstore_initialized()
         from sqlalchemy.orm import Session
         from sqlalchemy import func, or_
 
@@ -241,6 +274,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         """
         Clean the vectorstore collection by deleting all indexed data.
         """
+        self._ensure_vectorstore_initialized()
         self._log_tool_event(
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
@@ -259,6 +293,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             progress_step (int): Step for progress reporting, default is 20.
             clean_index (bool): If True, clean the index before re-indexing all documents.
         """
+        self._ensure_vectorstore_initialized()
         if clean_index:
             self._clean_index(index_name)
 
