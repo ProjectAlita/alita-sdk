@@ -516,6 +516,35 @@ TYPE_NORMALIZATION_MAP = {
     "dns_record": "configuration",
     "tone": "rule",
     "voice": "rule",
+    
+    # ==========================================================================
+    # FACT & KNOWLEDGE FAMILY → fact (semantic facts extracted by LLM)
+    # ==========================================================================
+    "fact": "fact",
+    "Fact": "fact",
+    "Facts": "fact",
+    # Code-specific fact types
+    "algorithm": "fact",
+    "behavior": "fact",
+    "validation": "fact",
+    "error_handling": "fact",
+    # Text-specific fact types
+    "decision": "fact",
+    "definition": "fact",
+    "contact": "fact",
+    
+    # ==========================================================================
+    # FILE & STRUCTURE FAMILY → file types (container nodes for entities)
+    # ==========================================================================
+    "file": "file",
+    "File": "file",
+    "source_file": "source_file",
+    "document_file": "document_file",
+    "config_file": "config_file",
+    "web_file": "web_file",
+    "directory": "directory",
+    "package": "package",
+    "folder": "directory",
 }
 
 def normalize_type(entity_type: str) -> str:
@@ -1620,7 +1649,300 @@ class GraphEnricher:
                         self.stats["similarity_links"] += 1
         
         logger.info(f"Created {self.stats['similarity_links']} similarity links")
+
+    def validate_low_confidence_relationships(
+        self,
+        confidence_threshold: float = 0.7,
+        llm: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Validate and re-evaluate relationships with confidence below threshold.
+        
+        This method routes low-confidence relationships through additional validation:
+        1. Gather context from both source and target entities
+        2. Check if relationship makes semantic sense given entity types
+        3. Optionally use LLM to validate ambiguous relationships
+        
+        Args:
+            confidence_threshold: Relationships below this are candidates for validation
+            llm: Optional LLM for re-evaluation (if None, uses heuristics only)
+            
+        Returns:
+            Dictionary with validation stats:
+            - validated: Number of relationships confirmed
+            - rejected: Number of relationships removed
+            - upgraded: Number of relationships with increased confidence
+            - downgraded: Number of relationships with decreased confidence
+        """
+        logger.info(f"Validating low-confidence relationships (threshold={confidence_threshold})...")
+        
+        stats = {
+            "candidates": 0,
+            "validated": 0,
+            "rejected": 0,
+            "upgraded": 0,
+            "downgraded": 0,
+        }
+        
+        links_to_keep = []
+        links_to_remove = []
+        
+        for link in self.graph_data.get("links", []):
+            confidence = link.get("confidence", 1.0)
+            
+            # Skip high-confidence links
+            if confidence >= confidence_threshold:
+                links_to_keep.append(link)
+                continue
+            
+            # Skip parser-extracted relationships (already validated by code structure)
+            if link.get("source") == "parser":
+                links_to_keep.append(link)
+                continue
+            
+            stats["candidates"] += 1
+            
+            # Get source and target entities
+            source_id = link.get("source")
+            target_id = link.get("target")
+            source_node = self.nodes_by_id.get(source_id)
+            target_node = self.nodes_by_id.get(target_id)
+            
+            if not source_node or not target_node:
+                # Invalid link - remove
+                stats["rejected"] += 1
+                links_to_remove.append(link)
+                continue
+            
+            # Validate using heuristics
+            validation_result = self._validate_relationship_heuristic(
+                source_node, target_node, link
+            )
+            
+            if validation_result["action"] == "keep":
+                # Update confidence if suggested
+                if "new_confidence" in validation_result:
+                    link["confidence"] = validation_result["new_confidence"]
+                    link["validation_reason"] = validation_result.get("reason", "heuristic")
+                    if validation_result["new_confidence"] > confidence:
+                        stats["upgraded"] += 1
+                    elif validation_result["new_confidence"] < confidence:
+                        stats["downgraded"] += 1
+                stats["validated"] += 1
+                links_to_keep.append(link)
+                
+            elif validation_result["action"] == "remove":
+                stats["rejected"] += 1
+                links_to_remove.append(link)
+                logger.debug(
+                    f"Removing low-confidence relationship: {source_node.get('name')} "
+                    f"--[{link.get('relation_type')}]--> {target_node.get('name')} "
+                    f"(reason: {validation_result.get('reason', 'unknown')})"
+                )
+                
+            elif validation_result["action"] == "llm_validate" and llm:
+                # Use LLM for ambiguous cases
+                llm_result = self._validate_relationship_with_llm(
+                    source_node, target_node, link, llm
+                )
+                if llm_result["valid"]:
+                    link["confidence"] = llm_result.get("confidence", confidence)
+                    link["validation_reason"] = "llm_validated"
+                    stats["validated"] += 1
+                    links_to_keep.append(link)
+                else:
+                    stats["rejected"] += 1
+                    links_to_remove.append(link)
+            else:
+                # Default: keep with same confidence
+                links_to_keep.append(link)
+                stats["validated"] += 1
+        
+        # Update links
+        self.graph_data["links"] = links_to_keep
+        
+        # Log removed links for analysis
+        if links_to_remove:
+            logger.info(f"Removed {len(links_to_remove)} invalid low-confidence relationships")
+        
+        self.stats["low_confidence_validation"] = stats
+        logger.info(
+            f"Low-confidence validation: {stats['candidates']} candidates, "
+            f"{stats['validated']} validated, {stats['rejected']} rejected, "
+            f"{stats['upgraded']} upgraded, {stats['downgraded']} downgraded"
+        )
+        
+        return stats
     
+    def _validate_relationship_heuristic(
+        self,
+        source_node: Dict,
+        target_node: Dict,
+        link: Dict
+    ) -> Dict[str, Any]:
+        """
+        Validate a relationship using heuristic rules.
+        
+        Returns:
+            Dict with 'action' (keep/remove/llm_validate) and optional 'new_confidence'
+        """
+        source_type = source_node.get("type", "").lower()
+        target_type = target_node.get("type", "").lower()
+        relation_type = link.get("relation_type", "").lower()
+        confidence = link.get("confidence", 0.5)
+        
+        # Rule 1: Invalid type combinations for specific relationships
+        invalid_combinations = {
+            # imports should be between code entities
+            "imports": {
+                "invalid_source": {"feature", "concept", "documentation", "requirement"},
+                "invalid_target": {"feature", "concept", "documentation", "requirement"},
+            },
+            # implements should have code as source
+            "implements": {
+                "invalid_source": {"documentation", "concept", "glossary_term"},
+            },
+            # contains should have container as source
+            "contains": {
+                "invalid_source": {"constant", "variable", "field", "property"},
+            },
+            # tests should have test as source
+            "tests": {
+                "invalid_source": {"class", "function", "method", "module"},
+            },
+        }
+        
+        if relation_type in invalid_combinations:
+            rules = invalid_combinations[relation_type]
+            if source_type in rules.get("invalid_source", set()):
+                return {"action": "remove", "reason": f"invalid_source_type:{source_type}"}
+            if target_type in rules.get("invalid_target", set()):
+                return {"action": "remove", "reason": f"invalid_target_type:{target_type}"}
+        
+        # Rule 2: Boost confidence for semantically valid combinations
+        valid_combinations = {
+            ("class", "interface", "implements"): 0.9,
+            ("method", "function", "calls"): 0.85,
+            ("test_case", "function", "tests"): 0.9,
+            ("test_case", "class", "tests"): 0.9,
+            ("documentation", "class", "documents"): 0.85,
+            ("documentation", "function", "documents"): 0.85,
+            ("ticket", "feature", "implements"): 0.8,
+            ("feature", "requirement", "implements"): 0.85,
+            ("toolkit", "tool", "contains"): 0.95,
+            ("module", "class", "contains"): 0.9,
+            ("class", "method", "contains"): 0.95,
+        }
+        
+        combo_key = (source_type, target_type, relation_type)
+        if combo_key in valid_combinations:
+            suggested_confidence = valid_combinations[combo_key]
+            return {
+                "action": "keep",
+                "new_confidence": max(confidence, suggested_confidence),
+                "reason": f"valid_combination:{combo_key}"
+            }
+        
+        # Rule 3: Check name overlap for related_to relationships
+        if relation_type == "related_to":
+            source_words = self._tokenize_name(source_node.get("name", ""))
+            target_words = self._tokenize_name(target_node.get("name", ""))
+            
+            if source_words and target_words:
+                overlap = len(source_words & target_words)
+                if overlap >= 2:
+                    # Good overlap - boost confidence
+                    return {
+                        "action": "keep",
+                        "new_confidence": min(confidence + 0.2, 0.9),
+                        "reason": f"name_overlap:{overlap}"
+                    }
+                elif overlap == 0 and confidence < 0.5:
+                    # No overlap and low confidence - consider removal
+                    return {"action": "llm_validate", "reason": "no_name_overlap"}
+        
+        # Rule 4: Very low confidence with no semantic support
+        if confidence < 0.4:
+            # Check if there's any semantic basis
+            source_name = source_node.get("name", "").lower()
+            target_name = target_node.get("name", "").lower()
+            
+            if (source_name not in target_name and 
+                target_name not in source_name and
+                self._word_overlap_score(source_name, target_name) < 0.3):
+                return {"action": "remove", "reason": "very_low_confidence_no_semantic_support"}
+        
+        # Default: keep with same confidence
+        return {"action": "keep", "reason": "default"}
+    
+    def _validate_relationship_with_llm(
+        self,
+        source_node: Dict,
+        target_node: Dict,
+        link: Dict,
+        llm: Any
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to validate an ambiguous relationship.
+        
+        Args:
+            source_node: Source entity
+            target_node: Target entity
+            link: The relationship to validate
+            llm: LLM instance for validation
+            
+        Returns:
+            Dict with 'valid' (bool) and 'confidence' (float)
+        """
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import JsonOutputParser
+        
+        prompt_template = """Validate if the following relationship makes semantic sense.
+
+Source Entity:
+- Name: {source_name}
+- Type: {source_type}
+- Description: {source_desc}
+
+Relationship: {relation_type}
+
+Target Entity:
+- Name: {target_name}
+- Type: {target_type}
+- Description: {target_desc}
+
+Question: Does it make sense that "{source_name}" {relation_type} "{target_name}"?
+
+Respond with ONLY a JSON object:
+{{"valid": true/false, "confidence": 0.0-1.0, "reason": "<brief explanation>"}}
+"""
+        
+        try:
+            prompt = ChatPromptTemplate.from_template(prompt_template)
+            parser = JsonOutputParser()
+            chain = prompt | llm | parser
+            
+            result = chain.invoke({
+                "source_name": source_node.get("name", ""),
+                "source_type": source_node.get("type", ""),
+                "source_desc": source_node.get("description", "No description"),
+                "relation_type": link.get("relation_type", "related_to"),
+                "target_name": target_node.get("name", ""),
+                "target_type": target_node.get("type", ""),
+                "target_desc": target_node.get("description", "No description"),
+            })
+            
+            return {
+                "valid": result.get("valid", False),
+                "confidence": result.get("confidence", 0.5),
+                "reason": result.get("reason", "llm_validated")
+            }
+            
+        except Exception as e:
+            logger.warning(f"LLM validation failed: {e}")
+            # On LLM failure, keep the relationship
+            return {"valid": True, "confidence": link.get("confidence", 0.5)}
+
     def enrich(
         self,
         normalize_types: bool = True,  # Normalize entity types first
@@ -1630,8 +1952,11 @@ class GraphEnricher:
         toolkit_tools: bool = True,  # Link tools to their toolkits
         orphans: bool = True,
         similarity: bool = False,  # Disabled by default - can create too many links
+        validate_low_confidence: bool = True,  # Validate relationships with confidence < 0.7
+        confidence_threshold: float = 0.7,  # Threshold for low-confidence validation
         min_similarity: float = 0.9,
         exact_match_only: bool = True,
+        llm: Optional[Any] = None,  # Optional LLM for relationship validation
     ):
         """
         Run all enrichment steps.
@@ -1644,6 +1969,7 @@ class GraphEnricher:
         4. Create semantic links (shared concepts) - LINKS related entities
         5. Connect orphans
         6. Similarity links (optional)
+        7. Validate low-confidence relationships
         
         Args:
             normalize_types: Normalize entity types to canonical forms
@@ -1653,8 +1979,11 @@ class GraphEnricher:
             toolkit_tools: Create explicit toolkit → tool relationships
             orphans: Connect orphan nodes to related entities
             similarity: Link highly similar entity names
+            validate_low_confidence: Validate relationships below confidence_threshold
+            confidence_threshold: Threshold for low-confidence validation (default: 0.7)
             min_similarity: Threshold for similarity matching
             exact_match_only: Only merge exact name matches if dedup enabled
+            llm: Optional LLM instance for validating ambiguous relationships
         """
         # Step 0: Normalize entity types (Tool/tool/Tools → tool)
         if normalize_types:
@@ -1680,9 +2009,16 @@ class GraphEnricher:
         if orphans:
             self.enrich_orphan_nodes()
         
-        # Step 5: High similarity links (optional)
+        # Step 6: High similarity links (optional)
         if similarity:
             self.enrich_similarity_links(min_similarity)
+        
+        # Step 7: Validate low-confidence relationships
+        if validate_low_confidence:
+            self.validate_low_confidence_relationships(
+                confidence_threshold=confidence_threshold,
+                llm=llm
+            )
         
         logger.info(f"Enrichment complete: {len(self.new_links)} new links added")
         return self.stats
@@ -1732,6 +2068,9 @@ def enrich_graph(
     toolkit_tools: bool = True,
     orphans: bool = True,
     similarity: bool = False,
+    validate_low_confidence: bool = True,
+    confidence_threshold: float = 0.7,
+    llm: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Convenience function to enrich a graph file.
@@ -1745,6 +2084,9 @@ def enrich_graph(
         toolkit_tools: Link tools to their toolkits
         orphans: Connect orphan nodes
         similarity: Create similarity links
+        validate_low_confidence: Validate relationships below confidence_threshold
+        confidence_threshold: Threshold for low-confidence validation (default: 0.7)
+        llm: Optional LLM instance for validating ambiguous relationships
         
     Returns:
         Enrichment statistics
@@ -1757,6 +2099,9 @@ def enrich_graph(
         toolkit_tools=toolkit_tools,
         orphans=orphans,
         similarity=similarity,
+        validate_low_confidence=validate_low_confidence,
+        confidence_threshold=confidence_threshold,
+        llm=llm,
     )
     enricher.save(output_path)
     return stats

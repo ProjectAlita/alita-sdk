@@ -54,58 +54,34 @@ ENTITY_TAXONOMY = {
         ]
     },
     "service_layer": {
-        "description": "APIs and services",
+        "description": "APIs and services (semantic descriptions, not code structure)",
         "types": [
             {"name": "service", "description": "Software service or microservice", "properties": ["name", "description", "tech_stack", "owner_team"]},
             
-            # REST API types
+            # REST API types (from specs/docs, not code)
             {"name": "rest_api", "description": "REST API specification", "properties": ["name", "description", "version", "auth_schema", "base_url", "content_type"]},
             {"name": "rest_endpoint", "description": "REST API endpoint", "properties": ["name", "method", "path", "request_schema", "response_schema", "auth_required", "status_codes"]},
-            {"name": "rest_resource", "description": "REST resource or entity", "properties": ["name", "path", "operations", "schema"]},
             
-            # GraphQL types
+            # GraphQL types (from specs/docs)
             {"name": "graphql_api", "description": "GraphQL API schema", "properties": ["name", "description", "version", "endpoint", "auth_schema"]},
-            {"name": "graphql_query", "description": "GraphQL query operation", "properties": ["name", "description", "arguments", "return_type", "fields"]},
-            {"name": "graphql_mutation", "description": "GraphQL mutation operation", "properties": ["name", "description", "arguments", "return_type", "side_effects"]},
-            {"name": "graphql_subscription", "description": "GraphQL subscription for real-time updates", "properties": ["name", "description", "arguments", "event_type", "payload_type"]},
-            {"name": "graphql_type", "description": "GraphQL type definition", "properties": ["name", "description", "fields", "interfaces", "directives"]},
+            {"name": "graphql_query", "description": "GraphQL query operation", "properties": ["name", "description", "arguments", "return_type"]},
+            {"name": "graphql_mutation", "description": "GraphQL mutation operation", "properties": ["name", "description", "arguments", "return_type"]},
             
-            # gRPC types
-            {"name": "grpc_service", "description": "gRPC service definition", "properties": ["name", "description", "package", "methods", "options"]},
-            {"name": "grpc_method", "description": "gRPC method (unary, streaming)", "properties": ["name", "description", "request_type", "response_type", "streaming_type"]},
-            {"name": "protobuf_message", "description": "Protocol Buffer message definition", "properties": ["name", "description", "fields", "nested_types", "options"]},
+            # Event-driven types (semantic)
+            {"name": "event_type", "description": "Event type or message schema", "properties": ["name", "description", "version", "schema", "payload_fields"]},
             
-            # Event-driven types
-            {"name": "event_bus", "description": "Event bus or message broker", "properties": ["name", "description", "technology", "topics", "partitions"]},
-            {"name": "event_type", "description": "Event type or message schema", "properties": ["name", "description", "version", "schema", "payload_fields", "routing_key"]},
-            {"name": "event_producer", "description": "Service that publishes events", "properties": ["name", "description", "event_types", "topic", "parent_service"]},
-            {"name": "event_consumer", "description": "Service that subscribes to events", "properties": ["name", "description", "event_types", "topic", "handler", "parent_service"]},
-            {"name": "event_handler", "description": "Handler for processing specific event", "properties": ["name", "description", "event_type", "processing_logic", "error_handling"]},
-            
-            # Generic/Legacy fallbacks
-            {"name": "payload", "description": "Generic request/response payload structure", "properties": ["name", "schema_type", "fields", "required_fields"]},
+            # Integration types
             {"name": "integration", "description": "External system integration", "properties": ["name", "description", "protocol", "external_system", "direction"]},
         ]
     },
-    "code_layer": {
-        "description": "Source code artifacts",
-        "types": [
-            {"name": "module", "description": "Code module or package", "properties": ["name", "path", "language", "description"]},
-            {"name": "class", "description": "Class or type definition", "properties": ["name", "description", "parent_class", "interfaces", "methods"]},
-            {"name": "function", "description": "Function or method", "properties": ["name", "signature", "description", "parameters", "return_type"]},
-            {"name": "interface", "description": "Interface or protocol definition", "properties": ["name", "description", "methods"]},
-            {"name": "constant", "description": "Configuration constant or enum value", "properties": ["name", "value", "description"]},
-            {"name": "configuration", "description": "Configuration setting", "properties": ["name", "value", "environment", "description"]},
-        ]
-    },
+    # NOTE: code_layer removed - classes, functions, methods, modules, interfaces, constants
+    # are now extracted by AST/regex parsers, not LLM entity extraction
     "data_layer": {
-        "description": "Database and data artifacts",
+        "description": "Database and data artifacts (from docs/specs, not code)",
         "types": [
             {"name": "database", "description": "Database or data store", "properties": ["name", "type", "description"]},
             {"name": "table", "description": "Database table or collection", "properties": ["name", "description", "primary_key", "indexes"]},
             {"name": "column", "description": "Table column or field", "properties": ["name", "data_type", "nullable", "default_value", "constraints", "parent_table"]},
-            {"name": "constraint", "description": "Database constraint (FK, unique, check)", "properties": ["name", "constraint_type", "definition", "parent_table"]},
-            {"name": "index", "description": "Database index", "properties": ["name", "columns", "unique", "parent_table"]},
             {"name": "migration", "description": "Database migration script", "properties": ["name", "version", "description", "changes"]},
             {"name": "enum", "description": "Enumeration or lookup values", "properties": ["name", "values", "description"]},
         ]
@@ -115,8 +91,6 @@ ENTITY_TAXONOMY = {
         "types": [
             {"name": "test_suite", "description": "Collection of related test cases", "properties": ["name", "description", "test_type", "coverage_area"]},
             {"name": "test_case", "description": "Individual test case", "properties": ["name", "description", "preconditions", "steps", "expected_result", "priority", "automated"]},
-            {"name": "test_step", "description": "Step within a test case", "properties": ["name", "action", "expected_result", "test_data"]},
-            {"name": "assertion", "description": "Test assertion or verification", "properties": ["name", "condition", "expected_value"]},
             {"name": "test_data", "description": "Test data set or fixture", "properties": ["name", "description", "data_format", "scope"]},
             {"name": "defect", "description": "Bug or defect report", "properties": ["name", "description", "severity", "status", "steps_to_reproduce", "affected_version"]},
             {"name": "incident", "description": "Production incident", "properties": ["name", "description", "severity", "impact", "root_cause", "resolution"]},
@@ -127,8 +101,6 @@ ENTITY_TAXONOMY = {
         "types": [
             {"name": "release", "description": "Software release or version", "properties": ["name", "version", "release_date", "changes", "status"]},
             {"name": "sprint", "description": "Development sprint or iteration", "properties": ["name", "start_date", "end_date", "goals"]},
-            {"name": "commit", "description": "Source code commit", "properties": ["name", "hash", "message", "author", "files_changed"]},
-            {"name": "pull_request", "description": "Code review request", "properties": ["name", "description", "source_branch", "target_branch", "status", "reviewers"]},
             {"name": "ticket", "description": "Work item or task ticket", "properties": ["name", "description", "type", "status", "priority", "assignee"]},
             {"name": "deployment", "description": "Deployment to environment", "properties": ["name", "environment", "version", "timestamp", "status"]},
         ]
@@ -150,38 +122,30 @@ ENTITY_TAXONOMY = {
             {"name": "tool", "description": "Individual tool or capability within a toolkit", "properties": ["name", "description", "parameters", "return_type", "parent_toolkit"]},
             {"name": "mcp_server", "description": "MCP (Model Context Protocol) server", "properties": ["name", "description", "transport", "tools", "resources"]},
             {"name": "mcp_tool", "description": "Tool exposed by an MCP server", "properties": ["name", "description", "input_schema", "parent_server"]},
-            {"name": "mcp_resource", "description": "Resource exposed by an MCP server", "properties": ["name", "uri", "description", "mime_type"]},
             {"name": "connector", "description": "External system connector or adapter", "properties": ["name", "description", "target_system", "auth_type", "capabilities"]},
         ]
     },
 }
 
 RELATIONSHIP_TAXONOMY = {
+    # NOTE: Code structural relationships (imports, extends, implements, calls, contains for code)
+    # are now extracted by AST/regex parsers, not LLM. This taxonomy is for semantic relationships.
     "structural": {
-        "description": "Structural relationships",
+        "description": "Structural relationships (for non-code entities)",
         "types": [
-            {"name": "contains", "description": "Parent contains child", "examples": ["module contains class", "screen contains ui_component", "toolkit contains tool"]},
-            {"name": "extends", "description": "Inherits or extends", "examples": ["class extends parent_class", "epic contains feature"]},
-            {"name": "implements", "description": "Implements interface or requirement", "examples": ["class implements interface", "function implements user_story"]},
-            {"name": "imports", "description": "Import or include dependency", "examples": ["module imports module"]},
-            {"name": "part_of", "description": "Part of larger whole", "examples": ["column part_of table", "step part_of test_case", "tool part_of toolkit"]},
+            {"name": "contains", "description": "Parent contains child (non-code)", "examples": ["screen contains ui_component", "toolkit contains tool", "epic contains feature"]},
+            {"name": "part_of", "description": "Part of larger whole", "examples": ["column part_of table", "tool part_of toolkit", "ui_field part_of screen"]},
             {"name": "provides", "description": "Provides capability or resource", "examples": ["toolkit provides tool", "mcp_server provides mcp_tool", "service provides api"]},
         ]
     },
     "behavioral": {
-        "description": "Behavioral and runtime relationships",
+        "description": "Behavioral and runtime relationships (semantic, not code-level)",
         "types": [
-            {"name": "calls", "description": "Invokes or calls", "examples": ["function calls function", "service calls rest_endpoint", "service calls grpc_method"]},
-            {"name": "invokes", "description": "Invokes REST/gRPC method", "examples": ["service invokes rest_endpoint", "function invokes grpc_method"]},
-            {"name": "queries", "description": "Executes GraphQL query", "examples": ["service queries graphql_query", "ui queries graphql_api"]},
-            {"name": "mutates", "description": "Executes GraphQL mutation", "examples": ["service mutates graphql_mutation", "form mutates graphql_api"]},
-            {"name": "subscribes_to", "description": "Subscribes to GraphQL subscription or event", "examples": ["service subscribes_to graphql_subscription", "event_consumer subscribes_to event_type"]},
-            {"name": "publishes", "description": "Publishes event to bus", "examples": ["event_producer publishes event_type", "service publishes event_bus"]},
-            {"name": "consumes", "description": "Consumes event from bus", "examples": ["event_consumer consumes event_type", "event_handler consumes event_bus"]},
-            {"name": "handles", "description": "Handles event or message", "examples": ["event_handler handles event_type", "service handles event"]},
-            {"name": "triggers", "description": "Triggers event or action", "examples": ["business_rule triggers workflow", "event triggers handler", "rest_endpoint triggers event_producer"]},
-            {"name": "depends_on", "description": "Runtime dependency", "examples": ["service depends_on service", "feature depends_on feature"]},
-            {"name": "uses", "description": "Uses or references", "examples": ["rest_endpoint uses payload", "test_case uses test_data", "grpc_method uses protobuf_message"]},
+            {"name": "triggers", "description": "Triggers event or action", "examples": ["business_rule triggers workflow", "event triggers handler"]},
+            {"name": "depends_on", "description": "Business/feature dependency", "examples": ["service depends_on service", "feature depends_on feature"]},
+            {"name": "uses", "description": "Uses or references", "examples": ["feature uses service", "test_case uses test_data"]},
+            {"name": "publishes", "description": "Publishes event", "examples": ["service publishes event_type"]},
+            {"name": "subscribes_to", "description": "Subscribes to event", "examples": ["service subscribes_to event_type"]},
         ]
     },
     "data_lineage": {
@@ -189,7 +153,6 @@ RELATIONSHIP_TAXONOMY = {
         "types": [
             {"name": "stores_in", "description": "Data stored in", "examples": ["ui_field stores_in column", "endpoint stores_in table"]},
             {"name": "reads_from", "description": "Reads data from", "examples": ["endpoint reads_from table", "screen reads_from api"]},
-            {"name": "transforms", "description": "Transforms data", "examples": ["function transforms payload"]},
             {"name": "maps_to", "description": "Data mapping", "examples": ["ui_field maps_to column", "attribute maps_to column"]},
         ]
     },
@@ -205,7 +168,6 @@ RELATIONSHIP_TAXONOMY = {
         "description": "Testing relationships",
         "types": [
             {"name": "tests", "description": "Tests functionality", "examples": ["test_case tests feature", "test_case tests endpoint"]},
-            {"name": "validates", "description": "Validates rule or requirement", "examples": ["test_case validates business_rule"]},
             {"name": "covers", "description": "Test coverage", "examples": ["test_suite covers feature", "test_case covers user_story"]},
             {"name": "reproduces", "description": "Reproduces defect", "examples": ["test_case reproduces defect"]},
         ]
@@ -215,7 +177,6 @@ RELATIONSHIP_TAXONOMY = {
         "types": [
             {"name": "owned_by", "description": "Owned by team/person", "examples": ["service owned_by team", "feature owned_by owner"]},
             {"name": "maintained_by", "description": "Maintained by", "examples": ["repository maintained_by team"]},
-            {"name": "reviewed_by", "description": "Reviewed by", "examples": ["pull_request reviewed_by owner"]},
             {"name": "assigned_to", "description": "Assigned to person", "examples": ["ticket assigned_to owner", "defect assigned_to owner"]},
         ]
     },
@@ -223,62 +184,20 @@ RELATIONSHIP_TAXONOMY = {
         "description": "Temporal and versioning relationships",
         "types": [
             {"name": "introduced_in", "description": "Introduced in release", "examples": ["feature introduced_in release", "api introduced_in release"]},
-            {"name": "removed_in", "description": "Removed in release", "examples": ["endpoint removed_in release"]},
             {"name": "modified_in", "description": "Modified in release", "examples": ["table modified_in migration"]},
-            {"name": "supersedes", "description": "Replaces previous version", "examples": ["api supersedes api", "release supersedes release"]},
             {"name": "blocks", "description": "Blocks progress", "examples": ["defect blocks feature", "ticket blocks ticket"]},
         ]
     },
     "semantic": {
-        "description": "Semantic and conflict relationships",
+        "description": "Semantic and knowledge relationships",
         "types": [
             {"name": "related_to", "description": "General relationship", "examples": ["feature related_to feature", "ticket related_to defect"]},
-            {"name": "duplicates", "description": "Duplicate of another", "examples": ["defect duplicates defect", "glossary_term duplicates glossary_term"]},
-            {"name": "contradicts", "description": "Conflicts with", "examples": ["requirement contradicts requirement", "business_rule contradicts business_rule"]},
+            {"name": "duplicates", "description": "Duplicate of another", "examples": ["defect duplicates defect"]},
             {"name": "references", "description": "References document", "examples": ["ticket references documentation", "test_case references user_story"]},
-            {"name": "synonym_of", "description": "Synonym relationship", "examples": ["glossary_term synonym_of glossary_term"]},
+            {"name": "documents", "description": "Documents or describes", "examples": ["documentation documents feature", "wiki documents api"]},
         ]
     },
 }
-
-
-def get_entity_types_for_doc_type(doc_type: str) -> List[Dict[str, Any]]:
-    """Get relevant entity types for a document type."""
-    mapping = {
-        "code": ["code_layer", "service_layer"],
-        "api_spec": ["service_layer", "data_layer"],
-        "requirements": ["product_layer", "domain_layer"],
-        "architecture": ["service_layer", "data_layer", "organization_layer"],
-        "config": ["code_layer", "data_layer"],
-        "database": ["data_layer"],
-        "test": ["testing_layer", "product_layer"],
-        "documentation": ["organization_layer", "domain_layer", "product_layer"],
-        "ticket": ["delivery_layer", "testing_layer", "product_layer"],
-        "commit": ["delivery_layer", "code_layer"],
-    }
-    
-    layers = mapping.get(doc_type, list(ENTITY_TAXONOMY.keys()))
-    types = []
-    for layer in layers:
-        if layer in ENTITY_TAXONOMY:
-            types.extend(ENTITY_TAXONOMY[layer]["types"])
-    return types
-
-
-def get_all_entity_types() -> List[Dict[str, Any]]:
-    """Get all entity types from taxonomy."""
-    types = []
-    for layer_data in ENTITY_TAXONOMY.values():
-        types.extend(layer_data["types"])
-    return types
-
-
-def get_all_relationship_types() -> List[Dict[str, Any]]:
-    """Get all relationship types from taxonomy."""
-    types = []
-    for category_data in RELATIONSHIP_TAXONOMY.values():
-        types.extend(category_data["types"])
-    return types
 
 
 # ============================================================================
@@ -398,7 +317,11 @@ Respond with ONLY a JSON object:
 """
 
 
-ENTITY_EXTRACTION_PROMPT = """Extract entities from the following document for a knowledge graph.
+ENTITY_EXTRACTION_PROMPT = """Extract semantic entities from the following document for a knowledge graph.
+
+NOTE: Code structure entities (classes, functions, methods, modules, interfaces, constants, variables, imports)
+are automatically extracted by AST/regex parsers - DO NOT extract these from code files.
+Focus on extracting SEMANTIC entities that represent business concepts, requirements, and domain knowledge.
 
 {schema_section}
 
@@ -410,14 +333,29 @@ Document content (with line numbers):
 Source file: {file_path}
 Source toolkit: {source_toolkit}
 
-Extract all relevant entities. For each entity provide:
-- A unique ID (use existing identifiers when available, like class names, function names, ticket IDs)
-- The entity type
-- The line range where this entity is defined or described (provide enough context - at least 3-5 lines minimum, never a single line)
+## What to Extract:
+For CODE files (.py, .js, .java, etc.): Extract only semantic entities like:
+- Features, requirements, business rules mentioned in comments/docstrings
+- Domain concepts, glossary terms explained in documentation strings
+- TODOs, FIXMEs, or technical debt notes
+- API contracts or integration points described in comments
+- Test scenarios or acceptance criteria in docstrings
+
+For DOCUMENTATION files (.md, .rst, .txt, confluence, etc.): Extract all entities including:
+- Features, requirements, user stories, epics
+- Domain entities, business rules, glossary terms
+- Workflows, processes, procedures
+- Services, APIs, integrations (as described, not as code)
+- Test cases, test suites, defects
+- Teams, owners, stakeholders
+
+For each entity provide:
+- A unique ID (use existing identifiers when available)
+- The entity type (from semantic types above, NOT code types like class/function)
+- The line range where this entity is defined or described (at least 3-5 lines minimum)
 - Properties including at minimum: name, description
 
-IMPORTANT: line_start and line_end should capture the full context of the entity definition, not just a single mention.
-If an entity is mentioned on one line but defined or described across multiple lines, use the broader range.
+IMPORTANT: line_start and line_end should capture the full context of the entity definition.
 Single-line references (line_start == line_end) are discouraged - expand to include surrounding context.
 
 Respond with ONLY a JSON array:
@@ -437,7 +375,11 @@ Respond with ONLY a JSON array:
 """
 
 
-RELATION_EXTRACTION_PROMPT = """Extract relationships between the entities listed below based on the document content.
+RELATION_EXTRACTION_PROMPT = """Extract SEMANTIC relationships between the entities listed below based on the document content.
+
+NOTE: Structural code relationships (imports, extends, implements, calls, contains for code elements)
+are automatically extracted by AST/regex parsers - DO NOT extract these from code files.
+Focus on extracting SEMANTIC relationships that represent business logic and domain connections.
 
 ## Document content:
 ---
@@ -450,9 +392,30 @@ RELATION_EXTRACTION_PROMPT = """Extract relationships between the entities liste
 {schema_section}
 
 ## Instructions:
-1. Look for relationships mentioned or implied in the document
+1. Look for semantic relationships mentioned or implied in the document
 2. For source_id and target_id, you MUST use EXACTLY the ID shown before the arrow (->)
-3. Common relationship types: contains, references, depends_on, implements, extends, uses, part_of, describes, follows, requires, configures
+
+## Relationship Types to Extract:
+For CODE files: Focus on semantic relationships like:
+- tests (test_case tests feature)
+- validates (test validates business_rule)
+- documents (code documents requirement)
+- related_to (feature related_to feature)
+- depends_on (business dependency, not code import)
+
+For DOCUMENTATION files: Extract all relationship types:
+- tests, validates, covers (testing relationships)
+- owned_by, maintained_by, assigned_to (ownership)
+- introduced_in, modified_in, removed_in (temporal)
+- related_to, references, duplicates (semantic)
+- navigates_to, shown_on (UI relationships)
+- triggers, depends_on (behavioral - for business logic)
+
+DO NOT extract for code files:
+- imports (handled by parser)
+- extends/implements (handled by parser)
+- calls (handled by parser)
+- contains (for code structure - handled by parser)
 
 ## Output Format:
 Respond with ONLY a JSON array. Use the EXACT entity IDs from the list above:
@@ -469,23 +432,6 @@ If no relationships are found, return an empty array: []
 
 EXAMPLE: If entities are "Migration Guide (407b9c0c2048)" and "Before State (bc4612fc3d87)",
 a valid relation would be: {{"source_id": "407b9c0c2048", "relation_type": "describes", "target_id": "bc4612fc3d87", "confidence": 0.9}}
-"""
-
-
-DEDUPLICATION_PROMPT = """Analyze these entity candidates and identify which ones refer to the same real-world entity.
-
-Entity candidates:
-{entities_json}
-
-Group entities that refer to the same thing. Consider:
-- Same names with different casing
-- Abbreviations vs full names
-- Partial matches that clearly refer to the same entity
-
-Respond with ONLY a JSON object mapping representative ID to list of duplicate IDs:
-{{
-  "<canonical_id>": ["<duplicate_id_1>", "<duplicate_id_2>"]
-}}
 """
 
 
@@ -1021,83 +967,503 @@ class RelationExtractor:
         return deduped
 
 
-class EntityDeduplicator:
-    """LLM-based entity deduplication for complex cases."""
+# ============================================================================
+# FACT EXTRACTION (for non-code files)
+# ============================================================================
+
+FACT_EXTRACTION_PROMPT = """Extract factual information from the following document.
+
+## Document content:
+---
+{content}
+---
+
+## Document metadata:
+- File: {file_path}
+- Source: {source_toolkit}
+
+## Canonical Fact Types:
+Extract facts using these canonical types:
+
+1. **decision** - Architectural or business decisions
+   - Properties: title, rationale, alternatives, outcome, date, stakeholders
+   - Example: "We chose PostgreSQL over MongoDB for transactional consistency"
+
+2. **requirement** - Functional or non-functional requirements
+   - Properties: title, description, priority, status, acceptance_criteria
+   - Example: "System must handle 1000 concurrent users"
+
+3. **definition** - Definitions of terms, concepts, or standards
+   - Properties: term, definition, context, synonyms
+   - Example: "A 'tenant' refers to an organization using our SaaS platform"
+
+4. **date** - Important dates, deadlines, milestones
+   - Properties: event, date, description, status
+   - Example: "MVP launch scheduled for Q2 2024"
+
+5. **reference** - External references, links, citations
+   - Properties: title, url, description, type (spec, documentation, standard)
+   - Example: "OAuth 2.0 specification: RFC 6749"
+
+6. **contact** - People, teams, ownership information
+   - Properties: name, role, team, email, responsibilities
+   - Example: "John Smith is the product owner for the payments module"
+
+## Instructions:
+1. Identify facts from the document that match the canonical types
+2. Each fact must have a unique ID (short hash-like string)
+3. Include confidence score (0.0-1.0) based on how explicit the fact is
+4. Include line_start and line_end for citation support
+
+## Output Format:
+Respond with ONLY a JSON array:
+[
+  {{
+    "id": "<unique_id>",
+    "fact_type": "<decision|requirement|definition|date|reference|contact>",
+    "title": "<brief title>",
+    "properties": {{
+      "<property_name>": "<value>"
+    }},
+    "line_start": <line_number>,
+    "line_end": <line_number>,
+    "confidence": <0.0-1.0>
+  }}
+]
+
+If no facts are found, return an empty array: []
+"""
+
+# Canonical fact types for validation
+CANONICAL_FACT_TYPES = {
+    "decision": {
+        "description": "Architectural or business decisions",
+        "properties": ["title", "rationale", "alternatives", "outcome", "date", "stakeholders"]
+    },
+    "requirement": {
+        "description": "Functional or non-functional requirements", 
+        "properties": ["title", "description", "priority", "status", "acceptance_criteria"]
+    },
+    "definition": {
+        "description": "Definitions of terms, concepts, or standards",
+        "properties": ["term", "definition", "context", "synonyms"]
+    },
+    "date": {
+        "description": "Important dates, deadlines, milestones",
+        "properties": ["event", "date", "description", "status"]
+    },
+    "reference": {
+        "description": "External references, links, citations",
+        "properties": ["title", "url", "description", "type"]
+    },
+    "contact": {
+        "description": "People, teams, ownership information",
+        "properties": ["name", "role", "team", "email", "responsibilities"]
+    }
+}
+
+# Code-specific fact types for semantic code understanding
+CODE_FACT_TYPES = {
+    "algorithm": {
+        "description": "Algorithm or pattern used in the code",
+        "properties": ["name", "description", "complexity", "use_case"]
+    },
+    "behavior": {
+        "description": "What the code does - actions, side effects, I/O",
+        "properties": ["action", "description", "inputs", "outputs", "side_effects"]
+    },
+    "validation": {
+        "description": "Input validation, checks, guards, assertions",
+        "properties": ["what", "how", "error_handling"]
+    },
+    "dependency": {
+        "description": "External service calls, API usage, library dependencies",
+        "properties": ["service", "operation", "purpose", "error_handling"]
+    },
+    "error_handling": {
+        "description": "How errors are handled - retry, fallback, logging",
+        "properties": ["strategy", "description", "fallback", "logging"]
+    }
+}
+
+CODE_FACT_EXTRACTION_PROMPT = """Analyze the following code and extract semantic facts about what it does.
+
+Focus on understanding the CODE'S PURPOSE AND BEHAVIOR, not its structure.
+Parsers already extract structure (classes, functions, imports). You extract MEANING.
+
+## Code content (with line numbers):
+---
+{content}
+---
+
+Source file: {file_path}
+
+## Fact types to extract:
+1. **algorithm** - What algorithm or design pattern is used?
+   - Example: "Uses binary search for O(log n) lookup"
+   - Example: "Implements observer pattern for event handling"
+
+2. **behavior** - What does this code DO? (actions, I/O, side effects)
+   - Example: "Sends email notification when payment fails"
+   - Example: "Writes audit log for every database mutation"
+   - Example: "Caches API responses for 5 minutes"
+
+3. **validation** - What validation or checks are performed?
+   - Example: "Validates email format using RFC 5322 regex"
+   - Example: "Checks user permissions before allowing access"
+
+4. **dependency** - What external services or APIs are called?
+   - Example: "Calls Stripe API for payment processing"
+   - Example: "Queries PostgreSQL for user data"
+
+5. **error_handling** - How are errors handled?
+   - Example: "Retries failed requests 3 times with exponential backoff"
+   - Example: "Falls back to cached data when API is unavailable"
+
+## Instructions:
+- Extract 1-5 most important facts about what this code DOES
+- Focus on business logic and behavior, not syntax
+- Include line numbers where the behavior is implemented
+- Be specific and actionable
+
+## Output Format:
+Respond with ONLY a JSON array:
+[
+  {{
+    "fact_type": "<algorithm|behavior|validation|dependency|error_handling>",
+    "subject": "<what is being described>",
+    "predicate": "<action or relationship>",
+    "object": "<target or outcome>",
+    "line_start": <start_line>,
+    "line_end": <end_line>,
+    "confidence": <0.0-1.0>
+  }}
+]
+
+If no meaningful facts can be extracted, return an empty array: []
+"""
+
+
+class FactExtractor:
+    """
+    Extracts structured facts from documents using lightweight LLM.
     
-    def __init__(self, llm: Any):
+    Two extraction modes:
+    - extract(): For text/docs - extracts decisions, requirements, definitions, etc.
+    - extract_code(): For code - extracts algorithms, behaviors, validations, etc.
+    """
+    
+    def __init__(self, llm: Any, max_retries: int = 3, retry_delay: float = 2.0):
         self.llm = llm
-        self.prompt = ChatPromptTemplate.from_template(DEDUPLICATION_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(FACT_EXTRACTION_PROMPT)
+        self.code_prompt = ChatPromptTemplate.from_template(CODE_FACT_EXTRACTION_PROMPT)
         self.parser = JsonOutputParser()
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
     
-    def find_duplicates(self, entities: List[Dict[str, Any]], batch_size: int = 50) -> Dict[str, List[str]]:
-        """
-        Find duplicate entities using LLM.
-        
-        Args:
-            entities: List of entity candidates
-            batch_size: Number of entities to process at once
-            
-        Returns:
-            Mapping of canonical ID to list of duplicate IDs
-        """
-        all_duplicates = {}
-        
-        # Process in batches
-        for i in range(0, len(entities), batch_size):
-            batch = entities[i:i + batch_size]
-            
-            try:
-                entities_json = json.dumps(batch, indent=2, default=str)
-                
-                chain = self.prompt | self.llm | self.parser
-                result = chain.invoke({"entities_json": entities_json})
-                
-                all_duplicates.update(result)
-            except Exception as e:
-                logger.warning(f"Deduplication batch failed: {e}")
-        
-        return all_duplicates
-    
-    def merge_duplicates(
+    def extract(
         self,
-        entities: List[Dict[str, Any]],
-        duplicates: Dict[str, List[str]]
+        document: Document,
+        fact_types: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Merge duplicate entities based on duplicate mapping.
+        Extract facts from a single document.
         
         Args:
-            entities: Original entity list
-            duplicates: Mapping from canonical ID to duplicate IDs
+            document: Document to extract from
+            fact_types: Optional filter for specific fact types
             
         Returns:
-            Merged entity list
+            List of extracted facts
         """
-        # Build ID to entity mapping
-        id_to_entity = {e.get('id'): e for e in entities}
+        import time
         
-        # Build set of IDs to skip (duplicates)
-        skip_ids = set()
-        for dup_list in duplicates.values():
-            skip_ids.update(dup_list)
+        file_path = document.metadata.get('file_path', document.metadata.get('source', 'unknown'))
+        source_toolkit = document.metadata.get('source_toolkit', 'filesystem')
         
-        merged = []
-        for entity in entities:
-            entity_id = entity.get('id')
-            
-            if entity_id in skip_ids:
-                continue
-            
-            # If this is a canonical entity, merge properties from duplicates
-            if entity_id in duplicates:
-                for dup_id in duplicates[entity_id]:
-                    if dup_id in id_to_entity:
-                        dup = id_to_entity[dup_id]
-                        # Merge properties
-                        for key, value in dup.get('properties', {}).items():
-                            if key not in entity.get('properties', {}):
-                                entity.setdefault('properties', {})[key] = value
-            
-            merged.append(entity)
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                content = document.page_content
+                
+                # Add line numbers for citation support
+                lines = content.split('\n')
+                numbered_content = '\n'.join(
+                    f"{i+1:4d} | {line}"
+                    for i, line in enumerate(lines[:300])  # Limit for LLM context
+                )
+                
+                chain = self.prompt | self.llm | self.parser
+                result = chain.invoke({
+                    "content": numbered_content,
+                    "file_path": file_path,
+                    "source_toolkit": source_toolkit
+                })
+                
+                if not isinstance(result, list):
+                    result = [result] if result else []
+                
+                # Validate and enrich facts
+                validated_facts = []
+                for fact in result:
+                    fact_type = fact.get('fact_type', '').lower()
+                    
+                    # Skip if not a canonical type
+                    if fact_type not in CANONICAL_FACT_TYPES:
+                        logger.warning(f"Skipping non-canonical fact type: {fact_type}")
+                        continue
+                    
+                    # Filter by requested types if specified
+                    if fact_types and fact_type not in fact_types:
+                        continue
+                    
+                    # Ensure required fields
+                    if 'id' not in fact:
+                        fact['id'] = hashlib.md5(
+                            f"{file_path}:{fact.get('title', '')}:{fact_type}".encode()
+                        ).hexdigest()[:12]
+                    
+                    # Add source tracking
+                    fact['source_toolkit'] = source_toolkit
+                    fact['file_path'] = file_path
+                    fact['source'] = 'fact_extractor'
+                    
+                    # Normalize confidence
+                    if 'confidence' not in fact:
+                        fact['confidence'] = 0.7
+                    
+                    validated_facts.append(fact)
+                
+                return validated_facts
+                
+            except Exception as e:
+                last_error = e
+                attempt_num = attempt + 1
+                
+                if attempt_num < self.max_retries:
+                    delay = 10 * attempt_num
+                    logger.warning(
+                        f"Fact extraction failed for '{file_path}' (attempt {attempt_num}/{self.max_retries}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.warning(
+                        f"Fact extraction failed for '{file_path}' after {self.max_retries} attempts: {e}. Skipping."
+                    )
         
-        return merged
+        return []
+    
+    def extract_batch(
+        self,
+        documents: List[Document],
+        fact_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract facts from multiple documents with deduplication.
+        
+        Args:
+            documents: List of documents to extract from
+            fact_types: Optional filter for specific fact types
+            
+        Returns:
+            List of extracted facts (deduplicated)
+        """
+        all_facts = []
+        
+        for doc in documents:
+            facts = self.extract(doc, fact_types)
+            all_facts.extend(facts)
+        
+        return self._deduplicate_facts(all_facts)
+    
+    def extract_code(
+        self,
+        document: Document,
+        fact_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract semantic facts from code - what the code DOES.
+        
+        Args:
+            document: Code document to extract from
+            fact_types: Optional filter for specific fact types
+            
+        Returns:
+            List of extracted code facts
+        """
+        import time
+        
+        file_path = document.metadata.get('file_path', document.metadata.get('source', 'unknown'))
+        source_toolkit = document.metadata.get('source_toolkit', 'filesystem')
+        
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                content = document.page_content
+                
+                # Add line numbers for citation support
+                lines = content.split('\n')
+                numbered_content = '\n'.join(
+                    f"{i+1:4d} | {line}"
+                    for i, line in enumerate(lines[:200])  # Limit for LLM context
+                )
+                
+                chain = self.code_prompt | self.llm | self.parser
+                result = chain.invoke({
+                    "content": numbered_content,
+                    "file_path": file_path
+                })
+                
+                if not isinstance(result, list):
+                    result = [result] if result else []
+                
+                # Validate and enrich facts
+                validated_facts = []
+                for fact in result:
+                    fact_type = fact.get('fact_type', '').lower()
+                    
+                    # Skip if not a canonical code fact type
+                    if fact_type not in CODE_FACT_TYPES:
+                        logger.warning(f"Skipping non-canonical code fact type: {fact_type}")
+                        continue
+                    
+                    # Filter by requested types if specified
+                    if fact_types and fact_type not in fact_types:
+                        continue
+                    
+                    # Ensure required fields
+                    if 'id' not in fact:
+                        fact['id'] = hashlib.md5(
+                            f"{file_path}:{fact.get('subject', '')}:{fact_type}".encode()
+                        ).hexdigest()[:12]
+                    
+                    # Add source tracking
+                    fact['source_toolkit'] = source_toolkit
+                    fact['file_path'] = file_path
+                    fact['source'] = 'code_fact_extractor'
+                    
+                    # Normalize confidence
+                    if 'confidence' not in fact:
+                        fact['confidence'] = 0.7
+                    
+                    validated_facts.append(fact)
+                
+                return validated_facts
+                
+            except Exception as e:
+                last_error = e
+                attempt_num = attempt + 1
+                
+                if attempt_num < self.max_retries:
+                    delay = 10 * attempt_num
+                    logger.warning(
+                        f"Code fact extraction failed for '{file_path}' (attempt {attempt_num}/{self.max_retries}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.warning(
+                        f"Code fact extraction failed for '{file_path}' after {self.max_retries} attempts: {e}. Skipping."
+                    )
+        
+        return []
+    
+    def extract_batch_code(
+        self,
+        documents: List[Document],
+        fact_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract facts from multiple code documents with deduplication.
+        
+        This method processes code documents using the code-specific prompt
+        and fact types (algorithm, behavior, validation, etc.).
+        
+        Args:
+            documents: List of code documents to extract from
+            fact_types: Optional filter for specific fact types
+            
+        Returns:
+            List of extracted facts (deduplicated)
+        """
+        all_facts = []
+        
+        for doc in documents:
+            facts = self.extract_code(doc, fact_types)
+            all_facts.extend(facts)
+        
+        return self._deduplicate_facts(all_facts)
+    
+    def _is_code_file(self, file_path: str) -> bool:
+        """Check if file is a code file that should use parsers instead."""
+        code_extensions = {
+            '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.kt', '.cs',
+            '.go', '.rs', '.swift', '.c', '.cpp', '.h', '.hpp', '.rb',
+            '.php', '.scala', '.clj', '.ex', '.exs', '.erl', '.hs'
+        }
+        
+        if not file_path:
+            return False
+        
+        import os
+        _, ext = os.path.splitext(file_path.lower())
+        return ext in code_extensions
+    
+    def _deduplicate_facts(self, facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Deduplicate facts using title and type similarity.
+        
+        File-level deduplication: same fact type + similar title = duplicate.
+        """
+        seen = {}  # (fact_type, normalized_title) -> fact
+        deduped = []
+        
+        for fact in facts:
+            fact_type = fact.get('fact_type', 'unknown')
+            title = fact.get('title', fact.get('id', ''))
+            
+            # Normalize title for comparison
+            normalized = title.lower().strip()
+            # Remove common stop words for better matching
+            for word in ['the', 'a', 'an', 'is', 'are', 'was', 'were']:
+                normalized = normalized.replace(f' {word} ', ' ')
+            normalized = ' '.join(normalized.split())  # Collapse whitespace
+            
+            key = (fact_type, normalized)
+            
+            if key in seen:
+                # Merge properties, keep higher confidence
+                existing = seen[key]
+                if fact.get('confidence', 0) > existing.get('confidence', 0):
+                    # Replace with higher confidence version
+                    for prop_key, prop_value in existing.get('properties', {}).items():
+                        if prop_key not in fact.get('properties', {}):
+                            fact.setdefault('properties', {})[prop_key] = prop_value
+                    seen[key] = fact
+                    # Update in deduped list
+                    for i, f in enumerate(deduped):
+                        if (f.get('fact_type'), f.get('title', '').lower().strip()) == key:
+                            deduped[i] = fact
+                            break
+                else:
+                    # Merge new properties into existing
+                    for prop_key, prop_value in fact.get('properties', {}).items():
+                        if prop_key not in existing.get('properties', {}):
+                            existing.setdefault('properties', {})[prop_key] = prop_value
+            else:
+                seen[key] = fact
+                deduped.append(fact)
+        
+        return deduped
+    
+    def get_fact_type_info(self, fact_type: str, code: bool = False) -> Optional[Dict[str, Any]]:
+        """Get information about a canonical fact type."""
+        types = CODE_FACT_TYPES if code else CANONICAL_FACT_TYPES
+        return types.get(fact_type)
+    
+    @staticmethod
+    def get_canonical_types(code: bool = False) -> List[str]:
+        """Get list of all canonical fact types."""
+        types = CODE_FACT_TYPES if code else CANONICAL_FACT_TYPES
+        return list(types.keys())

@@ -30,10 +30,11 @@ logger = logging.getLogger(__name__)
 @click.group()
 @click.option('--env-file', default='.env', help='Path to .env file')
 @click.option('--debug', is_flag=True, help='Enable debug logging')
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose/info logging (shows timing)')
 @click.option('--output', type=click.Choice(['text', 'json']), default='text', 
               help='Output format')
 @click.pass_context
-def cli(ctx, env_file: str, debug: bool, output: str):
+def cli(ctx, env_file: str, debug: bool, verbose: bool, output: str):
     """
     Alita SDK CLI - Test agents and toolkits from the command line.
     
@@ -55,12 +56,18 @@ def cli(ctx, env_file: str, debug: bool, output: str):
         logging.getLogger('alita_sdk').setLevel(logging.DEBUG)
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug logging enabled")
+    elif verbose:
+        # Verbose mode shows INFO level (timing info)
+        logging.getLogger('alita_sdk').setLevel(logging.INFO)
+        logger.setLevel(logging.INFO)
+        logger.info("Verbose logging enabled")
     
     # Load configuration
     config = get_config(env_file=env_file)
     ctx.obj['config'] = config
     ctx.obj['formatter'] = get_formatter(output)
     ctx.obj['debug'] = debug
+    ctx.obj['verbose'] = verbose
     
     # Check if configuration is valid (but don't fail yet - some commands don't need it)
     if not config.is_configured():

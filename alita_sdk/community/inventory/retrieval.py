@@ -50,9 +50,17 @@ SearchGraphParams = create_model(
     "SearchGraphParams",
     query=(str, Field(description="Search query for finding entities. Supports token matching (e.g., 'chat message' finds 'ChatMessageHandler')")),
     entity_type=(Optional[str], Field(default=None, description="Filter by entity type (e.g., 'class', 'function', 'method'). Case-insensitive.")),
-    layer=(Optional[str], Field(default=None, description="Filter by semantic layer: 'code' (classes/functions), 'service' (APIs/endpoints), 'data' (models/schemas), 'product' (features/menus), 'domain' (concepts/processes), 'documentation', 'configuration', 'testing', 'tooling'")),
+    layer=(Optional[str], Field(default=None, description="Filter by semantic layer: 'code' (classes/functions), 'service' (APIs/endpoints), 'data' (models/schemas), 'product' (features/menus), 'domain' (concepts/processes), 'documentation', 'configuration', 'testing', 'tooling', 'knowledge' (facts)")),
     file_pattern=(Optional[str], Field(default=None, description="Filter by file path pattern (glob-like, e.g., '**/chat*.py', 'api/v2/*.py')")),
     top_k=(Optional[int], Field(default=10, description="Number of results to return")),
+)
+
+SearchFactsParams = create_model(
+    "SearchFactsParams",
+    query=(Optional[str], Field(default=None, description="Optional search query to filter facts by subject/content")),
+    fact_type=(Optional[str], Field(default=None, description="Filter by fact type: 'algorithm', 'behavior', 'validation', 'dependency', 'error_handling' (code), or 'decision', 'requirement', 'definition', 'date', 'reference', 'contact' (text)")),
+    file_pattern=(Optional[str], Field(default=None, description="Filter by file path pattern (glob-like)")),
+    top_k=(Optional[int], Field(default=20, description="Maximum number of facts to return")),
 )
 
 GetEntityParams = create_model(
@@ -98,7 +106,7 @@ ListEntitiesByTypeParams = create_model(
 
 ListEntitiesByLayerParams = create_model(
     "ListEntitiesByLayerParams",
-    layer=(str, Field(description="Layer to list entities from: 'code' (classes/functions/methods), 'service' (APIs/RPCs), 'data' (models/schemas), 'product' (features/UI), 'domain' (concepts/processes), 'documentation', 'configuration', 'testing', 'tooling'")),
+    layer=(str, Field(description="Layer to list entities from: 'code' (classes/functions/methods), 'service' (APIs/RPCs), 'data' (models/schemas), 'product' (features/UI), 'domain' (concepts/processes), 'documentation', 'configuration', 'testing', 'tooling', 'knowledge' (facts), 'structure' (files)")),
     limit=(Optional[int], Field(default=50, description="Maximum number of entities to return")),
 )
 
@@ -106,6 +114,19 @@ SearchByFileParams = create_model(
     "SearchByFileParams",
     file_pattern=(str, Field(description="File path pattern (glob-like, e.g., '**/chat*.py', 'api/v2/*.py', 'rpc/*.py')")),
     limit=(Optional[int], Field(default=50, description="Maximum number of entities to return")),
+)
+
+GetFileInfoParams = create_model(
+    "GetFileInfoParams",
+    file_path=(str, Field(description="Path to the file to get info for (can be partial, e.g., 'utils.py' or 'src/utils.py')")),
+    include_entities=(Optional[bool], Field(default=True, description="Include list of entities defined in this file")),
+)
+
+ListFilesParams = create_model(
+    "ListFilesParams",
+    file_pattern=(Optional[str], Field(default=None, description="Optional file path pattern (glob-like, e.g., '**/*.py')")),
+    file_type=(Optional[str], Field(default=None, description="Filter by file type: 'source_file', 'document_file', 'config_file', 'web_file'")),
+    limit=(Optional[int], Field(default=50, description="Maximum number of files to return")),
 )
 
 AdvancedSearchParams = create_model(
@@ -904,6 +925,331 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
         
         return output
     
+    def search_facts(
+        self,
+        query: Optional[str] = None,
+        fact_type: Optional[str] = None,
+        file_pattern: Optional[str] = None,
+        top_k: int = 20
+    ) -> str:
+        """
+        Search for semantic facts extracted from code and documentation.
+        
+        Facts are structured knowledge extracted by LLM analysis:
+        - Code facts: algorithm, behavior, validation, dependency, error_handling
+        - Text facts: decision, requirement, definition, date, reference, contact
+        
+        Each fact has subject-predicate-object structure with citations.
+        
+        Args:
+            query: Optional text search on fact subject/content
+            fact_type: Filter by fact type (algorithm, behavior, decision, etc.)
+            file_pattern: Filter by source file path pattern
+            top_k: Maximum facts to return
+        """
+        self._log_tool_event(f"Searching facts: query={query}, type={fact_type}", "search_facts")
+        
+        import re
+        
+        results = []
+        
+        # Compile file pattern regex if provided
+        file_regex = None
+        if file_pattern:
+            pattern = file_pattern.replace('.', r'\.').replace('**', '.*').replace('*', '[^/]*').replace('?', '.')
+            try:
+                file_regex = re.compile(pattern, re.IGNORECASE)
+            except re.error:
+                pass
+        
+        # Search all fact entities
+        for node_id, data in self._knowledge_graph._graph.nodes(data=True):
+            # Only look at fact entities
+            if data.get('type', '').lower() != 'fact':
+                continue
+            
+            # Filter by fact_type property
+            props = data.get('properties', {})
+            entity_fact_type = props.get('fact_type', '')
+            
+            if fact_type and entity_fact_type.lower() != fact_type.lower():
+                continue
+            
+            # Filter by file pattern
+            citations = data.get('citations', [])
+            if not citations and 'citation' in data:
+                citations = [data['citation']]
+            
+            file_path = ''
+            for c in citations:
+                if isinstance(c, dict):
+                    file_path = c.get('file_path', '')
+                    break
+            
+            if file_regex and file_path:
+                if not file_regex.search(file_path):
+                    continue
+            
+            # Filter by query (search in subject and predicate)
+            if query:
+                query_lower = query.lower()
+                subject = props.get('subject', '').lower()
+                predicate = props.get('predicate', '').lower()
+                obj = props.get('object', '').lower()
+                name = data.get('name', '').lower()
+                
+                if not any(query_lower in text for text in [subject, predicate, obj, name]):
+                    continue
+            
+            results.append({
+                'entity': dict(data),
+                'file_path': file_path,
+            })
+        
+        # Sort by file path, then by name
+        results.sort(key=lambda x: (x['file_path'], x['entity'].get('name', '')))
+        results = results[:top_k]
+        
+        if not results:
+            filters = []
+            if query:
+                filters.append(f"query='{query}'")
+            if fact_type:
+                filters.append(f"type={fact_type}")
+            if file_pattern:
+                filters.append(f"file={file_pattern}")
+            filter_str = f" (filters: {', '.join(filters)})" if filters else ""
+            return f"No facts found{filter_str}"
+        
+        output = f"# Found {len(results)} facts\n\n"
+        
+        # Group by fact type
+        by_type: Dict[str, List] = {}
+        for r in results:
+            ft = r['entity'].get('properties', {}).get('fact_type', 'unknown')
+            if ft not in by_type:
+                by_type[ft] = []
+            by_type[ft].append(r)
+        
+        for ft, facts in sorted(by_type.items()):
+            output += f"## {ft} ({len(facts)})\n\n"
+            for f in facts:
+                entity = f['entity']
+                props = entity.get('properties', {})
+                file_path = f['file_path']
+                
+                subject = props.get('subject', entity.get('name', 'unknown'))
+                predicate = props.get('predicate', '')
+                obj = props.get('object', '')
+                confidence = props.get('confidence', 0)
+                
+                # Format as subject → predicate → object
+                fact_text = f"**{subject}**"
+                if predicate:
+                    fact_text += f" → {predicate}"
+                if obj:
+                    fact_text += f" → {obj}"
+                
+                output += f"- {fact_text}\n"
+                if file_path:
+                    citation = entity.get('citation') or (entity.get('citations', [{}])[0] if entity.get('citations') else {})
+                    line_info = ""
+                    if isinstance(citation, dict) and citation.get('line_start'):
+                        line_info = f":{citation['line_start']}"
+                        if citation.get('line_end'):
+                            line_info += f"-{citation['line_end']}"
+                    output += f"  📍 `{file_path}{line_info}` (confidence: {confidence:.1%})\n"
+                output += "\n"
+        
+        return output
+
+    def get_file_info(self, file_path: str, include_entities: bool = True) -> str:
+        """
+        Get detailed information about a file node including all entities defined in it.
+        
+        File nodes are container entities that aggregate all code, facts, and other
+        entities from a single source file.
+        
+        Args:
+            file_path: Path to the file (can be partial, e.g., 'utils.py')
+            include_entities: Whether to include list of entities defined in file
+        """
+        self._log_tool_event(f"Getting file info: {file_path}", "get_file_info")
+        
+        # Search for file entities matching the path
+        file_types = {'file', 'source_file', 'document_file', 'config_file', 'web_file'}
+        matches = []
+        
+        for node_id, data in self._knowledge_graph._graph.nodes(data=True):
+            if data.get('type', '').lower() not in file_types:
+                continue
+            
+            # Match by full path or partial path
+            entity_path = data.get('properties', {}).get('full_path', '') or data.get('name', '')
+            if file_path in entity_path or entity_path.endswith(file_path):
+                matches.append(data)
+        
+        if not matches:
+            return f"No file found matching '{file_path}'"
+        
+        if len(matches) > 1:
+            output = f"# Multiple files match '{file_path}'\n\n"
+            for m in matches:
+                full_path = m.get('properties', {}).get('full_path', m.get('name'))
+                output += f"- `{full_path}`\n"
+            output += f"\nShowing first match:\n\n"
+        else:
+            output = ""
+        
+        file_entity = matches[0]
+        props = file_entity.get('properties', {})
+        
+        output += f"# {file_entity.get('name')}\n\n"
+        output += f"**Type:** {file_entity.get('type')}\n"
+        output += f"**Path:** `{props.get('full_path', file_entity.get('name'))}`\n"
+        output += f"**Extension:** {props.get('extension', 'unknown')}\n"
+        output += f"**Lines:** {props.get('line_count', 'unknown')}\n"
+        output += f"**Size:** {props.get('size_bytes', 0):,} bytes\n"
+        output += f"**Content Hash:** `{props.get('content_hash', 'unknown')[:12]}...`\n\n"
+        
+        output += f"## Entity Summary\n\n"
+        output += f"- **Code entities:** {props.get('code_entity_count', 0)}\n"
+        output += f"- **Facts:** {props.get('fact_count', 0)}\n"
+        output += f"- **Other entities:** {props.get('other_entity_count', 0)}\n"
+        output += f"- **Total:** {props.get('entity_count', 0)}\n\n"
+        
+        if include_entities:
+            # Find entities defined_in this file
+            file_id = file_entity.get('id')
+            entities_in_file = []
+            
+            for edge in self._knowledge_graph._graph.edges(data=True):
+                source, target, edge_data = edge
+                if target == file_id and edge_data.get('relation_type') == 'defined_in':
+                    entity = self._knowledge_graph.get_entity(source)
+                    if entity:
+                        entities_in_file.append(entity)
+            
+            if entities_in_file:
+                output += f"## Entities in File ({len(entities_in_file)})\n\n"
+                
+                # Group by type
+                by_type: Dict[str, List] = {}
+                for ent in entities_in_file:
+                    etype = ent.get('type', 'unknown')
+                    if etype not in by_type:
+                        by_type[etype] = []
+                    by_type[etype].append(ent)
+                
+                for etype, ents in sorted(by_type.items(), key=lambda x: -len(x[1])):
+                    output += f"### {etype} ({len(ents)})\n"
+                    for ent in ents[:10]:
+                        output += f"- **{ent.get('name')}**"
+                        if ent.get('type') == 'fact':
+                            fact_type = ent.get('properties', {}).get('fact_type', '')
+                            if fact_type:
+                                output += f" [{fact_type}]"
+                        output += "\n"
+                    if len(ents) > 10:
+                        output += f"- ... and {len(ents) - 10} more\n"
+                    output += "\n"
+        
+        return output
+    
+    def list_files(
+        self,
+        file_pattern: Optional[str] = None,
+        file_type: Optional[str] = None,
+        limit: int = 50
+    ) -> str:
+        """
+        List all file nodes in the knowledge graph.
+        
+        File nodes contain metadata about source files and link to all entities
+        defined within them via 'defined_in' relationships.
+        
+        Args:
+            file_pattern: Optional glob pattern to filter files
+            file_type: Filter by file type (source_file, document_file, config_file, web_file)
+            limit: Maximum files to return
+        """
+        self._log_tool_event(f"Listing files: pattern={file_pattern}, type={file_type}", "list_files")
+        
+        import re
+        
+        file_types = {'file', 'source_file', 'document_file', 'config_file', 'web_file'}
+        
+        # Compile pattern if provided
+        file_regex = None
+        if file_pattern:
+            pattern = file_pattern.replace('.', r'\.').replace('**', '.*').replace('*', '[^/]*').replace('?', '.')
+            try:
+                file_regex = re.compile(pattern, re.IGNORECASE)
+            except re.error:
+                pass
+        
+        files = []
+        for node_id, data in self._knowledge_graph._graph.nodes(data=True):
+            entity_type = data.get('type', '').lower()
+            if entity_type not in file_types:
+                continue
+            
+            # Filter by file_type
+            if file_type and entity_type != file_type.lower():
+                continue
+            
+            props = data.get('properties', {})
+            full_path = props.get('full_path', data.get('name', ''))
+            
+            # Filter by pattern
+            if file_regex and not file_regex.search(full_path):
+                continue
+            
+            files.append({
+                'entity': data,
+                'path': full_path,
+            })
+        
+        if not files:
+            filters = []
+            if file_pattern:
+                filters.append(f"pattern={file_pattern}")
+            if file_type:
+                filters.append(f"type={file_type}")
+            filter_str = f" (filters: {', '.join(filters)})" if filters else ""
+            return f"No files found{filter_str}"
+        
+        # Sort by path
+        files.sort(key=lambda x: x['path'])
+        files = files[:limit]
+        
+        output = f"# Files ({len(files)})\n\n"
+        
+        # Group by file type
+        by_type: Dict[str, List] = {}
+        for f in files:
+            ftype = f['entity'].get('type', 'file')
+            if ftype not in by_type:
+                by_type[ftype] = []
+            by_type[ftype].append(f)
+        
+        for ftype, flist in sorted(by_type.items()):
+            output += f"## {ftype} ({len(flist)})\n\n"
+            for f in flist:
+                entity = f['entity']
+                props = entity.get('properties', {})
+                path = f['path']
+                entity_count = props.get('entity_count', 0)
+                fact_count = props.get('fact_count', 0)
+                
+                output += f"- `{path}` ({entity_count} entities"
+                if fact_count:
+                    output += f", {fact_count} facts"
+                output += ")\n"
+            output += "\n"
+        
+        return output
+
     def advanced_search(
         self,
         query: Optional[str] = None,
@@ -973,8 +1319,14 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
             {
                 "name": "search_graph",
                 "ref": self.search_graph,
-                "description": "Search for entities with enhanced token matching. Supports 'chat message' finding 'ChatMessageHandler', file patterns like '**/chat*.py', and layer filtering (code, service, data, product).",
+                "description": "Search for entities with enhanced token matching. Supports 'chat message' finding 'ChatMessageHandler', file patterns like '**/chat*.py', and layer filtering (code, service, data, product, knowledge).",
                 "args_schema": SearchGraphParams,
+            },
+            {
+                "name": "search_facts",
+                "ref": self.search_facts,
+                "description": "Search semantic facts extracted from code and docs. Filter by fact_type: algorithm, behavior, validation (code) or decision, requirement, definition (text). Returns subject→predicate→object triples with citations.",
+                "args_schema": SearchFactsParams,
             },
             {
                 "name": "get_entity",
@@ -997,7 +1349,7 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
             {
                 "name": "advanced_search",
                 "ref": self.advanced_search,
-                "description": "Advanced multi-criteria search. Combine text query with type/layer/file filters. Types: class,function,method. Layers: code,service,data,product.",
+                "description": "Advanced multi-criteria search. Combine text query with type/layer/file filters. Types: class,function,method. Layers: code,service,data,product,knowledge.",
                 "args_schema": AdvancedSearchParams,
             },
             {
@@ -1033,7 +1385,19 @@ class InventoryRetrievalApiWrapper(BaseToolApiWrapper):
             {
                 "name": "list_entities_by_layer",
                 "ref": self.list_entities_by_layer,
-                "description": "List entities by semantic layer: code (classes/functions), service (APIs), data (models), product (features), documentation, configuration, testing, tooling.",
+                "description": "List entities by semantic layer: code (classes/functions), service (APIs), data (models), product (features), knowledge (facts), structure (files), documentation, configuration, testing, tooling.",
                 "args_schema": ListEntitiesByLayerParams,
+            },
+            {
+                "name": "get_file_info",
+                "ref": self.get_file_info,
+                "description": "Get detailed info about a file including metadata (lines, size, hash) and all entities defined in it (classes, functions, facts, etc.).",
+                "args_schema": GetFileInfoParams,
+            },
+            {
+                "name": "list_files",
+                "ref": self.list_files,
+                "description": "List all file nodes in the graph. Filter by pattern ('**/*.py') or type (source_file, document_file, config_file). Shows entity counts per file.",
+                "args_schema": ListFilesParams,
             },
         ]

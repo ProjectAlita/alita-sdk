@@ -94,6 +94,7 @@ from .extractors import (
     RELATIONSHIP_TAXONOMY,
     EntityExtractor,
     RelationExtractor,
+    FactExtractor,
     DocumentClassifier,
     EntitySchemaDiscoverer,
 )
@@ -195,6 +196,7 @@ __all__ = [
     'RELATIONSHIP_TAXONOMY',
     'EntityExtractor',
     'RelationExtractor',
+    'FactExtractor',
     'DocumentClassifier',
     'EntitySchemaDiscoverer',
     

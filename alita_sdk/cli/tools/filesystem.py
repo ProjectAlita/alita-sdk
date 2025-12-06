@@ -1356,24 +1356,16 @@ class FilesystemApiWrapper:
         
         Args:
             branch: Ignored (kept for API compatibility with git-based loaders)
-            whitelist: File patterns to include (e.g., ['*.py', '*.md'])
-            blacklist: File patterns to exclude (e.g., ['*test*'])
+            whitelist: File patterns to include (e.g., ['*.py', 'src/**/*.js'])
+            blacklist: File patterns to exclude (e.g., ['*test*', 'node_modules/**'])
             chunked: If True, applies universal chunker based on file type
         
         Yields:
             Document objects with page_content and metadata
         """
-        _files = self._get_files()
-        self._log_tool_event(f"Found {len(_files)} files in {self.base_directory}", "loader")
+        import glob as glob_module
         
-        def is_whitelisted(file_path: str) -> bool:
-            if not whitelist:
-                return True
-            return (
-                any(fnmatch.fnmatch(file_path, p) for p in whitelist) or
-                any(fnmatch.fnmatch(Path(file_path).name, p) for p in whitelist) or
-                any(file_path.endswith(f'.{p.lstrip("*.")}') for p in whitelist if p.startswith('*.'))
-            )
+        base = Path(self.base_directory)
         
         def is_blacklisted(file_path: str) -> bool:
             if not blacklist:
@@ -1383,32 +1375,77 @@ class FilesystemApiWrapper:
                 any(fnmatch.fnmatch(Path(file_path).name, p) for p in blacklist)
             )
         
+        # Optimization: Use glob directly when whitelist has path patterns
+        # This avoids scanning 100K+ files in node_modules etc.
+        def get_files_via_glob() -> Generator[str, None, None]:
+            """Use glob patterns directly - much faster than scanning all files."""
+            seen = set()
+            for pattern in whitelist:
+                # Handle glob patterns
+                full_pattern = str(base / pattern)
+                for match in glob_module.glob(full_pattern, recursive=True):
+                    match_path = Path(match)
+                    if match_path.is_file():
+                        try:
+                            rel_path = str(match_path.relative_to(base))
+                            if rel_path not in seen and not is_blacklisted(rel_path):
+                                seen.add(rel_path)
+                                yield rel_path
+                        except ValueError:
+                            continue
+        
+        def get_files_via_scan() -> Generator[str, None, None]:
+            """Fall back to scanning all files when no whitelist or simple extension patterns."""
+            _files = self._get_files()
+            self._log_tool_event(f"Found {len(_files)} files in {self.base_directory}", "loader")
+            
+            def is_whitelisted(file_path: str) -> bool:
+                if not whitelist:
+                    return True
+                return (
+                    any(fnmatch.fnmatch(file_path, p) for p in whitelist) or
+                    any(fnmatch.fnmatch(Path(file_path).name, p) for p in whitelist) or
+                    any(file_path.endswith(f'.{p.lstrip("*.")}') for p in whitelist if p.startswith('*.'))
+                )
+            
+            for file_path in _files:
+                if is_whitelisted(file_path) and not is_blacklisted(file_path):
+                    yield file_path
+        
+        # Decide strategy: use glob if whitelist has path patterns (contains / or **)
+        use_glob = whitelist and any('/' in p or '**' in p for p in whitelist)
+        
+        if use_glob:
+            self._log_tool_event(f"Using glob patterns: {whitelist}", "loader")
+            file_iterator = get_files_via_glob()
+        else:
+            file_iterator = get_files_via_scan()
+        
         def raw_document_generator() -> Generator[Document, None, None]:
             self._log_tool_event("Reading files...", "loader")
-            total_files = len(_files)
             processed = 0
             
-            for idx, file_path in enumerate(_files, 1):
-                if is_whitelisted(file_path) and not is_blacklisted(file_path):
-                    content = self._read_file(file_path)
-                    if not content:
-                        continue
-                    
-                    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
-                    processed += 1
-                    
-                    yield Document(
-                        page_content=content,
-                        metadata={
-                            'file_path': file_path,
-                            'file_name': Path(file_path).name,
-                            'source': file_path,
-                            'commit_hash': content_hash,
-                        }
-                    )
+            for file_path in file_iterator:
+                content = self._read_file(file_path)
+                if not content:
+                    continue
                 
-                if idx % 20 == 0 or idx == total_files:
-                    self._log_tool_event(f"Checked {idx}/{total_files} files, {processed} matched", "loader")
+                content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+                processed += 1
+                
+                yield Document(
+                    page_content=content,
+                    metadata={
+                        'file_path': file_path,
+                        'file_name': Path(file_path).name,
+                        'source': file_path,
+                        'commit_hash': content_hash,
+                    }
+                )
+                
+                # Log progress every 100 files
+                if processed % 100 == 0:
+                    logger.debug(f"[loader] Read {processed} files...")
             
             self._log_tool_event(f"Loaded {processed} files", "loader")
         

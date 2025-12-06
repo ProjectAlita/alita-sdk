@@ -132,6 +132,20 @@ class KnowledgeGraph:
         },
         'tooling': {
             'tool', 'toolkit', 'command', 'node_type', 'node'
+        },
+        'knowledge': {
+            # Facts extracted from code and documentation
+            'fact',
+            # Code-specific fact types
+            'algorithm', 'behavior', 'validation', 'dependency', 'error_handling',
+            # Text-specific fact types
+            'decision', 'definition', 'date', 'contact',
+        },
+        'structure': {
+            # File-level container nodes
+            'file', 'source_file', 'document_file', 'config_file', 'web_file',
+            # Directory/package structure
+            'directory', 'package',
         }
     }
     
