@@ -13,6 +13,30 @@ AVAILABLE_TOOLS = {}
 AVAILABLE_TOOLKITS = {}
 FAILED_IMPORTS = {}
 
+
+def _inject_toolkit_id(tool_conf: dict, toolkit_tools) -> None:
+    """Inject `toolkit_id` into tools that expose `api_wrapper.toolkit_id`.
+
+    This reads 'id' from the tool configuration and, if it is an integer,
+    assigns it to the 'toolkit_id' attribute of the 'api_wrapper' for each
+    tool in 'toolkit_tools' that supports it.
+
+    Args:
+        tool_conf: Raw tool configuration item from 'tools_list'.
+        toolkit_tools: List of instantiated tools produced by a toolkit.
+    """
+    toolkit_id = tool_conf.get('id')
+    if isinstance(toolkit_id, int):
+        for t in toolkit_tools:
+            if hasattr(t, 'api_wrapper') and hasattr(t.api_wrapper, 'toolkit_id'):
+                t.api_wrapper.toolkit_id = toolkit_id
+    else:
+        logger.error(
+            f"Toolkit ID is missing or not an integer for tool "
+            f"\`{tool_conf.get('type', '')}\` with name \`{tool_conf.get('name', '')}\`"
+        )
+
+
 def _safe_import_tool(tool_name, module_path, get_tools_name=None, toolkit_class_name=None):
     """Safely import a tool module and register available functions/classes."""
     try:
@@ -159,15 +183,8 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
             else:
                 logger.warning(f"Unknown tool type: {tool_type}")
         #
-        # Always inject toolkit_id to each tool if it presents and has type 'int'
-        toolkit_id = tool.get('id')
-        if isinstance(toolkit_id, int):
-            for t in toolkit_tools:
-                if hasattr(t, 'api_wrapper') and hasattr(t.api_wrapper, 'toolkit_id'):
-                    t.api_wrapper.toolkit_id = toolkit_id
-        else:
-            logger.error(f"Toolkit ID is missing or not an integer for tool '{tool.get('type', '')}' with name '{tool.get('name', '')}'")
-
+        # Always inject toolkit_id to each tool 
+        _inject_toolkit_id(tool, toolkit_tools)
         tools.extend(toolkit_tools)
 
     return tools
