@@ -27,6 +27,10 @@ CHAT_COMMANDS = [
     '/mode auto',
     '/mode yolo',
     '/dir',
+    '/dir add',
+    '/dir rm',
+    '/dir remove',
+    '/inventory',
     '/session',
     '/session list',
     '/session resume',
@@ -43,6 +47,9 @@ CHAT_COMMANDS = [
 # Callback to get dynamic toolkit names for completion
 _toolkit_names_callback: Optional[Callable[[], List[str]]] = None
 
+# Callback to get inventory .json files for completion
+_inventory_files_callback: Optional[Callable[[], List[str]]] = None
+
 
 def set_toolkit_names_callback(callback: Callable[[], List[str]]):
     """
@@ -55,12 +62,34 @@ def set_toolkit_names_callback(callback: Callable[[], List[str]]):
     _toolkit_names_callback = callback
 
 
+def set_inventory_files_callback(callback: Callable[[], List[str]]):
+    """
+    Set a callback function that returns available inventory .json files.
+    
+    This allows the input handler to provide dynamic completions
+    for /inventory without having a direct dependency on agents.py.
+    """
+    global _inventory_files_callback
+    _inventory_files_callback = callback
+
+
 def get_toolkit_names_for_completion() -> List[str]:
     """Get toolkit names for tab completion."""
     global _toolkit_names_callback
     if _toolkit_names_callback:
         try:
             return _toolkit_names_callback()
+        except Exception:
+            return []
+    return []
+
+
+def get_inventory_files_for_completion() -> List[str]:
+    """Get inventory .json files for tab completion."""
+    global _inventory_files_callback
+    if _inventory_files_callback:
+        try:
+            return _inventory_files_callback()
         except Exception:
             return []
     return []
@@ -146,6 +175,16 @@ class ChatInputHandler:
             # Also match just the toolkit name if text doesn't start with /
             if not text.startswith('/'):
                 matches = [name for name in toolkit_names if name.lower().startswith(toolkit_prefix)]
+        # Handle /inventory <path> completion
+        elif line.startswith('/inventory '):
+            # Get partial path being typed
+            path_prefix = text.lower()
+            inventory_files = get_inventory_files_for_completion()
+            matches = [f'/inventory {path}' for path in inventory_files 
+                      if path.lower().startswith(path_prefix) or path_prefix == '']
+            # Also match just the path if text doesn't start with /
+            if not text.startswith('/'):
+                matches = [path for path in inventory_files if path.lower().startswith(path_prefix)]
         # Find matching commands
         elif text.startswith('/'):
             matches = [cmd for cmd in CHAT_COMMANDS if cmd.startswith(text)]

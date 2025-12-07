@@ -461,6 +461,159 @@ When answering questions about the codebase, use these tools to provide accurate
     return DEFAULT_PROMPT + inventory_context
 
 
+def _resolve_inventory_path(path: str, work_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Resolve an inventory/knowledge graph file path.
+    
+    Tries locations in order:
+    1. Absolute path
+    2. Relative to current working directory (or work_dir if provided)
+    3. Relative to .alita/inventory/ in current directory
+    4. Relative to .alita/inventory/ in work_dir (if different)
+    
+    Args:
+        path: The path to resolve (can be relative or absolute)
+        work_dir: Optional workspace directory to check
+        
+    Returns:
+        Absolute path to the file if found, None otherwise
+    """
+    # Expand user home directory
+    path = str(Path(path).expanduser())
+    
+    # Try absolute path first
+    if Path(path).is_absolute() and Path(path).exists():
+        return str(Path(path).resolve())
+    
+    # Try relative to current working directory
+    cwd = Path.cwd()
+    cwd_path = cwd / path
+    if cwd_path.exists():
+        return str(cwd_path.resolve())
+    
+    # Try .alita/inventory/ in current directory
+    alita_inventory_path = cwd / '.alita' / 'inventory' / path
+    if alita_inventory_path.exists():
+        return str(alita_inventory_path.resolve())
+    
+    # If work_dir is different from cwd, try there too
+    if work_dir:
+        work_path = Path(work_dir)
+        if work_path != cwd:
+            # Try relative to work_dir
+            work_rel_path = work_path / path
+            if work_rel_path.exists():
+                return str(work_rel_path.resolve())
+            
+            # Try .alita/inventory/ in work_dir
+            work_alita_path = work_path / '.alita' / 'inventory' / path
+            if work_alita_path.exists():
+                return str(work_alita_path.resolve())
+    
+    return None
+
+
+def _build_inventory_config(path: str, work_dir: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Build an inventory toolkit configuration from a file path.
+    
+    The toolkit name is derived from the filename (stem).
+    All available tools are included.
+    
+    Args:
+        path: Path to the knowledge graph JSON file
+        work_dir: Optional workspace directory for path resolution
+        
+    Returns:
+        Toolkit configuration dict if file found, None otherwise
+    """
+    # Resolve the path
+    resolved_path = _resolve_inventory_path(path, work_dir)
+    if not resolved_path:
+        return None
+    
+    # Validate it's a JSON file
+    if not resolved_path.endswith('.json'):
+        return None
+    
+    # Validate file exists and is readable
+    try:
+        with open(resolved_path, 'r') as f:
+            # Just check it's valid JSON
+            json.load(f)
+    except (IOError, json.JSONDecodeError):
+        return None
+    
+    # Extract toolkit name from filename (e.g., 'alita' from 'alita.json')
+    toolkit_name = Path(resolved_path).stem
+    
+    # Build configuration with all available tools
+    from .toolkit_loader import INVENTORY_TOOLS
+    
+    return {
+        'type': 'inventory',
+        'toolkit_name': toolkit_name,
+        'graph_path': resolved_path,
+        'base_directory': work_dir,
+        'selected_tools': INVENTORY_TOOLS,
+    }
+
+
+def _get_inventory_json_files(work_dir: Optional[str] = None) -> List[str]:
+    """
+    Get list of .json files for inventory path completion.
+    
+    Searches:
+    1. Current working directory (*.json files)
+    2. .alita/inventory/ directory (*.json files)
+    3. work_dir and work_dir/.alita/inventory/ if different from cwd
+    
+    Args:
+        work_dir: Optional workspace directory
+        
+    Returns:
+        List of relative or display paths for completion
+    """
+    suggestions = []
+    seen = set()
+    
+    cwd = Path.cwd()
+    
+    # Current directory .json files
+    for f in cwd.glob('*.json'):
+        if f.name not in seen:
+            suggestions.append(f.name)
+            seen.add(f.name)
+    
+    # .alita/inventory/ directory
+    alita_inv = cwd / '.alita' / 'inventory'
+    if alita_inv.exists():
+        for f in alita_inv.glob('*.json'):
+            display = f'.alita/inventory/{f.name}'
+            if display not in seen:
+                suggestions.append(display)
+                seen.add(display)
+    
+    # work_dir if different
+    if work_dir:
+        work_path = Path(work_dir)
+        if work_path != cwd:
+            for f in work_path.glob('*.json'):
+                if f.name not in seen:
+                    suggestions.append(f.name)
+                    seen.add(f.name)
+            
+            work_alita_inv = work_path / '.alita' / 'inventory'
+            if work_alita_inv.exists():
+                for f in work_alita_inv.glob('*.json'):
+                    display = f'.alita/inventory/{f.name}'
+                    if display not in seen:
+                        suggestions.append(display)
+                        seen.add(display)
+    
+    return sorted(suggestions)
+
+
 def _load_mcp_tools(agent_def: Dict[str, Any], mcp_config_path: str) -> List[Dict[str, Any]]:
     """Load MCP tools from agent definition with tool-level filtering.
     
@@ -477,9 +630,13 @@ def _load_mcp_tools(agent_def: Dict[str, Any], mcp_config_path: str) -> List[Dic
 
 def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_config: tuple,
                                 config, model: Optional[str], temperature: Optional[float],
-                                max_tokens: Optional[int], memory, work_dir: Optional[str],
+                                max_tokens: Optional[int], memory, allowed_directories: Optional[List[str]],
                                 plan_state: Optional[Dict] = None):
     """Setup local agent executor with all configurations.
+    
+    Args:
+        allowed_directories: List of allowed directories for filesystem access.
+                           First directory is the primary/base directory.
     
     Returns:
         Tuple of (agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools)
@@ -496,21 +653,28 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
         client, model, agent_def, temperature, max_tokens
     )
     
-    # Add filesystem tools if --dir is provided
+    # Add filesystem tools if directories are provided
     filesystem_tools = None
     terminal_tools = None
-    if work_dir:
+    if allowed_directories:
         from .tools import get_filesystem_tools, get_terminal_tools
         preset = agent_def.get('filesystem_tools_preset')
         include_tools = agent_def.get('filesystem_tools_include')
         exclude_tools = agent_def.get('filesystem_tools_exclude')
-        filesystem_tools = get_filesystem_tools(work_dir, include_tools, exclude_tools, preset)
         
-        # Also add terminal tools when work_dir is set
-        terminal_tools = get_terminal_tools(work_dir)
+        # First directory is the primary base directory
+        base_dir = allowed_directories[0]
+        extra_dirs = allowed_directories[1:] if len(allowed_directories) > 1 else None
+        filesystem_tools = get_filesystem_tools(base_dir, include_tools, exclude_tools, preset, extra_dirs)
+        
+        # Terminal tools use primary directory as cwd
+        terminal_tools = get_terminal_tools(base_dir)
         
         tool_count = len(filesystem_tools) + len(terminal_tools)
-        access_msg = f"✓ Granted filesystem & terminal access to: {work_dir} ({tool_count} tools)"
+        if len(allowed_directories) == 1:
+            access_msg = f"✓ Granted filesystem & terminal access to: {base_dir} ({tool_count} tools)"
+        else:
+            access_msg = f"✓ Granted filesystem & terminal access to {len(allowed_directories)} directories ({tool_count} tools)"
         if preset:
             access_msg += f" [preset: {preset}]"
         if include_tools:
@@ -1184,6 +1348,8 @@ def agent_show(ctx, agent_source: str, version: Optional[str]):
 @click.option('--version', help='Agent version (for platform agents)')
 @click.option('--toolkit-config', multiple=True, type=click.Path(exists=True),
               help='Toolkit configuration files (can specify multiple)')
+@click.option('--inventory', 'inventory_path', type=str,
+              help='Load inventory/knowledge graph from JSON file (e.g., alita.json or .alita/inventory/alita.json)')
 @click.option('--thread-id', help='Continue existing conversation thread')
 @click.option('--model', help='Override LLM model')
 @click.option('--temperature', type=float, help='Override temperature')
@@ -1194,53 +1360,23 @@ def agent_show(ctx, agent_source: str, version: Optional[str]):
               help='Output verbosity level: quiet (final output only), default (tool calls + outputs), debug (all including LLM calls)')
 @click.pass_context
 def agent_chat(ctx, agent_source: Optional[str], version: Optional[str], 
-               toolkit_config: tuple, thread_id: Optional[str],
+               toolkit_config: tuple, inventory_path: Optional[str], thread_id: Optional[str],
                model: Optional[str], temperature: Optional[float], 
                max_tokens: Optional[int], work_dir: Optional[str],
                verbose: str):
-    """
-    Start interactive chat with an agent.
+    """Start interactive chat with an agent.
     
-    If AGENT_SOURCE is not provided, shows an interactive menu to select from
-    available agents (both platform and local).
-    
-    AGENT_SOURCE can be:
-    - Platform agent ID or name
-    - Path to local agent file
-    - '__inventory__' for the built-in inventory/knowledge graph agent
-    
+    \b
     Examples:
-    
-        # Interactive selection
-        alita-cli agent chat
-        
-        # Chat with platform agent
-        alita-cli agent chat my-agent
-        
-        # Chat with local agent
-        alita-cli agent chat .github/agents/sdk-dev.agent.md
-        
-        # With toolkit configurations
-        alita-cli agent chat my-agent \\
-            --toolkit-config jira-config.json \\
-            --toolkit-config github-config.json
-        
-        # With filesystem access
-        alita-cli agent chat my-agent --dir ./workspace
-        
-        # Continue previous conversation
-        alita-cli agent chat my-agent --thread-id abc123
-        
-        # Quiet mode (hide tool calls and thinking)
-        alita-cli agent chat my-agent --verbose quiet
-        
-        # Debug mode (show all including LLM calls)
-        alita-cli agent chat my-agent --verbose debug
-        
-        # Built-in inventory agent with source toolkits
-        alita-cli agent chat __inventory__ \\
-            --toolkit-config jira.json \\
-            --toolkit-config github.json
+      alita chat                      # Interactive agent selection
+      alita chat my-agent             # Chat with platform agent
+      alita chat ./agent.md           # Chat with local agent file
+      alita chat --inventory alita.json
+      alita chat my-agent --dir ./src
+      alita chat my-agent --thread-id abc123
+      alita chat my-agent -v quiet    # Hide tool calls
+      alita chat my-agent -v debug    # Show all LLM calls
+      alita chat __inventory__ --toolkit-config jira.json
     """
     formatter = ctx.obj['formatter']
     config = ctx.obj['config']
@@ -1281,9 +1417,19 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         planning_tools = None
         plan_state = None
         
+        # Handle --inventory option: add inventory toolkit config at startup
+        if inventory_path:
+            inventory_config = _build_inventory_config(inventory_path, work_dir)
+            if inventory_config:
+                added_toolkit_configs.append(inventory_config)
+                console.print(f"[dim]✓ Loading inventory: {inventory_config['toolkit_name']} ({inventory_config['graph_path']})[/dim]")
+            else:
+                console.print(f"[yellow]Warning: Inventory file not found: {inventory_path}[/yellow]")
+                console.print("[dim]Searched in current directory and .alita/inventory/[/dim]")
+        
         # Approval mode: 'always' (confirm each tool), 'auto' (no confirmation), 'yolo' (no safety checks)
         approval_mode = 'always'
-        current_work_dir = work_dir  # Track work_dir for /dir command
+        allowed_directories = [work_dir] if work_dir else []  # Track allowed directories for /dir command
         current_agent_file = agent_source if is_local else None  # Track agent file for /reload command
         
         if is_direct:
@@ -1354,6 +1500,14 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         
         # Save session metadata with agent source for session resume
         agent_source_portable = to_portable_path(current_agent_file) if current_agent_file else None
+        # Filter out transient inventory configs (dicts) - only save file paths
+        serializable_toolkit_configs = [tc for tc in added_toolkit_configs if isinstance(tc, str)]
+        # Extract inventory graph path if present
+        inventory_graph = None
+        for tc in added_toolkit_configs:
+            if isinstance(tc, dict) and tc.get('type') == 'inventory':
+                inventory_graph = tc.get('graph_path')
+                break
         save_session_metadata(current_session_id, {
             'agent_name': agent_name,
             'agent_type': agent_type if 'agent_type' in dir() else 'Direct LLM',
@@ -1364,7 +1518,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
             'is_direct': is_direct,
             'is_local': is_local,
             'is_inventory': is_inventory,
-            'added_toolkit_configs': list(added_toolkit_configs),
+            'added_toolkit_configs': serializable_toolkit_configs,
+            'inventory_graph': inventory_graph,
             'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])],
         })
         console.print(f"[dim]Session: {current_session_id}[/dim]")
@@ -1435,8 +1590,11 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         input_handler = get_input_handler()
         
         # Set up toolkit names callback for tab completion
-        from .input_handler import set_toolkit_names_callback
+        from .input_handler import set_toolkit_names_callback, set_inventory_files_callback
         set_toolkit_names_callback(lambda: _list_available_toolkits(config))
+        
+        # Set up inventory files callback for /inventory tab completion
+        set_inventory_files_callback(lambda: _get_inventory_json_files(allowed_directories[0] if allowed_directories else None))
         
         # Interactive chat loop
         while True:
@@ -1459,7 +1617,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             'agent_source': to_portable_path(current_agent_file) if current_agent_file else None,
                             'model': current_model or llm_model_display,
                             'temperature': current_temperature if current_temperature is not None else llm_temperature_display,
-                            'work_dir': current_work_dir,
+                            'allowed_directories': allowed_directories,
                             'added_toolkit_configs': list(added_toolkit_configs),
                             'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])],
                         })
@@ -1516,7 +1674,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                             )
                             # Persist model change to session
                             update_session_metadata(current_session_id, {
@@ -1578,7 +1736,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         from .tools import create_session_memory
                         memory = create_session_memory(current_session_id)
                         agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                         )
                         
                         # Show what changed
@@ -1623,7 +1781,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                             )
                             # Persist added MCPs to session
                             update_session_metadata(current_session_id, {
@@ -1673,7 +1831,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                             )
                             # Persist added toolkits to session
                             update_session_metadata(current_session_id, {
@@ -1738,7 +1896,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     memory = create_session_memory(current_session_id)
                     try:
                         agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                         )
                         # Persist updated MCPs to session
                         update_session_metadata(current_session_id, {
@@ -1812,7 +1970,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     memory = create_session_memory(current_session_id)
                     try:
                         agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                            client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                         )
                         # Persist updated toolkits to session
                         update_session_metadata(current_session_id, {
@@ -1852,44 +2010,214 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             console.print(f"[yellow]Unknown mode: {new_mode}. Use: always, auto, or yolo[/yellow]")
                     continue
                 
-                # /dir command - mount workspace directory
+                # /dir command - manage allowed directories
                 if user_input == '/dir' or user_input.startswith('/dir '):
-                    parts = user_input.split(maxsplit=1)
+                    parts = user_input.split()
+                    
                     if len(parts) == 1:
-                        if current_work_dir:
-                            console.print(f"📁 [bold cyan]Current workspace:[/bold cyan] {current_work_dir}")
+                        # /dir - list all allowed directories
+                        if allowed_directories:
+                            console.print("📁 [bold cyan]Allowed directories:[/bold cyan]")
+                            for i, d in enumerate(allowed_directories):
+                                marker = "●" if i == 0 else "○"
+                                label = " [dim](primary)[/dim]" if i == 0 else ""
+                                console.print(f"  {marker} {d}{label}")
                         else:
-                            console.print("[yellow]No workspace mounted. Usage: /dir /path/to/workspace[/yellow]")
+                            console.print("[yellow]No directories allowed.[/yellow]")
+                        console.print("[dim]Usage: /dir [add|rm|remove] /path/to/directory[/dim]")
+                        continue
+                    
+                    action = parts[1].lower()
+                    
+                    # Handle /dir add /path or /dir /path (add is default)
+                    if action in ['add', 'rm', 'remove']:
+                        if len(parts) < 3:
+                            console.print(f"[yellow]Missing path. Usage: /dir {action} /path/to/directory[/yellow]")
+                            continue
+                        dir_path = parts[2]
                     else:
-                        new_dir = parts[1].strip()
-                        new_dir_path = Path(new_dir).expanduser().resolve()
-                        
-                        if not new_dir_path.exists():
-                            console.print(f"[red]Directory not found: {new_dir}[/red]")
+                        # /dir /path - default to add
+                        action = 'add'
+                        dir_path = parts[1]
+                    
+                    dir_path = str(Path(dir_path).expanduser().resolve())
+                    
+                    if action == 'add':
+                        if not Path(dir_path).exists():
+                            console.print(f"[red]Directory not found: {dir_path}[/red]")
                             continue
-                        if not new_dir_path.is_dir():
-                            console.print(f"[red]Not a directory: {new_dir}[/red]")
+                        if not Path(dir_path).is_dir():
+                            console.print(f"[red]Not a directory: {dir_path}[/red]")
                             continue
                         
-                        current_work_dir = str(new_dir_path)
+                        if dir_path in allowed_directories:
+                            console.print(f"[yellow]Directory already allowed: {dir_path}[/yellow]")
+                            continue
                         
-                        # Recreate agent executor with new work_dir - use session memory
+                        allowed_directories.append(dir_path)
+                        
+                        # Recreate agent executor with updated directories
                         if is_direct or is_local or is_inventory:
                             from .tools import create_session_memory
                             memory = create_session_memory(current_session_id)
                             try:
                                 agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                                 )
                                 console.print(Panel(
-                                    f"[cyan]✓ Mounted: [bold]{current_work_dir}[/bold]\n   Terminal + filesystem tools enabled.[/cyan]",
+                                    f"[cyan]✓ Added directory: [bold]{dir_path}[/bold]\n   Total allowed: {len(allowed_directories)}[/cyan]",
                                     border_style="cyan",
                                     box=box.ROUNDED
                                 ))
                             except Exception as e:
-                                console.print(f"[red]Error mounting directory: {e}[/red]")
+                                allowed_directories.remove(dir_path)  # Rollback
+                                console.print(f"[red]Error adding directory: {e}[/red]")
                         else:
                             console.print("[yellow]Directory mounting is only available for local agents and built-in agents.[/yellow]")
+                    
+                    elif action in ['rm', 'remove']:
+                        if dir_path not in allowed_directories:
+                            console.print(f"[yellow]Directory not in allowed list: {dir_path}[/yellow]")
+                            if allowed_directories:
+                                console.print("[dim]Currently allowed:[/dim]")
+                                for d in allowed_directories:
+                                    console.print(f"[dim]  - {d}[/dim]")
+                            continue
+                        
+                        if len(allowed_directories) == 1:
+                            console.print("[yellow]Cannot remove the last directory. Use /dir add first to add another.[/yellow]")
+                            continue
+                        
+                        allowed_directories.remove(dir_path)
+                        
+                        # Recreate agent executor with updated directories
+                        if is_direct or is_local or is_inventory:
+                            from .tools import create_session_memory
+                            memory = create_session_memory(current_session_id)
+                            try:
+                                agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
+                                )
+                                console.print(Panel(
+                                    f"[cyan]✓ Removed directory: [bold]{dir_path}[/bold]\n   Remaining: {len(allowed_directories)}[/cyan]",
+                                    border_style="cyan",
+                                    box=box.ROUNDED
+                                ))
+                            except Exception as e:
+                                allowed_directories.append(dir_path)  # Rollback
+                                console.print(f"[red]Error removing directory: {e}[/red]")
+                        else:
+                            console.print("[yellow]Directory mounting is only available for local agents and built-in agents.[/yellow]")
+                    continue
+                
+                # /inventory command - load inventory/knowledge graph from path
+                if user_input == '/inventory' or user_input.startswith('/inventory '):
+                    if not (is_direct or is_local or is_inventory):
+                        console.print("[yellow]Loading inventory is only available for local agents and built-in agents.[/yellow]")
+                        continue
+                    
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) == 1:
+                        # Show current inventory and available files
+                        current_inventory = None
+                        for tc in added_toolkit_configs:
+                            if isinstance(tc, dict) and tc.get('type') == 'inventory':
+                                current_inventory = tc.get('graph_path')
+                                break
+                            elif isinstance(tc, str):
+                                try:
+                                    with open(tc, 'r') as f:
+                                        cfg = json.load(f)
+                                        if cfg.get('type') == 'inventory':
+                                            current_inventory = cfg.get('graph_path')
+                                            break
+                                except Exception:
+                                    pass
+                        
+                        if current_inventory:
+                            console.print(f"📊 [bold cyan]Current inventory:[/bold cyan] {current_inventory}")
+                        else:
+                            console.print("[yellow]No inventory loaded.[/yellow]")
+                        
+                        # Show available .json files
+                        primary_dir = allowed_directories[0] if allowed_directories else None
+                        available = _get_inventory_json_files(primary_dir)
+                        if available:
+                            console.print(f"[dim]Available files: {', '.join(available[:10])}")
+                            if len(available) > 10:
+                                console.print(f"[dim]  ... and {len(available) - 10} more[/dim]")
+                        console.print("[dim]Usage: /inventory <path/to/graph.json>[/dim]")
+                    else:
+                        inventory_path = parts[1].strip()
+                        
+                        # Build inventory config from path
+                        primary_dir = allowed_directories[0] if allowed_directories else None
+                        inventory_config = _build_inventory_config(inventory_path, primary_dir)
+                        if not inventory_config:
+                            console.print(f"[red]Inventory file not found: {inventory_path}[/red]")
+                            # Show search locations
+                            console.print("[dim]Searched in:[/dim]")
+                            console.print(f"[dim]  - {Path.cwd()}[/dim]")
+                            console.print(f"[dim]  - {Path.cwd() / '.alita' / 'inventory'}[/dim]")
+                            if primary_dir:
+                                console.print(f"[dim]  - {primary_dir}[/dim]")
+                                console.print(f"[dim]  - {Path(primary_dir) / '.alita' / 'inventory'}[/dim]")
+                            continue
+                        
+                        # Remove any existing inventory toolkit configs
+                        new_toolkit_configs = []
+                        removed_inventory = None
+                        for tc in added_toolkit_configs:
+                            if isinstance(tc, dict) and tc.get('type') == 'inventory':
+                                removed_inventory = tc.get('toolkit_name', 'inventory')
+                                continue  # Skip existing inventory
+                            elif isinstance(tc, str):
+                                try:
+                                    with open(tc, 'r') as f:
+                                        cfg = json.load(f)
+                                        if cfg.get('type') == 'inventory':
+                                            removed_inventory = cfg.get('toolkit_name', Path(tc).stem)
+                                            continue  # Skip existing inventory
+                                except Exception:
+                                    pass
+                            new_toolkit_configs.append(tc)
+                        
+                        # Add new inventory config
+                        new_toolkit_configs.append(inventory_config)
+                        added_toolkit_configs = new_toolkit_configs
+                        
+                        # Recreate agent executor with new inventory
+                        from .tools import create_session_memory, update_session_metadata
+                        memory = create_session_memory(current_session_id)
+                        try:
+                            agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
+                            )
+                            # Persist updated toolkits to session (exclude transient inventory configs)
+                            serializable_configs = [tc for tc in added_toolkit_configs if isinstance(tc, str)]
+                            update_session_metadata(current_session_id, {
+                                'added_toolkit_configs': serializable_configs,
+                                'inventory_graph': inventory_config.get('graph_path')  # Save just the graph path
+                            })
+                            
+                            toolkit_name = inventory_config['toolkit_name']
+                            graph_path = inventory_config['graph_path']
+                            if removed_inventory:
+                                console.print(Panel(
+                                    f"[cyan]ℹ Replaced inventory [bold]{removed_inventory}[/bold] with [bold]{toolkit_name}[/bold]\n"
+                                    f"   Graph: {graph_path}[/cyan]",
+                                    border_style="cyan",
+                                    box=box.ROUNDED
+                                ))
+                            else:
+                                console.print(Panel(
+                                    f"[cyan]✓ Loaded inventory: [bold]{toolkit_name}[/bold]\n"
+                                    f"   Graph: {graph_path}[/cyan]",
+                                    border_style="cyan",
+                                    box=box.ROUNDED
+                                ))
+                        except Exception as e:
+                            console.print(f"[red]Error loading inventory: {e}[/red]")
                     continue
                 
                 # /session command - list or resume sessions
@@ -1997,9 +2325,12 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                     if restored_agent:
                                         agent_def['temperature'] = current_temperature
                                 
-                                # Restore work directory
-                                if session_metadata.get('work_dir'):
-                                    current_work_dir = session_metadata['work_dir']
+                                # Restore allowed directories
+                                if session_metadata.get('allowed_directories'):
+                                    allowed_directories = session_metadata['allowed_directories']
+                                elif session_metadata.get('work_dir'):
+                                    # Backward compatibility with old sessions
+                                    allowed_directories = [session_metadata['work_dir']]
                             
                             # Reinitialize context manager with resumed session_id to load chat history
                             ctx_manager = CLIContextManager(
@@ -2051,7 +2382,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             if (is_direct or is_local or is_inventory) and restored_agent:
                                 try:
                                     agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                        client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                        client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                                     )
                                     ctx_manager.llm = llm  # Update LLM for summarization
                                     
@@ -2130,7 +2461,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                             added_toolkit_configs = []
                             try:
                                 agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                    client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                                 )
                                 console.print(Panel(
                                     f"[cyan]ℹ Switched to agent: [bold]{agent_name}[/bold] ({agent_type}). Agent state reset, chat history preserved.[/cyan]",
@@ -2158,7 +2489,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                             )
                             console.print(Panel(
                                 f"[cyan]ℹ Switched to [bold]Alita[/bold]. Agent state reset, chat history preserved.[/cyan]",
@@ -2190,7 +2521,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         memory = create_session_memory(current_session_id)
                         try:
                             agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, current_work_dir, plan_state
+                                client, agent_def, tuple(added_toolkit_configs), config, current_model, current_temperature, current_max_tokens, memory, allowed_directories, plan_state
                             )
                             console.print(Panel(
                                 f"[cyan]ℹ Switched to [bold]Inventory[/bold] agent. Use /add_toolkit to add source toolkits.[/cyan]",
@@ -2496,7 +2827,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                         'agent_source': to_portable_path(current_agent_file) if current_agent_file else None,
                         'model': current_model or llm_model_display,
                         'temperature': current_temperature if current_temperature is not None else llm_temperature_display,
-                        'work_dir': current_work_dir,
+                        'allowed_directories': allowed_directories,
                         'added_toolkit_configs': list(added_toolkit_configs),
                         'added_mcps': [m if isinstance(m, str) else m.get('name') for m in agent_def.get('mcps', [])],
                     })
@@ -2539,40 +2870,24 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
               temperature: Optional[float], max_tokens: Optional[int],
               save_thread: Optional[str], work_dir: Optional[str],
               verbose: str):
-    """
-    Run agent with a single message (handoff mode).
+    """Run agent with a single message (handoff mode).
     
+    \b
     AGENT_SOURCE can be:
-    - Platform agent ID or name
-    - Path to local agent file
+      - Platform agent ID or name
+      - Path to local agent file
     
     MESSAGE is the input message to send to the agent.
     
+    \b
     Examples:
-    
-        # Simple query
-        alita-cli agent run my-agent "What is the status of JIRA-123?"
-        
-        # With local agent
-        alita-cli agent run .github/agents/sdk-dev.agent.md \\
-            "Create a new toolkit for Stripe API"
-        
-        # With toolkit configs and JSON output
-        alita-cli --output json agent run my-agent "Search for bugs" \\
-            --toolkit-config jira-config.json
-        
-        # With filesystem access
-        alita-cli agent run my-agent "Analyze the code in src/" --dir ./myproject
-        
-        # Save thread for continuation
-        alita-cli agent run my-agent "Start task" \\
-            --save-thread thread.txt
-            
-        # Quiet mode (hide tool calls and thinking)
-        alita-cli agent run my-agent "Query" --verbose quiet
-        
-        # Debug mode (show all including LLM calls)
-        alita-cli agent run my-agent "Query" --verbose debug
+      alita run my-agent "What is the status of JIRA-123?"
+      alita run ./agent.md "Create a new toolkit for Stripe API"
+      alita -o json run my-agent "Search for bugs" --toolkit-config jira.json
+      alita run my-agent "Analyze code" --dir ./myproject
+      alita run my-agent "Start task" --save-thread thread.txt
+      alita run my-agent "Query" -v quiet
+      alita run my-agent "Query" -v debug
     """
     formatter = ctx.obj['formatter']
     client = get_client(ctx)
@@ -2895,37 +3210,15 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
     
     AGENT_SOURCE: Path to agent definition file (e.g., .github/agents/test-runner.agent.md)
     
+    \b
     Examples:
-    
-        # Execute all test cases with data generator
-        alita-cli agent execute-test-cases \\
-            .github/agents/test-runner.agent.json \\
-            --test-cases-dir .github/ai_native/testcases \\
-            --results-dir .github/ai_native/results \\
-            --data-generator .github/agents/test-data-generator.agent.json
-        
-        # Execute specific test cases
-        alita-cli agent execute-test-cases \\
-            .github/agents/test-runner.agent.json \\
-            --test-cases-dir .github/ai_native/testcases \\
-            --results-dir .github/ai_native/results \\
-            --test-case TC-001.md \\
-            --test-case TC-002.md
-        
-        # Execute without data generation
-        alita-cli agent execute-test-cases \\
-            .github/agents/test-runner.agent.json \\
-            --test-cases-dir .github/ai_native/testcases \\
-            --results-dir .github/ai_native/results \\
-            --skip-data-generation
-        
-        # With custom model and temperature
-        alita-cli agent execute-test-cases \\
-            .github/agents/test-runner.agent.json \\
-            --test-cases-dir .github/ai_native/testcases \\
-            --results-dir .github/ai_native/results \\
-            --model gpt-4o \\
-            --temperature 0.0
+      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results
+      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
+          --data-generator ./data-gen.json
+      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
+          --test-case TC-001.md --test-case TC-002.md
+      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
+          --skip-data-generation --model gpt-4o
     """
     config = ctx.obj['config']
     client = get_client(ctx)

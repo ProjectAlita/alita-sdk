@@ -33,26 +33,67 @@ logger = logging.getLogger(__name__)
 
 # Comprehensive type consolidation map
 # Maps many ad-hoc LLM types to a smaller set of canonical types
+# NOTE: All keys should be lowercase - normalize_type() lowercases input first
 TYPE_NORMALIZATION_MAP = {
+    # ==========================================================================
+    # IDENTITY MAPPINGS - Types that MUST be preserved as-is
+    # ==========================================================================
+    "fact": "fact",
+    "source_file": "source_file",
+    "feature": "feature",
+    "module": "module",
+    "constant": "constant",
+    "rule": "rule",
+    "parameter": "parameter",
+    "error_handling": "error_handling",
+    "todo": "todo",
+    "property": "property",
+    "configuration": "configuration",
+    "process": "process",
+    "integration": "integration",
+    "interface": "interface",
+    "user_story": "user_story",
+    "test": "test",
+    "variable": "variable",
+    "function": "function",
+    
+    # ==========================================================================
+    # CODE STRUCTURE FAMILY → map to preserved types
+    # ==========================================================================
+    "named": "export",
+    "default": "export",
+    "business_rule": "rule",
+    "domain_concept": "concept",
+    "business_concept": "concept",
+    "integration_point": "integration",
+    "user_interface_element": "interface",
+    "user_interface_component": "interface",
+    "user_interaction": "interface",
+    "user_action": "interface",
+    "api_contract": "rest_api",
+    "technical_debt": "todo",
+    "test_scenario": "test",
+    "test_case": "test",
+    "tooltype": "tool",
+    
     # ==========================================================================
     # TOOL & TOOLKIT FAMILY → tool, toolkit
     # ==========================================================================
-    "Tools": "tool",
-    "Tool": "tool",
+    "tool": "tool",
+    "tools": "tool",
     "tool_used": "tool",
     "tool_example": "tool",
     "tool_category": "tool",
     "internal_tool": "tool",
     "documentationtool": "tool",
-    "Toolkit": "toolkit",
-    "Toolkits": "toolkit",
+    "toolkit": "toolkit",
+    "toolkits": "toolkit",
     "toolkit_type": "toolkit",
     
     # ==========================================================================
     # FEATURE & CAPABILITY FAMILY → feature
     # ==========================================================================
-    "Feature": "feature",
-    "Features": "feature",
+    "features": "feature",
     "functionality": "feature",
     "capability": "feature",
     "benefit": "feature",
@@ -61,20 +102,19 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # PROCESS & WORKFLOW FAMILY → process
     # ==========================================================================
-    "Process": "process",
-    "Processes": "process",
+    "processes": "process",
     "procedure": "process",
-    "workflow": "process",
+    "workflow": "workflow",
     "flow": "process",
     "pipeline": "process",
     
     # ==========================================================================
     # CONCEPT & ENTITY FAMILY → concept
     # ==========================================================================
-    "Concept": "concept",
-    "Concepts": "concept",
-    "Entity": "entity",
-    "Entities": "entity",
+    "concept": "concept",
+    "concepts": "concept",
+    "entity": "entity",
+    "entities": "entity",
     "entity_type": "entity",
     "entitytype": "entity",
     "domain_entity": "entity",
@@ -87,8 +127,7 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # CONFIGURATION FAMILY → configuration
     # ==========================================================================
-    "Configuration": "configuration",
-    "Config": "configuration",
+    "config": "configuration",
     "configuration_section": "configuration",
     "configuration_field": "configuration",
     "configuration_option": "configuration",
@@ -118,8 +157,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # SECTION & STRUCTURE FAMILY → section
     # ==========================================================================
-    "Section": "section",
-    "Sections": "section",
+    "section": "section",
+    "sections": "section",
     "interface_section": "section",
     "navigation_structure": "section",
     "navigation_group": "section",
@@ -128,8 +167,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # COMPONENT & UI FAMILY → component
     # ==========================================================================
-    "Component": "component",
-    "Components": "component",
+    "component": "component",
+    "components": "component",
     "ui_component": "component",
     "ui_element": "component",
     "ui_layout": "component",
@@ -144,8 +183,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # ISSUE & PROBLEM FAMILY → issue
     # ==========================================================================
-    "Issue": "issue",
-    "Issues": "issue",
+    "issue": "issue",
+    "issues": "issue",
     "issue_type": "issue",
     "issuetype": "issue",
     "known_issue": "issue",
@@ -160,8 +199,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # ACTION & COMMAND FAMILY → action
     # ==========================================================================
-    "Action": "action",
-    "Actions": "action",
+    "action": "action",
+    "actions": "action",
     "command": "action",
     "operation": "action",
     "task": "action",
@@ -171,11 +210,9 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # PARAMETER & FIELD FAMILY → parameter
     # ==========================================================================
-    "Parameter": "parameter",
-    "Parameters": "parameter",
+    "parameters": "parameter",
     "field": "parameter",
     "field_identifier": "parameter",
-    "variable": "parameter",
     "placeholder": "parameter",
     "value": "parameter",
     "label": "parameter",
@@ -200,8 +237,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # RESOURCE & FILE FAMILY → resource
     # ==========================================================================
-    "Resource": "resource",
-    "Resources": "resource",
+    "resource": "resource",
+    "resources": "resource",
     "file": "resource",
     "file_type": "resource",
     "file_format": "resource",
@@ -216,8 +253,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # PLATFORM & SOFTWARE FAMILY → platform
     # ==========================================================================
-    "Platform": "platform",
-    "Platforms": "platform",
+    "platform": "platform",
+    "platforms": "platform",
     "software": "platform",
     "softwareversion": "platform",
     "application": "platform",
@@ -231,9 +268,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # SERVICE & API FAMILY → Keep distinct types for different communication patterns
     # ==========================================================================
-    "Service": "service",
-    "Services": "service",
-    "Microservice": "service",
+    "service": "service",
+    "services": "service",
     "microservice": "service",
     "web_service": "service",
     "server": "service",
@@ -241,73 +277,68 @@ TYPE_NORMALIZATION_MAP = {
     "hostingservice": "service",
     
     # REST API (do NOT normalize to generic 'service')
-    "REST API": "rest_api",
+    "rest api": "rest_api",
     "rest_api": "rest_api",
     "restapi": "rest_api",
-    "REST": "rest_api",
-    "api": "rest_api",  # Generic 'api' defaults to REST (most common)
-    "API": "rest_api",
-    "OpenAPI": "rest_api",
+    "rest": "rest_api",
+    "api": "rest_api",
     "openapi": "rest_api",
     "swagger": "rest_api",
-    "REST Endpoint": "rest_endpoint",
+    "rest endpoint": "rest_endpoint",
     "rest_endpoint": "rest_endpoint",
     "endpoint": "rest_endpoint",
     "api_endpoint": "rest_endpoint",
     "http_endpoint": "rest_endpoint",
     "rest_resource": "rest_resource",
-    "resource": "rest_resource",
     
     # GraphQL (do NOT normalize to 'service')
-    "GraphQL API": "graphql_api",
+    "graphql api": "graphql_api",
     "graphql_api": "graphql_api",
     "graphql": "graphql_api",
-    "GraphQL": "graphql_api",
     "graphql_schema": "graphql_api",
-    "GraphQL Query": "graphql_query",
+    "graphql query": "graphql_query",
     "graphql_query": "graphql_query",
-    "query": "graphql_query",  # Context-dependent, use cautiously
-    "GraphQL Mutation": "graphql_mutation",
+    "query": "graphql_query",
+    "graphql mutation": "graphql_mutation",
     "graphql_mutation": "graphql_mutation",
     "mutation": "graphql_mutation",
-    "GraphQL Subscription": "graphql_subscription",
+    "graphql subscription": "graphql_subscription",
     "graphql_subscription": "graphql_subscription",
     "subscription": "graphql_subscription",
-    "GraphQL Type": "graphql_type",
+    "graphql type": "graphql_type",
     "graphql_type": "graphql_type",
     
     # gRPC (do NOT normalize to 'service')
-    "gRPC Service": "grpc_service",
+    "grpc service": "grpc_service",
     "grpc_service": "grpc_service",
     "grpc": "grpc_service",
-    "gRPC": "grpc_service",
-    "gRPC Method": "grpc_method",
+    "grpc method": "grpc_method",
     "grpc_method": "grpc_method",
     "rpc_method": "grpc_method",
     "protobuf_message": "protobuf_message",
     "protobuf": "protobuf_message",
     "proto_message": "protobuf_message",
-    "Protocol Buffer": "protobuf_message",
+    "protocol buffer": "protobuf_message",
     
     # Event-Driven Architecture (do NOT normalize to 'service')
-    "Event Bus": "event_bus",
+    "event bus": "event_bus",
     "event_bus": "event_bus",
     "message_broker": "event_bus",
     "message_queue": "event_bus",
     "kafka": "event_bus",
     "rabbitmq": "event_bus",
-    "Event Type": "event_type",
+    "event type": "event_type",
     "event_type": "event_type",
     "event": "event_type",
     "message_type": "event_type",
-    "Event Producer": "event_producer",
+    "event producer": "event_producer",
     "event_producer": "event_producer",
     "publisher": "event_producer",
-    "Event Consumer": "event_consumer",
+    "event consumer": "event_consumer",
     "event_consumer": "event_consumer",
     "subscriber": "event_consumer",
     "listener": "event_consumer",
-    "Event Handler": "event_handler",
+    "event handler": "event_handler",
     "event_handler": "event_handler",
     "message_handler": "event_handler",
     "handler": "event_handler",
@@ -315,8 +346,7 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # INTEGRATION & CONNECTION FAMILY → integration
     # ==========================================================================
-    "Integration": "integration",
-    "Integrations": "integration",
+    "integrations": "integration",
     "connection": "integration",
     "connection_type": "integration",
     "connector": "integration",
@@ -327,8 +357,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # EXAMPLE & USE CASE FAMILY → example
     # ==========================================================================
-    "Example": "example",
-    "Examples": "example",
+    "example": "example",
+    "examples": "example",
     "example_type": "example",
     "example_request": "example",
     "use_case": "example",
@@ -350,15 +380,15 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # STEP & PROCEDURE FAMILY → step
     # ==========================================================================
-    "Step": "step",
-    "Steps": "step",
+    "step": "step",
+    "steps": "step",
     "number_of_step": "step",
     "prerequisite": "step",
     
     # ==========================================================================
     # STATUS & STATE FAMILY → status
     # ==========================================================================
-    "Status": "status",
+    "status": "status",
     "state": "status",
     "state_type": "status",
     "mode": "status",
@@ -367,7 +397,7 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # PROJECT & WORKSPACE FAMILY → project
     # ==========================================================================
-    "Project": "project",
+    "project": "project",
     "workspace": "project",
     "project_scope": "project",
     "repository": "project",
@@ -376,7 +406,7 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # ROLE & USER FAMILY → role
     # ==========================================================================
-    "Role": "role",
+    "role": "role",
     "user_role": "role",
     "team": "role",
     "person": "role",
@@ -387,8 +417,8 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # AGENT FAMILY → agent
     # ==========================================================================
-    "Agent": "agent",
-    "Agents": "agent",
+    "agent": "agent",
+    "agents": "agent",
     "agent_type": "agent",
     "agent_configuration": "agent",
     "ai_agent": "agent",
@@ -411,7 +441,7 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # RELEASE & VERSION FAMILY → release
     # ==========================================================================
-    "Release": "release",
+    "release": "release",
     "version": "release",
     "change": "release",
     "feature_change": "release",
@@ -422,7 +452,6 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # REFERENCE & LINK FAMILY → reference
     # ==========================================================================
-    "Reference": "reference",
     "reference": "reference",
     "related_page": "reference",
     "url": "reference",
@@ -434,8 +463,7 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # RULE & POLICY FAMILY → rule
     # ==========================================================================
-    "Rule": "rule",
-    "rule": "rule",
+    "rules": "rule",
     "policy": "rule",
     "formatting_rule": "rule",
     "directive": "rule",
@@ -445,18 +473,19 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # MCP FAMILY → mcp_server
     # ==========================================================================
-    "MCP Server": "mcp_server",
-    "MCP Tool": "mcp_tool", 
-    "MCP Resource": "mcp_resource",
+    "mcp server": "mcp_server",
+    "mcp_server": "mcp_server",
+    "mcp tool": "mcp_tool", 
+    "mcp_tool": "mcp_tool",
+    "mcp resource": "mcp_resource",
+    "mcp_resource": "mcp_resource",
     "mcp_type": "mcp_server",
     "transport": "mcp_server",
     
     # ==========================================================================
     # MISCELLANEOUS → map to closest canonical type
     # ==========================================================================
-    "interface": "component",
-    "function": "action",
-    "method": "action",
+    "method": "method",
     "model": "concept",
     "category": "concept",
     "metric": "parameter",
@@ -520,31 +549,31 @@ TYPE_NORMALIZATION_MAP = {
     # ==========================================================================
     # FACT & KNOWLEDGE FAMILY → fact (semantic facts extracted by LLM)
     # ==========================================================================
-    "fact": "fact",
-    "Fact": "fact",
-    "Facts": "fact",
-    # Code-specific fact types
+    "facts": "fact",
     "algorithm": "fact",
     "behavior": "fact",
     "validation": "fact",
-    "error_handling": "fact",
-    # Text-specific fact types
     "decision": "fact",
     "definition": "fact",
-    "contact": "fact",
     
     # ==========================================================================
     # FILE & STRUCTURE FAMILY → file types (container nodes for entities)
     # ==========================================================================
-    "file": "file",
-    "File": "file",
-    "source_file": "source_file",
     "document_file": "document_file",
     "config_file": "config_file",
     "web_file": "web_file",
     "directory": "directory",
     "package": "package",
-    "folder": "directory",
+}
+
+# Types that should NEVER be normalized - they pass through as-is
+PRESERVED_TYPES = {
+    "fact", "source_file", "feature", "module", "constant", "rule",
+    "parameter", "error_handling", "todo", "property", "configuration",
+    "process", "integration", "interface", "user_story", "test",
+    "export", "rest_api", "concept", "component", "workflow",
+    "document_file", "config_file", "web_file", "directory", "package",
+    "variable", "function",  # Code entities - preserve for impact analysis
 }
 
 def normalize_type(entity_type: str) -> str:
@@ -567,20 +596,22 @@ def normalize_type(entity_type: str) -> str:
     if not entity_type:
         return "concept"  # Default to concept for unknown
     
-    # Check explicit mapping first (handles most cases)
-    if entity_type in TYPE_NORMALIZATION_MAP:
-        return TYPE_NORMALIZATION_MAP[entity_type]
-    
-    # Normalize: lowercase, replace spaces/hyphens with underscores
+    # Normalize to lowercase first - all checks are case-insensitive
     normalized = entity_type.lower().strip().replace(" ", "_").replace("-", "_")
     
-    # Check normalized form in map
+    # First: check if type should be preserved as-is (25+ canonical types)
+    if normalized in PRESERVED_TYPES:
+        return normalized
+    
+    # Check explicit mapping (all keys are lowercase now)
     if normalized in TYPE_NORMALIZATION_MAP:
         return TYPE_NORMALIZATION_MAP[normalized]
     
     # Handle plural forms
     if normalized.endswith('s') and not normalized.endswith('ss') and len(normalized) > 3:
         singular = normalized[:-1]
+        if singular in PRESERVED_TYPES:
+            return singular
         if singular in TYPE_NORMALIZATION_MAP:
             return TYPE_NORMALIZATION_MAP[singular]
     
@@ -606,7 +637,6 @@ def normalize_type(entity_type: str) -> str:
     
     # If still unknown, map to concept (generic catch-all)
     return "concept"
-
 
 # Relationship types for cross-source linking
 CROSS_SOURCE_RELATIONS = {

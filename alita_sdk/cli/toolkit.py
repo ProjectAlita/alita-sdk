@@ -141,24 +141,15 @@ def toolkit_schema(ctx, toolkit_name: str):
 @click.pass_context
 def toolkit_test(ctx, toolkit_type: str, tool: str, config_file, params, 
                 param, llm_model: str, temperature: float, max_tokens: int):
-    """
-    Test a specific tool from a toolkit.
+    """Test a specific tool from a toolkit.
     
     TOOLKIT_TYPE: Type of toolkit (e.g., 'jira', 'github', 'confluence')
     
+    \b
     Examples:
-    
-        # Test with config and params from files
-        alita-cli toolkit test jira --tool get_issue \\
-            --config jira-config.json --params params.json
-        
-        # Test with inline parameters
-        alita-cli toolkit test jira --tool get_issue \\
-            --config jira-config.json --param issue_key=PROJ-123
-        
-        # Test with JSON output for scripting
-        alita-cli --output json toolkit test github --tool get_issue \\
-            --config github-config.json --param owner=user --param repo=myrepo
+      alita toolkit test jira --tool get_issue --config jira.json --params params.json
+      alita toolkit test jira --tool get_issue --config jira.json --param issue_key=PROJ-123
+      alita -o json toolkit test github --tool get_issue --config github.json
     """
     formatter = ctx.obj['formatter']
     client = get_client(ctx)

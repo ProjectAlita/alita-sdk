@@ -179,29 +179,58 @@ class EmptyInput(BaseModel):
 
 class FileSystemTool(BaseTool):
     """Base class for filesystem tools with directory restriction."""
-    base_directory: str
+    base_directory: str  # Primary directory (for backward compatibility)
+    allowed_directories: List[str] = []  # Additional allowed directories
+    
+    def _get_all_allowed_directories(self) -> List[Path]:
+        """Get all allowed directories as resolved Paths."""
+        dirs = [Path(self.base_directory).resolve()]
+        for d in self.allowed_directories:
+            resolved = Path(d).resolve()
+            if resolved not in dirs:
+                dirs.append(resolved)
+        return dirs
     
     def _resolve_path(self, relative_path: str) -> Path:
         """
-        Resolve and validate a path within the base directory.
+        Resolve and validate a path within any of the allowed directories.
         
-        Security: Ensures resolved path is within allowed directory.
+        Security: Ensures resolved path is within one of the allowed directories.
         """
-        base = Path(self.base_directory).resolve()
+        allowed_dirs = self._get_all_allowed_directories()
         
-        # Handle both relative and absolute paths
+        # Handle absolute paths - check if within any allowed directory
         if Path(relative_path).is_absolute():
             target = Path(relative_path).resolve()
-        else:
-            target = (base / relative_path).resolve()
+            for base in allowed_dirs:
+                try:
+                    target.relative_to(base)
+                    return target
+                except ValueError:
+                    continue
+            raise ValueError(f"Access denied: path '{relative_path}' is outside allowed directories")
         
-        # Security check: ensure the resolved path is within base directory
-        try:
-            target.relative_to(base)
-        except ValueError:
-            raise ValueError(f"Access denied: path '{relative_path}' is outside allowed directory")
+        # For relative paths, try to resolve against each allowed directory
+        # First check primary base_directory
+        primary_base = allowed_dirs[0]
+        target = (primary_base / relative_path).resolve()
         
-        return target
+        # Check if target is within any allowed directory
+        for base in allowed_dirs:
+            try:
+                target.relative_to(base)
+                return target
+            except ValueError:
+                continue
+        
+        # If relative path doesn't work from primary, try finding the file in other directories
+        for base in allowed_dirs[1:]:
+            candidate = (base / relative_path).resolve()
+            if candidate.exists():
+                return candidate
+        
+        # Default to primary base directory resolution
+        raise ValueError(f"Access denied: path '{relative_path}' is outside allowed directories")
     
     def _format_size(self, size: int) -> str:
         """Format file size in human-readable format."""
@@ -957,7 +986,12 @@ class ListAllowedDirectoriesTool(FileSystemTool):
     
     def _run(self) -> str:
         """List allowed directories."""
-        return f"Allowed directory:\n{self.base_directory}\n\nAll subdirectories within this path are accessible."
+        dirs = self._get_all_allowed_directories()
+        if len(dirs) == 1:
+            return f"Allowed directory:\n{dirs[0]}\n\nAll subdirectories within this path are accessible."
+        else:
+            dir_list = "\n".join(f"  - {d}" for d in dirs)
+            return f"Allowed directories:\n{dir_list}\n\nAll subdirectories within these paths are accessible."
 
 
 # ========== Filesystem API Wrapper for Inventory Ingestion ==========
@@ -1510,13 +1544,14 @@ def get_filesystem_tools(
     base_directory: str,
     include_tools: Optional[List[str]] = None,
     exclude_tools: Optional[List[str]] = None,
-    preset: Optional[str] = None
+    preset: Optional[str] = None,
+    allowed_directories: Optional[List[str]] = None
 ) -> List[BaseTool]:
     """
-    Get filesystem tools for the specified base directory.
+    Get filesystem tools for the specified directories.
     
     Args:
-        base_directory: Absolute or relative path to the directory to restrict access to
+        base_directory: Absolute or relative path to the primary directory to restrict access to
         include_tools: Optional list of tool names to include. If provided, only these tools are returned.
                       If None, all tools are included (unless excluded).
         exclude_tools: Optional list of tool names to exclude. Applied after include_tools.
@@ -1566,6 +1601,10 @@ def get_filesystem_tools(
         # Use preset and add custom exclusions
         get_filesystem_tools('/path/to/dir', preset='read_only', 
                            exclude_tools=['filesystem_search_files'])
+        
+        # Multiple allowed directories
+        get_filesystem_tools('/path/to/primary', 
+                           allowed_directories=['/path/to/other1', '/path/to/other2'])
     """
     # Apply preset if specified
     preset_include = None
@@ -1589,26 +1628,27 @@ def get_filesystem_tools(
         final_exclude.extend(exclude_tools)
     final_exclude = list(set(final_exclude)) if final_exclude else None
     
-    # Resolve to absolute path
+    # Resolve to absolute paths
     base_dir = str(Path(base_directory).resolve())
+    extra_dirs = [str(Path(d).resolve()) for d in (allowed_directories or [])]
     
     # Define all available tools with their names
     all_tools = {
-        'filesystem_read_file': ReadFileTool(base_directory=base_dir),
-        'filesystem_read_file_chunk': ReadFileChunkTool(base_directory=base_dir),
-        'filesystem_read_multiple_files': ReadMultipleFilesTool(base_directory=base_dir),
-        'filesystem_write_file': WriteFileTool(base_directory=base_dir),
-        'filesystem_append_file': AppendFileTool(base_directory=base_dir),
-        'filesystem_edit_file': EditFileTool(base_directory=base_dir),
-        'filesystem_apply_patch': ApplyPatchTool(base_directory=base_dir),
-        'filesystem_list_directory': ListDirectoryTool(base_directory=base_dir),
-        'filesystem_directory_tree': DirectoryTreeTool(base_directory=base_dir),
-        'filesystem_search_files': SearchFilesTool(base_directory=base_dir),
-        'filesystem_delete_file': DeleteFileTool(base_directory=base_dir),
-        'filesystem_move_file': MoveFileTool(base_directory=base_dir),
-        'filesystem_create_directory': CreateDirectoryTool(base_directory=base_dir),
-        'filesystem_get_file_info': GetFileInfoTool(base_directory=base_dir),
-        'filesystem_list_allowed_directories': ListAllowedDirectoriesTool(base_directory=base_dir),
+        'filesystem_read_file': ReadFileTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_read_file_chunk': ReadFileChunkTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_read_multiple_files': ReadMultipleFilesTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_write_file': WriteFileTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_append_file': AppendFileTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_edit_file': EditFileTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_apply_patch': ApplyPatchTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_list_directory': ListDirectoryTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_directory_tree': DirectoryTreeTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_search_files': SearchFilesTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_delete_file': DeleteFileTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_move_file': MoveFileTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_create_directory': CreateDirectoryTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_get_file_info': GetFileInfoTool(base_directory=base_dir, allowed_directories=extra_dirs),
+        'filesystem_list_allowed_directories': ListAllowedDirectoriesTool(base_directory=base_dir, allowed_directories=extra_dirs),
     }
     
     # Start with all tools or only included ones

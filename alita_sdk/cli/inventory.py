@@ -158,31 +158,19 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
            config: Optional[str], preset: Optional[str], whitelist: tuple, blacklist: tuple, 
            no_relations: bool, model: Optional[str], limit: Optional[int], 
            fresh: bool, name: Optional[str], recursive: bool):
-    """
-    Run ingestion pipeline to build/update a knowledge graph.
+    """Run ingestion pipeline to build/update a knowledge graph.
     
     Use --toolkit for configured sources (GitHub, ADO, etc.) or --dir for
     local directories (simpler, no config needed).
     
+    \b
     Examples:
-    
-        # Ingest with preset (recommended!)
-        alita inventory ingest --dir ./my-project -g ./graph.json --preset python
-        
-        # Ingest local directory (simple!)
-        alita inventory ingest --dir ./my-project -g ./graph.json -w "*.py" -w "*.md"
-        
-        # Combine preset with custom patterns
-        alita inventory ingest --dir ./src -g ./graph.json -p typescript -w "*.json"
-        
-        # Ingest with custom name
-        alita inventory ingest --dir ./docs -g ./graph.json --name "my-docs"
-        
-        # Ingest from GitHub (requires toolkit config)
-        alita inventory ingest -t .alita/tools/github.json -g ./graph.json -w "*.md"
-        
-        # Ingest with LLM/guardrails config
-        alita inventory ingest --dir ./src -g ./graph.json -c ./config.yml
+      alita inventory ingest --dir ./src -g graph.json --preset python
+      alita inventory ingest --dir ./src -g graph.json -w "*.py" -w "*.md"
+      alita inventory ingest --dir ./src -g graph.json -p typescript -w "*.json"
+      alita inventory ingest --dir ./docs -g graph.json --name my-docs
+      alita inventory ingest -t github.json -g graph.json -w "*.md"
+      alita inventory ingest --dir ./src -g graph.json -c config.yml
     """
     # Load preset configuration if specified
     preset_whitelist = []
@@ -411,22 +399,16 @@ def ingest(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
 def retry(ctx, toolkit: Optional[str], directory: Optional[str], graph: str,
           config: Optional[str], no_relations: bool, model: Optional[str],
           name: str, force: bool, recursive: bool):
-    """
-    Retry ingestion for files that failed in a previous run.
+    """Retry ingestion for files that failed in a previous run.
     
     Reads the checkpoint file to find failed files and re-ingests them.
     Use --force to retry all failed files regardless of previous attempt count.
     
+    \b
     Examples:
-    
-        # Retry failed files from local directory ingestion
-        alita inventory retry --dir ./my-project -g ./graph.json -n my-source
-        
-        # Force retry all failed files (ignore attempt count)
-        alita inventory retry --dir ./my-project -g ./graph.json -n my-source --force
-        
-        # Retry with toolkit config
-        alita inventory retry -t .alita/tools/github.json -g ./graph.json -n github-repo
+      alita inventory retry --dir ./src -g graph.json -n my-source
+      alita inventory retry --dir ./src -g graph.json -n my-source --force
+      alita inventory retry -t github.json -g graph.json -n github-repo
     """
     # Validate: must have either --toolkit or --dir
     if not toolkit and not directory:

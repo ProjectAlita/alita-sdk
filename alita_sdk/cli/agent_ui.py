@@ -79,7 +79,7 @@ def print_help():
         padding=(0, 1),
     )
     
-    table.add_column("Command", style="bold yellow", no_wrap=True, width=14)
+    table.add_column("Command", style="bold yellow", no_wrap=True, width=16)
     table.add_column("Description", style="white")
     
     table.add_row("/clear", "Clear conversation history")
@@ -89,7 +89,8 @@ def print_help():
     table.add_row("/model", "Switch to a different model (preserves history)")
     table.add_row("/reload", "Reload agent from file (hot reload)")
     table.add_row("/mode", "Set approval mode: always, auto, yolo")
-    table.add_row("/dir <path>", "Mount workspace directory for terminal access")
+    table.add_row("/dir [add|rm] <path>", "Add/remove/list allowed directories")
+    table.add_row("/inventory <path>", "Load inventory/knowledge graph from JSON file")
     table.add_row("/session", "List or resume previous sessions with plans")
     table.add_row("/add_mcp", "Add an MCP server (preserves history)")
     table.add_row("/add_toolkit", "Add a toolkit (preserves history)")
@@ -144,9 +145,11 @@ def print_welcome(agent_name: str, model: str = "gpt-4o", temperature: float = 0
     right_content.append("/mode", style="bold yellow")
     right_content.append("        Set approval mode\n", style="dim")
     right_content.append("/dir", style="bold yellow")
-    right_content.append("         Mount directory\n", style="dim")
+    right_content.append("         Add/list directories\n", style="dim")
     right_content.append("/session", style="bold yellow")
     right_content.append("     List/resume sessions\n", style="dim")
+    right_content.append("/inventory", style="bold yellow")
+    right_content.append("   Load knowledge graph\n", style="dim")
     right_content.append("/add_mcp", style="bold yellow")
     right_content.append("     Add MCP server\n", style="dim")
     right_content.append("/add_toolkit", style="bold yellow")
