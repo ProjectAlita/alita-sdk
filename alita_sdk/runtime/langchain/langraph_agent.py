@@ -979,8 +979,10 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if is_execution_finished:
             thread_id = None
 
+        final_output = f"Assistant run has been completed, but output is None.\nAdding last message if any: {messages[-1] if messages else []}" if is_execution_finished and output is None else output
+
         result_with_state = {
-            "output": output,
+            "output": final_output,
             "thread_id": thread_id,
             "execution_finished": is_execution_finished
         }
