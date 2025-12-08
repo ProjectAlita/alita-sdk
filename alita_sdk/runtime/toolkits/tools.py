@@ -19,7 +19,7 @@ from ..tools.image_generation import ImageGenerationToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
-from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
+from ..utils.mcp_oauth import canonical_token_key, McpAuthorizationRequired
 from ...tools.utils import TOOLKIT_SPLITTER
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                 token_data = None
                 session_id = None
                 if mcp_tokens and url:
-                    canonical_url = canonical_resource(url)
+                    canonical_url = canonical_token_key(url)
                     logger.info(f"[MCP Auth] Looking for token for URL: {url}")
                     logger.info(f"[MCP Auth] Canonical URL: {canonical_url}")
                     logger.info(f"[MCP Auth] Available tokens: {list(mcp_tokens.keys())}")

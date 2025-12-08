@@ -162,3 +162,44 @@ def canonical_resource(server_url: str) -> str:
     if resource.endswith("/") and parsed.path in ("", "/"):
         resource = resource[:-1]
     return resource
+
+
+def canonical_token_key(server_url: str) -> str:
+    """
+    Produce a canonical key for MCP token lookup.
+    
+    This function normalizes URLs to ensure consistent token lookup between
+    frontend and backend. It must match the frontend's canonicalizeServerUrl
+    implementation exactly:
+    - Lowercases scheme and hostname
+    - Strips default ports (443 for https, 80 for http)
+    - Removes query strings and fragments
+    - Removes trailing slash only if path is empty or just '/'
+    """
+    parsed = urlparse(server_url)
+    
+    # Normalize scheme and hostname to lowercase
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname.lower() if parsed.hostname else ''
+    
+    # Strip default ports (443 for https, 80 for http) to match frontend behavior
+    port = parsed.port
+    if port == 443 and scheme == 'https':
+        port = None
+    elif port == 80 and scheme == 'http':
+        port = None
+    
+    # Build port string only if non-default port exists
+    port_str = f':{port}' if port else ''
+    
+    # Keep only scheme, host, port, and path (strip query and fragment)
+    path = parsed.path or ''
+    
+    # Build the canonical URL
+    resource = f'{scheme}://{hostname}{port_str}{path}'
+    
+    # Prefer form without trailing slash unless path is meaningful
+    if resource.endswith("/") and path in ("", "/"):
+        resource = resource[:-1]
+    
+    return resource
