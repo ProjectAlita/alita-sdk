@@ -162,3 +162,83 @@ def canonical_resource(server_url: str) -> str:
     if resource.endswith("/") and parsed.path in ("", "/"):
         resource = resource[:-1]
     return resource
+
+
+def exchange_oauth_token(
+    token_endpoint: str,
+    code: str,
+    redirect_uri: str,
+    client_id: str,
+    client_secret: Optional[str] = None,
+    code_verifier: Optional[str] = None,
+    scope: Optional[str] = None,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    """
+    Exchange an OAuth authorization code for access tokens.
+    
+    This function performs the OAuth token exchange on the server side,
+    avoiding CORS issues that would occur if done from a browser.
+    
+    Args:
+        token_endpoint: OAuth token endpoint URL
+        code: Authorization code from OAuth provider
+        redirect_uri: Redirect URI used in authorization request
+        client_id: OAuth client ID
+        client_secret: OAuth client secret (optional for public clients)
+        code_verifier: PKCE code verifier (optional)
+        scope: OAuth scope (optional)
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Token response from OAuth provider containing access_token, etc.
+        
+    Raises:
+        requests.RequestException: If the HTTP request fails
+        ValueError: If the token exchange fails
+    """
+    # Build the token request body
+    token_body = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+    }
+    
+    if client_secret:
+        token_body["client_secret"] = client_secret
+    if code_verifier:
+        token_body["code_verifier"] = code_verifier
+    if scope:
+        token_body["scope"] = scope
+
+    logger.info(f"MCP OAuth: exchanging code at {token_endpoint}")
+    
+    # Make the token exchange request
+    response = requests.post(
+        token_endpoint,
+        data=token_body,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+        timeout=timeout
+    )
+    
+    # Try to parse as JSON
+    try:
+        token_data = response.json()
+    except Exception:
+        # Some providers return URL-encoded response
+        from urllib.parse import parse_qs
+        token_data = {k: v[0] if len(v) == 1 else v 
+                     for k, v in parse_qs(response.text).items()}
+    
+    if response.ok:
+        logger.info("MCP OAuth: token exchange successful")
+        return token_data
+    else:
+        error_msg = token_data.get("error_description") or token_data.get("error") or response.text
+        logger.error(f"MCP OAuth: token exchange failed - {response.status_code}: {error_msg}")
+        raise ValueError(f"Token exchange failed: {error_msg}")
+
