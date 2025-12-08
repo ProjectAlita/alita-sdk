@@ -1,33 +1,34 @@
 # AI-Native Test Framework
 
-This directory contains the AI-native test framework for automated testing of ALITA SDK toolkits and agents.
+This directory contains the AI-native test framework for automated testing of ALITA SDK toolkits and agents. It works together with agent definitions and toolkit configs stored under `.alita/`.
 
 ## Directory Structure
 
 ```
 .github/ai_native/
-├── testcases/           # Test case definitions organized by toolkit
-│   ├── ado/            # Azure DevOps test cases
-│   │   ├── configs/    # ADO toolkit configurations
-│   │   └── TC-*.md     # ADO test case files
-│   ├── confluence/     # Confluence test cases
-│   │   ├── configs/    # Confluence toolkit configurations
-│   │   └── TC-*.md     # Confluence test case files
-│   ├── github/         # GitHub test cases
-│   │   ├── configs/    # GitHub toolkit configurations
-│   │   └── TC-*.md     # GitHub test case files
-│   └── indexer/        # Indexer test cases
-│       └── configs/    # Indexer toolkit configurations
-└── results/            # Test execution results (generated)
-    ├── TC-*_result.json # Individual test results
-    └── summary.json    # Overall test summary
+├── testcases/            # Test case definitions organized by toolkit
+│   ├── ado/              # ADO test cases (TC-*.md)
+│   ├── confluence/       # Confluence test cases (TC-*.md)
+│   ├── github/           # GitHub test cases (TC-*.md)
+│   └── indexer/          # Indexer test cases
+└── results/              # Test execution results (generated)
+  └── test_execution_summary.json  # Overall summary (matrix/CI)
+
+.alita/
+├── agents/
+│   ├── test-runner.agent.md         # Test runner agent
+│   └── test-data-generator.agent.md # Optional data generator agent
+└── tool_configs/                    # Toolkit configuration files
+  ├── git-config.json              # GitHub toolkit config
+  ├── confluence-config.json       # Confluence toolkit config
+  └── ado-config.json              # Azure DevOps toolkit config
 ```
 
 ## Test Case Format
 
 Test cases are written in Markdown format following this structure:
 
-### Example Test Case (TC-001_list_branches_tool.md)
+### Example Test Case (TC-001_list_branches.md)
 
 ```markdown
 # List Branches Displays Custom Branch
@@ -49,7 +50,7 @@ Verify that the `list_branches_in_repo` tool correctly lists all branches in the
 
 ## Config
 
-path: .github\ai_native\testcases\github\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 
 ## Pre-requisites
 
@@ -82,12 +83,12 @@ Review the tool's output for the presence of branch names.
 
 ### Config Section
 
-The config section specifies the toolkit configuration file to use:
+The config section specifies the toolkit configuration file to use. Configs are stored under `.alita/tool_configs/`.
 
 ```markdown
 ## Config
 
-path: .github\ai_native\testcases\github\configs\git-config.json
+path: .alita\tool_configs\git-config.json
 ```
 
 This file contains the toolkit settings including the toolkit type, authentication credentials, repository details, and the list of selected tools that the test can use.
@@ -130,11 +131,11 @@ Common expectation patterns:
 
 ```bash
 alita agent execute-test-cases \
-    .github/agents/test-runner.agent.md \
-    --test-cases-dir .github/ai_native/testcases/github \
-    --results-dir .github/ai_native/results \
-    --data-generator .github/agents/test-data-generator.agent.md \
-    --dir .
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .github/ai_native/testcases \
+  --results-dir .github/ai_native/results \
+  --data-generator .alita/agents/test-data-generator.agent.md \
+  --dir .
 ```
 
 ### Execute Specific Toolkit Tests
@@ -142,49 +143,71 @@ alita agent execute-test-cases \
 ```bash
 # GitHub tests
 alita agent execute-test-cases \
-    .github/agents/test-runner.agent.md \
-    --test-cases-dir .github/ai_native/testcases/github \
-    --results-dir .github/ai_native/results \
-    --data-generator .github/agents/test-data-generator.agent.md \
-    --dir .
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .github/ai_native/testcases/github \
+  --results-dir .github/ai_native/results \
+  --data-generator .alita/agents/test-data-generator.agent.md \
+  --dir .
 
 # Confluence tests
 alita agent execute-test-cases \
-    .github/agents/test-runner.agent.md \
-    --test-cases-dir .github/ai_native/testcases/confluence \
-    --results-dir .github/ai_native/results \
-    --data-generator .github/agents/test-data-generator.agent.md \
-    --dir .
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .github/ai_native/testcases/confluence \
+  --results-dir .github/ai_native/results \
+  --data-generator .alita/agents/test-data-generator.agent.md \
+  --dir .
 
 # ADO tests
 alita agent execute-test-cases \
-    .github/agents/test-runner.agent.md \
-    --test-cases-dir .github/ai_native/testcases/ado \
-    --results-dir .github/ai_native/results \
-    --data-generator .github/agents/test-data-generator.agent.md \
-    --dir .
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .github/ai_native/testcases/ado \
+  --results-dir .github/ai_native/results \
+  --data-generator .alita/agents/test-data-generator.agent.md \
+  --dir .
+```
+### Execute Specific Test Case Files
+
+```bash
+# Run a single test case file by name (can repeat --test-case)
+alita agent execute-test-cases \
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .github/ai_native/testcases/github \
+  --results-dir .github/ai_native/results \
+  --data-generator .alita/agents/test-data-generator.agent.md \
+  --dir . \
+  --test-case TC-011_read_file.md \
+  --test-case TC-010_create_file.md
 ```
 
-### Test Individual Tools
+### Skip Data Generation and Override Model
+
+```bash
+alita agent execute-test-cases \
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .github/ai_native/testcases/github \
+  --results-dir .github/ai_native/results \
+  --skip-data-generation \
+  --model gpt-4o \
+  --temperature 0.0 \
+  --max-tokens 2000 \
+  --dir .
+```
+
 
 ```bash
 # Test a specific tool directly
 alita toolkit test github \
-    --tool list_branches_in_repo \
-    --config .github/ai_native/testcases/github/configs/git-config.json
+  --tool list_branches_in_repo \
+  --config .alita/tool_configs/git-config.json
 
 # Test with parameters
 alita toolkit test confluence \
-    --tool get_page_tree \
-    --config .github/ai_native/testcases/confluence/configs/confluence-config.json \
-    --param page_id="262313"
-```
+  --tool get_page_tree \
+  --config .alita/tool_configs/confluence-config.json \
 
 ## Test Results
 
-After execution, results are saved in the specified results directory:
-
-### Individual Test Results (TC-001_list_branches_tool_result.json)
+### Individual Test Results
 
 ```json
 {
@@ -211,8 +234,6 @@ After execution, results are saved in the specified results directory:
       "step_title": "Verify Output",
       "instruction": "Review the tool's output for the presence of branch names...",
       "output": "The output contains: main, hello, feature-branch",
-      "error": null,
-      "expectation": "The output text contains the branch name 'hello'",
       "validation_passed": true,
       "validation_details": "Output contains 'hello'"
     }
@@ -220,7 +241,7 @@ After execution, results are saved in the specified results directory:
 }
 ```
 
-### Summary Report (summary.json)
+### Summary Report (test_execution_summary.json)
 
 ```json
 {
@@ -250,35 +271,19 @@ The test framework currently supports the following toolkits:
 - **GitHub** (`testcases/github/`) - GitHub API operations, branches, PRs, issues, files
 - **Azure DevOps** (`testcases/ado/`) - ADO repositories, branches, PRs, files
 - **Confluence** (`testcases/confluence/`) - Confluence pages, search, attachments
-- **Indexer** (`testcases/indexer/`) - Code and document indexing operations
-
 ## Validation Rules
 
 The test framework uses pattern matching to validate outputs:
-
-- **Contains text**: `"contains 'text'"` or `"contains \"text\""`
-  - Example: `"The output contains the text 'my_test_branch'"`
   - Validates: Output must include the exact string
 
 - **No errors**: `"runs without errors"` or `"without errors"`
-  - Validates: No error keywords in output (error, exception, failed, traceback)
-
-- **Default**: If output is generated, step passes
-  - Use for exploratory or information-gathering steps
-
 ## Best Practices
 
 1. **One Concept Per Test**: Each test case should verify one specific functionality
-2. **Clear Expectations**: Make assertions specific and measurable
-3. **Organized by Toolkit**: Place test cases in the appropriate toolkit directory
-4. **Isolated Configs**: Each toolkit should have its own config files to avoid conflicts
 5. **Descriptive Names**: Use clear, descriptive file names (TC-XXX_what_it_tests.md)
 6. **Document Prerequisites**: List all required setup in the Pre-requisites section
 7. **Incremental Steps**: Break complex tests into smaller, validatable steps
 8. **Environment Variables**: Use environment variable placeholders (e.g., `${GIT_TOOL_ACCESS_TOKEN}`) for sensitive data
-
-## CI/CD Integration
-
 The test framework integrates with GitHub Actions for automated testing. The workflow supports:
 
 ### Matrix Execution
@@ -294,16 +299,16 @@ Tests are automatically selected based on changed files in PRs:
 
 ### Manual Execution
 
-The execute-test-cases command returns a non-zero exit code when tests fail:
+The `execute-test-cases` command returns a non-zero exit code when any tests fail:
 
 ```bash
 # In your CI/CD script
 alita agent execute-test-cases \
-    .github/agents/test-runner.agent.md \
-    --test-cases-dir .github/ai_native/testcases/github \
-    --results-dir .github/ai_native/results \
-    --data-generator .github/agents/test-data-generator.agent.md \
-    --dir .
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .github/ai_native/testcases \
+  --results-dir .github/ai_native/results \
+  --skip-data-generation \
+  --dir .
 
 # Exit code 0 = all tests passed
 # Exit code 1 = one or more tests failed
@@ -317,8 +322,8 @@ If you see: `⚠ Warning: Config file not found`
 
 - Check the path in the Config section matches the actual file location
 - Ensure the path is relative to the workspace root
-- Use the correct path format: `.github/ai_native/testcases/<toolkit>/configs/<config-file>.json`
-- Verify the config file exists in the toolkit's configs directory
+- Use the correct path format: `.alita/tool_configs/<config-file>.json`
+- Verify the config file exists under `.alita/tool_configs/`
 
 ### Tool Not Available
 

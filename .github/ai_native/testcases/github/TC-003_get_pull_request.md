@@ -10,7 +10,7 @@ Verify that the `get_pull_request` tool correctly retrieves detailed information
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Repository** | `ProjectAlita/elitea-testing` | Target GitHub repository (owner/repo format) |
 | **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
 | **Base URL** | `https://api.github.com` | GitHub API endpoint |
 | **Tool** | `get_pull_request` | GitHub tool to execute for retrieving PR details |
@@ -19,6 +19,7 @@ Verify that the `get_pull_request` tool correctly retrieves detailed information
 ## Config
 
 path: .alita\tool_configs\git-config.json
+generateTestData: false
 
 ## Pre-requisites
 
@@ -31,7 +32,7 @@ path: .alita\tool_configs\git-config.json
 
 ### Step 1: Execute the Tool
 
-Execute the `get_pull_request` tool with PR number `{{TEST_PR_NUMBER}}` against the target repository.
+Execute the `get_pull_request` tool with PR number `14` against the target repository.
 
 **Expectation:** The tool runs without errors and returns detailed information about the pull request.
 
@@ -39,9 +40,4 @@ Execute the `get_pull_request` tool with PR number `{{TEST_PR_NUMBER}}` against 
 
 Review the tool's output to ensure it contains the expected pull request details.
 
-**Expectation:** The output contains PR number `{{TEST_PR_NUMBER}}`, title `{{TEST_PR_TITLE}}`.
-
-## Final Result
-
-- ✅ **Pass:** If all expectations are met throughout the test steps, the objective is achieved and the test passes
-- ❌ **Fail:** If any expectation fails at any point, the test fails
+**Expectation:** The output contains PR number `14`, title `AI Tetsing pull request`.

@@ -10,7 +10,7 @@ Verify that the `list_open_pull_requests` tool correctly retrieves and displays 
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Repository** | `ProjectAlita/elitea-testing` | Target GitHub repository (owner/repo format) |
 | **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
 | **Base URL** | `https://api.github.com` | GitHub API endpoint |
 | **Tool** | `list_open_pull_requests` | GitHub tool to execute for listing open PRs |
@@ -18,6 +18,7 @@ Verify that the `list_open_pull_requests` tool correctly retrieves and displays 
 ## Config
 
 path: .alita\tool_configs\git-config.json
+generateTestData: false
 
 ## Pre-requisites
 
@@ -41,10 +42,4 @@ Execute the `list_open_pull_requests` tool against the target repository.
 
 Review the tool's output to ensure it contains the expected pull request.
 
-**Expectation:** The output contains pull request number `{{TEST_PR_NUMBER}}` The output contains title `{{TEST_PR_TITLE}}` Exactly all expectations must match
-Variables like `{{TEST_PR_NUMBER}}` and `{{TEST_PR_TITLE}}` should be replaced with actual values during test execution from your context
-
-## Final Result
-
-- ✅ **Pass:** If all expectations are met throughout the test steps, the objective is achieved and the test passes
-- ❌ **Fail:** If any expectation fails at any point, the test fails
+**Expectation:** The output contains pull request number `14` The output contains title `AI Tetsing pull request` Exactly all expectations must match

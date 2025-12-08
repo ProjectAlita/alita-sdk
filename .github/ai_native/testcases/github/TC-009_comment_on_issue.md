@@ -10,7 +10,7 @@ Verify that the `comment_on_issue` tool correctly adds a comment to an existing 
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Repository** | `ProjectAlita/elitea-testing` | Target GitHub repository (owner/repo format) |
 | **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
 | **Base URL** | `https://api.github.com` | GitHub API endpoint |
 | **Tool** | `comment_on_issue` | GitHub tool to execute for adding a comment |
@@ -28,12 +28,13 @@ Verify that the `comment_on_issue` tool correctly adds a comment to an existing 
 ## Config
 
 path: .alita\tool_configs\git-config.json
+generateTestData: false
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute the `comment_on_issue` tool with issue number `{{TEST_ISSUE_NUMBER}}` and comment text `{{TEST_COMMENT_TEXT}}`.
+Execute the `comment_on_issue` tool with issue number `15` and comment text comment "AI test {{current_date_and_hours}}".
 
 **Expectation:** The tool runs without errors and returns a success message containing the comment URL.
 

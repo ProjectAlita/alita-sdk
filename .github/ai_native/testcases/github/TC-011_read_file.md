@@ -10,7 +10,7 @@ Verify that the `read_file` tool correctly retrieves the content of a file from 
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Repository** | `ProjectAlita/elitea-testing` | Target GitHub repository (owner/repo format) |
 | **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
 | **Base URL** | `https://api.github.com` | GitHub API endpoint |
 | **Tool** | `read_file` | GitHub tool to execute for reading file content |
@@ -45,4 +45,4 @@ Execute the `read_file` tool from GitHub with file path `.gitignore` using main 
 
 Review the returned content to ensure it matches the expected file content.
 
-**Expectation:** The output should be a string containing the file content and should contain signoz/clickhouse/user_scripts/histogramQuantile
+**Expectation:** The output should be a string containing the file content and should contain .DS_Store and !test-data/sample-*

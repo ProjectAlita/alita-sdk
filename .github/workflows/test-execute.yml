@@ -29,12 +29,18 @@ jobs:
             echo "Fetching changed files from PR #${{ github.event.pull_request.number }}"
             
             # Fetch the changed files from the PR
-            CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only | jq -R -s -c 'split("\n") | map(select(length > 0))')
-            echo "Changed files from PR: $CHANGED_FILES"
+            CHANGED_FILES_RAW=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+            echo "Raw changed files:"
+            echo "$CHANGED_FILES_RAW"
             
-            # Check if pyproject.toml was changed
-            if echo "$CHANGED_FILES" | jq -e 'any(. == "pyproject.toml")' > /dev/null; then
-              echo "::notice::pyproject.toml was changed, running all tests"
+            CHANGED_FILES=$(echo "$CHANGED_FILES_RAW" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "Changed files from PR (JSON): $CHANGED_FILES"
+            
+            # Check if pyproject.toml or alita_sdk/runtime was changed (using grep as well for robustness)
+            if echo "$CHANGED_FILES_RAW" | grep -q "^pyproject\.toml$" || \
+               echo "$CHANGED_FILES_RAW" | grep -q "^alita_sdk/runtime/" || \
+               echo "$CHANGED_FILES" | jq -e 'any(. == "pyproject.toml" or startswith("alita_sdk/runtime/"))' > /dev/null; then
+              echo "::notice::pyproject.toml or alita_sdk/runtime was changed, running all tests"
               echo "matrix=$TEST_DIRS" >> $GITHUB_OUTPUT
               echo "has-tests=true" >> $GITHUB_OUTPUT
               echo "::notice::Generated matrix: $TEST_DIRS"
@@ -55,7 +61,6 @@ jobs:
               else
                 echo "::error::No test cases found for the changed toolkits"
                 echo "Changed toolkits: $CHANGED_TOOLKITS"
-                echo "Available test directories: $TEST_DIRS"
                 echo "has-tests=false" >> $GITHUB_OUTPUT
               fi
             fi

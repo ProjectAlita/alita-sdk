@@ -10,7 +10,7 @@ Verify that the `get_issues` tool correctly retrieves a list of issues from a Gi
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Repository** | `ProjectAlita/elitea-testing` | Target GitHub repository (owner/repo format) |
 | **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
 | **Base URL** | `https://api.github.com` | GitHub API endpoint |
 | **Tool** | `get_issues` | GitHub tool to execute for retrieving issues list |
@@ -26,6 +26,7 @@ Verify that the `get_issues` tool correctly retrieves a list of issues from a Gi
 ## Config
 
 path: .alita\tool_configs\git-config.json
+generateTestData: false
 
 ## Test Steps & Expectations
 

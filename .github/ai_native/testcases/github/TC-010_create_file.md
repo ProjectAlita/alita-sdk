@@ -10,7 +10,7 @@ Verify that the `create_file` tool correctly creates a new file with specified c
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Repository** | `ProjectAlita/elitea-testing` | Target GitHub repository (owner/repo format) |
 | **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
 | **Base URL** | `https://api.github.com` | GitHub API endpoint |
 | **Tool** | `create_file` | GitHub tool to execute for creating a new file |
@@ -30,6 +30,7 @@ Verify that the `create_file` tool correctly creates a new file with specified c
 ## Config
 
 path: .alita\tool_configs\git-config.json
+generateTestData: false
 
 ## Test Steps & Expectations
 
@@ -37,10 +38,10 @@ path: .alita\tool_configs\git-config.json
 
 Verify that the active branch is set to a feature/test branch, not the main/master branch.
 
-**Expectation:** The active branch should be `{{TEST_BRANCH}}` or another non-protected branch. If the active branch is main/master, the tool should return an error message about protected branches.
+**Expectation:** The active branch should be `tc-file-ops-2025-12-08`. If the active branch is main/master, the tool should return an error message about protected branches.
 
 ### Step 2: Execute the Tool
 
-Execute the `create_file` tool with file path `{{TEST_FILE_PATH}}` and contents `{{TEST_FILE_CONTENTS}}`.
+Execute the `create_file` tool with file path `{{CURRENT_TIME}}.aitest.txt` and contents `{{CURRENT_TIME_AND_DATE}}`.
 
-**Expectation:** The tool runs without errors and returns a success message like "Created file {{TEST_FILE_PATH}}".
+**Expectation:** The tool runs without errors and returns a success message like "Created file {{CURRENT_TIME}}.aitest.txt".

@@ -4,7 +4,7 @@
   "github_configuration": {
     "access_token": "${GIT_TOOL_ACCESS_TOKEN}"
   },
-  "repository": "VladVariushkin/agent",
+  "repository": "ProjectAlita/elitea-testing",
   "active_branch": "main",
   "base_branch": "main",
   "selected_tools": [

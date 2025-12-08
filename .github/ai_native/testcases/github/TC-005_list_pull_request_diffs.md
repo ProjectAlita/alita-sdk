@@ -10,7 +10,7 @@ Verify that the `list_pull_request_diffs` tool correctly retrieves the file chan
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Repository** | `VladVariushkin/agent` | Target GitHub repository (owner/repo format) |
+| **Repository** | `ProjectAlita/elitea-testing` | Target GitHub repository (owner/repo format) |
 | **Access Token** | `GIT_TOOL_ACCESS_TOKEN` | GitHub personal access token for authentication |
 | **Base URL** | `https://api.github.com` | GitHub API endpoint |
 | **Tool** | `list_pull_request_diffs` | GitHub tool to execute for retrieving PR diffs |
@@ -27,16 +27,19 @@ saved in the variable `TEST_PR_DIFFS`
 ## Config
 
 path: .alita\tool_configs\git-config.json
+generateTestData: false
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute the `list_pull_request_diffs` tool with PR number `{{TEST_PR_NUMBER}}` against the target repository.
+Execute the `list_pull_request_diffs` tool with PR number `14` against the target repository.
 **Expectation:** The tool runs without errors and returns a list of file changes with diff information.
 
 ### Step 2: Verify Output Content
 
 Review the tool's output to ensure it contains the expected diff details.
 
-**Expectation:** The output is a list containing file diff objects. Each diff object should have fields including `path`, `filename`, `status`, `additions`, `deletions`, and `changes`. At least one file should show `status` as `modified` or `added`. The output should contain diff information for files like `{{TEST_PR_DIFFS}}`.
+**Expectation:** The output is a list containing file diff objects. Each diff object should have fields including `path`, `filename`, `status`, `additions`, `deletions`, and `changes`. At least one file should show `status` as `modified` or `added`. The output should contain diff information for files like 
+- toolkit-tests/ado-wiki/Scenario_1_Get_Wiki.feature
+-toolkit-tests/ado-wiki/Scenario_4_Modify_Wiki_Page.feature.
