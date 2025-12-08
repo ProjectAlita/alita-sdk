@@ -111,8 +111,7 @@ class ArgsSchema(Enum):
             Field(
                 description=(
                     "Branch to be used for read file operation."
-                ),
-                default=None
+                )
             ),
         )
     )

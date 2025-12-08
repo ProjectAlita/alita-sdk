@@ -1,6 +1,3 @@
-from typing import Optional
-
-from atlassian import Bitbucket
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 

@@ -2,6 +2,7 @@ import copy
 import json
 import logging
 import time
+from enum import Enum
 from typing import Any, Optional, List, Dict, Generator
 
 from langchain_core.callbacks import dispatch_custom_event
@@ -18,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CUT_OFF = 0.2
 INDEX_META_UPDATE_INTERVAL = 600.0
+
+class IndexTools(str, Enum):
+    """Enum for index-related tool names."""
+    INDEX_DATA = "index_data"
+    SEARCH_INDEX = "search_index"
+    STEPBACK_SEARCH_INDEX = "stepback_search_index"
+    STEPBACK_SUMMARY_INDEX = "stepback_summary_index"
+    REMOVE_INDEX = "remove_index"
+    LIST_COLLECTIONS = "list_collections"
 
 # Base Vector Store Schema Models
 BaseIndexParams = create_model(
@@ -641,8 +651,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """
         return [
             {
-                "name": "index_data",
-                "mode": "index_data",
+                "name": IndexTools.INDEX_DATA.value,
+                "mode": IndexTools.INDEX_DATA.value,
                 "ref": self.index_data,
                 "description": "Loads data to index.",
                 "args_schema": create_model(
@@ -652,36 +662,36 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 )
             },
             {
-                "name": "search_index",
-                "mode": "search_index",
+                "name": IndexTools.SEARCH_INDEX.value,
+                "mode": IndexTools.SEARCH_INDEX.value,
                 "ref": self.search_index,
                 "description": self.search_index.__doc__,
                 "args_schema": BaseSearchParams
             },
             {
-                "name": "stepback_search_index",
-                "mode": "stepback_search_index",
+                "name": IndexTools.STEPBACK_SEARCH_INDEX.value,
+                "mode": IndexTools.STEPBACK_SEARCH_INDEX.value,
                 "ref": self.stepback_search_index,
                 "description": self.stepback_search_index.__doc__,
                 "args_schema": BaseStepbackSearchParams
             },
             {
-                "name": "stepback_summary_index",
-                "mode": "stepback_summary_index",
+                "name": IndexTools.STEPBACK_SUMMARY_INDEX.value,
+                "mode": IndexTools.STEPBACK_SUMMARY_INDEX.value,
                 "ref": self.stepback_summary_index,
                 "description": self.stepback_summary_index.__doc__,
                 "args_schema": BaseStepbackSearchParams
             },
             {
-                "name": "remove_index",
-                "mode": "remove_index",
+                "name": IndexTools.REMOVE_INDEX.value,
+                "mode": IndexTools.REMOVE_INDEX.value,
                 "ref": self.remove_index,
                 "description": self.remove_index.__doc__,
                 "args_schema": RemoveIndexParams
             },
             {
-                "name": "list_collections",
-                "mode": "list_collections",
+                "name": IndexTools.LIST_COLLECTIONS.value,
+                "mode": IndexTools.LIST_COLLECTIONS.value,
                 "ref": self.list_collections,
                 "description": self.list_collections.__doc__,
                 # No parameters

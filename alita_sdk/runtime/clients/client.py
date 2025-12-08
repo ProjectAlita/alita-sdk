@@ -22,6 +22,7 @@ from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..utils.utils import TOOLKIT_SPLITTER
 from ...tools import get_available_toolkit_models
+from ...tools.base_indexer_toolkit import IndexTools
 
 logger = logging.getLogger(__name__)
 
@@ -915,7 +916,11 @@ class AlitaClient:
                             full_available_tools.append(tool_name_attr)
 
                 # Create comprehensive error message
-                error_msg = f"Tool '{tool_name}' not found in toolkit '{toolkit_config.get('toolkit_name')}'."
+                error_msg = f"Tool '{tool_name}' not found in toolkit '{toolkit_config.get('toolkit_name')}'.\n"
+
+                # Custom error for index tools
+                if toolkit_name in [tool.value for tool in IndexTools]:
+                    error_msg += f" Please make sure proper PGVector configuration and embedding model are set in the platform.\n"
 
                 if base_available_tools and full_available_tools:
                     error_msg += f" Available tools: {base_available_tools} (base names) or {full_available_tools} (full names)"
