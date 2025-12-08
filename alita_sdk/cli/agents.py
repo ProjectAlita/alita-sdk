@@ -2709,6 +2709,18 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                         ctx_manager.add_message("assistant", clean_output)
                                         history_already_added = True
                                     
+                                    # CRITICAL: Use a new thread_id when continuing to avoid corrupted
+                                    # checkpoint state. The tool limit may have left the checkpoint with
+                                    # an AIMessage containing tool_calls without corresponding ToolMessages.
+                                    # Using a new thread_id starts fresh with our clean context manager state.
+                                    import uuid
+                                    continuation_thread_id = f"{current_session_id}-cont-{uuid.uuid4().hex[:8]}"
+                                    invoke_config = RunnableConfig(
+                                        configurable={"thread_id": continuation_thread_id}
+                                    )
+                                    if cli_callback:
+                                        invoke_config["callbacks"] = [cli_callback]
+                                    
                                     # Set new input to continue with a more explicit continuation message
                                     # Include context about the task limit to help the agent understand
                                     user_input = (
@@ -2763,10 +2775,28 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                 choice = 's'
                             
                             if choice == 'c':
-                                # Continue - the checkpoint should preserve state
-                                # We'll re-invoke with a continuation message
+                                # Continue - Use a new thread_id to avoid corrupted checkpoint state.
+                                # GraphRecursionError may have left the checkpoint with an AIMessage
+                                # containing tool_calls without corresponding ToolMessages.
+                                # Using a new thread_id starts fresh with our clean context manager state.
                                 continue_from_recursion = True
-                                console.print("\n[cyan]Continuing from last checkpoint...[/cyan]\n")
+                                console.print("\n[cyan]Continuing with fresh context...[/cyan]\n")
+                                
+                                # Add current progress to history if we have it
+                                # (GraphRecursionError doesn't give us partial output, but context may have been updated)
+                                history_input = original_user_input if not history_already_added else user_input
+                                ctx_manager.add_message("user", history_input)
+                                ctx_manager.add_message("assistant", "[Previous task interrupted - continuing...]")
+                                history_already_added = True
+                                
+                                # Create new thread_id to avoid corrupted checkpoint
+                                import uuid
+                                continuation_thread_id = f"{current_session_id}-cont-{uuid.uuid4().hex[:8]}"
+                                invoke_config = RunnableConfig(
+                                    configurable={"thread_id": continuation_thread_id}
+                                )
+                                if cli_callback:
+                                    invoke_config["callbacks"] = [cli_callback]
                                 
                                 # More explicit continuation message
                                 user_input = (

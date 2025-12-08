@@ -443,15 +443,68 @@ class CLICallbackHandler(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Called when LLM errors."""
+        error_str = str(error)
+        
+        # Parse common error patterns for user-friendly messages
+        user_message = None
+        hint = None
+        
+        # Invalid model identifier (Bedrock/Claude)
+        if "model identifier is invalid" in error_str.lower() or "BedrockException" in error_str:
+            user_message = "Invalid model identifier"
+            hint = "The model may not be available in your region or the model ID is incorrect.\nUse /model to switch to a different model."
+        
+        # Rate limiting
+        elif "rate limit" in error_str.lower() or "too many requests" in error_str.lower():
+            user_message = "Rate limit exceeded"
+            hint = "Wait a moment and try again, or switch to a different model with /model."
+        
+        # Token/context length exceeded
+        elif "context length" in error_str.lower() or "maximum.*tokens" in error_str.lower() or "too long" in error_str.lower():
+            user_message = "Context length exceeded"
+            hint = "The conversation is too long. Start a new session or use /clear to reset."
+        
+        # Authentication errors
+        elif "authentication" in error_str.lower() or "unauthorized" in error_str.lower() or "api key" in error_str.lower():
+            user_message = "Authentication failed"
+            hint = "Check your API credentials in the configuration."
+        
+        # Model not found/available
+        elif "model not found" in error_str.lower() or "does not exist" in error_str.lower():
+            user_message = "Model not found"
+            hint = "The requested model is not available. Use /model to select a different one."
+        
+        # Build the display message
         console.print()
-        console.print(Panel(
-            Text(str(error), style="red"),
-            title="[bold red]✗ LLM Error[/bold red]",
-            title_align="left",
-            border_style="red",
-            box=ERROR_BOX,
-            padding=(0, 1),
-        ))
+        if user_message:
+            content = Text()
+            content.append(f"❌ {user_message}\n\n", style="bold red")
+            if hint:
+                content.append(f"💡 {hint}\n\n", style="yellow")
+            content.append("Technical details:\n", style="dim")
+            # Truncate long error messages
+            if len(error_str) > 300:
+                content.append(error_str[:300] + "...", style="dim")
+            else:
+                content.append(error_str, style="dim")
+            console.print(Panel(
+                content,
+                title="[bold red]✗ LLM Error[/bold red]",
+                title_align="left",
+                border_style="red",
+                box=ERROR_BOX,
+                padding=(0, 1),
+            ))
+        else:
+            # Fallback to original behavior for unrecognized errors
+            console.print(Panel(
+                Text(str(error), style="red"),
+                title="[bold red]✗ LLM Error[/bold red]",
+                title_align="left",
+                border_style="red",
+                box=ERROR_BOX,
+                padding=(0, 1),
+            ))
     
     #
     # Chain Callbacks

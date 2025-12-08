@@ -642,3 +642,90 @@ class CLIContextManager:
             List of message dicts with 'role' and 'content'
         """
         return cli_messages_to_dicts(self._messages, include_only=include_only)
+
+
+def sanitize_message_history(messages: List[Any]) -> List[Any]:
+    """
+    Sanitize message history to ensure valid tool call/response structure.
+    
+    This function ensures that any AIMessage with tool_calls has corresponding
+    ToolMessages for all tool_call_ids. This prevents the LLM API error:
+    "An assistant message with 'tool_calls' must be followed by tool messages 
+    responding to each 'tool_call_id'."
+    
+    Use this when:
+    - Resuming from a GraphRecursionError (step limit)
+    - Resuming from a tool execution limit
+    - Loading corrupted checkpoint state
+    
+    Args:
+        messages: List of LangChain message objects or dicts
+        
+    Returns:
+        Sanitized list of messages with placeholder ToolMessages added for any
+        missing tool call responses.
+    """
+    from langchain_core.messages import ToolMessage, AIMessage as LCAIMessage
+    
+    if not messages:
+        return messages
+    
+    result = list(messages)  # Copy to avoid mutating original
+    
+    # Build set of existing tool_call_ids that have responses
+    existing_tool_responses = set()
+    for msg in result:
+        if hasattr(msg, 'tool_call_id') and msg.tool_call_id:
+            existing_tool_responses.add(msg.tool_call_id)
+        elif isinstance(msg, dict) and msg.get('type') == 'tool':
+            tool_call_id = msg.get('tool_call_id')
+            if tool_call_id:
+                existing_tool_responses.add(tool_call_id)
+    
+    # Find AIMessages with tool_calls and check for missing responses
+    messages_to_add = []
+    for i, msg in enumerate(result):
+        tool_calls = None
+        
+        # Check for tool_calls in different message formats
+        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            tool_calls = msg.tool_calls
+        elif isinstance(msg, dict) and msg.get('tool_calls'):
+            tool_calls = msg.get('tool_calls')
+        
+        if tool_calls:
+            # Check each tool_call for a corresponding response
+            for tool_call in tool_calls:
+                tool_call_id = None
+                tool_name = 'unknown'
+                
+                if isinstance(tool_call, dict):
+                    tool_call_id = tool_call.get('id', '')
+                    tool_name = tool_call.get('name', 'unknown')
+                elif hasattr(tool_call, 'id'):
+                    tool_call_id = getattr(tool_call, 'id', '')
+                    tool_name = getattr(tool_call, 'name', 'unknown')
+                
+                if tool_call_id and tool_call_id not in existing_tool_responses:
+                    # Missing tool response - create placeholder
+                    logger.warning(
+                        f"Found AIMessage with tool_call '{tool_name}' ({tool_call_id}) "
+                        f"without corresponding ToolMessage. Adding placeholder."
+                    )
+                    placeholder = ToolMessage(
+                        content=f"[Tool call '{tool_name}' was interrupted - no response available. "
+                                f"The task may need to be retried.]",
+                        tool_call_id=tool_call_id
+                    )
+                    messages_to_add.append((i + 1, placeholder))
+                    existing_tool_responses.add(tool_call_id)  # Prevent duplicates
+    
+    # Insert placeholder messages (reverse order to maintain correct indices)
+    for insert_idx, placeholder_msg in reversed(messages_to_add):
+        result.insert(insert_idx, placeholder_msg)
+    
+    if messages_to_add:
+        logger.info(f"Sanitized message history: added {len(messages_to_add)} placeholder ToolMessages")
+    
+    return result
+

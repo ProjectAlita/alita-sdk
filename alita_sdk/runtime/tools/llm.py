@@ -397,8 +397,20 @@ class LLMNode(BaseTool):
                     'contextwindowexceedederror', 'max_tokens', 'content too large'
                 ])
                 
-                if is_context_error:
-                    logger.warning(f"Context window exceeded during tool execution iteration {iteration}")
+                # Check for Bedrock/Claude output limit errors
+                # These often manifest as "model identifier is invalid" when output exceeds limits
+                is_output_limit_error = any(indicator in error_str for indicator in [
+                    'model identifier is invalid',
+                    'bedrockexception',
+                    'output token',
+                    'response too large',
+                    'max_tokens_to_sample',
+                    'output_token_limit'
+                ])
+                
+                if is_context_error or is_output_limit_error:
+                    error_type = "output limit" if is_output_limit_error else "context window"
+                    logger.warning(f"{error_type.title()} exceeded during tool execution iteration {iteration}")
                     
                     # Find the last tool message and its associated tool name
                     last_tool_msg_idx = None
@@ -435,13 +447,27 @@ class LLMNode(BaseTool):
                         original_msg = new_messages[last_tool_msg_idx]
                         tool_call_id = getattr(original_msg, 'tool_call_id', 'unknown')
                         
-                        # Replace with truncated message
-                        truncated_content = (
-                            f"⚠️ TOOL OUTPUT TRUNCATED - Context window exceeded\n\n"
-                            f"The tool '{last_tool_name or 'unknown'}' returned too much data for the model's context window.\n\n"
-                            f"To fix this:\n{tool_suggestions}\n\n"
-                            f"Please retry with more restrictive parameters."
-                        )
+                        # Build error-specific guidance
+                        if is_output_limit_error:
+                            truncated_content = (
+                                f"⚠️ MODEL OUTPUT LIMIT EXCEEDED\n\n"
+                                f"The tool '{last_tool_name or 'unknown'}' returned data, but the model's response was too large.\n\n"
+                                f"IMPORTANT: You must provide a SMALLER, more focused response.\n"
+                                f"- Break down your response into smaller chunks\n"
+                                f"- Summarize instead of listing everything\n"
+                                f"- Focus on the most relevant information first\n"
+                                f"- If listing items, show only top 5-10 most important\n\n"
+                                f"Tool-specific tips:\n{tool_suggestions}\n\n"
+                                f"Please retry with a more concise response."
+                            )
+                        else:
+                            truncated_content = (
+                                f"⚠️ TOOL OUTPUT TRUNCATED - Context window exceeded\n\n"
+                                f"The tool '{last_tool_name or 'unknown'}' returned too much data for the model's context window.\n\n"
+                                f"To fix this:\n{tool_suggestions}\n\n"
+                                f"Please retry with more restrictive parameters."
+                            )
+                        
                         truncated_msg = ToolMessage(
                             content=truncated_content,
                             tool_call_id=tool_call_id
@@ -453,10 +479,16 @@ class LLMNode(BaseTool):
                         continue
                     else:
                         # Couldn't find tool message, add error and break
-                        error_msg = (
-                            "Context window exceeded. The conversation or tool results are too large. "
-                            "Try using tools with smaller output limits (e.g., max_items, max_depth parameters)."
-                        )
+                        if is_output_limit_error:
+                            error_msg = (
+                                "Model output limit exceeded. Please provide a more concise response. "
+                                "Break down your answer into smaller parts and summarize where possible."
+                            )
+                        else:
+                            error_msg = (
+                                "Context window exceeded. The conversation or tool results are too large. "
+                                "Try using tools with smaller output limits (e.g., max_items, max_depth parameters)."
+                            )
                         new_messages.append(AIMessage(content=error_msg))
                         break
                 else:
@@ -469,6 +501,35 @@ class LLMNode(BaseTool):
         # Handle max iterations
         if iteration >= self.steps_limit:
             logger.warning(f"Reached maximum iterations ({self.steps_limit}) for tool execution")
+            
+            # CRITICAL: Check if the last message is an AIMessage with pending tool_calls
+            # that were not processed. If so, we need to add placeholder ToolMessages to prevent
+            # the "assistant message with 'tool_calls' must be followed by tool messages" error
+            # when the conversation continues.
+            if new_messages:
+                last_msg = new_messages[-1]
+                if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
+                    from langchain_core.messages import ToolMessage
+                    pending_tool_calls = last_msg.tool_calls if hasattr(last_msg.tool_calls, '__iter__') else []
+                    
+                    # Check which tool_call_ids already have responses
+                    existing_tool_call_ids = set()
+                    for msg in new_messages:
+                        if hasattr(msg, 'tool_call_id'):
+                            existing_tool_call_ids.add(msg.tool_call_id)
+                    
+                    # Add placeholder responses for any tool calls without responses
+                    for tool_call in pending_tool_calls:
+                        tool_call_id = tool_call.get('id', '') if isinstance(tool_call, dict) else getattr(tool_call, 'id', '')
+                        tool_name = tool_call.get('name', '') if isinstance(tool_call, dict) else getattr(tool_call, 'name', '')
+                        
+                        if tool_call_id and tool_call_id not in existing_tool_call_ids:
+                            logger.info(f"Adding placeholder ToolMessage for interrupted tool call: {tool_name} ({tool_call_id})")
+                            placeholder_msg = ToolMessage(
+                                content=f"[Tool execution interrupted - step limit ({self.steps_limit}) reached before {tool_name} could be executed]",
+                                tool_call_id=tool_call_id
+                            )
+                            new_messages.append(placeholder_msg)
             
             # Add warning message - CLI or calling code can detect this and prompt user
             warning_msg = f"Maximum tool execution iterations ({self.steps_limit}) reached. Stopping tool execution."
