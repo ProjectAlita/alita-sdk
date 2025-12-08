@@ -21,6 +21,7 @@ from ...community import get_toolkits as community_toolkits, get_tools as commun
 from ...tools.memory import MemoryToolkit
 from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
 from ...tools.utils import TOOLKIT_SPLITTER
+from alita_sdk.tools import _inject_toolkit_id
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                         logger.warning("Image generation internal tool requested "
                                        "but no image generation model configured")
             elif tool['type'] == 'artifact':
-                tools.extend(ArtifactToolkit.get_toolkit(
+                toolkit_tools = ArtifactToolkit.get_toolkit(
                     client=alita_client,
                     bucket=tool['settings']['bucket'],
                     toolkit_name=tool.get('toolkit_name', ''),
@@ -102,8 +103,12 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
                     embedding_model=tool['settings'].get('embedding_model'),
                     collection_name=f"{tool.get('toolkit_name')}",
-                    collection_schema = str(tool['id'])
-                ).get_tools())
+                    collection_schema=str(tool['id']),
+                ).get_tools()
+                # Inject toolkit_id for artifact tools as well
+                _inject_toolkit_id(tool, toolkit_tools)
+                tools.extend(toolkit_tools)
+
             elif tool['type'] == 'vectorstore':
                 tools.extend(VectorStoreToolkit.get_toolkit(
                     llm=llm,
