@@ -235,23 +235,6 @@ class McpToolkit(BaseToolkit):
                     description="Request timeout in seconds (1-3600)"
                 )
             ),
-            discovery_mode=(
-                Literal['static', 'dynamic', 'hybrid'],
-                Field(
-                    default="dynamic",
-                    description="Discovery mode",
-                    json_schema_extra={
-                        'tooltip': 'static: use registry, dynamic: live discovery, hybrid: try dynamic first'
-                    }
-                )
-            ),
-            discovery_interval=(
-                Union[int, str],
-                Field(
-                    default=300,
-                    description="Discovery interval in seconds (60-3600, for periodic discovery)"
-                )
-            ),
             selected_tools=(
                 List[str],
                 Field(
@@ -295,8 +278,6 @@ class McpToolkit(BaseToolkit):
         url: str,
         headers: Optional[Dict[str, str]] = None,
         timeout: int = 60,
-        discovery_mode: str = "hybrid",
-        discovery_interval: int = 300,
         selected_tools: List[str] = None,
         enable_caching: bool = True,
         cache_ttl: int = 300,
@@ -317,8 +298,6 @@ class McpToolkit(BaseToolkit):
             url: MCP server HTTP URL
             headers: HTTP headers for authentication
             timeout: Request timeout in seconds
-            discovery_mode: Discovery mode ('static', 'dynamic', 'hybrid')
-            discovery_interval: Discovery interval in seconds (for periodic discovery)
             selected_tools: List of specific tools to enable (empty = all tools)
             enable_caching: Whether to enable caching
             cache_ttl: Cache TTL in seconds
@@ -337,7 +316,6 @@ class McpToolkit(BaseToolkit):
 
         # Convert numeric parameters that may come as strings from UI
         timeout = safe_int(timeout, 60)
-        discovery_interval = safe_int(discovery_interval, 300)
         cache_ttl = safe_int(cache_ttl, 300)
 
         logger.info(f"Creating MCP toolkit: {toolkit_name}")
@@ -383,8 +361,7 @@ class McpToolkit(BaseToolkit):
             connection_config=connection_config,
             timeout=timeout,
             selected_tools=selected_tools,
-            client=client,
-            discovery_mode=discovery_mode
+            client=client
         )
 
         return toolkit
@@ -396,8 +373,7 @@ class McpToolkit(BaseToolkit):
         connection_config: McpConnectionConfig,
         timeout: int,
         selected_tools: List[str],
-        client,
-        discovery_mode: str = "dynamic"
+        client
     ) -> List[BaseTool]:
         """
         Create tools from a single MCP server. Always performs live discovery when connection config is provided.
@@ -447,11 +423,11 @@ class McpToolkit(BaseToolkit):
             logger.error(f"Direct discovery failed for MCP toolkit '{toolkit_name}': {e}", exc_info=True)
             logger.error(f"Discovery error details - URL: {connection_config.url}, Timeout: {timeout}s")
 
-            # Fallback to static mode if available and not already static
+            # Fallback to static mode if available
             if isinstance(e, McpAuthorizationRequired):
                 # Authorization is required; surface upstream so the caller can prompt the user
                 raise
-            if client and discovery_mode != "static":
+            if client:
                 logger.info(f"Falling back to static discovery for toolkit '{toolkit_name}'")
                 tools = cls._create_tools_static(toolkit_name, selected_tools, timeout, client)
             else:
@@ -878,8 +854,6 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None) -> L
         url=url,
         headers=headers,
         timeout=safe_int(settings.get('timeout'), 60),
-        discovery_mode=settings.get('discovery_mode', 'dynamic'),
-        discovery_interval=safe_int(settings.get('discovery_interval'), 300),
         selected_tools=settings.get('selected_tools', []),
         enable_caching=settings.get('enable_caching', True),
         cache_ttl=safe_int(settings.get('cache_ttl'), 300),
