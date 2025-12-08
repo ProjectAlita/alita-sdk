@@ -52,3 +52,4 @@ alita_sdk = [ "*.md", "*.txt", "*.yml", "*.yaml",]
 [tool.setuptools.packages.find]
 where = [ ".",]
 exclude = [ "tests*", "venv*", ".*", "dist*", "build*", "__pycache__*",]
+
