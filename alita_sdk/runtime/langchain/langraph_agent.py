@@ -939,13 +939,13 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         logging.info(f"Input: {thread_id} - {input}")
         if self.checkpointer and self.checkpointer.get_tuple(config):
             if config.pop("should_continue", False):
-                # Continuing interrupted execution: update state and invoke without input
-                self.update_state(config, input)
-                invoke_input = None
-            else:
                 # New message in existing session: pass input to restart graph execution
                 # Don't use update_state + invoke(None) as that doesn't restart finished graphs
                 invoke_input = input
+            else:
+                # Continuing interrupted execution: update state and invoke without input
+                self.update_state(config, input)
+                invoke_input = None
             result = super().invoke(invoke_input, config=config, *args, **kwargs)
         else:
             result = super().invoke(input, config=config, *args, **kwargs)
