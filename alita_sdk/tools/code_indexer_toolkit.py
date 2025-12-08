@@ -80,6 +80,8 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
     
         Returns:
         - generator: Yields Documents from files matching the whitelist but not the blacklist.
+                    Each document has exactly the key 'filename' in metadata, which is used as an ID
+                    for further operations (indexing, deduplication, and retrieval).
     
         Example:
         # Use 'feature-branch', include '.py' files, exclude 'test_' files
@@ -89,6 +91,8 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
         Notes:
         - Whitelist and blacklist use Unix shell-style wildcards.
         - Files must match the whitelist and not the blacklist to be included.
+        - Each document MUST have exactly the key 'filename' in metadata. This key is used as an ID
+          for further operations such as indexing, deduplication, and retrieval.
         - When chunked=True:
           - .md files → markdown chunker (header-based splitting)
           - .py/.js/.ts/etc → code parser (TreeSitter-based)
@@ -146,7 +150,7 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
                         page_content=file_content,
                         metadata={
                             'file_path': file,
-                            'file_name': file,
+                            'filename': file,
                             'source': file,
                             'commit_hash': file_hash,
                         }

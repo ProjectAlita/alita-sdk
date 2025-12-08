@@ -99,7 +99,7 @@ def _code_chunker_from_documents(
     def file_content_generator():
         for doc in documents:
             yield {
-                'file_name': doc.metadata.get('file_path', doc.metadata.get('file_name', 'unknown')),
+                'file_name': doc.metadata.get('file_path', doc.metadata.get('filename', 'unknown')),
                 'file_content': doc.page_content,
                 'commit_hash': doc.metadata.get('commit_hash', ''),
             }
