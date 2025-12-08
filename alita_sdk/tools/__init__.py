@@ -33,7 +33,7 @@ def _inject_toolkit_id(tool_conf: dict, toolkit_tools) -> None:
     else:
         logger.error(
             f"Toolkit ID is missing or not an integer for tool "
-            f"\`{tool_conf.get('type', '')}\` with name \`{tool_conf.get('name', '')}\`"
+            f"`{tool_conf.get('type', '')}` with name `{tool_conf.get('name', '')}`"
         )
 
 
