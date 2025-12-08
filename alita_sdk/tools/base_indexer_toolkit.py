@@ -210,6 +210,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             raise e
 
     def _save_index_generator(self, base_documents: Generator[Document, None, None], base_total: int, chunking_tool, chunking_config, result, index_name: Optional[str] = None):
+        self._ensure_vectorstore_initialized()
         self._log_tool_event(f"Base documents are ready for indexing. {base_total} base documents in total to index.")
         from ..runtime.langchain.interfaces.llm_processor import add_documents
         #
@@ -332,6 +333,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             log_msg: str = "Verification of documents to index started"
     ) -> Generator[Document, None, None]:
         """Generic duplicate reduction logic for documents."""
+        self._ensure_vectorstore_initialized()
         self._log_tool_event(log_msg, tool_name="index_documents")
         indexed_data = self._get_indexed_data(index_name)
         indexed_keys = set(indexed_data.keys())
@@ -487,6 +489,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         )
     
     def index_meta_init(self, index_name: str, index_configuration: dict[str, Any]):
+        self._ensure_vectorstore_initialized()
         index_meta = super().get_index_meta(index_name)
         if not index_meta:
             self._log_tool_event(
@@ -514,7 +517,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     def index_meta_update(self, index_name: str, state: str, result: int, update_force: bool = True, interval: Optional[float] = None):
         """Update `index_meta` document with optional time-based throttling.
-    
+
         Args:
             index_name: Index name to update meta for.
             state: New state value for the `index_meta` record.
@@ -525,6 +528,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                       If `None`, falls back to the value stored in `self._index_meta_config["update_interval"]`
                       if present, otherwise uses `INDEX_META_UPDATE_INTERVAL`.
         """
+        self._ensure_vectorstore_initialized()
         if not hasattr(self, "_index_meta_last_update_time"):
             self._index_meta_last_update_time: Dict[str, float] = {}
 
