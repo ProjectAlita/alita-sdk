@@ -17,7 +17,7 @@ from ..runtime.utils.utils import IndexerKeywords
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CUT_OFF = 0.2
+DEFAULT_CUT_OFF = 0.1
 INDEX_META_UPDATE_INTERVAL = 600.0
 
 class IndexTools(str, Enum):
