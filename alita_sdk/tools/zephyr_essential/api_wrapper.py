@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from typing import Optional, Generator, Literal
@@ -284,22 +285,20 @@ class ZephyrEssentialApiWrapper(NonCodeIndexerToolkit):
                 if isinstance(v, (str, int, float, bool, list, dict))
             }
             metadata['type'] = "TEST_CASE"
-
-            yield Document(page_content="", metadata=metadata)
-
-    def _extend_data(self, documents: Generator[Document, None, None]) -> Generator[Document, None, None]:
-        for document in documents:
+            #
             try:
-                if 'type' in document.metadata and document.metadata['type'] == "TEST_CASE":
-                    additional_content = self._process_test_case(document.metadata['key'])
-                    for steps_type, content in additional_content.items():
-                        if content:
-                            page_content = json.dumps(content)
-                            document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
-                            document.metadata["steps_type"] = steps_type
+                additional_content = self._process_test_case(metadata['key'])
+                for steps_type, content in additional_content.items():
+                    if content:
+                        page_content = json.dumps(content)
+                        content_hash = hashlib.sha256(page_content.encode('utf-8')).hexdigest()
+                        metadata[IndexerKeywords.UPDATED_ON.value] = content_hash
+                        metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = page_content.encode('utf-8')
+                        metadata["steps_type"] = steps_type
             except Exception as e:
                 logging.error(f"Failed to process document: {e}")
-            yield document
+            #
+            yield Document(page_content="", metadata=metadata)
 
     def _process_test_case(self, key) -> dict:
         steps = self.get_test_case_test_steps(key)
