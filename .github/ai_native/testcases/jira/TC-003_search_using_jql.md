@@ -53,7 +53,7 @@ Execute the `search_using_jql` tool with the JQL query to search for high priori
 
 **Input:**
 ```
-priority = High
+priority = High AND key ~ AT-2
 ```
 
 **Expectation:** 
