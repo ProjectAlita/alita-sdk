@@ -43,9 +43,3 @@ Execute the `comment_on_issue` tool with issue number `15` and comment text comm
 Review the tool's output to ensure it confirms comment creation.
 
 **Expectation:** The output should contain a success message like "Comment added successfully!" and include a URL to the newly created comment. The URL should follow the pattern `https://github.com/<owner>/<repo>/issues/<number>#issuecomment-<comment_id>`.
-
-### Step 3: Verify Comment Persistence
-
-Retrieve the issue again using `get_issue` tool to verify the comment was added.
-
-**Expectation:** The `comments` count in the issue should have increased by 1 compared to before the comment was added. The comment should be visible when viewing the issue on GitHub.
