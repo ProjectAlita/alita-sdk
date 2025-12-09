@@ -1,0 +1,11 @@
+{
+  "type": "planning",
+  "id": 1,
+  "toolkit_name": "Plan",
+  "selected_tools": [
+    "update_plan",
+    "complete_step",
+    "get_plan_status",
+    "delete_plan"
+  ]
+}

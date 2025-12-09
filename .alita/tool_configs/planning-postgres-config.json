@@ -1,0 +1,14 @@
+{
+  "type": "planning",
+  "id": 2,
+  "toolkit_name": "Plan",
+  "selected_tools": [
+    "update_plan",
+    "complete_step",
+    "get_plan_status",
+    "delete_plan"
+  ],
+  "pgvector_configuration": {
+    "connection_string": "${PGVECTOR_CONNECTION_STRING}"
+  }
+}

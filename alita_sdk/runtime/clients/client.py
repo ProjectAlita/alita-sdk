@@ -346,7 +346,8 @@ class AlitaClient:
                     app_type=None, memory=None, runtime='langchain',
                     application_variables: Optional[dict] = None,
                     version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
-                    llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None):
+                    llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
+                    conversation_id: Optional[str] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -394,11 +395,13 @@ class AlitaClient:
         # The exception will propagate naturally to the indexer worker's outer handler
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
-                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens)
+                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
+                                      conversation_id=conversation_id)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
-                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens).runnable()
+                                      tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
+                                      conversation_id=conversation_id).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 
@@ -619,7 +622,7 @@ class AlitaClient:
                       tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                       memory=None, runtime='langchain', variables: Optional[list] = None,
                       store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False,
-                      mcp_tokens: Optional[dict] = None):
+                      mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -667,7 +670,8 @@ class AlitaClient:
             memory=memory,
             store=store,
             debug_mode=debug_mode,
-            mcp_tokens=mcp_tokens
+            mcp_tokens=mcp_tokens,
+            conversation_id=conversation_id
         ).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,

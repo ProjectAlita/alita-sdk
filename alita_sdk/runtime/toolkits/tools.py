@@ -9,6 +9,7 @@ from alita_sdk.tools import get_tools as alita_tools
 from .application import ApplicationToolkit
 from .artifact import ArtifactToolkit
 from .datasource import DatasourcesToolkit
+from .planning import PlanningToolkit
 from .prompt import PromptToolkit
 from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
@@ -30,6 +31,7 @@ def get_toolkits():
     core_toolkits = [
         ArtifactToolkit.toolkit_config_schema(),
         MemoryToolkit.toolkit_config_schema(),
+        PlanningToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
         ImageGenerationToolkit.toolkit_config_schema(),
@@ -39,7 +41,7 @@ def get_toolkits():
     return core_toolkits + community_toolkits() + alita_toolkits()
 
 
-def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None) -> list:
+def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None) -> list:
     prompts = []
     tools = []
 
@@ -114,6 +116,25 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     llm=llm,
                     toolkit_name=tool.get('toolkit_name', ''),
                     **tool['settings']).get_tools())
+            elif tool['type'] == 'planning':
+                # Planning toolkit for multi-step task tracking
+                # Try to fetch pgvector_project_connstr from project secrets
+                pgvector_connstr = None
+                if alita_client:
+                    try:
+                        pgvector_connstr = alita_client.unsecret('pgvector_project_connstr')
+                        if pgvector_connstr:
+                            logger.info("Using pgvector_project_connstr for planning toolkit")
+                    except Exception as e:
+                        logger.debug(f"pgvector_project_connstr not available: {e}")
+                
+                pgvector_config = {'connection_string': pgvector_connstr} if pgvector_connstr else {}
+                tools.extend(PlanningToolkit.get_toolkit(
+                    toolkit_name=tool.get('toolkit_name', ''),
+                    selected_tools=tool['settings'].get('selected_tools', []),
+                    pgvector_configuration=pgvector_config,
+                    conversation_id=conversation_id or tool['settings'].get('conversation_id'),
+                ).get_tools())
             elif tool['type'] == 'mcp':
                 # remote mcp tool initialization with token injection
                 settings = dict(tool['settings'])

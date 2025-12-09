@@ -6,6 +6,10 @@ Sessions are persisted to $ALITA_DIR/sessions/<session_id>/
 - plan.json: Execution plan with steps
 - memory.db: SQLite database for conversation memory
 - session.json: Session metadata (agent, model, etc.)
+
+This module re-exports the runtime PlanningToolkit for unified usage across
+CLI, indexer_worker, and SDK agents. The runtime toolkit supports both
+PostgreSQL (production) and filesystem (local) storage backends.
 """
 
 import os
@@ -20,6 +24,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# Session Management Functions
+# ============================================================================
 
 def get_sessions_dir() -> Path:
     """Get the sessions directory path (relative to $ALITA_DIR or .alita)."""
@@ -180,6 +188,10 @@ def from_portable_path(portable_path: str) -> str:
     return str(alita_dir / portable_path)
 
 
+# ============================================================================
+# PlanState - For CLI UI compatibility and session listing
+# ============================================================================
+
 class PlanStep(BaseModel):
     """A single step in a plan."""
     description: str = Field(description="Step description")
@@ -187,7 +199,12 @@ class PlanStep(BaseModel):
 
 
 class PlanState(BaseModel):
-    """Current plan state."""
+    """
+    Current plan state for CLI display.
+    
+    This is used for CLI UI rendering and backwards compatibility.
+    The actual plan storage is handled by the runtime PlanningWrapper.
+    """
     title: str = Field(default="", description="Plan title")
     steps: List[PlanStep] = Field(default_factory=list, description="List of steps")
     session_id: str = Field(default="", description="Session ID for persistence")
@@ -225,23 +242,6 @@ class PlanState(BaseModel):
             steps=steps,
             session_id=data.get("session_id", "")
         )
-    
-    def save(self) -> Optional[Path]:
-        """Save plan state to session file."""
-        if not self.session_id:
-            return None
-        
-        try:
-            session_dir = get_sessions_dir() / self.session_id
-            session_dir.mkdir(parents=True, exist_ok=True)
-            
-            plan_file = session_dir / "plan.json"
-            plan_file.write_text(json.dumps(self.to_dict(), indent=2))
-            logger.debug(f"Saved plan to {plan_file}")
-            return plan_file
-        except Exception as e:
-            logger.warning(f"Failed to save plan: {e}")
-            return None
     
     @classmethod
     def load(cls, session_id: str) -> Optional["PlanState"]:
@@ -326,121 +326,9 @@ def list_sessions() -> List[Dict[str, Any]]:
     return sessions
 
 
-class UpdatePlanInput(BaseModel):
-    """Input for updating the plan."""
-    title: str = Field(description="Title for the plan (e.g., 'Test Investigation Plan')")
-    steps: List[str] = Field(description="List of step descriptions in order")
-
-
-class CompleteStepInput(BaseModel):
-    """Input for marking a step as complete."""
-    step_number: int = Field(description="Step number to mark as complete (1-indexed)")
-
-
-class UpdatePlanTool(BaseTool):
-    """Create or update the execution plan."""
-    
-    name: str = "update_plan"
-    description: str = """Create or replace the current execution plan.
-    
-Use this when:
-- Starting a multi-step task that needs tracking
-- The sequence of activities matters
-- Breaking down a complex task into phases
-
-The plan will be displayed to the user and you can mark steps complete as you progress.
-Plans are automatically saved and can be resumed in future sessions.
-
-Example:
-    update_plan(
-        title="API Test Investigation",
-        steps=[
-            "Reproduce the failing test locally",
-            "Capture error logs and stack trace",
-            "Identify root cause",
-            "Apply fix to test or code",
-            "Re-run test suite to verify"
-        ]
-    )"""
-    args_schema: type[BaseModel] = UpdatePlanInput
-    
-    # Reference to shared plan state (set by executor)
-    plan_state: Optional[PlanState] = None
-    _plan_callback: Optional[Callable] = None
-    
-    def __init__(self, plan_state: Optional[PlanState] = None, plan_callback: Optional[Callable] = None, **kwargs):
-        super().__init__(**kwargs)
-        self.plan_state = plan_state or PlanState()
-        self._plan_callback = plan_callback
-    
-    def _run(self, title: str, steps: List[str]) -> str:
-        """Update the plan with new steps."""
-        self.plan_state.title = title
-        self.plan_state.steps = [PlanStep(description=s) for s in steps]
-        
-        # Auto-save to session
-        saved_path = self.plan_state.save()
-        
-        # Notify callback if set (for UI rendering)
-        if self._plan_callback:
-            self._plan_callback(self.plan_state)
-        
-        result = f"Plan updated:\n\n{self.plan_state.render()}"
-        if saved_path:
-            result += f"\n\n[dim]Session: {self.plan_state.session_id}[/dim]"
-        return result
-
-
-class CompleteStepTool(BaseTool):
-    """Mark a plan step as complete."""
-    
-    name: str = "complete_step"
-    description: str = """Mark a step in the current plan as completed.
-    
-Use this after finishing a step to update the plan progress.
-Step numbers are 1-indexed (first step is 1, not 0).
-Progress is automatically saved.
-
-Example:
-    complete_step(step_number=1)  # Mark first step as done"""
-    args_schema: type[BaseModel] = CompleteStepInput
-    
-    # Reference to shared plan state (set by executor)
-    plan_state: Optional[PlanState] = None
-    _plan_callback: Optional[Callable] = None
-    
-    def __init__(self, plan_state: Optional[PlanState] = None, plan_callback: Optional[Callable] = None, **kwargs):
-        super().__init__(**kwargs)
-        self.plan_state = plan_state or PlanState()
-        self._plan_callback = plan_callback
-    
-    def _run(self, step_number: int) -> str:
-        """Mark a step as complete."""
-        if not self.plan_state.steps:
-            return "No plan exists. Use update_plan first to create a plan."
-        
-        if step_number < 1 or step_number > len(self.plan_state.steps):
-            return f"Invalid step number. Plan has {len(self.plan_state.steps)} steps (1-{len(self.plan_state.steps)})."
-        
-        step = self.plan_state.steps[step_number - 1]
-        if step.completed:
-            return f"Step {step_number} was already completed."
-        
-        step.completed = True
-        
-        # Auto-save to session
-        self.plan_state.save()
-        
-        # Notify callback if set (for UI rendering)
-        if self._plan_callback:
-            self._plan_callback(self.plan_state)
-        
-        # Count progress
-        completed = sum(1 for s in self.plan_state.steps if s.completed)
-        total = len(self.plan_state.steps)
-        
-        return f"✓ Step {step_number} completed ({completed}/{total} done)\n\n{self.plan_state.render()}"
-
+# ============================================================================
+# Planning Tools - Using Runtime PlanningToolkit
+# ============================================================================
 
 def get_planning_tools(
     plan_state: Optional[PlanState] = None,
@@ -448,34 +336,54 @@ def get_planning_tools(
     session_id: Optional[str] = None
 ) -> tuple[List[BaseTool], PlanState]:
     """
-    Get planning tools with shared state.
+    Get planning tools using the runtime PlanningToolkit.
+    
+    Uses the runtime PlanningToolkit which supports both PostgreSQL
+    and filesystem storage. For CLI, it uses filesystem storage with
+    session_id as the thread identifier.
     
     Args:
-        plan_state: Optional existing plan state to use
-        plan_callback: Optional callback function called when plan changes
-        session_id: Optional session ID for persistence. If provided and plan exists,
-                   will load from disk. If None, generates a new session ID.
+        plan_state: Optional existing plan state (for backwards compatibility)
+        plan_callback: Optional callback function called when plan changes (for CLI UI)
+        session_id: Optional session ID for persistence. If None, generates a new one.
         
     Returns:
         Tuple of (list of tools, plan state object)
     """
-    # Try to load existing session or create new one
-    if session_id:
-        loaded = PlanState.load(session_id)
-        if loaded:
-            state = loaded
-            logger.info(f"Resumed session {session_id} with plan: {state.title}")
-        else:
-            state = plan_state or PlanState()
-            state.session_id = session_id
-    else:
-        state = plan_state or PlanState()
-        if not state.session_id:
-            state.session_id = generate_session_id()
+    from alita_sdk.runtime.toolkits.planning import PlanningToolkit
+    from alita_sdk.runtime.tools.planning.wrapper import PlanState as RuntimePlanState
     
-    tools = [
-        UpdatePlanTool(plan_state=state, plan_callback=plan_callback),
-        CompleteStepTool(plan_state=state, plan_callback=plan_callback),
-    ]
+    # Generate session_id if not provided
+    if not session_id:
+        session_id = generate_session_id()
+    
+    # Create adapter callback that converts between PlanState types
+    def adapter_callback(runtime_plan: RuntimePlanState):
+        if plan_callback:
+            # Convert runtime PlanState to CLI PlanState for UI
+            cli_plan = PlanState(
+                title=runtime_plan.title,
+                steps=[PlanStep(description=s.description, completed=s.completed) for s in runtime_plan.steps],
+                session_id=session_id
+            )
+            plan_callback(cli_plan)
+    
+    # Create toolkit with filesystem storage (no pgvector_configuration)
+    # Use session_id as default_conversation_id so tools don't need conversation_id parameter
+    toolkit = PlanningToolkit.get_toolkit(
+        toolkit_name=None,  # No prefix - tools are called directly
+        selected_tools=['update_plan', 'complete_step', 'get_plan_status', 'delete_plan'],
+        pgvector_configuration=None,  # Uses filesystem storage
+        storage_dir=str(get_sessions_dir() / session_id),  # Use session-specific directory
+        plan_callback=adapter_callback if plan_callback else None,
+        default_conversation_id=session_id  # Use session_id as conversation_id
+    )
+    
+    tools = toolkit.get_tools()
+    
+    # Create local state for return (for backward compatibility)
+    loaded = PlanState.load(session_id)
+    state = loaded if loaded else (plan_state or PlanState())
+    state.session_id = session_id
     
     return tools, state

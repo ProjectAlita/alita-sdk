@@ -149,7 +149,9 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
 
         # Set pgvector collection schema if present
         if settings.get('pgvector_configuration'):
-            settings['pgvector_configuration']['collection_schema'] = str(tool['id'])
+            # Use tool id if available, otherwise use toolkit_name or type as fallback
+            collection_id = tool.get('id') or tool.get('toolkit_name') or tool_type
+            settings['pgvector_configuration']['collection_schema'] = str(collection_id)
 
         # Handle ADO special cases
         if tool_type in ['ado_boards', 'ado_wiki', 'ado_plans']:
@@ -161,6 +163,8 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
                 logger.error(f"Error getting ADO repos tools: {e}")
         elif tool_type == 'mcp':
             logger.debug(f"Skipping MCP toolkit '{tool.get('toolkit_name')}' - handled by runtime toolkit system")
+        elif tool_type == 'planning':
+            logger.debug(f"Skipping planning toolkit '{tool.get('toolkit_name')}' - handled by runtime toolkit system")
         elif tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
             try:
                 toolkit_tools.extend(AVAILABLE_TOOLS[tool_type]['get_tools'](tool))

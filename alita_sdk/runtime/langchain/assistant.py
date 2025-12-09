@@ -32,7 +32,8 @@ class Assistant:
                  memory: Optional[Any] = None,
                  store: Optional[BaseStore] = None,
                  debug_mode: Optional[bool] = False,
-                 mcp_tokens: Optional[dict] = None):
+                 mcp_tokens: Optional[dict] = None,
+                 conversation_id: Optional[str] = None):
 
         self.app_type = app_type
         self.memory = memory
@@ -96,7 +97,8 @@ class Assistant:
             llm=self.client,
             memory_store=self.store,
             debug_mode=debug_mode,
-            mcp_tokens=mcp_tokens
+            mcp_tokens=mcp_tokens,
+            conversation_id=conversation_id
         )
         if tools:
             self.tools += tools
