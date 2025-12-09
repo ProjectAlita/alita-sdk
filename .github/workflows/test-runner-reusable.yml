@@ -107,7 +107,7 @@ jobs:
           
       - name: Copy test results
         run: |
-          docker cp alita-sdk-dev:/app/.github/ai_native/results/test_execution_summary.json ./test_execution_summary.json || echo "{}" > ./test_execution_summary.json
+          docker cp alita-sdk-dev:/app/.alita/tests/results/test_execution_summary.json ./test_execution_summary.json || echo "{}" > ./test_execution_summary.json
       
       - name: Save Docker logs
         if: always()
