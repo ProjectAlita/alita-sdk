@@ -7,5 +7,6 @@
     "complete_step",
     "get_plan_status",
     "delete_plan"
-  ]
+  ],
+  "local": true
 }

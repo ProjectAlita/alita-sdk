@@ -118,22 +118,42 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     **tool['settings']).get_tools())
             elif tool['type'] == 'planning':
                 # Planning toolkit for multi-step task tracking
-                # Try to fetch pgvector_project_connstr from project secrets
-                pgvector_connstr = None
-                if alita_client:
-                    try:
-                        pgvector_connstr = alita_client.unsecret('pgvector_project_connstr')
-                        if pgvector_connstr:
-                            logger.info("Using pgvector_project_connstr for planning toolkit")
-                    except Exception as e:
-                        logger.debug(f"pgvector_project_connstr not available: {e}")
+                settings = tool.get('settings', {})
                 
-                pgvector_config = {'connection_string': pgvector_connstr} if pgvector_connstr else {}
+                # Check if local mode is enabled (uses filesystem storage, ignores pgvector)
+                use_local = settings.get('local', False)
+                
+                if use_local:
+                    # Local mode - use filesystem storage
+                    logger.info("Planning toolkit using local filesystem storage (local=true)")
+                    pgvector_config = {}
+                else:
+                    # Check if explicit connection_string is provided in pgvector_configuration
+                    explicit_pgvector_config = settings.get('pgvector_configuration', {})
+                    explicit_connstr = explicit_pgvector_config.get('connection_string') if explicit_pgvector_config else None
+                    
+                    if explicit_connstr:
+                        # Use explicitly provided connection string (overrides project secrets)
+                        logger.info("Using explicit connection_string for planning toolkit")
+                        pgvector_config = explicit_pgvector_config
+                    else:
+                        # Try to fetch pgvector_project_connstr from project secrets
+                        pgvector_connstr = None
+                        if alita_client:
+                            try:
+                                pgvector_connstr = alita_client.unsecret('pgvector_project_connstr')
+                                if pgvector_connstr:
+                                    logger.info("Using pgvector_project_connstr for planning toolkit")
+                            except Exception as e:
+                                logger.debug(f"pgvector_project_connstr not available: {e}")
+                        
+                        pgvector_config = {'connection_string': pgvector_connstr} if pgvector_connstr else {}
+                
                 tools.extend(PlanningToolkit.get_toolkit(
                     toolkit_name=tool.get('toolkit_name', ''),
-                    selected_tools=tool['settings'].get('selected_tools', []),
+                    selected_tools=settings.get('selected_tools', []),
                     pgvector_configuration=pgvector_config,
-                    conversation_id=conversation_id or tool['settings'].get('conversation_id'),
+                    conversation_id=conversation_id or settings.get('conversation_id'),
                 ).get_tools())
             elif tool['type'] == 'mcp':
                 # remote mcp tool initialization with token injection
