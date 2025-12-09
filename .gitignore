@@ -174,4 +174,5 @@ node_modules/
 
 # AI
 .serena/
-.github/ai_native/results/*
+.alita/tests/results/*
+!.alita/tests/results/.gitkeep

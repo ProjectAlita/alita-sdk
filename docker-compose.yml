@@ -24,8 +24,8 @@ services:
       - ./alita_sdk:/app/alita_sdk
     command: >
       sh -c "alita agent execute-test-cases
-      .alita/test-runner.agent.md
-      --test-cases-dir .github/ai_native/testcases/$${TEST_CASES_DIR}
-      --results-dir .github/ai_native/results
-      --data-generator .alita/test-data-generator.agent.md
-      --dir ."
+      .alita/agents/test-runner.agent.md
+      --test-cases-dir .alita/tests/testcases/$${TEST_CASES_DIR}
+      --results-dir .alita/tests/results
+      --data-generator .alita/agents/test-data-generator.agent.md
+      --dir .alita"

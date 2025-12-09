@@ -1,0 +1,35 @@
+{
+  "cloud": true,
+  "type": "jira",
+  "api_version": "3",
+  "toolkit_name": "jira",
+  "limit": 5,
+  "selected_tools": [
+    "index_data",
+    "search_index",
+    "stepback_search_index",
+    "stepback_summary_index",
+    "remove_index",
+    "list_collections",
+    "search_using_jql",
+    "create_issue",
+    "update_issue",
+    "modify_labels",
+    "list_comments",
+    "add_comments",
+    "list_projects",
+    "set_issue_status",
+    "get_specific_field_info",
+    "get_field_with_image_descriptions",
+    "get_comments_with_image_descriptions",
+    "get_remote_links",
+    "link_issues",
+    "get_attachments_content",
+    "execute_generic_rq"
+  ],
+  "jira_configuration": {
+    "api_key": "${CONFLUENCE_API_KEY}", 
+    "base_url": "${CONFLUENCE_BASE_URL}",
+    "username": "${CONFLUENCE_USERNAME}"
+  }
+}
