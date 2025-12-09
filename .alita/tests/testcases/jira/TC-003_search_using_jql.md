@@ -10,10 +10,9 @@ Verify that the `search_using_jql` tool correctly searches for and retrieves Jir
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Base URL** | `${JIRA_BASE_URL}` | Jira instance base URL |
-| **Username** | `${JIRA_USERNAME}` | Jira username/email |
-| **API Key** | `${JIRA_API_KEY}` | Jira API token |
-| **Cloud** | `${JIRA_CLOUD}` | Whether using Jira Cloud (true/false) |
+| **Base URL** | `${CONFLUENCE_BASE_URL}` | Jira instance base URL |
+| **Username** | `${CONFLUENCE_USERNAME}` | Jira username/email |
+| **API Key** | `${CONFLUENCE_API_KEY}` | Jira API token |
 | **Tool** | `search_using_jql` | Jira tool to execute for searching issues |
 
 ### Test Data

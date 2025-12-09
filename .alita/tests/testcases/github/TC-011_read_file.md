@@ -35,8 +35,6 @@ generateTestData: false
 
 ### Step 1: Execute the Tool with Default Branch
 
-List all the tools you have
-
 Execute the `read_file` tool from GitHub with file path `.gitignore` using main branch.
 
 **Expectation:** The tool runs without errors and returns the file content as a string.
