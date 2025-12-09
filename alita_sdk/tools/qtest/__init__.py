@@ -37,7 +37,7 @@ class QtestToolkit(BaseToolkit):
             name,
             qtest_configuration=(QtestConfiguration, Field(description="QTest API token", json_schema_extra={
                 'configuration_types': ['qtest']})),
-            qtest_project_id=(int, Field(default=None, description="QTest project id")),
+            qtest_project_id=(int, Field(description="QTest project id")),
             no_of_tests_shown_in_dql_search=(Optional[int], Field(description="Max number of items returned by dql search",
                                                                   default=10)),
 
