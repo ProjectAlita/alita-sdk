@@ -419,19 +419,28 @@ class McpToolkit(BaseToolkit):
 
             logger.info(f"Successfully created {len(tools)} MCP tools from toolkit '{toolkit_name}' via direct discovery")
 
+        except McpAuthorizationRequired:
+            # Authorization is required; surface upstream so the caller can prompt the user
+            logger.info(f"MCP toolkit '{toolkit_name}' requires OAuth authorization")
+            raise
         except Exception as e:
             logger.error(f"Direct discovery failed for MCP toolkit '{toolkit_name}': {e}", exc_info=True)
             logger.error(f"Discovery error details - URL: {connection_config.url}, Timeout: {timeout}s")
 
-            # Fallback to static mode if available
-            if isinstance(e, McpAuthorizationRequired):
-                # Authorization is required; surface upstream so the caller can prompt the user
+            # Check if the exception wraps McpAuthorizationRequired (can happen with asyncio)
+            if hasattr(e, '__cause__') and isinstance(e.__cause__, McpAuthorizationRequired):
+                logger.info(f"Found wrapped McpAuthorizationRequired, re-raising")
+                raise e.__cause__
+            
+            # For new MCP toolkits (no client), don't silently return empty - surface the error
+            # This helps users understand why tool discovery failed
+            if not client:
+                logger.warning(f"No fallback available for toolkit '{toolkit_name}' - re-raising discovery error")
                 raise
-            if client:
-                logger.info(f"Falling back to static discovery for toolkit '{toolkit_name}'")
-                tools = cls._create_tools_static(toolkit_name, selected_tools, timeout, client)
-            else:
-                logger.warning(f"No fallback available for toolkit '{toolkit_name}' - returning empty tools list")
+            
+            # Only fall back to static discovery for existing toolkits with a client
+            logger.info(f"Falling back to static discovery for toolkit '{toolkit_name}'")
+            tools = cls._create_tools_static(toolkit_name, selected_tools, timeout, client)
 
         # Don't add inspection tool to agent - it's only for internal use by toolkit
         # inspection_tool = cls._create_inspection_tool(
@@ -477,8 +486,15 @@ class McpToolkit(BaseToolkit):
                 )
             )
             return all_tools, session_id
+        except McpAuthorizationRequired:
+            # Re-raise auth required exceptions directly
+            logger.info(f"[MCP SSE] Authorization required for '{toolkit_name}'")
+            raise
         except Exception as e:
             logger.error(f"[MCP SSE] Discovery failed for '{toolkit_name}': {e}")
+            # Check if the exception wraps McpAuthorizationRequired
+            if hasattr(e, '__cause__') and isinstance(e.__cause__, McpAuthorizationRequired):
+                raise e.__cause__
             raise
     
     @classmethod
