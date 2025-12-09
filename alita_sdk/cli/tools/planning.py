@@ -369,14 +369,14 @@ def get_planning_tools(
             plan_callback(cli_plan)
     
     # Create toolkit with filesystem storage (no pgvector_configuration)
-    # Use session_id as default_conversation_id so tools don't need conversation_id parameter
+    # Use session_id as conversation_id so tools don't need it passed explicitly
     toolkit = PlanningToolkit.get_toolkit(
         toolkit_name=None,  # No prefix - tools are called directly
         selected_tools=['update_plan', 'complete_step', 'get_plan_status', 'delete_plan'],
         pgvector_configuration=None,  # Uses filesystem storage
         storage_dir=str(get_sessions_dir() / session_id),  # Use session-specific directory
         plan_callback=adapter_callback if plan_callback else None,
-        default_conversation_id=session_id  # Use session_id as conversation_id
+        conversation_id=session_id  # Use session_id as conversation_id
     )
     
     tools = toolkit.get_tools()

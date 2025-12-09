@@ -294,8 +294,8 @@ class PlanningWrapper(BaseModel):
     - Filesystem when no connection_string (local usage)
     
     Conversation ID can be:
-    1. Passed explicitly to each method (from server via payload)
-    2. Set via default_conversation_id (for CLI usage where session_id is fixed)
+    1. Passed explicitly to each method
+    2. Set via conversation_id field (from server payload or CLI session_id)
     """
     connection_string: Optional[str] = Field(
         default=None, 
@@ -312,10 +312,6 @@ class PlanningWrapper(BaseModel):
     plan_callback: Optional[Any] = Field(
         default=None,
         description="Optional callback function called when plan changes (for CLI UI updates)"
-    )
-    default_conversation_id: Optional[str] = Field(
-        default=None,
-        description="Default conversation ID to use when not provided (conversation_id from server or session_id from CLI)"
     )
     
     # Runtime state
@@ -380,12 +376,12 @@ class PlanningWrapper(BaseModel):
         Args:
             title: Plan title
             steps: List of step descriptions
-            conversation_id: Conversation ID for scoping (from server or CLI session_id). Uses default_conversation_id if not provided.
+            conversation_id: Conversation ID for scoping. Uses wrapper's conversation_id if not provided.
             
         Returns:
             Formatted plan state string
         """
-        conversation_id = conversation_id or self.default_conversation_id
+        conversation_id = conversation_id or self.conversation_id
         if not conversation_id:
             return "❌ Error: conversation_id is required (from server or session_id from CLI)"
         
@@ -419,12 +415,12 @@ class PlanningWrapper(BaseModel):
         
         Args:
             step_number: Step number (1-indexed)
-            conversation_id: Conversation ID for scoping (from server or CLI session_id). Uses default_conversation_id if not provided.
+            conversation_id: Conversation ID for scoping. Uses wrapper's conversation_id if not provided.
             
         Returns:
             Updated plan state string
         """
-        conversation_id = conversation_id or self.default_conversation_id
+        conversation_id = conversation_id or self.conversation_id
         if not conversation_id:
             return "❌ Error: conversation_id is required (from server or session_id from CLI)"
         
@@ -468,12 +464,12 @@ class PlanningWrapper(BaseModel):
         Get the current plan status.
         
         Args:
-            conversation_id: Conversation ID for scoping (from server or CLI session_id). Uses default_conversation_id if not provided.
+            conversation_id: Conversation ID for scoping. Uses wrapper's conversation_id if not provided.
             
         Returns:
             Formatted plan state or message if no plan exists
         """
-        conversation_id = conversation_id or self.default_conversation_id
+        conversation_id = conversation_id or self.conversation_id
         if not conversation_id:
             return "❌ Error: conversation_id is required (from server or session_id from CLI)"
         
@@ -494,12 +490,12 @@ class PlanningWrapper(BaseModel):
         Delete the current plan.
         
         Args:
-            conversation_id: Conversation ID for scoping (from server or CLI session_id). Uses default_conversation_id if not provided.
+            conversation_id: Conversation ID for scoping. Uses wrapper's conversation_id if not provided.
             
         Returns:
             Confirmation message
         """
-        conversation_id = conversation_id or self.default_conversation_id
+        conversation_id = conversation_id or self.conversation_id
         if not conversation_id:
             return "❌ Error: conversation_id is required (from server or session_id from CLI)"
         
@@ -526,7 +522,7 @@ class PlanningWrapper(BaseModel):
             List of tool definitions with name, description, and args_schema
         """
         # Define input schemas for tools
-        # conversation_id is optional when default_conversation_id is set (CLI usage)
+        # conversation_id is optional when set on the wrapper instance
         UpdatePlanInput = create_model(
             'UpdatePlanInput',
             title=(str, Field(description="Title for the plan (e.g., 'Test Investigation Plan')")),

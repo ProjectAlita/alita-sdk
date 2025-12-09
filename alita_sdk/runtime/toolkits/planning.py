@@ -108,7 +108,7 @@ class PlanningToolkit(BaseToolkit):
         pgvector_configuration: Optional[dict] = None,
         storage_dir: Optional[str] = None,
         plan_callback: Optional[Any] = None,
-        default_conversation_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
         **kwargs
     ):
         """
@@ -121,9 +121,9 @@ class PlanningToolkit(BaseToolkit):
                                    If not provided, uses filesystem storage.
             storage_dir: Directory for filesystem storage (when no pgvector_configuration)
             plan_callback: Optional callback function called when plan changes (for CLI UI)
-            default_conversation_id: Default conversation ID to use when not provided in tool calls.
-                              For CLI, this is typically the session_id.
-            **kwargs: Additional configuration options (e.g., conversation_id)
+            conversation_id: Conversation ID for scoping plans.
+                            For server: from elitea_core payload. For CLI: session_id.
+            **kwargs: Additional configuration options
             
         Returns:
             PlanningToolkit instance with configured tools
@@ -143,10 +143,9 @@ class PlanningToolkit(BaseToolkit):
         # Create wrapper - it will auto-select storage backend
         wrapper = PlanningWrapper(
             connection_string=connection_string if connection_string else None,
-            conversation_id=kwargs.get('conversation_id'),
+            conversation_id=conversation_id,
             storage_dir=storage_dir,
             plan_callback=plan_callback,
-            default_conversation_id=default_conversation_id
         )
         
         # Build tool name prefix
