@@ -75,9 +75,22 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
     except Exception as e:
         # Re-raise McpAuthorizationRequired without logging as error
         from ..utils.mcp_oauth import McpAuthorizationRequired
+        
+        # Check if it's McpAuthorizationRequired directly
         if isinstance(e, McpAuthorizationRequired):
             logger.info(f"Toolkit {toolkit_name} requires MCP OAuth authorization")
             raise
+        
+        # Also check for wrapped exceptions
+        if hasattr(e, '__cause__') and isinstance(e.__cause__, McpAuthorizationRequired):
+            logger.info(f"Toolkit {toolkit_name} requires MCP OAuth authorization (wrapped)")
+            raise e.__cause__
+        
+        # Check exception class name as fallback
+        if e.__class__.__name__ == 'McpAuthorizationRequired':
+            logger.info(f"Toolkit {toolkit_name} requires MCP OAuth authorization (by name)")
+            raise
+        
         # Log and re-raise other errors
         logger.error(f"Error instantiating toolkit {toolkit_name} with client: {str(e)}")
         raise

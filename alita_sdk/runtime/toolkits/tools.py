@@ -158,8 +158,15 @@ def get_tools(tools_list: list, alita_client, llm, memory_store: BaseStore = Non
                     toolkit_name=tool.get('toolkit_name', ''),
                     client=alita_client,
                     **settings).get_tools())
+        except McpAuthorizationRequired:
+            # Re-raise auth required exceptions directly
+            raise
         except Exception as e:
-            if isinstance(e, McpAuthorizationRequired):
+            # Check for wrapped McpAuthorizationRequired
+            if hasattr(e, '__cause__') and isinstance(e.__cause__, McpAuthorizationRequired):
+                raise e.__cause__
+            # Check exception class name as fallback
+            if e.__class__.__name__ == 'McpAuthorizationRequired':
                 raise
             logger.error(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}", exc_info=True)
             if debug_mode:

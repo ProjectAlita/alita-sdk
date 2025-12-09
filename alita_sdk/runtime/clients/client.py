@@ -807,8 +807,22 @@ class AlitaClient:
             except Exception as toolkit_error:
                 # Re-raise McpAuthorizationRequired to allow proper handling upstream
                 from ..utils.mcp_oauth import McpAuthorizationRequired
+                
+                # Check if it's McpAuthorizationRequired directly
                 if isinstance(toolkit_error, McpAuthorizationRequired):
+                    logger.info(f"McpAuthorizationRequired detected, re-raising")
                     raise
+                
+                # Also check for wrapped exceptions (e.g., from asyncio)
+                if hasattr(toolkit_error, '__cause__') and isinstance(toolkit_error.__cause__, McpAuthorizationRequired):
+                    logger.info(f"Wrapped McpAuthorizationRequired detected, re-raising cause")
+                    raise toolkit_error.__cause__
+                
+                # Check exception class name as fallback (in case of module reload issues)
+                if toolkit_error.__class__.__name__ == 'McpAuthorizationRequired':
+                    logger.info(f"McpAuthorizationRequired detected by name, re-raising")
+                    raise
+                
                 # For other errors, return error response
                 return {
                     "success": False,
