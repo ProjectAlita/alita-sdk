@@ -19,6 +19,7 @@ Verify that the `get_pages_with_label` tool correctly retrieves pages tagged wit
 ## Config
 
 path: .alita\tool_configs\confluence-config.json
+generateTestData: false
 
 ## Pre-requisites
 
@@ -36,6 +37,13 @@ Execute the `get_pages_with_label` tool with the label parameter set to `test-la
 
 ### Step 2: Verify the Output
 
-Verify that the output contains page details including page_id, page_title, page_url, and content.
+Verify that the output contains page details including page_id, page_title, page_url, content.
 
-**Expectation:** The output is a list containing at least one page with the specified label, formatted as a string with page details.
+**Expectation:** The output contains `[
+  {
+    "page_id": "104300545",
+    "page_title": "Test Label Page",
+    "page_url": "https://epamelitea.atlassian.net/spaces/AT/pages/104300545/Test+Label+Page",
+    "content": ""
+  }
+]` .

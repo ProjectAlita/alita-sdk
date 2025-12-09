@@ -20,6 +20,7 @@ Verify that the `list_pages_with_label` tool correctly retrieves a list of page 
 ## Config
 
 path: .alita\tool_configs\confluence-config.json
+generateTestData: false
 
 ## Pre-requisites
 
@@ -39,4 +40,4 @@ Execute the `list_pages_with_label` tool with the label parameter set to `test-l
 
 Verify that the output contains a list of dictionaries with 'id' and 'title' keys.
 
-**Expectation:** The output is a list like `[{'id': 'page_id', 'title': 'page_title'}]` containing pages with the specified label.
+**Expectation:** The output is exactly this content `[{"id": "104300545","title": "Test Label Page"}]`
