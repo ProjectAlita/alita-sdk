@@ -12,6 +12,7 @@ from langchain_core.runnables import Runnable
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph
@@ -937,18 +938,25 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             )
         
         logging.info(f"Input: {thread_id} - {input}")
-        if self.checkpointer and self.checkpointer.get_tuple(config):
-            if config.pop("should_continue", False):
-                # New message in existing session: pass input to restart graph execution
-                # Don't use update_state + invoke(None) as that doesn't restart finished graphs
-                invoke_input = input
+        try:
+            if self.checkpointer and self.checkpointer.get_tuple(config):
+                if config.pop("should_continue", False):
+                    invoke_input = input
+                else:
+                    self.update_state(config, input)
+                    invoke_input = None
+                result = super().invoke(invoke_input, config=config, *args, **kwargs)
             else:
-                # Continuing interrupted execution: update state and invoke without input
-                self.update_state(config, input)
-                invoke_input = None
-            result = super().invoke(invoke_input, config=config, *args, **kwargs)
-        else:
-            result = super().invoke(input, config=config, *args, **kwargs)
+                result = super().invoke(input, config=config, *args, **kwargs)
+        except GraphRecursionError as e:
+            current_recursion_limit = config.get("recursion_limit", 0)
+            logger.warning("ToolExecutionLimitReached caught in LangGraphAgentRunnable: %s", e)
+            return self._handle_graph_recursion_error(
+                config=config,
+                thread_id=thread_id,
+                current_recursion_limit=current_recursion_limit,
+            )
+
         try:
             # Check if printer node output exists
             printer_output = result.get(PRINTER_NODE_RS)
@@ -992,6 +1000,35 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             # except of key = 'output' which is already included
             for key, value in config_state.values.items():
                 if key != 'output':
+                    result_with_state[key] = value
+
+        return result_with_state
+
+    def _handle_graph_recursion_error(
+            self,
+            config: RunnableConfig,
+            thread_id: str,
+            current_recursion_limit: int,
+    ) -> dict:
+        """Handle GraphRecursionError by returning a soft\-boundary response."""
+        config_state = self.get_state(config)
+        is_execution_finished = False
+
+        friendly_output = (
+            f"Tool step limit {current_recursion_limit} reached for this run. You can continue by sending another "
+            "message or refining your request."
+        )
+
+        result_with_state: dict[str, Any] = {
+            "output": friendly_output,
+            "thread_id": thread_id,
+            "execution_finished": is_execution_finished,
+            "tool_execution_limit_reached": True,
+        }
+
+        if hasattr(config_state, "values") and config_state.values:
+            for key, value in config_state.values.items():
+                if key != "output":
                     result_with_state[key] = value
 
         return result_with_state
