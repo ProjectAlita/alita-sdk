@@ -5,23 +5,23 @@ This directory contains the AI-native test framework for automated testing of AL
 ## Directory Structure
 
 ```
-.github/ai_native/
-├── testcases/            # Test case definitions organized by toolkit
-│   ├── ado/              # ADO test cases (TC-*.md)
-│   ├── confluence/       # Confluence test cases (TC-*.md)
-│   ├── github/           # GitHub test cases (TC-*.md)
-│   └── indexer/          # Indexer test cases
-└── results/              # Test execution results (generated)
-  └── test_execution_summary.json  # Overall summary (matrix/CI)
-
 .alita/
 ├── agents/
 │   ├── test-runner.agent.md         # Test runner agent
 │   └── test-data-generator.agent.md # Optional data generator agent
-└── tool_configs/                    # Toolkit configuration files
-  ├── git-config.json              # GitHub toolkit config
-  ├── confluence-config.json       # Confluence toolkit config
-  └── ado-config.json              # Azure DevOps toolkit config
+├── tool_configs/                    # Toolkit configuration files
+│   ├── git-config.json              # GitHub toolkit config
+│   ├── confluence-config.json       # Confluence toolkit config
+│   ├── ado-config.json              # Azure DevOps toolkit config
+│   └── jira-config.json             # Jira toolkit config
+└── tests/
+    ├── testcases/                   # Test case definitions organized by toolkit
+    │   ├── ado/                     # ADO test cases (TC-*.md)
+    │   ├── confluence/              # Confluence test cases (TC-*.md)
+    │   ├── github/                  # GitHub test cases (TC-*.md)
+    │   └── jira/                    # Jira test cases (TC-*.md)
+    └── results/                     # Test execution results (generated)
+        └── test_execution_summary.json  # Overall summary (matrix/CI)
 ```
 
 ## Test Case Format
@@ -132,8 +132,8 @@ Common expectation patterns:
 ```bash
 alita agent execute-test-cases \
   .alita/agents/test-runner.agent.md \
-  --test-cases-dir .github/ai_native/testcases \
-  --results-dir .github/ai_native/results \
+  --test-cases-dir .alita/tests/testcases \
+  --results-dir .alita/tests/results \
   --data-generator .alita/agents/test-data-generator.agent.md \
   --dir .
 ```
@@ -144,24 +144,32 @@ alita agent execute-test-cases \
 # GitHub tests
 alita agent execute-test-cases \
   .alita/agents/test-runner.agent.md \
-  --test-cases-dir .github/ai_native/testcases/github \
-  --results-dir .github/ai_native/results \
+  --test-cases-dir .alita/tests/testcases/github \
+  --results-dir .alita/tests/results \
   --data-generator .alita/agents/test-data-generator.agent.md \
   --dir .
 
 # Confluence tests
 alita agent execute-test-cases \
   .alita/agents/test-runner.agent.md \
-  --test-cases-dir .github/ai_native/testcases/confluence \
-  --results-dir .github/ai_native/results \
+  --test-cases-dir .alita/tests/testcases/confluence \
+  --results-dir .alita/tests/results \
   --data-generator .alita/agents/test-data-generator.agent.md \
   --dir .
 
 # ADO tests
 alita agent execute-test-cases \
   .alita/agents/test-runner.agent.md \
-  --test-cases-dir .github/ai_native/testcases/ado \
-  --results-dir .github/ai_native/results \
+  --test-cases-dir .alita/tests/testcases/ado \
+  --results-dir .alita/tests/results \
+  --data-generator .alita/agents/test-data-generator.agent.md \
+  --dir .
+
+# Jira tests
+alita agent execute-test-cases \
+  .alita/agents/test-runner.agent.md \
+  --test-cases-dir .alita/tests/testcases/jira \
+  --results-dir .alita/tests/results \
   --data-generator .alita/agents/test-data-generator.agent.md \
   --dir .
 ```
@@ -171,8 +179,8 @@ alita agent execute-test-cases \
 # Run a single test case file by name (can repeat --test-case)
 alita agent execute-test-cases \
   .alita/agents/test-runner.agent.md \
-  --test-cases-dir .github/ai_native/testcases/github \
-  --results-dir .github/ai_native/results \
+  --test-cases-dir .alita/tests/testcases/github \
+  --results-dir .alita/tests/results \
   --data-generator .alita/agents/test-data-generator.agent.md \
   --dir . \
   --test-case TC-011_read_file.md \
@@ -184,8 +192,8 @@ alita agent execute-test-cases \
 ```bash
 alita agent execute-test-cases \
   .alita/agents/test-runner.agent.md \
-  --test-cases-dir .github/ai_native/testcases/github \
-  --results-dir .github/ai_native/results \
+  --test-cases-dir .alita/tests/testcases/github \
+  --results-dir .alita/tests/results \
   --skip-data-generation \
   --model gpt-4o \
   --temperature 0.0 \
@@ -216,7 +224,7 @@ alita toolkit test confluence \
   "timestamp": "2025-12-04T11:54:43.022632",
   "agent": "Test Runner Agent",
   "objective": "Verify that the list_branches_in_repo tool correctly lists all branches...",
-  "config_path": ".github\\ai_native\\testcases\\github\\configs\\git-config.json",
+  "config_path": ".alita\\tool_configs\\git-config.json",
   "passed": true,
   "steps": [
     {
@@ -257,9 +265,9 @@ alita toolkit test confluence \
 
 ## Writing New Test Cases
 
-1. **Choose the appropriate toolkit directory**: Create test case in `testcases/<toolkit_name>/` (e.g., `github`, `ado`, `confluence`)
+1. **Choose the appropriate toolkit directory**: Create test case in `.alita/tests/testcases/<toolkit_name>/` (e.g., `github`, `ado`, `confluence`, `jira`)
 2. **Create test case file**: Name it `TC-XXX_description.md` following the numbering convention
-3. **Create or reuse config file**: Place toolkit config in `testcases/<toolkit_name>/configs/`
+3. **Create or reuse config file**: Place toolkit config in `.alita/tool_configs/`
 4. **Follow the test case format**: Include all required sections (Objective, Config, Pre-requisites, Test Steps, Final Result)
 5. **Define clear expectations**: Make assertions specific and measurable
 6. **Run the test**: Use the execute-test-cases command to validate
@@ -268,9 +276,10 @@ alita toolkit test confluence \
 
 The test framework currently supports the following toolkits:
 
-- **GitHub** (`testcases/github/`) - GitHub API operations, branches, PRs, issues, files
-- **Azure DevOps** (`testcases/ado/`) - ADO repositories, branches, PRs, files
-- **Confluence** (`testcases/confluence/`) - Confluence pages, search, attachments
+- **GitHub** (`.alita/tests/testcases/github/`) - GitHub API operations, branches, PRs, issues, files
+- **Azure DevOps** (`.alita/tests/testcases/ado/`) - ADO repositories, branches, PRs, files
+- **Confluence** (`.alita/tests/testcases/confluence/`) - Confluence pages, search, attachments
+- **Jira** (`.alita/tests/testcases/jira/`) - Jira issues, projects, workflows
 ## Validation Rules
 
 The test framework uses pattern matching to validate outputs:
@@ -294,6 +303,7 @@ Tests are automatically selected based on changed files in PRs:
 # .github/workflows/test-matrix-execution.yml
 - When a PR changes files in alita_sdk/tools/github/, only GitHub tests run
 - When a PR changes files in alita_sdk/tools/confluence/, only Confluence tests run
+- When a PR changes files in alita_sdk/tools/jira/, only Jira tests run
 - Otherwise, all test suites run
 ```
 
@@ -305,8 +315,8 @@ The `execute-test-cases` command returns a non-zero exit code when any tests fai
 # In your CI/CD script
 alita agent execute-test-cases \
   .alita/agents/test-runner.agent.md \
-  --test-cases-dir .github/ai_native/testcases \
-  --results-dir .github/ai_native/results \
+  --test-cases-dir .alita/tests/testcases \
+  --results-dir .alita/tests/results \
   --skip-data-generation \
   --dir .
 
