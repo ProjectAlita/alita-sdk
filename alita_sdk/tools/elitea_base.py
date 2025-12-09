@@ -195,6 +195,11 @@ class BaseToolApiWrapper(BaseModel):
                     #     execution = str(execution)
                     return execution
                 except Exception as e:
+                    # Re-raise McpAuthorizationRequired directly without wrapping
+                    from alita_sdk.runtime.utils.mcp_oauth import McpAuthorizationRequired
+                    if isinstance(e, McpAuthorizationRequired):
+                        raise
+                    
                     # Catch all tool execution exceptions and provide user-friendly error messages
                     error_type = type(e).__name__
                     error_message = str(e)
