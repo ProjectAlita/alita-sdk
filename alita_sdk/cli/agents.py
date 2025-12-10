@@ -2615,6 +2615,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     invoke_config = RunnableConfig(
                         configurable={"thread_id": current_session_id}
                     )
+                    # always proceed with continuation enabled
+                    invoke_config["should_continue"] = True
                     cli_callback = None
                     if show_verbose:
                         cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
