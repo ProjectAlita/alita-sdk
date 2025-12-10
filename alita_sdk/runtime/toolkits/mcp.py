@@ -426,11 +426,6 @@ class McpToolkit(BaseToolkit):
         except Exception as e:
             logger.error(f"Direct discovery failed for MCP toolkit '{toolkit_name}': {e}", exc_info=True)
             logger.error(f"Discovery error details - URL: {connection_config.url}, Timeout: {timeout}s")
-
-            # Check if the exception wraps McpAuthorizationRequired (can happen with asyncio)
-            if hasattr(e, '__cause__') and isinstance(e.__cause__, McpAuthorizationRequired):
-                logger.info(f"Found wrapped McpAuthorizationRequired, re-raising")
-                raise e.__cause__
             
             # For new MCP toolkits (no client), don't silently return empty - surface the error
             # This helps users understand why tool discovery failed
@@ -492,9 +487,6 @@ class McpToolkit(BaseToolkit):
             raise
         except Exception as e:
             logger.error(f"[MCP SSE] Discovery failed for '{toolkit_name}': {e}")
-            # Check if the exception wraps McpAuthorizationRequired
-            if hasattr(e, '__cause__') and isinstance(e.__cause__, McpAuthorizationRequired):
-                raise e.__cause__
             raise
     
     @classmethod
