@@ -44,7 +44,7 @@ DEFAULT_ALLOWED_WITH_LLM = {
     LoaderProperties.PROMPT.value: "",
 }
 
-DEFAULT_ALLOWED_EXCEL = {**DEFAULT_ALLOWED_WITH_LLM, "add_header_to_chunks": False, "header_row_number": 1}
+DEFAULT_ALLOWED_EXCEL = {**DEFAULT_ALLOWED_WITH_LLM, 'add_header_to_chunks': False, 'header_row_number': 1, 'max_tokens': -1, 'sheet_name': ''}
 
 # Image file loaders mapping - directly supported by LLM with image_url
 image_loaders_map = {
@@ -165,9 +165,10 @@ document_loaders_map = {
                       'spreadsheetml.sheet'),
         'is_multimodal_processing': False,
         'kwargs': {
-            'excel_by_sheets': True,
-            'raw_content': True,
-            'cleanse': False
+            'add_header_to_chunks': False,
+            'header_row_number': 1,
+            'max_tokens': -1,
+            'sheet_name': ''
         },
         'allowed_to_override': DEFAULT_ALLOWED_EXCEL
     },
