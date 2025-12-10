@@ -60,6 +60,7 @@ def markdown_chunker(file_content_generator: Generator[Document, None, None], co
                     docmeta.update({"headers": "; ".join(headers_meta)})
                     docmeta['chunk_id'] = chunk_id
                     docmeta['chunk_type'] = "document"
+                    docmeta['method_name'] = 'markdown'
                     yield Document(
                         page_content=subchunk,
                         metadata=docmeta
@@ -71,6 +72,7 @@ def markdown_chunker(file_content_generator: Generator[Document, None, None], co
                 docmeta.update({"headers": "; ".join(headers_meta)})
                 docmeta['chunk_id'] = chunk_id
                 docmeta['chunk_type'] = "document"
+                docmeta['method_name'] = 'text'
                 yield Document(
                     page_content=chunk.page_content,
                     metadata=docmeta

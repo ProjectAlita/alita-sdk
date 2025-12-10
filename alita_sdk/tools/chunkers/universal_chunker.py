@@ -86,6 +86,7 @@ def _default_text_chunker(
         for idx, chunk in enumerate(chunks, 1):
             chunk.metadata['chunk_id'] = idx
             chunk.metadata['chunk_type'] = 'text'
+            chunk.metadata['method_name'] = 'text'
             yield chunk
 
 

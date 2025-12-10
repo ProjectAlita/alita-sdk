@@ -17,6 +17,7 @@ def json_chunker(file_content_generator: Generator[Document, None, None], config
             for chunk in chunks:
                 metadata = doc.metadata.copy()
                 metadata['chunk_id'] = chunk_id
+                metadata['method_name'] = 'json'
                 chunk_id += 1
                 yield Document(page_content=json.dumps(chunk), metadata=metadata)
         except Exception as e:
