@@ -94,6 +94,11 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     else:
                         logger.warning("Image generation internal tool requested "
                                        "but no image generation model configured")
+                elif tool['name'] == 'planner':
+                    tools += PlanningToolkit.get_toolkit(
+                        pgvector_configuration=tool.get('settings', {}).get('pgvector_configuration'),
+                        conversation_id=conversation_id,
+                    ).get_tools()
             elif tool['type'] == 'artifact':
                 toolkit_tools = ArtifactToolkit.get_toolkit(
                     client=alita_client,

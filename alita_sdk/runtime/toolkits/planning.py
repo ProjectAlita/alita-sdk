@@ -94,7 +94,9 @@ class PlanningToolkit(BaseToolkit):
                         "label": "Planning",
                         "description": "Tools for managing multi-step execution plans with progress tracking. Uses PostgreSQL when configured, filesystem otherwise.",
                         "icon_url": None,
-                        "max_length": PlanningToolkit._toolkit_max_length
+                        "max_length": PlanningToolkit._toolkit_max_length,
+                        "categories": ["planning", "internal_tool"],
+                        "extra_categories": ["task management", "todo", "progress tracking"]
                     }
                 }
             )
