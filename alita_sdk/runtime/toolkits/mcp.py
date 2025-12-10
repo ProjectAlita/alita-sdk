@@ -17,7 +17,7 @@ from ..tools.mcp_remote_tool import McpRemoteTool
 from ..tools.mcp_inspect_tool import McpInspectTool
 from ...tools.utils import TOOLKIT_SPLITTER, clean_string
 from ..models.mcp_models import McpConnectionConfig
-from ..utils.mcp_sse_client import McpSseClient
+from ..utils.mcp_client import McpClient
 from ..utils.mcp_oauth import (
     McpAuthorizationRequired,
     canonical_resource,
@@ -509,64 +509,65 @@ class McpToolkit(BaseToolkit):
             session_id = str(uuid.uuid4())
             logger.info(f"[MCP SSE] Generated temporary session_id for OAuth: {session_id}")
         
-        logger.info(f"[MCP SSE] Discovering from {connection_config.url} with session {session_id}")
+        logger.info(f"[MCP] Discovering from {connection_config.url} with session {session_id}")
         
         # Prepare headers
         headers = {}
         if connection_config.headers:
             headers.update(connection_config.headers)
         
-        # Create SSE client
-        client = McpSseClient(
+        # Create unified MCP client (auto-detects SSE vs Streamable HTTP)
+        client = McpClient(
             url=connection_config.url,
             session_id=session_id,
             headers=headers,
             timeout=timeout
         )
         
-        # Initialize MCP session
-        await client.initialize()
-        logger.info(f"[MCP SSE] Session initialized for '{toolkit_name}'")
-        
-        # Discover tools
-        tools = await client.list_tools()
-        all_tools.extend(tools)
-        logger.info(f"[MCP SSE] Discovered {len(tools)} tools from '{toolkit_name}'")
-        
-        # Discover prompts
-        try:
-            prompts = await client.list_prompts()
-            # Convert prompts to tool format
-            for prompt in prompts:
-                prompt_tool = {
-                    "name": f"prompt_{prompt.get('name', 'unnamed')}",
-                    "description": prompt.get('description', f"Execute prompt: {prompt.get('name')}"),
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "arguments": {
-                                "type": "object",
-                                "description": "Arguments for the prompt template",
-                                "properties": {
-                                    arg.get("name"): {
-                                        "type": "string",
-                                        "description": arg.get("description", ""),
-                                        "required": arg.get("required", False)
+        async with client:
+            # Initialize MCP session
+            await client.initialize()
+            logger.info(f"[MCP] Session initialized for '{toolkit_name}' (transport={client.detected_transport})")
+            
+            # Discover tools
+            tools = await client.list_tools()
+            all_tools.extend(tools)
+            logger.info(f"[MCP] Discovered {len(tools)} tools from '{toolkit_name}'")
+            
+            # Discover prompts
+            try:
+                prompts = await client.list_prompts()
+                # Convert prompts to tool format
+                for prompt in prompts:
+                    prompt_tool = {
+                        "name": f"prompt_{prompt.get('name', 'unnamed')}",
+                        "description": prompt.get('description', f"Execute prompt: {prompt.get('name')}"),
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "arguments": {
+                                    "type": "object",
+                                    "description": "Arguments for the prompt template",
+                                    "properties": {
+                                        arg.get("name"): {
+                                            "type": "string",
+                                            "description": arg.get("description", ""),
+                                            "required": arg.get("required", False)
+                                        }
+                                        for arg in prompt.get("arguments", [])
                                     }
-                                    for arg in prompt.get("arguments", [])
                                 }
                             }
-                        }
-                    },
-                    "_mcp_type": "prompt",
-                    "_mcp_prompt_name": prompt.get('name')
-                }
-                all_tools.append(prompt_tool)
-            logger.info(f"[MCP SSE] Discovered {len(prompts)} prompts from '{toolkit_name}'")
-        except Exception as e:
-            logger.warning(f"[MCP SSE] Failed to discover prompts: {e}")
+                        },
+                        "_mcp_type": "prompt",
+                        "_mcp_prompt_name": prompt.get('name')
+                    }
+                    all_tools.append(prompt_tool)
+                logger.info(f"[MCP] Discovered {len(prompts)} prompts from '{toolkit_name}'")
+            except Exception as e:
+                logger.warning(f"[MCP] Failed to discover prompts: {e}")
         
-        logger.info(f"[MCP SSE] Total discovered {len(all_tools)} items from '{toolkit_name}'")
+        logger.info(f"[MCP] Total discovered {len(all_tools)} items from '{toolkit_name}'")
         return all_tools
 
     @classmethod

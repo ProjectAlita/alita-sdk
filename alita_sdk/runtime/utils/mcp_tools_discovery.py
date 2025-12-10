@@ -1,14 +1,15 @@
 """
 MCP Tools Discovery Utility.
 Provides a standalone function to discover tools from remote MCP servers.
+Supports both SSE (Server-Sent Events) and Streamable HTTP transports with auto-detection.
 """
 
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from ..models.mcp_models import McpConnectionConfig
 from .mcp_oauth import McpAuthorizationRequired
+from .mcp_client import McpClient
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,9 @@ def discover_mcp_tools(
     """
     Discover available tools from a remote MCP server.
     
-    This function connects to a remote MCP server via SSE (Server-Sent Events)
-    and retrieves the list of available tools using the MCP protocol.
+    This function connects to a remote MCP server and retrieves the list of 
+    available tools using the MCP protocol. Automatically detects and uses
+    the appropriate transport (SSE or Streamable HTTP).
     
     Args:
         url: MCP server HTTP URL (http:// or https://)
@@ -48,19 +50,12 @@ def discover_mcp_tools(
         ... )
         >>> print(f"Found {len(tools)} tools")
     """
-    # Build connection config
-    connection_config = McpConnectionConfig(
-        url=url,
-        headers=headers or {},
-        session_id=session_id
-    )
-    
     logger.info(f"[MCP Discovery] Starting tool discovery from {url}")
     
     try:
         # Run the async discovery in a new event loop
         tools_list = asyncio.run(
-            _discover_tools_async(connection_config, timeout)
+            _discover_tools_async(url, headers, timeout, session_id)
         )
         logger.info(f"[MCP Discovery] Successfully discovered {len(tools_list)} tools from {url}")
         return tools_list
@@ -76,68 +71,41 @@ def discover_mcp_tools(
 
 
 async def _discover_tools_async(
-    connection_config: McpConnectionConfig,
-    timeout: int
+    url: str,
+    headers: Optional[Dict[str, str]],
+    timeout: int,
+    session_id: Optional[str],
 ) -> List[Dict[str, Any]]:
     """
-    Async implementation of tool discovery using SSE client.
-    
-    Args:
-        connection_config: MCP connection configuration
-        timeout: Request timeout in seconds
-        
-    Returns:
-        List of tool definitions
+    Async implementation of tool discovery using unified MCP client.
     """
-    import uuid
-    from .mcp_sse_client import McpSseClient
-    
     all_tools = []
-    session_id = connection_config.session_id
     
-    # Generate temporary session_id if not provided
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        logger.debug(f"[MCP Discovery] Generated session_id: {session_id}")
-    
-    logger.debug(f"[MCP Discovery] Connecting to {connection_config.url}")
-    
-    # Prepare headers
-    headers = {}
-    if connection_config.headers:
-        headers.update(connection_config.headers)
-    
-    # Create SSE client
-    client = McpSseClient(
-        url=connection_config.url,
+    # Create unified MCP client (auto-detects transport)
+    client = McpClient(
+        url=url,
         session_id=session_id,
         headers=headers,
         timeout=timeout
     )
     
-    try:
-        async with client:
-            # Initialize MCP protocol session
-            logger.debug("[MCP Discovery] Initializing MCP session...")
-            await client.initialize()
-            
-            # Request tool list
-            logger.debug("[MCP Discovery] Requesting tools/list...")
-            response = await client.send_request("tools/list", {})
-            
-            tools = response.get('result', {}).get('tools', [])
-            logger.debug(f"[MCP Discovery] Received {len(tools)} tools")
-            
-            # Convert tools to standard format
-            for tool in tools:
-                tool_def = {
-                    'name': tool.get('name'),
-                    'description': tool.get('description', ''),
-                    'inputSchema': tool.get('inputSchema', {}),
-                }
-                all_tools.append(tool_def)
-    except McpAuthorizationRequired:
-        raise
+    async with client:
+        # Initialize MCP session
+        await client.initialize()
+        logger.debug(f"[MCP Discovery] Session initialized (transport={client.detected_transport})")
+        
+        # Get tools list
+        tools = await client.list_tools()
+        logger.debug(f"[MCP Discovery] Received {len(tools)} tools")
+        
+        # Convert tools to standard format
+        for tool in tools:
+            tool_def = {
+                'name': tool.get('name'),
+                'description': tool.get('description', ''),
+                'inputSchema': tool.get('inputSchema', {}),
+            }
+            all_tools.append(tool_def)
     
     return all_tools
 
@@ -153,10 +121,4 @@ async def discover_mcp_tools_async(
     
     See discover_mcp_tools for full documentation.
     """
-    connection_config = McpConnectionConfig(
-        url=url,
-        headers=headers or {},
-        session_id=session_id
-    )
-    
-    return await _discover_tools_async(connection_config, timeout)
+    return await _discover_tools_async(url, headers, timeout, session_id)
