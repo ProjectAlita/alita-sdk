@@ -135,6 +135,7 @@ class ListDirectoryInput(BaseModel):
     path: str = Field(default=".", description="Relative path to the directory to list")
     include_sizes: bool = Field(default=False, description="Include file sizes in the output")
     sort_by: str = Field(default="name", description="Sort by 'name' or 'size'")
+    max_results: Optional[int] = Field(default=200, description="Maximum number of entries to return. Default is 200 to prevent context overflow.")
 
 
 class DirectoryTreeInput(BaseModel):
@@ -181,6 +182,8 @@ class FileSystemTool(BaseTool):
     """Base class for filesystem tools with directory restriction."""
     base_directory: str  # Primary directory (for backward compatibility)
     allowed_directories: List[str] = []  # Additional allowed directories
+    _basename_collision_detected: bool = False  # Cache for collision detection
+    _basename_collision_checked: bool = False  # Whether we've checked for collisions
     
     def _get_all_allowed_directories(self) -> List[Path]:
         """Get all allowed directories as resolved Paths."""
@@ -190,6 +193,56 @@ class FileSystemTool(BaseTool):
             if resolved not in dirs:
                 dirs.append(resolved)
         return dirs
+    
+    def _check_basename_collision(self) -> bool:
+        """Check if multiple allowed directories have the same basename."""
+        if self._basename_collision_checked:
+            return self._basename_collision_detected
+        
+        allowed_dirs = self._get_all_allowed_directories()
+        basenames = [d.name for d in allowed_dirs]
+        self._basename_collision_detected = len(basenames) != len(set(basenames))
+        self._basename_collision_checked = True
+        return self._basename_collision_detected
+    
+    def _get_relative_path_from_allowed_dirs(self, absolute_path: Path) -> tuple:
+        """Get relative path and directory name for a file in allowed directories.
+        
+        Args:
+            absolute_path: Absolute path to the file
+            
+        Returns:
+            Tuple of (relative_path, directory_name)
+            
+        Raises:
+            ValueError: If path is not within any allowed directory
+        """
+        allowed_dirs = self._get_all_allowed_directories()
+        
+        # Find which allowed directory contains this path
+        for base in allowed_dirs:
+            try:
+                rel_path = absolute_path.relative_to(base)
+                
+                # Determine directory name for prefix
+                if self._check_basename_collision():
+                    # Use parent/basename format to disambiguate
+                    dir_name = f"{base.parent.name}/{base.name}"
+                else:
+                    # Use just basename
+                    dir_name = base.name
+                
+                return (str(rel_path), dir_name)
+            except ValueError:
+                continue
+        
+        # Path not in any allowed directory
+        allowed_paths = [str(d) for d in allowed_dirs]
+        raise ValueError(
+            f"Path '{absolute_path}' is not within any allowed directory.\n"
+            f"Allowed directories: {allowed_paths}\n"
+            f"Attempted path: {absolute_path}"
+        )
     
     def _resolve_path(self, relative_path: str) -> Path:
         """
@@ -602,7 +655,7 @@ class ListDirectoryTool(FileSystemTool):
         "Consider using filesystem_directory_tree with max_depth=1 for hierarchical overview",
     ]
     
-    def _run(self, path: str = ".", include_sizes: bool = False, sort_by: str = "name") -> str:
+    def _run(self, path: str = ".", include_sizes: bool = False, sort_by: str = "name", max_results: Optional[int] = 200) -> str:
         """List directory contents."""
         try:
             target = self._resolve_path(path)
@@ -618,7 +671,8 @@ class ListDirectoryTool(FileSystemTool):
                 entry_info = {
                     'name': entry.name,
                     'is_dir': entry.is_dir(),
-                    'size': entry.stat().st_size if entry.is_file() else 0
+                    'size': entry.stat().st_size if entry.is_file() else 0,
+                    'path': entry
                 }
                 entries.append(entry_info)
             
@@ -628,6 +682,18 @@ class ListDirectoryTool(FileSystemTool):
             else:
                 entries.sort(key=lambda x: x['name'].lower())
             
+            # Apply limit
+            total_count = len(entries)
+            truncated = False
+            if max_results is not None and total_count > max_results:
+                entries = entries[:max_results]
+                truncated = True
+            
+            # Get directory name for multi-directory configs
+            allowed_dirs = self._get_all_allowed_directories()
+            has_multiple_dirs = len(allowed_dirs) > 1
+            _, dir_name = self._get_relative_path_from_allowed_dirs(target) if has_multiple_dirs else ("", "")
+            
             # Format output
             lines = []
             total_files = 0
@@ -636,7 +702,12 @@ class ListDirectoryTool(FileSystemTool):
             
             for entry in entries:
                 prefix = "[DIR] " if entry['is_dir'] else "[FILE]"
-                name = entry['name']
+                
+                # Add directory prefix for multi-directory configs
+                if has_multiple_dirs:
+                    name = f"{dir_name}/{entry['name']}"
+                else:
+                    name = entry['name']
                 
                 if include_sizes and not entry['is_dir']:
                     size_str = self._format_size(entry['size'])
@@ -664,6 +735,10 @@ class ListDirectoryTool(FileSystemTool):
                 if total_files > 0:
                     summary += f"\nCombined size: {self._format_size(total_size)}"
                 result += summary
+            
+            if truncated:
+                result += f"\n\n⚠️  OUTPUT TRUNCATED: Showing {len(entries)} of {total_count} entries from '{dir_name if has_multiple_dirs else path}' (max_results={max_results})"
+                result += "\n   To see more: increase max_results or list a specific subdirectory"
             
             # Add note about how to access files
             result += "\n\nNote: Access files using paths shown above (e.g., 'agents/file.md' for items in agents/ directory)"
@@ -818,23 +893,34 @@ class SearchFilesTool(FileSystemTool):
             else:
                 matches = sorted(all_matches)
             
-            # Format results
-            base = Path(self.base_directory).resolve()
+            # Format results with directory prefixes for multi-directory configs
+            allowed_dirs = self._get_all_allowed_directories()
+            has_multiple_dirs = len(allowed_dirs) > 1
             results = []
+            search_dir_name = None
             
             for match in matches:
-                rel_path = match.relative_to(base)
+                if has_multiple_dirs:
+                    rel_path_str, dir_name = self._get_relative_path_from_allowed_dirs(match)
+                    display_path = f"{dir_name}/{rel_path_str}"
+                    if search_dir_name is None:
+                        search_dir_name = dir_name
+                else:
+                    rel_path_str = str(match.relative_to(Path(self.base_directory).resolve()))
+                    display_path = rel_path_str
+                
                 if match.is_dir():
-                    results.append(f"📁 {rel_path}/")
+                    results.append(f"📁 {display_path}/")
                 else:
                     size = self._format_size(match.stat().st_size)
-                    results.append(f"📄 {rel_path} ({size})")
+                    results.append(f"📄 {display_path} ({size})")
             
             header = f"Found {total_count} matches for '{pattern}':\n\n"
             output = header + "\n".join(results)
             
             if truncated:
-                output += f"\n\n⚠️  OUTPUT TRUNCATED: Showing {max_results} of {total_count} results (max_results={max_results})"
+                location_str = f"from '{search_dir_name}' " if search_dir_name else ""
+                output += f"\n\n⚠️  OUTPUT TRUNCATED: Showing {max_results} of {total_count} results {location_str}(max_results={max_results})"
                 output += "\n   To see more: increase max_results or use a more specific pattern"
             
             return output
