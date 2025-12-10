@@ -21,14 +21,16 @@ from openpyxl import load_workbook
 from xlrd import open_workbook
 from langchain_core.documents import Document
 from .AlitaTableLoader import AlitaTableLoader
+from alita_sdk.runtime.langchain.constants import LOADER_MAX_TOKENS_DEFAULT
 
 cell_delimiter = " | "
 
 class AlitaExcelLoader(AlitaTableLoader):
-    excel_by_sheets: bool = False
     sheet_name: str = None
-    return_type: str = 'str'
     file_name: str = None
+    max_tokens: int = LOADER_MAX_TOKENS_DEFAULT
+    add_header_to_chunks: bool = False
+    header_row_number: int = 1
 
     def __init__(self, **kwargs):
         if not kwargs.get('file_path'):
@@ -39,9 +41,22 @@ class AlitaExcelLoader(AlitaTableLoader):
         else:
             self.file_name = kwargs.get('file_path')
         super().__init__(**kwargs)
-        self.excel_by_sheets = kwargs.get('excel_by_sheets')
-        self.return_type = kwargs.get('return_type')
         self.sheet_name = kwargs.get('sheet_name')
+        # Set and validate chunking parameters only once
+        self.max_tokens = int(kwargs.get('max_tokens', LOADER_MAX_TOKENS_DEFAULT))
+        self.add_header_to_chunks = bool(kwargs.get('add_header_to_chunks', False))
+        header_row_number = kwargs.get('header_row_number', 1)
+        # Validate header_row_number
+        try:
+            header_row_number = int(header_row_number)
+            if header_row_number > 0:
+                self.header_row_number = header_row_number
+            else:
+                self.header_row_number = 1
+                self.add_header_to_chunks = False
+        except (ValueError, TypeError):
+            self.header_row_number = 1
+            self.add_header_to_chunks = False
 
     def get_content(self):
         try:
@@ -64,59 +79,32 @@ class AlitaExcelLoader(AlitaTableLoader):
         Reads .xlsx files using openpyxl.
         """
         workbook = load_workbook(self.file_path, data_only=True)  # `data_only=True` ensures we get cell values, not formulas
-
+        sheets = workbook.sheetnames
         if self.sheet_name:
-            # If a specific sheet name is provided, parse only that sheet
-            if self.sheet_name in workbook.sheetnames:
+            if self.sheet_name in sheets:
                 sheet_content = self.parse_sheet(workbook[self.sheet_name])
-                return sheet_content
+                return {self.sheet_name: sheet_content}
             else:
                 raise ValueError(f"Sheet '{self.sheet_name}' does not exist in the workbook.")
-        elif self.excel_by_sheets:
-            # Parse each sheet individually and return as a dictionary
-            result = {}
-            for sheet_name in workbook.sheetnames:
-                sheet_content = self.parse_sheet(workbook[sheet_name])
-                result[sheet_name] = sheet_content
-            return result
         else:
-            # Combine all sheets into a single string result
-            result = []
-            for sheet_name in workbook.sheetnames:
-                sheet_content = self.parse_sheet(workbook[sheet_name])
-                result.append(f"====== Sheet name: {sheet_name} ======\n{sheet_content}")
-            return "\n\n".join(result)
+            # Dictionary comprehension for all sheets
+            return {name: self.parse_sheet(workbook[name]) for name in sheets}
 
     def _read_xls(self):
         """
         Reads .xls files using xlrd.
         """
         workbook = open_workbook(filename=self.file_name, file_contents=self.file_content)
-
+        sheets = workbook.sheet_names()
         if self.sheet_name:
-            # If a specific sheet name is provided, parse only that sheet
-            if self.sheet_name in workbook.sheet_names():
+            if self.sheet_name in sheets:
                 sheet = workbook.sheet_by_name(self.sheet_name)
-                sheet_content = self.parse_sheet_xls(sheet)
-                return sheet_content
+                return self.parse_sheet_xls(sheet)
             else:
                 raise ValueError(f"Sheet '{self.sheet_name}' does not exist in the workbook.")
-        elif self.excel_by_sheets:
-            # Parse each sheet individually and return as a dictionary
-            result = {}
-            for sheet_name in workbook.sheet_names():
-                sheet = workbook.sheet_by_name(sheet_name)
-                sheet_content = self.parse_sheet_xls(sheet)
-                result[sheet_name] = sheet_content
-            return result
         else:
-            # Combine all sheets into a single string result
-            result = []
-            for sheet_name in workbook.sheet_names():
-                sheet = workbook.sheet_by_name(sheet_name)
-                sheet_content = self.parse_sheet_xls(sheet)
-                result.append(f"====== Sheet name: {sheet_name} ======\n{sheet_content}")
-            return "\n\n".join(result)
+            # Dictionary comprehension for all sheets
+            return {name: self.parse_sheet_xls(workbook.sheet_by_name(name)) for name in sheets}
 
     def parse_sheet(self, sheet):
         """
@@ -170,34 +158,88 @@ class AlitaExcelLoader(AlitaTableLoader):
         # Format the sheet content based on the return type
         return self._format_sheet_content(sheet_content)
 
-    def _format_sheet_content(self, sheet_content):
+    def _format_sheet_content(self, rows):
         """
-        Formats the sheet content based on the return type.
+        Format rows into a list of CSV string chunks, each not exceeding self.max_tokens tokens (using tiktoken).
+        - If add_header_to_chunks is True and header_row_number is valid, the specified header row is prepended once at the top of each chunk (not before every row).
+        - Each chunk is a string with rows separated by newlines (CSV row delimiter), and the header (if used) is the first line of each chunk.
+        - If a single row exceeds max_tokens, it is placed in its own chunk without splitting, with the header prepended if applicable.
+        - Returns: List[str] where each string is a CSV chunk.
         """
-        if self.return_type == 'dict':
-            # Convert to a list of dictionaries (each row is a dictionary)
-            headers = sheet_content[0].split(cell_delimiter) if sheet_content else []
-            data_rows = sheet_content[1:] if len(sheet_content) > 1 else []
-            return [dict(zip(headers, row.split(cell_delimiter))) for row in data_rows]
-        elif self.return_type == 'csv':
-            # Return as CSV (newline-separated rows, comma-separated values)
-            return "\n".join([",".join(row.split(cell_delimiter)) for row in sheet_content])
-        else:
-            # Default: Return as plain text (newline-separated rows, pipe-separated values)
-            return "\n".join(sheet_content)
+        import tiktoken
+        encoding = tiktoken.get_encoding('cl100k_base')
+
+        # --- Inner functions ---
+        def count_tokens(text):
+            """Count tokens in text using tiktoken encoding."""
+            return len(encoding.encode(text))
+
+        def to_csv(row):
+            """Convert a row from pipe-delimited to CSV format."""
+            return ','.join(row.split(cell_delimiter))
+
+        def finalize_chunk(chunk_rows):
+            """Join rows for a chunk, prepending header if needed."""
+            if self.add_header_to_chunks and header_csv:
+                return '\n'.join([header_csv] + chunk_rows)
+            else:
+                return '\n'.join(chunk_rows)
+        # --- End inner functions ---
+
+        # Extract header if needed
+        header_csv = None
+        if self.add_header_to_chunks and rows:
+            header_idx = self.header_row_number - 1
+            header = rows.pop(header_idx)
+            header_csv = to_csv(header)
+
+        chunks = []  # List to store final CSV chunks
+        current_chunk = []  # Accumulate rows for the current chunk
+        current_tokens = 0  # Token count for the current chunk
+
+        for row in rows:
+            # Convert row to CSV format and count tokens
+            row_str = to_csv(row)
+            row_tokens = count_tokens(row_str)
+            # If row itself exceeds max_tokens, flush current chunk and add row as its own chunk (with header if needed)
+            if row_tokens > self.max_tokens:
+                if current_chunk:
+                    chunks.append(finalize_chunk(current_chunk))
+                    current_chunk = []
+                    current_tokens = 0
+                # Add the large row as its own chunk, with header if needed
+                if self.add_header_to_chunks and header_csv:
+                    chunks.append(finalize_chunk([row_str]))
+                else:
+                    chunks.append(row_str)
+                continue
+            # If adding row would exceed max_tokens, flush current chunk and start new
+            if current_tokens + row_tokens > self.max_tokens:
+                if current_chunk:
+                    chunks.append(finalize_chunk(current_chunk))
+                current_chunk = [row_str]
+                current_tokens = row_tokens
+            else:
+                current_chunk.append(row_str)
+                current_tokens += row_tokens
+        # Add any remaining rows as the last chunk
+        if current_chunk:
+            chunks.append(finalize_chunk(current_chunk))
+        return chunks
 
     def load(self) -> list:
         docs = []
         content_per_sheet = self.get_content()
-        for sheet_name, content in content_per_sheet.items():
+        # content_per_sheet is a dict of sheet_name: list of chunk strings
+        for sheet_name, content_chunks in content_per_sheet.items():
             metadata = {
                 "source": f'{self.file_path}:{sheet_name}',
                 "sheet_name": sheet_name,
                 "file_type": "excel",
-                "excel_by_sheets": self.excel_by_sheets,
-                "return_type": self.return_type,
             }
-            docs.append(Document(page_content=f"Sheet: {sheet_name}\n {str(content)}", metadata=metadata))
+            # Each chunk is a separate Document
+            for chunk in content_chunks:
+                docs.append(Document(page_content=chunk, metadata=metadata))
         return docs
 
     def read(self, lazy: bool = False):
