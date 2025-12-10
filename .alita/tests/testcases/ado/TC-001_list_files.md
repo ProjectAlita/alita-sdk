@@ -34,8 +34,6 @@ generateTestData : false
 
 ### Step 1: Execute the Tool
 
-List all your available tools you have 
-
 Execute the `list_files` tool to retrieve files from the repository root directory.
 
 **Expectation:** The tool runs without errors and returns a list of files.

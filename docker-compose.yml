@@ -29,3 +29,13 @@ services:
       --results-dir .alita/tests/results
       --data-generator .alita/agents/test-data-generator.agent.md
       --dir .alita"
+
+  pgvector-db:
+    image: ankane/pgvector
+    container_name: local-alita-pgvector-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=yourpassword
+      - POSTGRES_DB=postgres
+    ports:
+      - "5435:5432"
