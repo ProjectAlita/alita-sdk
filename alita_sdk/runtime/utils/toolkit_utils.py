@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any], 
                                    llm_client: Any, 
                                    alita_client: Optional[Any] = None,
-                                   mcp_tokens: Optional[Dict[str, Any]] = None) -> List[Any]:
+                                   mcp_tokens: Optional[Dict[str, Any]] = None,
+                                   use_prefix: bool = False) -> List[Any]:
     """
     Instantiate a toolkit with LLM client support.
     
@@ -25,6 +26,9 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
         llm_client: LLM client instance for tools that need LLM capabilities
         alita_client: Optional additional client instance
         mcp_tokens: Optional dictionary of MCP OAuth tokens by server URL
+        use_prefix: If True, tools get prefixed with toolkit_name to prevent collisions
+                   (for agent use). If False, tools use base names only (for testing interface).
+                   Default False for backward compatibility with testing.
     
     Returns:
         List of instantiated tools from the toolkit
@@ -58,7 +62,7 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
             'id': toolkit_config.get('id', random.randint(1, 1000000)),
             'type': toolkit_config.get('type', toolkit_type),
             'settings': settings,
-            'toolkit_name': toolkit_name
+            'toolkit_name': toolkit_name if use_prefix else None
         }
         
         # Get tools using the toolkit configuration with clients

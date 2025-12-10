@@ -814,7 +814,7 @@ class AlitaClient:
 
             # Instantiate the toolkit with client and LLM support
             try:
-                tools = instantiate_toolkit_with_client(toolkit_config, llm, self, mcp_tokens=mcp_tokens)
+                tools = instantiate_toolkit_with_client(toolkit_config, llm, self, mcp_tokens=mcp_tokens, use_prefix=False)
             except Exception as toolkit_error:
                 # Re-raise McpAuthorizationRequired to allow proper handling upstream
                 from ..utils.mcp_oauth import McpAuthorizationRequired
