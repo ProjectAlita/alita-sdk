@@ -83,8 +83,4 @@ Verify that the number of results respects the configured limit.
 
 **Expectation:**
 - The number of returned issues should not exceed the `limit` value configured in jira-config.json (default: 5)
-- output contains `{'key': 'AT-2', 'id': '12378', 'projectId': '10066', 'summary': 'Test issue created by automated test',
-    'description': {'type': 'doc', 'version': 1, 'content': [{'type': 'paragraph', 'content':
-    [{'type': 'text', 'text': 'This is a test issue created to verify the create_issue tool functionality'}]}]},
-    'created': '2025-12-08', 'assignee': 'None', 'priority': 'High', 'status': 'To Do', 'updated': '2025-12-08T22:26:02.355+0300',
-    'duedate': None, 'url': 'https://epamelitea.atlassian.net/browse/AT-2', 'related_issues': {}, '': None}`
+- output contains `{'key': 'AT-2', 'id': '12378', 'projectId': '10066', 'summary': 'Test issue created by automated test', 'description': {'type': 'doc', 'version': 1, 'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': 'This is a test issue created to verify the create_issue tool functionality'}]}]}, 'created': '2025-12-08', 'assignee': 'None', 'priority': 'High', 'status': 'To Do', 'updated': '2025-12-09T17:53:00.666+0300', 'duedate': None, 'url': 'https://epamelitea.atlassian.net/browse/AT-2', 'related_issues': {}, '': None}`
