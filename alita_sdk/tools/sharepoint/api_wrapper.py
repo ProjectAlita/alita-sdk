@@ -271,13 +271,13 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             file_name = file.get('Name', '')
 
             # Check if file should be skipped based on skip_extensions
-            if any(re.match(pattern.replace('*', '.*') + '$', file_name, re.IGNORECASE)
+            if any(re.match(re.escape(pattern).replace(r'\*', '.*') + '$', file_name, re.IGNORECASE)
                    for pattern in skip_extensions):
                 continue
 
             # Check if file should be included based on include_extensions
             # If include_extensions is empty, process all files (that weren't skipped)
-            if include_extensions and not (any(re.match(pattern.replace('*', '.*') + '$', file_name, re.IGNORECASE)
+            if include_extensions and not (any(re.match(re.escape(pattern).replace(r'\*', '.*') + '$', file_name, re.IGNORECASE)
                         for pattern in include_extensions)):
                 continue
 

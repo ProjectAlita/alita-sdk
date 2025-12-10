@@ -34,19 +34,24 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         return self.artifact.list(bucket_name, return_as_string)
 
     def create_file(self, filename: str, filedata: str, bucket_name = None):
-        if filename.endswith(".xlsx"):
+        # Sanitize filename to prevent regex errors during indexing
+        sanitized_filename, was_modified = self._sanitize_filename(filename)
+        if was_modified:
+            logging.warning(f"Filename sanitized: '{filename}' -> '{sanitized_filename}'")
+        
+        if sanitized_filename.endswith(".xlsx"):
             data = json.loads(filedata)
             filedata = self.create_xlsx_filedata(data)
 
-        result = self.artifact.create(filename, filedata, bucket_name)
+        result = self.artifact.create(sanitized_filename, filedata, bucket_name)
         
         # Dispatch custom event for file creation
         self._log_tool_event(
             tool_name="file_modified",
             message="""
             {
-                "message": f"File '{filename}' created successfully",
-                "filename": filename,
+                "message": f"File '{sanitized_filename}' created successfully",
+                "filename": sanitized_filename,
                 "tool_name": "createFile",
                 "toolkit": "artifact",
                 "operation_type": "create",
@@ -56,6 +61,33 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             }""")
 
         return result
+    
+    @staticmethod
+    def _sanitize_filename(filename: str) -> tuple:
+        """Sanitize filename for safe storage and regex pattern matching."""
+        from pathlib import Path
+        
+        if not filename or not filename.strip():
+            return "unnamed_file", True
+        
+        original = filename
+        path_obj = Path(filename)
+        name = path_obj.stem
+        extension = path_obj.suffix
+        
+        # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
+        sanitized_name = re.sub(r'[^\w\s-]', '', name, flags=re.UNICODE)
+        sanitized_name = re.sub(r'[-\s]+', '-', sanitized_name)
+        sanitized_name = sanitized_name.strip('-').strip()
+        
+        if not sanitized_name:
+            sanitized_name = "file"
+        
+        if extension:
+            extension = re.sub(r'[^\w.-]', '', extension, flags=re.UNICODE)
+        
+        sanitized = sanitized_name + extension
+        return sanitized, (sanitized != original)
 
     def create_xlsx_filedata(self, data: dict[str, list[list]]) -> bytes:
         try:
@@ -173,13 +205,13 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             file_name = file['name']
 
             # Check if file should be skipped based on skip_extensions
-            if any(re.match(pattern.replace('*', '.*') + '$', file_name, re.IGNORECASE)
+            if any(re.match(re.escape(pattern).replace(r'\*', '.*') + '$', file_name, re.IGNORECASE)
                    for pattern in skip_extensions):
                 continue
 
             # Check if file should be included based on include_extensions
             # If include_extensions is empty, process all files (that weren't skipped)
-            if include_extensions and not (any(re.match(pattern.replace('*', '.*') + '$', file_name, re.IGNORECASE)
+            if include_extensions and not (any(re.match(re.escape(pattern).replace(r'\*', '.*') + '$', file_name, re.IGNORECASE)
                                                for pattern in include_extensions)):
                 continue
 

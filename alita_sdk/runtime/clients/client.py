@@ -469,11 +469,44 @@ class AlitaClient:
         return self._process_requst(data)
 
     def create_artifact(self, bucket_name, artifact_name, artifact_data):
+        # Sanitize filename to prevent regex errors during indexing
+        sanitized_name, was_modified = self._sanitize_artifact_name(artifact_name)
+        if was_modified:
+            logger.warning(f"Artifact filename sanitized: '{artifact_name}' -> '{sanitized_name}'")
+        
         url = f'{self.artifacts_url}/{bucket_name.lower()}'
         data = requests.post(url, headers=self.headers, files={
-            'file': (artifact_name, artifact_data)
+            'file': (sanitized_name, artifact_data)
         }, verify=False)
         return self._process_requst(data)
+    
+    @staticmethod
+    def _sanitize_artifact_name(filename: str) -> tuple:
+        """Sanitize filename for safe storage and regex pattern matching."""
+        import re
+        from pathlib import Path
+        
+        if not filename or not filename.strip():
+            return "unnamed_file", True
+        
+        original = filename
+        path_obj = Path(filename)
+        name = path_obj.stem
+        extension = path_obj.suffix
+        
+        # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
+        sanitized_name = re.sub(r'[^\w\s-]', '', name, flags=re.UNICODE)
+        sanitized_name = re.sub(r'[-\s]+', '-', sanitized_name)
+        sanitized_name = sanitized_name.strip('-').strip()
+        
+        if not sanitized_name:
+            sanitized_name = "file"
+        
+        if extension:
+            extension = re.sub(r'[^\w.-]', '', extension, flags=re.UNICODE)
+        
+        sanitized = sanitized_name + extension
+        return sanitized, (sanitized != original)
 
     def download_artifact(self, bucket_name, artifact_name):
         url = f'{self.artifact_url}/{bucket_name.lower()}/{artifact_name}'

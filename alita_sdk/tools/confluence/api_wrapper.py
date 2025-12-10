@@ -896,14 +896,14 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
                     # Re-verify extension filters
                     # Check if file should be skipped based on skip_extensions
-                    if any(re.match(pattern.replace('*', '.*') + '$', title, re.IGNORECASE)
+                    if any(re.match(re.escape(pattern).replace(r'\*', '.*') + '$', title, re.IGNORECASE)
                            for pattern in self._skip_extensions):
                         continue
 
                     # Check if file should be included based on include_extensions
                     # If include_extensions is empty, process all files (that weren't skipped)
                     if self._include_extensions and not (
-                    any(re.match(pattern.replace('*', '.*') + '$', title, re.IGNORECASE)
+                    any(re.match(re.escape(pattern).replace(r'\*', '.*') + '$', title, re.IGNORECASE)
                         for pattern in self._include_extensions)):
                         continue
 
