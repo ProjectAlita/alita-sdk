@@ -1358,12 +1358,14 @@ def agent_show(ctx, agent_source: str, version: Optional[str]):
               help='Grant agent filesystem access to this directory')
 @click.option('--verbose', '-v', type=click.Choice(['quiet', 'default', 'debug']), default='default',
               help='Output verbosity level: quiet (final output only), default (tool calls + outputs), debug (all including LLM calls)')
+@click.option('--recursion-limit', type=int, default=50,
+              help='Maximum number of tool execution steps per turn')
 @click.pass_context
 def agent_chat(ctx, agent_source: Optional[str], version: Optional[str], 
                toolkit_config: tuple, inventory_path: Optional[str], thread_id: Optional[str],
                model: Optional[str], temperature: Optional[float], 
                max_tokens: Optional[int], work_dir: Optional[str],
-               verbose: str):
+               verbose: str, recursion_limit: Optional[int]):
     """Start interactive chat with an agent.
     
     \b
@@ -2617,6 +2619,9 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                     )
                     # always proceed with continuation enabled
                     invoke_config["should_continue"] = True
+                    # Set recursion limit for tool executions
+                    logger.debug(f"Setting tool steps limit to {recursion_limit}")
+                    invoke_config["recursion_limit"] = recursion_limit
                     cli_callback = None
                     if show_verbose:
                         cli_callback = create_cli_callback(verbose=True, debug=debug_mode)
@@ -2720,6 +2725,8 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
                                     invoke_config = RunnableConfig(
                                         configurable={"thread_id": continuation_thread_id}
                                     )
+                                    invoke_config["should_continue"] = True
+                                    invoke_config["recursion_limit"] = recursion_limit
                                     if cli_callback:
                                         invoke_config["callbacks"] = [cli_callback]
                                     
