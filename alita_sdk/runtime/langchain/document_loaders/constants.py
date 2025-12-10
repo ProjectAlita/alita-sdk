@@ -27,6 +27,7 @@ from .AlitaTextLoader import AlitaTextLoader
 from .AlitaMarkdownLoader import AlitaMarkdownLoader
 from .AlitaPythonLoader import AlitaPythonLoader
 from enum import Enum
+from alita_sdk.runtime.langchain.constants import LOADER_MAX_TOKENS_DEFAULT
 
 
 class LoaderProperties(Enum):
@@ -34,7 +35,7 @@ class LoaderProperties(Enum):
     PROMPT_DEFAULT = 'use_default_prompt'
     PROMPT = 'prompt'
 
-DEFAULT_ALLOWED_BASE = {'max_tokens': 512}
+DEFAULT_ALLOWED_BASE = {'max_tokens': LOADER_MAX_TOKENS_DEFAULT}
 
 DEFAULT_ALLOWED_WITH_LLM = {
     **DEFAULT_ALLOWED_BASE,
@@ -42,6 +43,8 @@ DEFAULT_ALLOWED_WITH_LLM = {
     LoaderProperties.PROMPT_DEFAULT.value: False,
     LoaderProperties.PROMPT.value: "",
 }
+
+DEFAULT_ALLOWED_EXCEL = {**DEFAULT_ALLOWED_WITH_LLM, "add_header_to_chunks": False, "header_row_number": 1}
 
 # Image file loaders mapping - directly supported by LLM with image_url
 image_loaders_map = {
@@ -166,7 +169,7 @@ document_loaders_map = {
             'raw_content': True,
             'cleanse': False
         },
-        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
+        'allowed_to_override': DEFAULT_ALLOWED_EXCEL
     },
     '.xls': {
         'class': AlitaExcelLoader,
@@ -177,7 +180,7 @@ document_loaders_map = {
             'raw_content': True,
             'cleanse': False
         },
-        'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
+        'allowed_to_override': DEFAULT_ALLOWED_EXCEL
     },
     '.pdf': {
         'class': AlitaPDFLoader,
