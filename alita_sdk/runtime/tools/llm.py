@@ -130,7 +130,9 @@ class LLMNode(BaseTool):
         # or standalone LLM node for chat (with messages only)
         if 'system' in func_args.keys():
             # Flow for LLM node with prompt/task from pipeline
-            if not func_args.get('system') or not func_args.get('task'):
+            if func_args.get('system') is None or func_args.get('task') is None:
+                raise ToolException(f"LLMNode requires 'system' and 'task' parameters in input mapping. "
+                                    f"Actual params: {func_args}")
                 raise ToolException(f"LLMNode requires 'system' and 'task' parameters in input mapping. "
                                     f"Actual params: {func_args}")
             # cast to str in case user passes variable different from str
