@@ -268,6 +268,16 @@ class LLMNode(BaseTool):
             result_container = []
             exception_container = []
 
+            # Try to capture Streamlit context from current thread for propagation
+            streamlit_ctx = None
+            try:
+                from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ctx
+                streamlit_ctx = get_script_run_ctx()
+                if streamlit_ctx:
+                    logger.debug("Captured Streamlit context for propagation to worker thread")
+            except (ImportError, Exception) as e:
+                logger.debug(f"Streamlit context not available or failed to capture: {e}")
+
             def run_in_thread():
                 """Run coroutine in a new thread with its own event loop."""
                 new_loop = asyncio.new_event_loop()
@@ -283,6 +293,15 @@ class LLMNode(BaseTool):
                     asyncio.set_event_loop(None)
 
             thread = threading.Thread(target=run_in_thread, daemon=False)
+
+            # Propagate Streamlit context to the worker thread if available
+            if streamlit_ctx is not None:
+                try:
+                    add_script_run_ctx(thread, streamlit_ctx)
+                    logger.debug("Successfully propagated Streamlit context to worker thread")
+                except Exception as e:
+                    logger.warning(f"Failed to propagate Streamlit context to worker thread: {e}")
+
             thread.start()
             thread.join(timeout=self.tool_execution_timeout)  # 15 minute timeout for safety
 
@@ -314,6 +333,16 @@ class LLMNode(BaseTool):
                 result_container = []
                 exception_container = []
 
+                # Try to capture Streamlit context from current thread for propagation
+                streamlit_ctx = None
+                try:
+                    from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ctx
+                    streamlit_ctx = get_script_run_ctx()
+                    if streamlit_ctx:
+                        logger.debug("Captured Streamlit context for propagation to worker thread")
+                except (ImportError, Exception) as e:
+                    logger.debug(f"Streamlit context not available or failed to capture: {e}")
+
                 def run_in_thread():
                     """Run coroutine in a new thread with its own event loop."""
                     new_loop = asyncio.new_event_loop()
@@ -329,6 +358,15 @@ class LLMNode(BaseTool):
                         asyncio.set_event_loop(None)
 
                 thread = threading.Thread(target=run_in_thread, daemon=False)
+
+                # Propagate Streamlit context to the worker thread if available
+                if streamlit_ctx is not None:
+                    try:
+                        add_script_run_ctx(thread, streamlit_ctx)
+                        logger.debug("Successfully propagated Streamlit context to worker thread")
+                    except Exception as e:
+                        logger.warning(f"Failed to propagate Streamlit context to worker thread: {e}")
+
                 thread.start()
                 thread.join(timeout=self.tool_execution_timeout)
 
