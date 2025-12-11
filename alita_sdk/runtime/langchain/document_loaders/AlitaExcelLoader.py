@@ -83,9 +83,9 @@ class AlitaExcelLoader(AlitaTableLoader):
         if self.sheet_name:
             if self.sheet_name in sheets:
                 sheet_content = self.parse_sheet(workbook[self.sheet_name])
-                return {self.sheet_name: sheet_content}
             else:
-                raise ValueError(f"Sheet '{self.sheet_name}' does not exist in the workbook.")
+                sheet_content = [f"Sheet '{self.sheet_name}' does not exist in the workbook."]
+            return {self.sheet_name: sheet_content}
         else:
             # Dictionary comprehension for all sheets
             return {name: self.parse_sheet(workbook[name]) for name in sheets}
@@ -99,9 +99,9 @@ class AlitaExcelLoader(AlitaTableLoader):
         if self.sheet_name:
             if self.sheet_name in sheets:
                 sheet = workbook.sheet_by_name(self.sheet_name)
-                return self.parse_sheet_xls(sheet)
+                return {self.sheet_name: self.parse_sheet_xls(sheet)}
             else:
-                raise ValueError(f"Sheet '{self.sheet_name}' does not exist in the workbook.")
+                return {self.sheet_name: [f"Sheet '{self.sheet_name}' does not exist in the workbook."]}
         else:
             # Dictionary comprehension for all sheets
             return {name: self.parse_sheet_xls(workbook.sheet_by_name(name)) for name in sheets}
@@ -160,11 +160,15 @@ class AlitaExcelLoader(AlitaTableLoader):
 
     def _format_sheet_content(self, rows):
         """
-        Format rows into a list of CSV string chunks, each not exceeding self.max_tokens tokens (using tiktoken).
-        - If add_header_to_chunks is True and header_row_number is valid, the specified header row is prepended once at the top of each chunk (not before every row).
-        - Each chunk is a string with rows separated by newlines (CSV row delimiter), and the header (if used) is the first line of each chunk.
-        - If a single row exceeds max_tokens, it is placed in its own chunk without splitting, with the header prepended if applicable.
-        - Returns: List[str] where each string is a CSV chunk.
+        Specification:
+        Formats a list of sheet rows into a list of string chunks according to the following rules:
+        1. If max_tokens < 1, returns a single chunk (list of one string) with all rows joined by a newline ('\n').
+           - If add_header_to_chunks is True and header_row_number is valid, the specified header row is prepended as the first line.
+        2. If max_tokens >= 1:
+           a. Each chunk is a string containing one or more rows, separated by newlines ('\n'), such that the total token count (as measured by tiktoken) does not exceed max_tokens.
+           b. If add_header_to_chunks is True and header_row_number is valid, the specified header row is prepended once at the top of each chunk (not before every row).
+           c. If a single row exceeds max_tokens, it is placed in its own chunk without splitting, with the header prepended if applicable.
+        3. Returns: List[str], where each string is a chunk ready for further processing.
         """
         import tiktoken
         encoding = tiktoken.get_encoding('cl100k_base')
@@ -174,33 +178,30 @@ class AlitaExcelLoader(AlitaTableLoader):
             """Count tokens in text using tiktoken encoding."""
             return len(encoding.encode(text))
 
-        def to_csv(row):
-            """Convert a row from pipe-delimited to CSV format."""
-            return ','.join(row.split(cell_delimiter))
-
         def finalize_chunk(chunk_rows):
             """Join rows for a chunk, prepending header if needed."""
-            if self.add_header_to_chunks and header_csv:
-                return '\n'.join([header_csv] + chunk_rows)
+            if self.add_header_to_chunks and header:
+                return '\n'.join([header] + chunk_rows)
             else:
                 return '\n'.join(chunk_rows)
         # --- End inner functions ---
 
+        # If max_tokens < 1, return all rows as a single chunk
+        if self.max_tokens < 1:
+            return ['\n'.join(rows)]
+
         # Extract header if needed
-        header_csv = None
+        header = None
         if self.add_header_to_chunks and rows:
             header_idx = self.header_row_number - 1
             header = rows.pop(header_idx)
-            header_csv = to_csv(header)
 
-        chunks = []  # List to store final CSV chunks
+        chunks = []  # List to store final chunks
         current_chunk = []  # Accumulate rows for the current chunk
         current_tokens = 0  # Token count for the current chunk
 
         for row in rows:
-            # Convert row to CSV format and count tokens
-            row_str = to_csv(row)
-            row_tokens = count_tokens(row_str)
+            row_tokens = count_tokens(row)
             # If row itself exceeds max_tokens, flush current chunk and add row as its own chunk (with header if needed)
             if row_tokens > self.max_tokens:
                 if current_chunk:
@@ -208,19 +209,19 @@ class AlitaExcelLoader(AlitaTableLoader):
                     current_chunk = []
                     current_tokens = 0
                 # Add the large row as its own chunk, with header if needed
-                if self.add_header_to_chunks and header_csv:
-                    chunks.append(finalize_chunk([row_str]))
+                if self.add_header_to_chunks and header:
+                    chunks.append(finalize_chunk([row]))
                 else:
-                    chunks.append(row_str)
+                    chunks.append(row)
                 continue
             # If adding row would exceed max_tokens, flush current chunk and start new
             if current_tokens + row_tokens > self.max_tokens:
                 if current_chunk:
                     chunks.append(finalize_chunk(current_chunk))
-                current_chunk = [row_str]
+                current_chunk = [row]
                 current_tokens = row_tokens
             else:
-                current_chunk.append(row_str)
+                current_chunk.append(row)
                 current_tokens += row_tokens
         # Add any remaining rows as the last chunk
         if current_chunk:
