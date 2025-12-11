@@ -24,6 +24,10 @@ from ..utils.mcp_client import McpClient
 
 logger = logging.getLogger(__name__)
 
+# Global registry to store MCP tool session metadata by tool name
+# This is used to pass session info to callbacks since LangChain's serialization doesn't include all fields
+MCP_TOOL_SESSION_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
 
 class McpRemoteTool(McpServerTool):
     """
@@ -43,6 +47,7 @@ class McpRemoteTool(McpServerTool):
         """Update metadata with session info after model initialization."""
         super().model_post_init(__context)
         self._update_metadata_with_session()
+        self._register_session_metadata()
     
     def _update_metadata_with_session(self):
         """Update the metadata dict with current session information."""
@@ -53,6 +58,15 @@ class McpRemoteTool(McpServerTool):
                 'mcp_session_id': self.session_id,
                 'mcp_server_url': canonical_resource(self.server_url)
             })
+    
+    def _register_session_metadata(self):
+        """Register session metadata in global registry for callback access."""
+        if self.session_id and self.server_url:
+            MCP_TOOL_SESSION_REGISTRY[self.name] = {
+                'mcp_session_id': self.session_id,
+                'mcp_server_url': canonical_resource(self.server_url)
+            }
+            logger.debug(f"[MCP] Registered session metadata for tool '{self.name}': session={self.session_id}")
     
     def __getstate__(self):
         """Custom serialization for pickle compatibility."""

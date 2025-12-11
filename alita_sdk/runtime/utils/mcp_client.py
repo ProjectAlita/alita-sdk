@@ -76,6 +76,16 @@ class McpClient:
         
         logger.info(f"[MCP Client] Created for {url} (transport={transport}, session={self.session_id})")
     
+    @property
+    def server_session_id(self) -> Optional[str]:
+        """Get the server-provided session ID (from mcp-session-id header)."""
+        return self._mcp_session_id
+    
+    @property
+    def detected_transport(self) -> Optional[str]:
+        """Get the detected transport type."""
+        return self._detected_transport
+    
     async def __aenter__(self):
         """Async context manager entry - detect and connect."""
         await self._connect()
@@ -160,10 +170,11 @@ class McpClient:
             **self.headers
         }
         
-        # Add session ID header if we have one (for session resumption)
-        # Skip if retrying without session due to invalid session error
-        if self.session_id and not retry_without_session:
-            headers["Mcp-Session-Id"] = self.session_id
+        # DON'T send session_id on initialization - per MCP spec, initialization requests
+        # must not include a sessionId. The server will provide one in the response.
+        # Session ID is only used for subsequent requests after initialization.
+        # (The retry_without_session flag is kept for backwards compatibility but
+        # is effectively always true for initialization now)
         
         # Debug: log headers (mask sensitive data)
         debug_headers = {k: (v[:20] + '...' if k.lower() == 'authorization' and len(v) > 20 else v) 
@@ -218,6 +229,10 @@ class McpClient:
             
             # Get session ID from response headers
             self._mcp_session_id = response.headers.get("mcp-session-id")
+            if self._mcp_session_id:
+                logger.info(f"[MCP Client] Server provided session_id: {self._mcp_session_id}")
+            else:
+                logger.debug(f"[MCP Client] No session_id in response headers. Headers: {dict(response.headers)}")
             
             # Parse response
             result = await self._parse_response(response)

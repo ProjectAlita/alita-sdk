@@ -459,28 +459,30 @@ class McpToolkit(BaseToolkit):
         toolkit_name: str,
         connection_config: McpConnectionConfig,
         timeout: int
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """
         Discover tools and prompts from MCP server using SSE client.
-        Returns list of tool/prompt dictionaries with name, description, and inputSchema.
-        Prompts are converted to tools that can be invoked.
-        """
-        session_id = connection_config.session_id
         
-        if not session_id:
-            logger.warning(f"[MCP Session] No session_id provided for '{toolkit_name}' - server may require it")
-            logger.warning(f"[MCP Session] Frontend should generate a UUID and include it with mcp_tokens")
+        Returns:
+            Tuple of (tool_list, server_session_id) - session_id may be server-provided
+        """
+        initial_session_id = connection_config.session_id
+        
+        if not initial_session_id:
+            logger.warning(f"[MCP Session] No session_id provided for '{toolkit_name}' - will generate one")
         
         # Run async discovery in sync context
         try:
-            all_tools = asyncio.run(
+            all_tools, server_session_id = asyncio.run(
                 cls._discover_tools_async(
                     toolkit_name=toolkit_name,
                     connection_config=connection_config,
                     timeout=timeout
                 )
             )
-            return all_tools, session_id
+            # Return tools and the session_id (server-provided or generated)
+            logger.info(f"[MCP Session] Final session_id for '{toolkit_name}': {server_session_id}")
+            return all_tools, server_session_id
         except McpAuthorizationRequired:
             # Re-raise auth required exceptions directly
             logger.info(f"[MCP SSE] Authorization required for '{toolkit_name}'")
@@ -495,9 +497,12 @@ class McpToolkit(BaseToolkit):
         toolkit_name: str,
         connection_config: McpConnectionConfig,
         timeout: int
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """
         Async implementation of tool discovery using SSE client.
+        
+        Returns:
+            Tuple of (tool_list, server_session_id)
         """
         all_tools = []
         session_id = connection_config.session_id
@@ -524,10 +529,16 @@ class McpToolkit(BaseToolkit):
             timeout=timeout
         )
         
+        server_session_id = None
         async with client:
             # Initialize MCP session
             await client.initialize()
             logger.info(f"[MCP] Session initialized for '{toolkit_name}' (transport={client.detected_transport})")
+            
+            # Capture server-provided session_id (from mcp-session-id header)
+            server_session_id = client.server_session_id
+            if server_session_id:
+                logger.info(f"[MCP] Server provided session_id: {server_session_id}")
             
             # Discover tools
             tools = await client.list_tools()
@@ -568,7 +579,9 @@ class McpToolkit(BaseToolkit):
                 logger.warning(f"[MCP] Failed to discover prompts: {e}")
         
         logger.info(f"[MCP] Total discovered {len(all_tools)} items from '{toolkit_name}'")
-        return all_tools
+        # Return tools and server-provided session_id (use server's if available, else the one we sent)
+        final_session_id = server_session_id or session_id
+        return all_tools, final_session_id
 
     @classmethod
     def _create_tool_from_dict(
