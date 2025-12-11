@@ -30,7 +30,7 @@ class ServiceNowToolkit(BaseToolkit):
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
-                          ServiceNowApiWrapper.model_construct().get_available_tools()}
+                          ServiceNowAPIWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
             name=(str, Field(description="Toolkit name")),

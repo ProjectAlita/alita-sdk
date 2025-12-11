@@ -8,7 +8,7 @@ from git import Repo
 from pydantic import BaseModel, Field, create_model, model_validator
 from langchain_core.tools import ToolException
 
-from ..elitea_base import BaseToolApiWrapper, extend_with_file_operations
+from ..elitea_base import BaseToolApiWrapper, extend_with_file_operations, BaseCodeToolApiWrapper
 from ..utils.text_operations import parse_old_new_markers
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,12 @@ class LocalGit(BaseToolApiWrapper):
     repo_url: str = None
     commit_sha: str = None
     path_pattern: str = '**/*.py'
+    
+    # Import file operation methods from BaseCodeToolApiWrapper
+    read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
+    read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
+    search_file = BaseCodeToolApiWrapper.search_file
+    edit_file = BaseCodeToolApiWrapper.edit_file
 
     @model_validator(mode='before')
     @classmethod

@@ -7,7 +7,7 @@ from pydantic import create_model, Field, model_validator, SecretStr, PrivateAtt
 
 from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
-from ..elitea_base import extend_with_file_operations
+from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 from ..utils.content_parser import parse_file_content
 
 AppendFileModel = create_model(
@@ -110,6 +110,12 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
     branch: Optional[str] = 'main'
     _git: Any = PrivateAttr()
     _active_branch: Any = PrivateAttr()
+    
+    # Import file operation methods from BaseCodeToolApiWrapper
+    read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
+    read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
+    search_file = BaseCodeToolApiWrapper.search_file
+    edit_file = BaseCodeToolApiWrapper.edit_file
 
     @staticmethod
     def _sanitize_url(url: str) -> str:

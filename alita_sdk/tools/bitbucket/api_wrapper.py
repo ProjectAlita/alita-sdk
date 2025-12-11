@@ -13,7 +13,7 @@ from pydantic.fields import PrivateAttr
 
 from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
-from ..elitea_base import extend_with_file_operations
+from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,12 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
 
     _bitbucket: Any = PrivateAttr()
     _active_branch: Any = PrivateAttr()
+    
+    # Import file operation methods from BaseCodeToolApiWrapper
+    read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
+    read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
+    search_file = BaseCodeToolApiWrapper.search_file
+    edit_file = BaseCodeToolApiWrapper.edit_file
     url: str = ''
     project: str = ''
     """The key of the project this repo belongs to"""

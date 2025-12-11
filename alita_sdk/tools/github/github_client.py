@@ -11,7 +11,7 @@ from github import Auth, Github, GithubIntegration, Repository
 from github.Consts import DEFAULT_BASE_URL
 from langchain_core.tools import ToolException
 
-from ..elitea_base import extend_with_file_operations
+from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 from .schemas import (
     GitHubAuthConfig,
     GitHubRepoConfig,
@@ -95,6 +95,12 @@ class GitHubClient(BaseModel):
     
     # Alita instance
     alita: Optional[Any] = Field(default=None, exclude=True)
+    
+    # Import file operation methods from BaseCodeToolApiWrapper
+    read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
+    read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
+    search_file = BaseCodeToolApiWrapper.search_file
+    edit_file = BaseCodeToolApiWrapper.edit_file
 
     @property
     def github_repo_instance(self) -> Optional[Repository.Repository]:
