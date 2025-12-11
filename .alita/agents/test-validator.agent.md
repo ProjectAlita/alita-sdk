@@ -3,7 +3,7 @@ name: "test-validator"
 description: "Agent for validating test execution results against expectations"
 model: "gpt-5"
 temperature: 0.0
-max_tokens: 2048
+max_tokens: 30000
 step_limit: 10
 tools: []
 ---

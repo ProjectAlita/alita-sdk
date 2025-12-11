@@ -285,7 +285,7 @@ def _build_single_test_execution_prompt(test_case_info: dict, test_number: int) 
         f"TEST CASE #{test_number}: {test_case['name']}",
         f"File: {test_file.name}",
         f"{'='*80}",
-        "\nExecute the following steps in sequential order and report results:"
+        "\nList all the tools you have in your environment. Execute the following steps in sequential order and report results:"
     ]
     
     if test_case['steps']:
@@ -385,6 +385,92 @@ def _create_fallback_result_for_test(test_case: dict, test_file: Path, reason: s
         'step_results': fallback_steps,
         'validation_error': reason
     }
+
+
+def _cleanup_executor_cache(cache: Dict[str, tuple], cache_name: str = "executor") -> None:
+    """Clean up executor cache resources.
+    
+    Args:
+        cache: Dictionary of cached executors
+        cache_name: Name of cache for logging
+    """
+    console.print(f"[dim]Cleaning up {cache_name} cache...[/dim]")
+    for cache_key, cached_items in cache.items():
+        try:
+            # Extract memory from tuple (second element)
+            memory = cached_items[1] if len(cached_items) > 1 else None
+            
+            # Close SQLite memory connection
+            if memory and hasattr(memory, 'conn') and memory.conn:
+                memory.conn.close()
+        except Exception as e:
+            logger.debug(f"Error cleaning up {cache_name} cache for {cache_key}: {e}")
+
+
+def _create_executor_from_cache(cache: Dict[str, tuple], cache_key: str, 
+                                client, agent_def: Dict, toolkit_config_path: Optional[str],
+                                config, model: Optional[str], temperature: Optional[float],
+                                max_tokens: Optional[int], work_dir: Optional[str]) -> tuple:
+    """Get or create executor from cache.
+    
+    Args:
+        cache: Executor cache dictionary
+        cache_key: Key for caching
+        client: API client
+        agent_def: Agent definition
+        toolkit_config_path: Path to toolkit config
+        config: CLI configuration
+        model: Model override
+        temperature: Temperature override
+        max_tokens: Max tokens override
+        work_dir: Working directory
+        
+    Returns:
+        Tuple of (agent_executor, memory, mcp_session_manager)
+    """
+    if cache_key in cache:
+        return cache[cache_key]
+    
+    # Create new executor
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    import sqlite3
+    
+    memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+    toolkit_config_tuple = (toolkit_config_path,) if toolkit_config_path else ()
+    
+    agent_executor, mcp_session_manager, _, _, _, _, _ = _setup_local_agent_executor(
+        client, agent_def, toolkit_config_tuple, config, model, temperature, 
+        max_tokens, memory, work_dir
+    )
+    
+    # Cache the executor
+    cached_tuple = (agent_executor, memory, mcp_session_manager)
+    cache[cache_key] = cached_tuple
+    return cached_tuple
+
+
+def _print_validation_diagnostics(validation_output: str) -> None:
+    """Print diagnostic information for validation output.
+    
+    Args:
+        validation_output: The validation output to diagnose
+    """
+    console.print(f"\n[bold red]🔍 Diagnostic Information:[/bold red]")
+    console.print(f"[dim]Output length: {len(validation_output)} characters[/dim]")
+    
+    # Check for key JSON elements
+    has_json = '{' in validation_output and '}' in validation_output
+    has_fields = 'test_number' in validation_output and 'steps' in validation_output
+    
+    console.print(f"[dim]Has JSON structure: {has_json}[/dim]")
+    console.print(f"[dim]Has required fields: {has_fields}[/dim]")
+    
+    # Show relevant excerpt
+    if len(validation_output) > 400:
+        console.print(f"\n[red]First 200 chars:[/red] [dim]{validation_output[:200]}[/dim]")
+        console.print(f"[red]Last 200 chars:[/red] [dim]{validation_output[-200:]}[/dim]")
+    else:
+        console.print(f"\n[red]Full output:[/red] [dim]{validation_output}[/dim]")
 
 
 def _get_alita_system_prompt(config) -> str:
@@ -3268,6 +3354,11 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
       alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
           --skip-data-generation --model gpt-4o
     """
+    # Import dependencies at function start
+    import sqlite3
+    import uuid
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    
     config = ctx.obj['config']
     client = get_client(ctx)
     
@@ -3351,12 +3442,6 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
         else:
             console.print(f"[dim]No validator agent specified, using test runner agent for validation[/dim]\n")
         
-        # Track overall results
-        total_tests = 0
-        passed_tests = 0
-        failed_tests = 0
-        test_results = []  # Store structured results for final report
-        
         # Store bulk data generation chat history to pass to test executors
         bulk_gen_chat_history = []
         
@@ -3391,7 +3476,6 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
 
             try:
                 # Setup data generator agent
-                from langgraph.checkpoint.sqlite import SqliteSaver
                 bulk_memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
                 
                 # Use first test case's config or empty tuple
@@ -3474,33 +3558,17 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 
                 # Use cache key (None if no config)
                 cache_key = toolkit_config_path if toolkit_config_path else '__no_config__'
-                
-                # Generate unique thread_id for each test case to isolate execution contexts
-                import uuid
                 thread_id = f"test_case_{idx}_{uuid.uuid4().hex[:8]}"
                 
-                # Check executor cache
-                if cache_key in executor_cache:
-                    agent_executor, memory, mcp_session_manager = executor_cache[cache_key]
-                else:
-                    # Create new executor
-                    from langgraph.checkpoint.sqlite import SqliteSaver
-                    memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
-                    
-                    toolkit_config_tuple = (toolkit_config_path,) if toolkit_config_path else ()
-                    agent_executor, mcp_session_manager, _, _, _, _, _ = _setup_local_agent_executor(
-                        client, agent_def, toolkit_config_tuple, config, model, temperature, max_tokens, memory, work_dir
-                    )
-                    
-                    # Cache the executor
-                    executor_cache[cache_key] = (agent_executor, memory, mcp_session_manager)
+                # Get or create executor from cache
+                agent_executor, memory, mcp_session_manager = _create_executor_from_cache(
+                    executor_cache, cache_key, client, agent_def, toolkit_config_path,
+                    config, model, temperature, max_tokens, work_dir
+                )
                 
                 # Build execution prompt for single test case
                 execution_prompt = _build_single_test_execution_prompt(tc_info, idx)
-                
-                console.print(f"[dim]Executing test case with {len(bulk_gen_chat_history)} messages in history (data gen context only)[/dim]\n")
-                console.print(f"[dim]Executing test case with {execution_prompt}[/dim]\n")
-                
+                console.print(f"[dim]Executing with {len(bulk_gen_chat_history)} history messages[/dim]")
                 
                 # Execute test case
                 execution_output = ""
@@ -3530,29 +3598,21 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 # Validate test case using ISOLATED validation executor
                 validation_prompt = _build_single_test_validation_prompt(tc_info, idx, execution_output)
                 
-                console.print(f"[bold yellow]🔍 Validating test case (isolated context)...[/bold yellow]\n")
+                console.print(f"[bold yellow]🔍 Validating test case (isolated context)...[/bold yellow]")
+                
                 # Create or retrieve isolated validation executor
                 validation_cache_key = f"{cache_key}_validation"
-                if validation_cache_key in validation_executor_cache:
-                    validation_executor, validation_memory, validation_mcp_session = validation_executor_cache[validation_cache_key]
-                    console.print(f"[dim]Using cached validation executor[/dim]\n")
+                validation_agent_def = validator_def if validator_def else agent_def
+                
+                validation_executor, validation_memory, validation_mcp_session = _create_executor_from_cache(
+                    validation_executor_cache, validation_cache_key, client, validation_agent_def,
+                    toolkit_config_path, config, model, temperature, max_tokens, work_dir
+                )
+                
+                if validation_cache_key not in validation_executor_cache:
+                    console.print(f"[dim]Created new isolated validation executor[/dim]")
                 else:
-                    console.print(f"[dim]Creating new isolated validation executor (no data gen history)[/dim]\n")
-                    # Create completely separate memory for validation
-                    from langgraph.checkpoint.sqlite import SqliteSaver
-                    validation_memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
-                    
-                    # Use validator agent definition if available, otherwise fall back to test runner agent
-                    validation_agent_def = validator_def if validator_def else agent_def
-                    
-                    toolkit_config_tuple = (toolkit_config_path,) if toolkit_config_path else ()
-                    validation_executor, validation_mcp_session, _, _, _, _, _ = _setup_local_agent_executor(
-                        client, validation_agent_def, toolkit_config_tuple, config, model, temperature, max_tokens, 
-                        validation_memory, work_dir
-                    )
-                    
-                    # Cache the validation executor
-                    validation_executor_cache[validation_cache_key] = (validation_executor, validation_memory, validation_mcp_session)
+                    console.print(f"[dim]Using cached validation executor[/dim]")
                 
                 # For validation, use a separate thread with NO chat history (isolated from data gen)
                 # This prevents the agent from using tools and encourages direct JSON output
@@ -3619,22 +3679,7 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                     console.print(f"[yellow]Error: {str(e)}[/yellow]")
                     
                     # Enhanced diagnostic output
-                    console.print(f"\n[bold red]🔍 Diagnostic Information:[/bold red]")
-                    console.print(f"[dim]Output length: {len(validation_output)} characters[/dim]")
-                    console.print(f"[dim]Contains '{{': {'{' in validation_output}[/dim]")
-                    console.print(f"[dim]Contains '}}': {'}' in validation_output}[/dim]")
-                    console.print(f"[dim]Contains 'test_number': {'test_number' in validation_output}[/dim]")
-                    console.print(f"[dim]Contains 'steps': {'steps' in validation_output}[/dim]")
-                    
-                    # Show first/last 200 chars for context
-                    if len(validation_output) > 400:
-                        console.print(f"\n[red]First 200 chars:[/red]")
-                        console.print(f"[dim]{validation_output[:200]}[/dim]")
-                        console.print(f"\n[red]Last 200 chars:[/red]")
-                        console.print(f"[dim]{validation_output[-200:]}[/dim]")
-                    else:
-                        console.print(f"\n[red]Full validation output:[/red]")
-                        console.print(f"[dim]{validation_output}[/dim]")
+                    _print_validation_diagnostics(validation_output)
                     
                     # Generate fallback result using helper function
                     console.print(f"\n[yellow]🔄 Generating fallback validation result...[/yellow]")
@@ -3662,34 +3707,8 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 console.print()
         
         # Cleanup: Close executor cache resources
-        console.print("[dim]Cleaning up executor cache...[/dim]")
-        for cache_key, (agent_executor, memory, mcp_session_manager) in executor_cache.items():
-            try:
-                # Close MCP sessions if present
-                if mcp_session_manager is not None:
-                    # MCP session cleanup is handled by garbage collection
-                    pass
-                
-                # Close SQLite memory connection
-                if hasattr(memory, 'conn') and memory.conn:
-                    memory.conn.close()
-            except Exception as e:
-                logger.debug(f"Error cleaning up executor cache for {cache_key}: {e}")
-        
-        # Cleanup: Close validation executor cache resources
-        console.print("[dim]Cleaning up validation executor cache...[/dim]")
-        for cache_key, (validation_executor, validation_memory, validation_mcp_session) in validation_executor_cache.items():
-            try:
-                # Close MCP sessions if present
-                if validation_mcp_session is not None:
-                    # MCP session cleanup is handled by garbage collection
-                    pass
-                
-                # Close SQLite memory connection
-                if hasattr(validation_memory, 'conn') and validation_memory.conn:
-                    validation_memory.conn.close()
-            except Exception as e:
-                logger.debug(f"Error cleaning up validation executor cache for {cache_key}: {e}")
+        _cleanup_executor_cache(executor_cache, "executor")
+        _cleanup_executor_cache(validation_executor_cache, "validation executor")
         
         # Calculate totals
         total_tests = len(test_results)
