@@ -275,67 +275,6 @@ def _build_bulk_data_gen_prompt(parsed_test_cases: list) -> str:
 {'='*60}"""
 
 
-def _build_bulk_execution_prompt(parsed_test_cases: list) -> str:
-    """Build consolidated prompt for bulk test execution."""
-    parts = []
-    
-    for idx, tc_info in enumerate(parsed_test_cases, 1):
-        test_case = tc_info['data']
-        test_file = tc_info['file']
-        
-        parts.append(f"\n{'='*80}\nTEST CASE #{idx}: {test_case['name']}\nFile: {test_file.name}\n{'='*80}")
-        
-        if test_case['steps']:
-            for step in test_case['steps']:
-                parts.append(f"\nStep {step['number']}: {step['title']}\n{step['instruction']}")
-                if step['expectation']:
-                    parts.append(f"Expected Result: {step['expectation']}")
-        else:
-            parts.append("\n(No steps defined)")
-    
-    return "\n".join(parts)
-
-
-def _build_validation_prompt(parsed_test_cases: list, execution_output: str) -> str:
-    """Build prompt for bulk validation of test results."""
-    parts = ["You are a test validator. Review the test execution results and validate each test case.\n\nTest Cases to Validate:\n"]
-    
-    for idx, tc_info in enumerate(parsed_test_cases, 1):
-        test_case = tc_info['data']
-        parts.append(f"\nTest Case #{idx}: {test_case['name']}")
-        if test_case['steps']:
-            for step in test_case['steps']:
-                parts.append(f"  Step {step['number']}: {step['title']}")
-                if step['expectation']:
-                    parts.append(f"  Expected: {step['expectation']}")
-    
-    parts.append(f"\n\nActual Execution Results:\n{execution_output}\n")
-    parts.append(f"""\nBased on the execution results above, validate each test case.
-
-Respond with valid JSON in this EXACT format:
-{{
-  "test_cases": [
-    {{
-      "test_number": 1,
-      "test_name": "<test case name>",
-      "steps": [
-        {{"step_number": 1, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}},
-        {{"step_number": 2, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}}
-      ]
-    }},
-    {{
-      "test_number": 2,
-      "test_name": "<test case name>",
-      "steps": [...]
-    }}
-  ]
-}}
-
-Validate all {len(parsed_test_cases)} test cases and their steps.""")
-    
-    return "\n".join(parts)
-
-
 def _build_single_test_execution_prompt(test_case_info: dict, test_number: int) -> str:
     """Build execution prompt for a single test case."""
     test_case = test_case_info['data']
@@ -346,7 +285,7 @@ def _build_single_test_execution_prompt(test_case_info: dict, test_number: int) 
         f"TEST CASE #{test_number}: {test_case['name']}",
         f"File: {test_file.name}",
         f"{'='*80}",
-        "\nExecute the following steps in order and report what you did:"
+        "\nExecute the following steps in sequential order and report results:"
     ]
     
     if test_case['steps']:
@@ -364,7 +303,7 @@ def _build_single_test_validation_prompt(test_case_info: dict, test_number: int,
     test_case = test_case_info['data']
     
     parts = [
-        "You are a test validator. Review the test execution results and validate this test case.\n",
+        "Review the test execution results and validate this test case and provide the output in JSON format.\n",
         f"\nTest Case #{test_number}: {test_case['name']}"
     ]
     
@@ -419,17 +358,33 @@ def _extract_json_from_text(text: str) -> dict:
     return json.loads(text[start_idx:end_idx])
 
 
-def _create_fallback_results(parsed_test_cases: list) -> tuple[list, int, int, int]:
-    """Create fallback results when execution/validation fails."""
-    test_results = []
-    for tc_info in parsed_test_cases:
-        test_results.append({
-            'title': tc_info['data']['name'],
+def _create_fallback_result_for_test(test_case: dict, test_file: Path, reason: str = 'Validation failed') -> dict:
+    """Create a fallback result for a single test case with detailed step information.
+    
+    Args:
+        test_case: Parsed test case data
+        test_file: Path to test case file
+        reason: Reason for fallback
+        
+    Returns:
+        Fallback test result dict with step details
+    """
+    fallback_steps = []
+    for step_info in test_case.get('steps', []):
+        fallback_steps.append({
+            'step_number': step_info['number'],
+            'title': step_info['title'],
             'passed': False,
-            'file': tc_info['file'].name,
-            'step_results': []
+            'details': reason
         })
-    return test_results, len(parsed_test_cases), 0, len(parsed_test_cases)
+    
+    return {
+        'title': test_case['name'],
+        'passed': False,
+        'file': test_file.name,
+        'step_results': fallback_steps,
+        'validation_error': reason
+    }
 
 
 def _get_alita_system_prompt(config) -> str:
@@ -3544,6 +3499,8 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 execution_prompt = _build_single_test_execution_prompt(tc_info, idx)
                 
                 console.print(f"[dim]Executing test case with {len(bulk_gen_chat_history)} messages in history (data gen context only)[/dim]\n")
+                console.print(f"[dim]Executing test case with {execution_prompt}[/dim]\n")
+                
                 
                 # Execute test case
                 execution_output = ""
@@ -3574,7 +3531,6 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 validation_prompt = _build_single_test_validation_prompt(tc_info, idx, execution_output)
                 
                 console.print(f"[bold yellow]🔍 Validating test case (isolated context)...[/bold yellow]\n")
-                console.print(f"[bold yellow]🔍 {validation_prompt}...[/bold yellow]\n")
                 # Create or retrieve isolated validation executor
                 validation_cache_key = f"{cache_key}_validation"
                 if validation_cache_key in validation_executor_cache:
@@ -3658,30 +3614,51 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                     })
                     
                 except Exception as e:
-                    logger.debug(f"Validation parsing failed for {test_name}: {e}")
+                    logger.debug(f"Validation parsing failed for {test_name}: {e}", exc_info=True)
                     console.print(f"[yellow]⚠ Warning: Could not parse validation results for {test_name}[/yellow]")
                     console.print(f"[yellow]Error: {str(e)}[/yellow]")
-                    console.print(f"[red]Full validation output that failed to parse:[/red]")
-                    console.print(f"[dim]{validation_output}[/dim]\n")
-                    # Create fallback result for this test
-                    test_results.append({
-                        'title': test_name,
-                        'passed': False,
-                        'file': test_file.name,
-                        'step_results': []
-                    })
+                    
+                    # Enhanced diagnostic output
+                    console.print(f"\n[bold red]🔍 Diagnostic Information:[/bold red]")
+                    console.print(f"[dim]Output length: {len(validation_output)} characters[/dim]")
+                    console.print(f"[dim]Contains '{{': {'{' in validation_output}[/dim]")
+                    console.print(f"[dim]Contains '}}': {'}' in validation_output}[/dim]")
+                    console.print(f"[dim]Contains 'test_number': {'test_number' in validation_output}[/dim]")
+                    console.print(f"[dim]Contains 'steps': {'steps' in validation_output}[/dim]")
+                    
+                    # Show first/last 200 chars for context
+                    if len(validation_output) > 400:
+                        console.print(f"\n[red]First 200 chars:[/red]")
+                        console.print(f"[dim]{validation_output[:200]}[/dim]")
+                        console.print(f"\n[red]Last 200 chars:[/red]")
+                        console.print(f"[dim]{validation_output[-200:]}[/dim]")
+                    else:
+                        console.print(f"\n[red]Full validation output:[/red]")
+                        console.print(f"[dim]{validation_output}[/dim]")
+                    
+                    # Generate fallback result using helper function
+                    console.print(f"\n[yellow]🔄 Generating fallback validation result...[/yellow]")
+                    fallback_result = _create_fallback_result_for_test(
+                        test_case,
+                        test_file,
+                        f'Validation failed - could not parse validator output: {str(e)}'
+                    )
+                    console.print(f"[dim]Created {len(fallback_result['step_results'])} fallback step results[/dim]\n")
+                    
+                    test_results.append(fallback_result)
                     console.print()
                     
             except Exception as e:
                 logger.debug(f"Test execution failed for {test_name}: {e}", exc_info=True)
                 console.print(f"[red]✗ Test execution failed: {e}[/red]")
-                # Create fallback result for this test
-                test_results.append({
-                    'title': test_name,
-                    'passed': False,
-                    'file': test_file.name,
-                    'step_results': []
-                })
+                
+                # Create fallback result using helper function
+                fallback_result = _create_fallback_result_for_test(
+                    test_case,
+                    test_file,
+                    f'Test execution failed: {str(e)}'
+                )
+                test_results.append(fallback_result)
                 console.print()
         
         # Cleanup: Close executor cache resources

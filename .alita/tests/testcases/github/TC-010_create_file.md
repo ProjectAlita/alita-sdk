@@ -36,7 +36,7 @@ generateTestData: false
 
 ### Step 1: Ensure Active Branch is Not Main
 
-Verify that the active branch is set to a feature/test branch, not the main/master branch.
+Set active branch to a tc-file-ops-2025-12-08 branch, not the main/master branch.
 
 **Expectation:** The active branch should be `tc-file-ops-2025-12-08`. If the active branch is main/master, the tool should return an error message about protected branches.
 
