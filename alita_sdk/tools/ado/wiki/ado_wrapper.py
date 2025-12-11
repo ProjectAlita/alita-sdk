@@ -52,8 +52,9 @@ ModifyPageInput = create_model(
     wiki_identified=(str, Field(description="Wiki ID or wiki name")),
     page_name=(str, Field(description="Wiki page name")),
     page_content=(str, Field(description="Wiki page content")),
-    version_identifier=(str, Field(description="Version string identifier (name of tag/branch, SHA1 of commit)")),
-    version_type=(Optional[str], Field(description="Version type (branch, tag, or commit). Determines how Id is interpreted", default="branch"))
+    version_identifier=(str, Field(description="Version string identifier (name of tag/branch, SHA1 of commit). Usually for wiki the branch is 'wikiMaster'")),
+    version_type=(Optional[str], Field(description="Version type (branch, tag, or commit). Determines how Id is interpreted", default="branch")),
+    expanded=(Optional[bool], Field(description="Whether to return the full page object or just its simplified version.", default=False))
 )
 
 RenamePageInput = create_model(
@@ -64,6 +65,19 @@ RenamePageInput = create_model(
     version_identifier=(str, Field(description="Version string identifier (name of tag/branch, SHA1 of commit)")),
     version_type=(Optional[str], Field(description="Version type (branch, tag, or commit). Determines how Id is interpreted", default="branch"))
 )
+
+
+def _format_wiki_page_response(wiki_page_response, expanded: bool = False):
+    """Format wiki page response."""
+    try:
+        return {
+            'eTag': wiki_page_response.eTag,
+            'page': wiki_page_response.page.__dict__ if wiki_page_response.page else None
+        } if expanded else {"eTag": wiki_page_response.eTag, "id": wiki_page_response.page.id,
+                            "page": wiki_page_response.page.url}
+    except:
+        logger.error(f"Unable to format wiki page response: {wiki_page_response}")
+        return wiki_page_response
 
 
 class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
@@ -226,7 +240,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Unable to rename wiki page: {str(e)}")
             return ToolException(f"Unable to rename wiki page: {str(e)}")
 
-    def modify_wiki_page(self, wiki_identified: str, page_name: str, page_content: str, version_identifier: str, version_type: str = "branch"):
+    def modify_wiki_page(self, wiki_identified: str, page_name: str, page_content: str, version_identifier: str, version_type: str = "branch", expanded: Optional[bool] = False):
         """Create or Update ADO wiki page content."""
         try:
             all_wikis = [wiki.name for wiki in self._client.get_all_wikis(project=self.project)]
@@ -257,24 +271,24 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                     return ToolException(f"Unable to extract page by path {page_name}: {str(get_page_e)}")
 
             try:
-                return self._client.create_or_update_page(
+                return _format_wiki_page_response(self._client.create_or_update_page(
                     project=self.project,
                     wiki_identifier=wiki_identified,
                     path=page_name,
                     parameters=WikiPageCreateOrUpdateParameters(content=page_content),
                     version=version,
                     version_descriptor=GitVersionDescriptor(version=version_identifier, version_type=version_type)
-                )
+                ), expanded=expanded)
             except AzureDevOpsServiceError as e:
                 if "The version '{0}' either is invalid or does not exist." in str(e):
                     # Retry the request without version_descriptor
-                    return self._client.create_or_update_page(
+                    return _format_wiki_page_response(wiki_page_response=self._client.create_or_update_page(
                         project=self.project,
                         wiki_identifier=wiki_identified,
                         path=page_name,
                         parameters=WikiPageCreateOrUpdateParameters(content=page_content),
                         version=version
-                    )
+                    ), expanded=expanded)
                 else:
                     raise
         except Exception as e:
