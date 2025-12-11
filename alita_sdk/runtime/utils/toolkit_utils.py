@@ -58,11 +58,12 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
         toolkit_type = toolkit_config.get('type', toolkit_name.lower())
 
         # Create a tool configuration dict with required fields
+        # Note: MCP toolkit always requires toolkit_name, other toolkits respect use_prefix flag
         tool_config = {
             'id': toolkit_config.get('id', random.randint(1, 1000000)),
             'type': toolkit_config.get('type', toolkit_type),
             'settings': settings,
-            'toolkit_name': toolkit_name if use_prefix else None
+            'toolkit_name': toolkit_name if (use_prefix or toolkit_type == 'mcp') else None
         }
         
         # Get tools using the toolkit configuration with clients
