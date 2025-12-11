@@ -13,13 +13,19 @@ from pydantic import create_model, Field, model_validator
 
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...tools.utils.available_tools_decorator import extend_with_parent_available_tools
-from ...tools.elitea_base import extend_with_file_operations
+from ...tools.elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 from ...runtime.utils.utils import IndexerKeywords
 
 
 class ArtifactWrapper(NonCodeIndexerToolkit):
     bucket: str
     artifact: Optional[Any] = None
+    
+    # Import file operation methods from BaseCodeToolApiWrapper
+    read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
+    read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
+    search_file = BaseCodeToolApiWrapper.search_file
+    edit_file = BaseCodeToolApiWrapper.edit_file
     
     @model_validator(mode='before')
     @classmethod
@@ -343,12 +349,12 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                 document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = document.metadata['name']
                 yield document
             except Exception as e:
-                logger.error(f"Failed while parsing the file '{document.metadata['name']}': {e}")
+                logging.error(f"Failed while parsing the file '{document.metadata['name']}': {e}")
                 yield document
 
     @extend_with_file_operations
     def get_available_tools(self):
-        """Get available tools, including indexing tools only if vector store is configured."""
+        """Get available tools. Returns all tools for schema; filtering happens at toolkit level."""
         bucket_name = (Optional[str], Field(description="Name of the bucket to work with."
                                                         "If bucket is not specified by user directly, the name should be taken from chat history."
                                                         "If bucket never mentioned in chat, the name will be taken from tool configuration."
@@ -453,22 +459,13 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             }
         ]
         
-        # Add indexing tools only if vector store is configured
-        has_vector_config = (
-            hasattr(self, 'embedding_model') and self.embedding_model and
-            hasattr(self, 'pgvector_configuration') and self.pgvector_configuration
-        )
-        
-        if has_vector_config:
-            try:
-                # Get indexing tools from parent class
-                indexing_tools = super(ArtifactWrapper, self).get_available_tools()
-                return indexing_tools + basic_tools
-            except Exception as e:
-                # If getting parent tools fails, log warning and return basic tools only
-                logging.warning(f"Failed to load indexing tools: {e}. Only basic artifact tools will be available.")
-                return basic_tools
-        else:
-            # No vector store config, return basic tools only
-            logging.info("Vector store not configured. Indexing tools (index_data, search_index, etc.) are not available.")
+        # Always include indexing tools in available tools list
+        # Filtering based on vector store config happens at toolkit level via decorator
+        try:
+            # Get indexing tools from parent class
+            indexing_tools = super(ArtifactWrapper, self).get_available_tools()
+            return indexing_tools + basic_tools
+        except Exception as e:
+            # If getting parent tools fails, log warning and return basic tools only
+            logging.warning(f"Failed to load indexing tools: {e}. Only basic artifact tools will be available.")
             return basic_tools

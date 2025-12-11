@@ -88,7 +88,8 @@ class XrayToolkit(BaseToolkit):
                 api_wrapper=xray_api_wrapper,
                 name=tool["name"],
                 description=description,
-                args_schema=tool["args_schema"]
+                args_schema=tool["args_schema"],
+                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
             ))
         return cls(tools=tools)
 

@@ -1107,9 +1107,12 @@ def extend_with_file_operations(method):
     def wrapper(self, *args, **kwargs):
         tools = method(self, *args, **kwargs)
         
-        # Only add file operations if toolkit inherits from BaseCodeToolApiWrapper
-        # and has implemented the required methods
-        if isinstance(self, BaseCodeToolApiWrapper):
+        # Only add file operations if toolkit has implemented the required methods
+        # Check for both _read_file and _write_file methods
+        has_file_ops = (hasattr(self, '_read_file') and callable(getattr(self, '_read_file')) and
+                        hasattr(self, '_write_file') and callable(getattr(self, '_write_file')))
+        
+        if has_file_ops:
             # Import schemas from elitea_base
             from . import elitea_base
             

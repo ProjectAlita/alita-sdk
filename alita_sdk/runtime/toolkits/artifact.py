@@ -1,6 +1,7 @@
 from typing import List, Any, Literal, Optional
 
 from alita_sdk.tools.utils import clean_string, get_max_toolkit_length
+from alita_sdk.tools.elitea_base import filter_missconfigured_index_tools
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field
@@ -40,6 +41,7 @@ class ArtifactToolkit(BaseToolkit):
         )
     
     @classmethod
+    @filter_missconfigured_index_tools
     def get_toolkit(cls, client: Any, bucket: str, toolkit_name: Optional[str] = None, selected_tools: list[str] = [], **kwargs):
         if selected_tools is None:
             selected_tools = []
@@ -65,7 +67,8 @@ class ArtifactToolkit(BaseToolkit):
                 api_wrapper=artifact_wrapper,
                 name=tool["name"],
                 description=description,
-                args_schema=tool["args_schema"]
+                args_schema=tool["args_schema"],
+                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
             ))
         return cls(tools=tools)
     
