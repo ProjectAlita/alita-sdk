@@ -128,10 +128,17 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
 
         tool_name = args[0].get("name")
         tool_run_id = str(run_id)
+        
+        # Extract metadata from tool if available (from BaseAction.metadata)
+        # kwargs may contain 'serialized' with full tool info including metadata
+        tool_meta = args[0].copy()
+        if 'serialized' in kwargs and 'metadata' in kwargs['serialized']:
+            tool_meta['metadata'] = kwargs['serialized']['metadata']
+        
         payload = {
             "tool_name": tool_name,
             "tool_run_id": tool_run_id,
-            "tool_meta": args[0],
+            "tool_meta": tool_meta,
             "tool_inputs": kwargs.get('inputs')
         }
         payload = json.loads(json.dumps(payload, ensure_ascii=False, default=lambda o: str(o)))
