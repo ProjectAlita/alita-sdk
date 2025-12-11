@@ -208,12 +208,6 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
             # Re-raise auth required exceptions directly
             raise
         except Exception as e:
-            # Check for wrapped McpAuthorizationRequired
-            if hasattr(e, '__cause__') and isinstance(e.__cause__, McpAuthorizationRequired):
-                raise e.__cause__
-            # Check exception class name as fallback
-            if e.__class__.__name__ == 'McpAuthorizationRequired':
-                raise
             logger.error(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}", exc_info=True)
             if debug_mode:
                 logger.info("Skipping tool initialization error due to debug mode.")

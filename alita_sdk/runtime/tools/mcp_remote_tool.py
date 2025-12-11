@@ -20,7 +20,7 @@ from ..utils.mcp_oauth import (
     fetch_resource_metadata_async,
     infer_authorization_servers_from_realm,
 )
-from ..utils.mcp_sse_client import McpSseClient
+from ..utils.mcp_client import McpClient
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class McpRemoteTool(McpServerTool):
             tool_name_for_server = self.name.rsplit(TOOLKIT_SPLITTER, 1)[-1] if TOOLKIT_SPLITTER in self.name else self.name
             logger.warning(f"original_tool_name not set for '{self.name}', using extracted: {tool_name_for_server}")
         
-        logger.info(f"[MCP SSE] Executing tool '{tool_name_for_server}' with session {self.session_id}")
+        logger.info(f"[MCP] Executing tool '{tool_name_for_server}' with session {self.session_id}")
         
         try:
             # Prepare headers
@@ -106,16 +106,18 @@ class McpRemoteTool(McpServerTool):
             if self.server_headers:
                 headers.update(self.server_headers)
             
-            # Create SSE client
-            client = McpSseClient(
+            # Create unified MCP client (auto-detects transport)
+            client = McpClient(
                 url=self.server_url,
                 session_id=self.session_id,
                 headers=headers,
                 timeout=self.tool_timeout_sec
             )
             
-            # Execute tool call via SSE
-            result = await client.call_tool(tool_name_for_server, kwargs)
+            # Execute tool call (client auto-detects SSE vs Streamable HTTP)
+            async with client:
+                await client.initialize()
+                result = await client.call_tool(tool_name_for_server, kwargs)
             
             # Format the result
             if isinstance(result, dict):
@@ -144,7 +146,7 @@ class McpRemoteTool(McpServerTool):
             return str(result)
             
         except Exception as e:
-            logger.error(f"[MCP SSE] Tool execution failed: {e}", exc_info=True)
+            logger.error(f"[MCP] Tool execution failed: {e}", exc_info=True)
             raise
 
     def _parse_sse(self, text: str) -> Dict[str, Any]:

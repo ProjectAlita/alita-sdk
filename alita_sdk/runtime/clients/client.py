@@ -21,6 +21,7 @@ from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..utils.utils import TOOLKIT_SPLITTER
+from ..utils.mcp_oauth import McpAuthorizationRequired
 from ...tools import get_available_toolkit_models
 from ...tools.base_indexer_toolkit import IndexTools
 
@@ -848,25 +849,11 @@ class AlitaClient:
             # Instantiate the toolkit with client and LLM support
             try:
                 tools = instantiate_toolkit_with_client(toolkit_config, llm, self, mcp_tokens=mcp_tokens, use_prefix=False)
-            except Exception as toolkit_error:
+            except McpAuthorizationRequired:
                 # Re-raise McpAuthorizationRequired to allow proper handling upstream
-                from ..utils.mcp_oauth import McpAuthorizationRequired
-                
-                # Check if it's McpAuthorizationRequired directly
-                if isinstance(toolkit_error, McpAuthorizationRequired):
-                    logger.info(f"McpAuthorizationRequired detected, re-raising")
-                    raise
-                
-                # Also check for wrapped exceptions (e.g., from asyncio)
-                if hasattr(toolkit_error, '__cause__') and isinstance(toolkit_error.__cause__, McpAuthorizationRequired):
-                    logger.info(f"Wrapped McpAuthorizationRequired detected, re-raising cause")
-                    raise toolkit_error.__cause__
-                
-                # Check exception class name as fallback (in case of module reload issues)
-                if toolkit_error.__class__.__name__ == 'McpAuthorizationRequired':
-                    logger.info(f"McpAuthorizationRequired detected by name, re-raising")
-                    raise
-                
+                logger.info(f"McpAuthorizationRequired detected, re-raising")
+                raise
+            except Exception as toolkit_error:
                 # For other errors, return error response
                 return {
                     "success": False,
@@ -1101,7 +1088,6 @@ class AlitaClient:
 
         except Exception as e:
             # Re-raise McpAuthorizationRequired to allow proper handling upstream
-            from ..utils.mcp_oauth import McpAuthorizationRequired
             if isinstance(e, McpAuthorizationRequired):
                 raise
             logger = logging.getLogger(__name__)
