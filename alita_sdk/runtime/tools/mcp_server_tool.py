@@ -5,8 +5,6 @@ from typing import Any, Type, Literal, Optional, Union, List
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, create_model, EmailStr, constr, ConfigDict
 
-from ...tools.utils import TOOLKIT_SPLITTER
-
 logger = getLogger(__name__)
 
 
@@ -91,13 +89,13 @@ class McpServerTool(BaseTool):
         return create_model(model_name, **fields)
 
     def _run(self, *args, **kwargs):
-        # Extract the actual tool/prompt name (remove toolkit prefix)
+        # Use the tool name directly (no prefix extraction needed)
         call_data = {
             "server": self.server,
             "tool_timeout_sec": self.tool_timeout_sec,
             "tool_call_id": str(uuid.uuid4()),
             "params": {
-                "name": self.name.rsplit(TOOLKIT_SPLITTER)[1] if TOOLKIT_SPLITTER in self.name else self.name,
+                "name": self.name,
                 "arguments": kwargs
             }
         }

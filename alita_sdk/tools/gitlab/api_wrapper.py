@@ -7,6 +7,7 @@ from pydantic import create_model, Field, model_validator, SecretStr, PrivateAtt
 
 from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..elitea_base import extend_with_file_operations
 from ..utils.content_parser import parse_file_content
 
 AppendFileModel = create_model(
@@ -215,7 +216,19 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         except Exception as e:
             return f"Unable to get commit hash for {file_path} due to error:\n{e}"
 
-    def _read_file(self, file_path: str, branch: str):
+    def _read_file(self, file_path: str, branch: str, **kwargs):
+        """
+        Read a file from specified branch with optional partial read support.
+        
+        Parameters:
+            file_path: the file path
+            branch: the branch to read the file from
+            **kwargs: Additional parameters (offset, limit, head, tail) - currently ignored,
+                     partial read handled client-side by base class methods
+        
+        Returns:
+            File content as string
+        """
         return self.read_file(file_path, branch)
 
     def create_branch(self, branch_name: str) -> str:
@@ -325,6 +338,66 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         return parse_file_content(file_name=file_path,
                                   file_content=file.decode(),
                                   llm=self.llm)
+    
+    def _write_file(
+        self,
+        file_path: str,
+        content: str,
+        branch: str = None,
+        commit_message: str = None
+    ) -> str:
+        """
+        Write content to a file (create or update).
+        
+        Parameters:
+            file_path: Path to the file
+            content: New file content
+            branch: Branch name (uses active branch if None)
+            commit_message: Commit message
+            
+        Returns:
+            Success message
+        """
+        try:
+            branch = branch or self._active_branch
+            
+            if branch == self.branch:
+                raise ToolException(
+                    f"Cannot commit directly to the {self.branch} branch. "
+                    "Please create a new branch and try again."
+                )
+            
+            self.set_active_branch(branch)
+            
+            # Check if file exists
+            try:
+                self.repo_instance.files.get(file_path, branch)
+                # File exists, update it
+                commit = {
+                    "branch": branch,
+                    "commit_message": commit_message or f"Update {file_path}",
+                    "actions": [
+                        {
+                            "action": "update",
+                            "file_path": file_path,
+                            "content": content,
+                        }
+                    ],
+                }
+                self.repo_instance.commits.create(commit)
+                return f"Updated file {file_path}"
+            except:
+                # File doesn't exist, create it
+                data = {
+                    "branch": branch,
+                    "commit_message": commit_message or f"Create {file_path}",
+                    "file_path": file_path,
+                    "content": content,
+                }
+                self.repo_instance.files.create(data)
+                return f"Created file {file_path}"
+        except Exception as e:
+            raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def update_file(self, file_query: str, branch: str) -> str:
         if branch == self.branch:
@@ -445,6 +518,7 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         ]
 
     @extend_with_parent_available_tools
+    @extend_with_file_operations
     def get_available_tools(self):
         return [
             {

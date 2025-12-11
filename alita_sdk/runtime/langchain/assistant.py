@@ -102,6 +102,50 @@ class Assistant:
         )
         if tools:
             self.tools += tools
+        
+        # Create ToolRegistry to track tool metadata and handle name collisions
+        self.tool_registry = {}
+        tool_name_counts = {}  # Track how many times each base name appears
+        
+        for tool in self.tools:
+            if hasattr(tool, 'name'):
+                original_name = tool.name
+                base_name = original_name
+                
+                # Extract toolkit metadata from tool configuration
+                toolkit_name = ""
+                toolkit_type = ""
+                
+                # Find matching tool config to extract metadata
+                for tool_config in version_tools:
+                    # Try to match by toolkit_name or name field
+                    config_toolkit_name = tool_config.get('toolkit_name', tool_config.get('name', ''))
+                    # Simple heuristic: toolkit info should be accessible from tool config
+                    # For now, use toolkit_name and type from config
+                    toolkit_name = config_toolkit_name
+                    toolkit_type = tool_config.get('type', '')
+                    break  # Use first match for now; will refine with better matching
+                
+                # Handle duplicate tool names by appending numeric suffix
+                if base_name in tool_name_counts:
+                    tool_name_counts[base_name] += 1
+                    # Append suffix to make unique
+                    new_name = f"{base_name}_{tool_name_counts[base_name]}"
+                    tool.name = new_name
+                    logger.info(f"Tool name collision detected: '{base_name}' -> '{new_name}'")
+                else:
+                    tool_name_counts[base_name] = 0
+                    new_name = base_name
+                
+                # Store in registry
+                self.tool_registry[tool.name] = {
+                    'toolkit_name': toolkit_name,
+                    'toolkit_type': toolkit_type,
+                    'original_tool_name': base_name
+                }
+                
+        logger.info(f"ToolRegistry initialized with {len(self.tool_registry)} tools")
+        
         # Handle prompt setup
         if app_type in ["pipeline", "predict", "react"]:
             self.prompt = data['instructions']

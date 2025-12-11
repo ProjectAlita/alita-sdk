@@ -8,7 +8,8 @@ from git import Repo
 from pydantic import BaseModel, Field, create_model, model_validator
 from langchain_core.tools import ToolException
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseToolApiWrapper, extend_with_file_operations
+from ..utils.text_operations import parse_old_new_markers
 
 logger = logging.getLogger(__name__)
 CREATE_FILE_PROMPT = """Create new file in your local repository."""
@@ -128,58 +129,6 @@ class LocalGit(BaseToolApiWrapper):
             repo.head.reset(commit=commit_sha, working_tree=True)
         return values
 
-    def extract_old_new_pairs(self, file_query):
-        # Split the file content by lines
-        code_lines = file_query.split("\n")
-
-        # Initialize lists to hold the contents of OLD and NEW sections
-        old_contents = []
-        new_contents = []
-
-        # Initialize variables to track whether the current line is within an OLD or NEW section
-        in_old_section = False
-        in_new_section = False
-
-        # Temporary storage for the current section's content
-        current_section_content = []
-
-        # Iterate through each line in the file content
-        for line in code_lines:
-            # Check for OLD section start
-            if "OLD <<<" in line:
-                in_old_section = True
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for OLD section end
-            if ">>>> OLD" in line:
-                in_old_section = False
-                old_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for NEW section start
-            if "NEW <<<" in line:
-                in_new_section = True
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for NEW section end
-            if ">>>> NEW" in line:
-                in_new_section = False
-                new_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # If currently in an OLD or NEW section, add the line to the current section content
-            if in_old_section or in_new_section:
-                current_section_content.append(line)
-
-        # Pair the OLD and NEW contents
-        paired_contents = list(zip(old_contents, new_contents))
-
-        return paired_contents
-
     def checkout_commit(self, commit_sha: str) -> str:
         """ Checkout specific commit from repository """
         try:
@@ -233,6 +182,58 @@ class LocalGit(BaseToolApiWrapper):
                 return f.read()
         else:
             return "File '{}' cannot be read because it is not existed".format(file_path)
+    
+    def _read_file(self, file_path: str, branch: str = None, **kwargs) -> str:
+        """
+        Read a file from the repository with optional partial read support.
+        
+        Parameters:
+            file_path: the file path (relative to repo root)
+            branch: branch name (not used for local git, always reads from working dir)
+            **kwargs: Additional parameters (offset, limit, head, tail) - currently ignored,
+                     partial read handled client-side by base class methods
+        
+        Returns:
+            File content as string
+        """
+        return self.read_file(file_path)
+    
+    def _write_file(
+        self,
+        file_path: str,
+        content: str,
+        branch: str = None,
+        commit_message: str = None
+    ) -> str:
+        """
+        Write content to a file (create or update).
+        
+        Parameters:
+            file_path: Path to the file (relative to repo root)
+            content: New file content
+            branch: Branch name (not used for local git)
+            commit_message: Commit message (not used - files are written without commit)
+            
+        Returns:
+            Success message
+        """
+        try:
+            full_path = os.path.normpath(os.path.join(self.repo.working_dir, file_path))
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            
+            # Write the file
+            with open(full_path, 'w') as f:
+                f.write(content)
+            
+            # Determine if file was created or updated
+            if os.path.exists(full_path):
+                return f"Updated file {file_path}"
+            else:
+                return f"Created file {file_path}"
+        except Exception as e:
+            raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def update_file_content_by_lines(self, file_path: str, start_line_index: int, end_line_index: int,
                                      new_content: str) -> str:
@@ -314,7 +315,7 @@ class LocalGit(BaseToolApiWrapper):
             file_path = os.path.normpath(os.path.join(self.repo.working_dir, file_path))
             file_content = self.read_file(file_path)
             updated_file_content = file_content
-            for old, new in self.extract_old_new_pairs(file_query):
+            for old, new in parse_old_new_markers(file_query):  # Use shared utility
                 if not old.strip():
                     continue
                 updated_file_content = updated_file_content.replace(old, new)
@@ -332,6 +333,7 @@ class LocalGit(BaseToolApiWrapper):
         except Exception as e:
             return "Unable to update file due to error:\n" + str(e)
 
+    @extend_with_file_operations
     def get_available_tools(self):
         return [
             {

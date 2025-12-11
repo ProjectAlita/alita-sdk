@@ -1,0 +1,23 @@
+{
+  "type": "artifact",
+  "id": 1,
+  "toolkit_name": "artifact",
+  "bucket": "test-artifacts",
+  "selected_tools": [
+    "listFiles",
+    "createFile",
+    "readFile",
+    "deleteFile",
+    "appendData",
+    "overwriteData",
+    "createNewBucket",
+    "read_file_chunk",
+    "read_multiple_files",
+    "search_file",
+    "edit_file",
+    "index_data",
+    "search_index",
+    "remove_index",
+    "list_collections"
+  ]
+}

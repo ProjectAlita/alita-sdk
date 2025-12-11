@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.mcp_remote_tool import McpRemoteTool
 from ..tools.mcp_inspect_tool import McpInspectTool
-from ...tools.utils import TOOLKIT_SPLITTER, clean_string
 from ..models.mcp_models import McpConnectionConfig
 from ..utils.mcp_client import McpClient
 from ..utils.mcp_oauth import (
@@ -40,110 +39,6 @@ def safe_int(value, default):
         logger.warning(f"Invalid integer value '{value}', using default {default}")
         return default
 
-def optimize_tool_name(prefix: str, tool_name: str, max_total_length: int = 64) -> str:
-    """
-    Optimize tool name to fit within max_total_length while preserving meaning.
-    
-    Args:
-        prefix: The toolkit prefix (already cleaned)
-        tool_name: The original tool name
-        max_total_length: Maximum total length for the full tool name (default: 64)
-    
-    Returns:
-        Optimized full tool name in format: prefix___tool_name
-    """
-    splitter = TOOLKIT_SPLITTER
-    splitter_len = len(splitter)
-    prefix_len = len(prefix)
-    
-    # Calculate available space for tool name
-    available_space = max_total_length - prefix_len - splitter_len
-    
-    if available_space <= 0:
-        logger.error(f"Prefix '{prefix}' is too long ({prefix_len} chars), cannot create valid tool name")
-        # Fallback: truncate prefix itself
-        prefix = prefix[:max_total_length - splitter_len - 10]  # Leave 10 chars for tool name
-        available_space = max_total_length - len(prefix) - splitter_len
-    
-    # If tool name fits, use it as-is
-    if len(tool_name) <= available_space:
-        return f'{prefix}{splitter}{tool_name}'
-    
-    # Tool name is too long, need to optimize
-    logger.debug(f"Tool name '{tool_name}' is too long ({len(tool_name)} chars), optimizing to fit {available_space} chars")
-    
-    # Split tool name into parts (handle camelCase, snake_case, and mixed)
-    # First, split by underscores and hyphens
-    parts = re.split(r'[_-]', tool_name)
-    
-    # Further split camelCase within each part
-    all_parts = []
-    for part in parts:
-        # Insert underscore before uppercase letters (camelCase to snake_case)
-        snake_case_part = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', part)
-        all_parts.extend(snake_case_part.split('_'))
-    
-    # Filter out empty parts
-    all_parts = [p for p in all_parts if p]
-    
-    # Remove redundant prefix words (case-insensitive comparison)
-    # Only remove if prefix is meaningful (>= 3 chars) to avoid over-filtering
-    prefix_lower = prefix.lower()
-    filtered_parts = []
-    for part in all_parts:
-        part_lower = part.lower()
-        # Skip if this part contains the prefix or the prefix contains this part
-        # But only if both are meaningful (>= 3 chars)
-        should_remove = False
-        if len(prefix_lower) >= 3 and len(part_lower) >= 3:
-            if part_lower in prefix_lower or prefix_lower in part_lower:
-                should_remove = True
-                logger.debug(f"Removing redundant part '{part}' (matches prefix '{prefix}')")
-        
-        if not should_remove:
-            filtered_parts.append(part)
-    
-    # If we removed all parts, keep the original parts
-    if not filtered_parts:
-        filtered_parts = all_parts
-    
-    # Reconstruct tool name with filtered parts
-    optimized_name = '_'.join(filtered_parts)
-    
-    # If still too long, truncate intelligently
-    if len(optimized_name) > available_space:
-        # Strategy: Keep beginning and end, as they often contain the most important info
-        # For example: "projectalita_github_io_list_branches" -> "projectalita_list_branches"
-        
-        # Try removing middle parts first
-        if len(filtered_parts) > 2:
-            # Keep first and last parts, remove middle
-            kept_parts = [filtered_parts[0], filtered_parts[-1]]
-            optimized_name = '_'.join(kept_parts)
-            
-            # If still too long, add parts from the end until we run out of space
-            if len(optimized_name) <= available_space and len(filtered_parts) > 2:
-                for i in range(len(filtered_parts) - 2, 0, -1):
-                    candidate = '_'.join([filtered_parts[0]] + filtered_parts[i:])
-                    if len(candidate) <= available_space:
-                        optimized_name = candidate
-                        break
-        
-        # If still too long, just truncate
-        if len(optimized_name) > available_space:
-            # Try to truncate at word boundary
-            truncated = optimized_name[:available_space]
-            last_underscore = truncated.rfind('_')
-            if last_underscore > available_space * 0.7:  # Keep if we're not losing too much
-                optimized_name = truncated[:last_underscore]
-            else:
-                optimized_name = truncated
-    
-    full_name = f'{prefix}{splitter}{optimized_name}'
-    logger.info(f"Optimized tool name: '{tool_name}' ({len(tool_name)} chars) -> '{optimized_name}' ({len(optimized_name)} chars), full: '{full_name}' ({len(full_name)} chars)")
-    
-    return full_name
-
 class McpToolkit(BaseToolkit):
     """
     MCP Toolkit for connecting to a single remote MCP server and exposing its tools.
@@ -152,9 +47,6 @@ class McpToolkit(BaseToolkit):
 
     tools: List[BaseTool] = []
     toolkit_name: Optional[str] = None
-
-    # Class variable (not Pydantic field) for tool name length limit
-    toolkit_max_length: ClassVar[int] = 0  # No limit for MCP tool names
 
     def __getstate__(self):
         """Custom serialization for pickle compatibility."""
@@ -595,28 +487,23 @@ class McpToolkit(BaseToolkit):
     ) -> Optional[BaseTool]:
         """Create a BaseTool from a tool/prompt dictionary (from direct HTTP discovery)."""
         try:
-            # Store toolkit_max_length in local variable to avoid contextual access issues
-            max_length_value = cls.toolkit_max_length
-
-            # Clean toolkit name for prefixing
-            clean_prefix = clean_string(toolkit_name, max_length_value)
-
-            # Optimize tool name to fit within 64 character limit
-            full_tool_name = optimize_tool_name(clean_prefix, tool_dict.get("name", "unknown"))
+            # Use original tool name directly
+            tool_name = tool_dict.get("name", "unknown")
             
             # Check if this is a prompt (converted to tool)
             is_prompt = tool_dict.get("_mcp_type") == "prompt"
             item_type = "prompt" if is_prompt else "tool"
 
-            # Build description and ensure it doesn't exceed 1000 characters
-            description = f"MCP {item_type} '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {tool_dict.get('description', '')}"
+            # Build description with toolkit context and ensure it doesn't exceed 1000 characters
+            base_description = tool_dict.get('description', '')
+            description = f"{base_description}\nToolkit: {toolkit_name} ({connection_config.url})"
             if len(description) > 1000:
                 description = description[:997] + "..."
-                logger.debug(f"Trimmed description for tool '{tool_dict.get('name')}' from {len(description)} to 1000 chars")
+                logger.debug(f"Trimmed description for tool '{tool_name}' to 1000 chars")
 
             # Use McpRemoteTool for remote MCP servers (HTTP/SSE)
             return McpRemoteTool(
-                name=full_tool_name,
+                name=tool_name,
                 description=description,
                 args_schema=McpServerTool.create_pydantic_model_from_schema(
                     tool_dict.get("inputSchema", {})
@@ -628,11 +515,11 @@ class McpToolkit(BaseToolkit):
                 tool_timeout_sec=timeout,
                 is_prompt=is_prompt,
                 prompt_name=tool_dict.get("_mcp_prompt_name") if is_prompt else None,
-                original_tool_name=tool_dict.get('name'),  # Store original name for MCP server invocation
+                original_tool_name=tool_name,  # Store original name for MCP server invocation
                 session_id=session_id  # Pass session ID for stateful SSE servers
             )
         except Exception as e:
-            logger.error(f"Failed to create MCP tool '{tool_dict.get('name')}' from toolkit '{toolkit_name}': {e}")
+            logger.error(f"Failed to create MCP tool '{tool_name}' from toolkit '{toolkit_name}': {e}")
             return None
 
     @classmethod
@@ -691,7 +578,7 @@ class McpToolkit(BaseToolkit):
             # We don't have full connection config in static mode, so create a basic one
             # The inspection tool will work as long as the server is accessible
             inspection_tool = McpInspectTool(
-                name=f"{clean_string(toolkit_name, 50)}{TOOLKIT_SPLITTER}mcp_inspect",
+                name="mcp_inspect",
                 server_name=toolkit_name,
                 server_url="",  # Will be populated by the client if available
                 description=f"Inspect available tools, prompts, and resources from MCP toolkit '{toolkit_name}'"
@@ -713,22 +600,17 @@ class McpToolkit(BaseToolkit):
     ) -> Optional[BaseTool]:
         """Create a BaseTool from discovered metadata."""
         try:
-            # Store toolkit_max_length in local variable to avoid contextual access issues
-            max_length_value = cls.toolkit_max_length
+            # Use original tool name directly
+            tool_name = tool_metadata.name
 
-            # Clean server name for prefixing (use tool_metadata.server instead of toolkit_name)
-            clean_prefix = clean_string(tool_metadata.server, max_length_value)
-            # Optimize tool name to fit within 64 character limit
-            full_tool_name = optimize_tool_name(clean_prefix, tool_metadata.name)
-
-            # Build description and ensure it doesn't exceed 1000 characters
-            description = f"MCP tool '{tool_metadata.name}' from server '{tool_metadata.server}': {tool_metadata.description}"
+            # Build description with toolkit context and ensure it doesn't exceed 1000 characters
+            description = f"{tool_metadata.description}\nToolkit: {toolkit_name}"
             if len(description) > 1000:
                 description = description[:997] + "..."
-                logger.debug(f"Trimmed description for tool '{tool_metadata.name}' from {len(description)} to 1000 chars")
+                logger.debug(f"Trimmed description for tool '{tool_name}' to 1000 chars")
 
             return McpServerTool(
-                name=full_tool_name,
+                name=tool_name,
                 description=description,
                 args_schema=McpServerTool.create_pydantic_model_from_schema(tool_metadata.input_schema),
                 client=client,
@@ -736,7 +618,7 @@ class McpToolkit(BaseToolkit):
                 tool_timeout_sec=timeout
             )
         except Exception as e:
-            logger.error(f"Failed to create MCP tool '{tool_metadata.name}' from server '{tool_metadata.server}': {e}")
+            logger.error(f"Failed to create MCP tool '{tool_name}' from server '{tool_metadata.server}': {e}")
             return None
 
     @classmethod
@@ -749,23 +631,18 @@ class McpToolkit(BaseToolkit):
     ) -> Optional[BaseTool]:
         """Create a single MCP tool."""
         try:
-            # Store toolkit_max_length in local variable to avoid contextual access issues
-            max_length_value = cls.toolkit_max_length
+            # Use original tool name directly
+            tool_name = available_tool["name"]
 
-            # Clean toolkit name for prefixing
-            clean_prefix = clean_string(toolkit_name, max_length_value)
-
-            # Optimize tool name to fit within 64 character limit
-            full_tool_name = optimize_tool_name(clean_prefix, available_tool["name"])
-
-            # Build description and ensure it doesn't exceed 1000 characters
-            description = f"MCP tool '{available_tool['name']}' from toolkit '{toolkit_name}': {available_tool.get('description', '')}"
+            # Build description with toolkit context and ensure it doesn't exceed 1000 characters
+            base_description = available_tool.get('description', '')
+            description = f"{base_description}\nToolkit: {toolkit_name}"
             if len(description) > 1000:
                 description = description[:997] + "..."
-                logger.debug(f"Trimmed description for tool '{available_tool['name']}' from {len(description)} to 1000 chars")
+                logger.debug(f"Trimmed description for tool '{tool_name}' to 1000 chars")
 
             return McpServerTool(
-                name=full_tool_name,
+                name=tool_name,
                 description=description,
                 args_schema=McpServerTool.create_pydantic_model_from_schema(
                     available_tool.get("inputSchema", {})
@@ -775,7 +652,7 @@ class McpToolkit(BaseToolkit):
                 tool_timeout_sec=timeout
             )
         except Exception as e:
-            logger.error(f"Failed to create MCP tool '{available_tool.get('name')}' from toolkit '{toolkit_name}': {e}")
+            logger.error(f"Failed to create MCP tool '{tool_name}' from toolkit '{toolkit_name}': {e}")
             return None
 
     @classmethod
@@ -786,16 +663,8 @@ class McpToolkit(BaseToolkit):
     ) -> Optional[BaseTool]:
         """Create the inspection tool for the MCP toolkit."""
         try:
-            # Store toolkit_max_length in local variable to avoid contextual access issues
-            max_length_value = cls.toolkit_max_length
-
-            # Clean toolkit name for prefixing
-            clean_prefix = clean_string(toolkit_name, max_length_value)
-
-            full_tool_name = f'{clean_prefix}{TOOLKIT_SPLITTER}mcp_inspect'
-
             return McpInspectTool(
-                name=full_tool_name,
+                name="mcp_inspect",
                 server_name=toolkit_name,
                 server_url=connection_config.url,
                 server_headers=connection_config.headers,

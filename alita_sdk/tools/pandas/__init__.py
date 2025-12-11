@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, create_model, Field
 
 from .api_wrapper import PandasWrapper
 from ..base.tool import BaseAction
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 
 name = "pandas"
 
@@ -21,12 +21,10 @@ def get_tools(tool):
 
 class PandasToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in PandasWrapper.model_construct().get_available_tools()}
-        PandasToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             bucket_name=(str, Field(default=None, title="Bucket name", description="Bucket where the content file is stored")),
@@ -41,16 +39,19 @@ class PandasToolkit(BaseToolkit):
         if selected_tools is None:
             selected_tools = []
         csv_tool_api_wrapper = PandasWrapper(**kwargs)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = csv_tool_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools and tool["name"] not in selected_tools:
                 continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=csv_tool_api_wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

@@ -6,7 +6,7 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.gitlab import GitlabConfiguration
 
 name = "gitlab_org"
@@ -22,12 +22,10 @@ def get_tools(tool):
 
 class AlitaGitlabSpaceToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in GitLabWorkspaceAPIWrapper.model_construct().get_available_tools()}
-        AlitaGitlabSpaceToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             gitlab_configuration=(GitlabConfiguration, Field(description="GitLab configuration",
@@ -44,7 +42,6 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
                 'metadata': {
                     "label": "GitLab Org",
                     "icon_url": None,
-                    "max_length": AlitaGitlabSpaceToolkit.toolkit_max_length,
                     "categories": ["code repositories"],
                     "extra_categories": ["gitlab", "git", "repository", "code", "version control"],
                 }
@@ -62,17 +59,20 @@ class AlitaGitlabSpaceToolkit(BaseToolkit):
             **kwargs['gitlab_configuration'],
         }
         gitlab_wrapper = GitLabWorkspaceAPIWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, AlitaGitlabSpaceToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = gitlab_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=gitlab_wrapper,
-                name=prefix + tool['name'],
-                description=tool["description"],
+                name=tool['name'],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

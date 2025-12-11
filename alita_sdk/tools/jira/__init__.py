@@ -6,7 +6,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field
 import requests
 
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
+from ..utils import clean_string, get_max_toolkit_length, parse_list, check_connection_response
 from ...configurations.jira import JiraConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -37,12 +37,10 @@ def get_tools(tool):
 
 class JiraToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in JiraApiWrapper.model_construct().get_available_tools()}
-        JiraToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
 
         @check_connection_response
         def check_connection(self):
@@ -89,7 +87,6 @@ class JiraToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Jira",
                     "icon_url": "jira-icon.svg",
-                    "max_length": JiraToolkit.toolkit_max_length,
                     "categories": ["project management"],
                     "extra_categories": ["jira", "atlassian", "issue tracking", "project management", "task management"],
                 }
@@ -110,17 +107,21 @@ class JiraToolkit(BaseToolkit):
             **(kwargs.get('pgvector_configuration') or {}),
         }
         jira_api_wrapper = JiraApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = jira_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = f"Jira instance: {jira_api_wrapper.url}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=jira_api_wrapper,
-                name=prefix + tool["name"],
-                description=f"Tool for Jira: '{jira_api_wrapper.base_url}'\n{tool['description']}",
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

@@ -6,7 +6,7 @@ from pydantic.fields import Field
 from .api_wrapper import GooglePlacesAPIWrapper
 from ..base.tool import BaseAction
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.google_places import GooglePlacesConfiguration
 
 name = "google_places"
@@ -22,12 +22,10 @@ def get_tools(tool):
 
 class GooglePlacesToolkit(BaseToolkit):
     tools: list[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in GooglePlacesAPIWrapper.model_construct().get_available_tools()}
-        GooglePlacesToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             results_count=(Optional[int], Field(description="Results number to show", default=None)),
@@ -38,7 +36,6 @@ class GooglePlacesToolkit(BaseToolkit):
                                       'metadata':
                                           {
                                               "label": "Google Places", "icon_url": "gplaces-icon.svg",
-                                              "max_length": GooglePlacesToolkit.toolkit_max_length,
                                               "categories": ["other"],
                                               "extra_categories": ["google", "places", "maps", "location",
                                                                    "geolocation"],
@@ -56,16 +53,19 @@ class GooglePlacesToolkit(BaseToolkit):
             **kwargs.get('google_places_configuration', {}),
         }
         google_places_api_wrapper = GooglePlacesAPIWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, GooglePlacesToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = google_places_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools and tool["name"] not in selected_tools:
                 continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=google_places_api_wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

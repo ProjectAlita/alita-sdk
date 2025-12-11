@@ -7,7 +7,7 @@ from .api_wrapper import AlitaGitHubAPIWrapper
 from .tool import GitHubAction
 from ..elitea_base import filter_missconfigured_index_tools
 
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.github import GithubConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -39,13 +39,11 @@ def get_tools(tool):
 
 class AlitaGitHubToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           AlitaGitHubAPIWrapper.model_construct().get_available_tools()}
-        AlitaGitHubToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             __config__=ConfigDict(
@@ -53,7 +51,6 @@ class AlitaGitHubToolkit(BaseToolkit):
                     'metadata': {
                         "label": "GitHub",
                         "icon_url": None,
-                        "max_length": AlitaGitHubToolkit.toolkit_max_length,
                         "categories": ["code repositories"],
                         "extra_categories": ["github", "git", "repository", "code", "version control"],
                     },
@@ -87,17 +84,20 @@ class AlitaGitHubToolkit(BaseToolkit):
         github_api_wrapper = AlitaGitHubAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = github_api_wrapper.get_available_tools()
         tools = []
-        prefix = clean_string(toolkit_name, AlitaGitHubToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = f"Repository: {github_api_wrapper.github_repository}\n{description}"
+            description = description[:1000]
             tools.append(GitHubAction(
                 api_wrapper=github_api_wrapper,
-                name=prefix + tool["name"],
+                name=tool["name"],
                 mode=tool["mode"],
-                # set unique description for declared tools to differentiate the same methods for different toolkits
-                description=f"Repository: {github_api_wrapper.github_repository}\n" + tool["description"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

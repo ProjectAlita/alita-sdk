@@ -11,6 +11,7 @@ from github import Auth, Github, GithubIntegration, Repository
 from github.Consts import DEFAULT_BASE_URL
 from langchain_core.tools import ToolException
 
+from ..elitea_base import extend_with_file_operations
 from .schemas import (
     GitHubAuthConfig,
     GitHubRepoConfig,
@@ -1414,13 +1415,16 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}"
 
-    def _read_file(self, file_path: str, branch: str, repo_name: Optional[str] = None) -> str:
+    def _read_file(self, file_path: str, branch: str, repo_name: Optional[str] = None, **kwargs) -> str:
         """
-        Read a file from specified branch
+        Read a file from specified branch with optional partial read support.
+        
         Parameters:
             file_path(str): the file path
             branch(str): the branch to read the file from
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            **kwargs: Additional parameters (offset, limit, head, tail) - currently ignored,
+                     partial read handled client-side by base class methods
 
         Returns:
             str: The file decoded as a string, or an error message if not found
@@ -1445,6 +1449,61 @@ class GitHubClient(BaseModel):
             str: The file contents as a string
         """
         return self._read_file(file_path, branch if branch else self.active_branch, repo_name)
+    
+    def _write_file(
+        self,
+        file_path: str,
+        content: str,
+        branch: str = None,
+        commit_message: str = None,
+        repo_name: Optional[str] = None
+    ) -> str:
+        """
+        Write content to a file (create or update).
+        
+        Parameters:
+            file_path: Path to the file
+            content: New file content
+            branch: Branch name (uses active branch if None)
+            commit_message: Commit message
+            repo_name: Name of the repository in format 'owner/repo'
+            
+        Returns:
+            Success message
+        """
+        try:
+            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            branch = branch or self.active_branch
+            
+            if branch == self.github_base_branch:
+                raise ToolException(
+                    f"Cannot commit directly to the {self.github_base_branch} branch. "
+                    "Please create a new branch and try again."
+                )
+            
+            # Check if file exists
+            try:
+                existing_file = repo.get_contents(file_path, ref=branch)
+                # File exists, update it
+                repo.update_file(
+                    path=file_path,
+                    message=commit_message or f"Update {file_path}",
+                    content=content,
+                    branch=branch,
+                    sha=existing_file.sha,
+                )
+                return f"Updated file {file_path}"
+            except:
+                # File doesn't exist, create it
+                repo.create_file(
+                    path=file_path,
+                    message=commit_message or f"Create {file_path}",
+                    content=content,
+                    branch=branch,
+                )
+                return f"Created file {file_path}"
+        except Exception as e:
+            raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def loader(self,
                branch: Optional[str] = None,
@@ -1877,6 +1936,7 @@ class GitHubClient(BaseModel):
             import traceback
             return f"API call failed: {traceback.format_exc()}"
 
+    @extend_with_file_operations
     def get_available_tools(self) -> List[Dict[str, Any]]:
         return [
              {

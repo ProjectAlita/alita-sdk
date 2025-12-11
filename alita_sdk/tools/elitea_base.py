@@ -11,7 +11,6 @@ from pydantic import BaseModel, create_model, Field, SecretStr
 
 # from alita_sdk.runtime.langchain.interfaces.llm_processor import get_embeddings
 from .chunkers import markdown_chunker
-from .utils import TOOLKIT_SPLITTER
 from .vector_adapters.VectorStoreAdapter import VectorStoreAdapterFactory
 from ..runtime.utils.utils import IndexerKeywords
 
@@ -126,6 +125,58 @@ BaseIndexDataParams = create_model(
     chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default_factory=dict)),
 )
 
+# File Operations Schema Models
+ReadFileInput = create_model(
+    "ReadFileInput",
+    file_path=(str, Field(description="Path to the file to read")),
+    branch=(Optional[str], Field(description="Branch name. If None, uses active branch.", default=None)),
+    offset=(Optional[int], Field(description="Starting line number (1-indexed, inclusive). Read from this line onwards.", default=None, ge=1)),
+    limit=(Optional[int], Field(description="Number of lines to read from offset. If None, reads to end.", default=None, ge=1)),
+    head=(Optional[int], Field(description="Read only the first N lines. Alternative to offset/limit.", default=None, ge=1)),
+    tail=(Optional[int], Field(description="Read only the last N lines. Alternative to offset/limit.", default=None, ge=1)),
+)
+
+ReadFileChunkInput = create_model(
+    "ReadFileChunkInput",
+    file_path=(str, Field(description="Path to the file to read")),
+    branch=(Optional[str], Field(description="Branch name. If None, uses active branch.", default=None)),
+    start_line=(int, Field(description="Starting line number (1-indexed, inclusive)", ge=1)),
+    end_line=(Optional[int], Field(description="Ending line number (1-indexed, inclusive). If None, reads to end.", default=None, ge=1)),
+)
+
+ReadMultipleFilesInput = create_model(
+    "ReadMultipleFilesInput",
+    file_paths=(List[str], Field(description="List of file paths to read", min_length=1)),
+    branch=(Optional[str], Field(description="Branch name. If None, uses active branch.", default=None)),
+    offset=(Optional[int], Field(description="Starting line number for all files (1-indexed)", default=None, ge=1)),
+    limit=(Optional[int], Field(description="Number of lines to read from offset for all files", default=None, ge=1)),
+)
+
+EditFileInput = create_model(
+    "EditFileInput",
+    file_path=(str, Field(description="Path to the file to edit. Must be a text file (markdown, txt, csv, json, xml, html, yaml, etc.)")),
+    file_query=(str, Field(description="""Edit instructions with OLD/NEW markers. Format:
+OLD <<<<
+old content to replace
+>>>> OLD
+NEW <<<<
+new content
+>>>> NEW
+
+Multiple OLD/NEW pairs can be provided for multiple edits.""")),
+    branch=(Optional[str], Field(description="Branch name. If None, uses active branch.", default=None)),
+    commit_message=(Optional[str], Field(description="Commit message for the change (VCS toolkits only)", default=None)),
+)
+
+SearchFileInput = create_model(
+    "SearchFileInput",
+    file_path=(str, Field(description="Path to the file to search")),
+    pattern=(str, Field(description="Search pattern. Treated as regex by default unless is_regex=False.")),
+    branch=(Optional[str], Field(description="Branch name. If None, uses active branch.", default=None)),
+    is_regex=(bool, Field(description="Whether pattern is a regex. Default is True for flexible matching.", default=True)),
+    context_lines=(int, Field(description="Number of lines before/after match to include for context", default=2, ge=0)),
+)
+
 
 class BaseToolApiWrapper(BaseModel):
     
@@ -185,8 +236,7 @@ class BaseToolApiWrapper(BaseModel):
 
 
     def run(self, mode: str, *args: Any, **kwargs: Any):
-        if TOOLKIT_SPLITTER in mode:
-            mode = mode.rsplit(TOOLKIT_SPLITTER, maxsplit=1)[1]
+        # Mode is now the clean tool name (no prefix to remove)
         for tool in self.get_available_tools():
             if tool["name"] == mode:
                 try:
@@ -589,11 +639,281 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
     def _get_files(self):
         raise NotImplementedError("Subclasses should implement this method")
 
-    def _read_file(self, file_path: str, branch: str):
+    def _read_file(
+        self, 
+        file_path: str, 
+        branch: str = None,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
+        head: Optional[int] = None,
+        tail: Optional[int] = None,
+        **kwargs  # Allow subclasses to have additional parameters
+    ) -> str:
+        """
+        Read file content with optional partial read support.
+        
+        Subclasses should implement this method. If they don't support partial reads,
+        they can accept **kwargs and ignore offset/limit/head/tail parameters - the base 
+        class high-level methods will apply slicing client-side.
+        
+        Args:
+            file_path: Path to the file
+            branch: Branch name (None for active branch)
+            offset: Starting line number (1-indexed)
+            limit: Number of lines to read from offset
+            head: Read only first N lines
+            tail: Read only last N lines
+            **kwargs: Additional toolkit-specific parameters (e.g., repo_name for GitHub)
+            
+        Returns:
+            File content as string
+        """
         raise NotImplementedError("Subclasses should implement this method")
+    
+    def _write_file(
+        self,
+        file_path: str,
+        content: str,
+        branch: str = None,
+        commit_message: str = None
+    ) -> str:
+        """
+        Write content to a file.
+        
+        Subclasses should implement this method to enable edit_file functionality.
+        For VCS toolkits, this may involve creating or updating files with commits.
+        
+        Args:
+            file_path: Path to the file
+            content: New file content
+            branch: Branch name (None for active branch)
+            commit_message: Commit message (VCS toolkits only)
+            
+        Returns:
+            Success message
+        """
+        raise NotImplementedError("Subclasses should implement _write_file to enable editing")
 
     def _file_commit_hash(self, file_path: str, branch: str):
         pass
+    
+    def read_file_chunk(
+        self,
+        file_path: str,
+        start_line: int,
+        end_line: Optional[int] = None,
+        branch: str = None
+    ) -> str:
+        """
+        Read a specific range of lines from a file.
+        
+        Args:
+            file_path: Path to the file
+            start_line: Starting line number (1-indexed, inclusive)
+            end_line: Ending line number (1-indexed, inclusive). If None, reads to end.
+            branch: Branch name (None for active branch)
+            
+        Returns:
+            File content for the specified line range
+        """
+        from .utils.text_operations import apply_line_slice
+        
+        # Calculate offset and limit from start_line and end_line
+        offset = start_line
+        limit = (end_line - start_line + 1) if end_line is not None else None
+        
+        # Read the file with offset/limit
+        content = self._read_file(file_path, branch, offset=offset, limit=limit)
+        
+        # Apply client-side slicing if toolkit doesn't support partial reads
+        # (toolkit's _read_file will return full content if it ignores offset/limit)
+        return apply_line_slice(content, offset=offset, limit=limit)
+    
+    def read_multiple_files(
+        self,
+        file_paths: List[str],
+        branch: str = None,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None
+    ) -> Dict[str, str]:
+        """
+        Read multiple files in batch.
+        
+        Args:
+            file_paths: List of file paths to read
+            branch: Branch name (None for active branch)
+            offset: Starting line number for all files (1-indexed)
+            limit: Number of lines to read from offset for all files
+            
+        Returns:
+            Dictionary mapping file paths to their content (or error messages)
+        """
+        results = {}
+        
+        for file_path in file_paths:
+            try:
+                content = self._read_file(
+                    file_path, 
+                    branch, 
+                    offset=offset, 
+                    limit=limit
+                )
+                results[file_path] = content
+            except Exception as e:
+                results[file_path] = f"Error reading file: {str(e)}"
+                logger.error(f"Failed to read {file_path}: {e}")
+        
+        return results
+    
+    def search_file(
+        self,
+        file_path: str,
+        pattern: str,
+        branch: str = None,
+        is_regex: bool = True,
+        context_lines: int = 2
+    ) -> str:
+        """
+        Search for pattern in file content with context.
+        
+        Args:
+            file_path: Path to the file
+            pattern: Search pattern (regex if is_regex=True, else literal)
+            branch: Branch name (None for active branch)
+            is_regex: Whether pattern is regex (default True)
+            context_lines: Lines of context before/after matches (default 2)
+            
+        Returns:
+            Formatted string with search results and context
+        """
+        from .utils.text_operations import search_in_content
+        
+        # Read full file content
+        content = self._read_file(file_path, branch)
+        
+        # Search for pattern
+        matches = search_in_content(content, pattern, is_regex, context_lines)
+        
+        if not matches:
+            return f"No matches found for pattern '{pattern}' in {file_path}"
+        
+        # Format results
+        result_lines = [f"Found {len(matches)} match(es) for pattern '{pattern}' in {file_path}:\n"]
+        
+        for i, match in enumerate(matches, 1):
+            result_lines.append(f"\n--- Match {i} at line {match['line_number']} ---")
+            
+            # Context before
+            if match['context_before']:
+                for line in match['context_before']:
+                    result_lines.append(f"  {line}")
+            
+            # Matching line (highlighted)
+            result_lines.append(f"> {match['line_content']}")
+            
+            # Context after
+            if match['context_after']:
+                for line in match['context_after']:
+                    result_lines.append(f"  {line}")
+        
+        return "\n".join(result_lines)
+    
+    def edit_file(
+        self,
+        file_path: str,
+        file_query: str,
+        branch: str = None,
+        commit_message: str = None
+    ) -> str:
+        """
+        Edit file using OLD/NEW markers for precise replacements.
+        
+        Only works with text files (markdown, txt, csv, json, xml, html, yaml, code files).
+        
+        Args:
+            file_path: Path to the file to edit
+            file_query: Edit instructions with OLD/NEW markers
+            branch: Branch name (None for active branch)
+            commit_message: Commit message (VCS toolkits only)
+            
+        Returns:
+            Success message or error
+            
+        Raises:
+            ToolException: If file is not text-editable or edit fails
+        """
+        from .utils.text_operations import parse_old_new_markers, is_text_editable
+        from langchain_core.callbacks import dispatch_custom_event
+        
+        # Validate file is text-editable
+        if not is_text_editable(file_path):
+            raise ToolException(
+                f"Cannot edit binary/document file '{file_path}'. "
+                f"Supported text formats: markdown, txt, csv, json, xml, html, yaml, code files."
+            )
+        
+        # Parse OLD/NEW markers
+        edits = parse_old_new_markers(file_query)
+        if not edits:
+            raise ToolException(
+                "No OLD/NEW marker pairs found in file_query. "
+                "Format: OLD <<<< old text >>>> OLD  NEW <<<< new text >>>> NEW"
+            )
+        
+        # Read current file content
+        try:
+            current_content = self._read_file(file_path, branch)
+        except Exception as e:
+            raise ToolException(f"Failed to read file {file_path}: {e}")
+        
+        # Apply all edits
+        updated_content = current_content
+        for old_text, new_text in edits:
+            if not old_text.strip():
+                continue
+            
+            if old_text not in updated_content:
+                logger.warning(
+                    f"Old content not found in {file_path}. "
+                    f"Looking for: {old_text[:100]}..."
+                )
+                continue
+            
+            updated_content = updated_content.replace(old_text, new_text)
+        
+        # Check if any changes were made
+        if current_content == updated_content:
+            return (
+                f"No changes made to {file_path}. "
+                "Old content was not found or is empty. "
+                "Use read_file or search_file to verify current content."
+            )
+        
+        # Write updated content
+        try:
+            result = self._write_file(file_path, updated_content, branch, commit_message)
+        except NotImplementedError:
+            raise ToolException(
+                f"Editing not supported for this toolkit. "
+                f"The _write_file method is not implemented."
+            )
+        except Exception as e:
+            raise ToolException(f"Failed to write file {file_path}: {e}")
+        
+        # Dispatch file modification event
+        try:
+            dispatch_custom_event("file_modified", {
+                "message": f"File '{file_path}' edited successfully",
+                "filename": file_path,
+                "tool_name": "edit_file",
+                "toolkit": self.__class__.__name__,
+                "operation_type": "modify",
+                "edits_applied": len(edits)
+            })
+        except Exception as e:
+            logger.warning(f"Failed to dispatch file_modified event: {e}")
+        
+        return result
 
     def __handle_get_files(self, path: str, branch: str):
         """
@@ -773,20 +1093,75 @@ def extend_with_vector_tools(method):
     return wrapper
 
 
+def extend_with_file_operations(method):
+    """
+    Decorator to automatically add file operation tools to toolkits that implement
+    _read_file and _write_file methods.
+    
+    Adds:
+    - read_file_chunk: Read specific line ranges
+    - read_multiple_files: Batch read files
+    - search_file: Search for patterns in files
+    - edit_file: Edit files using OLD/NEW markers
+    """
+    def wrapper(self, *args, **kwargs):
+        tools = method(self, *args, **kwargs)
+        
+        # Only add file operations if toolkit inherits from BaseCodeToolApiWrapper
+        # and has implemented the required methods
+        if isinstance(self, BaseCodeToolApiWrapper):
+            # Import schemas from elitea_base
+            from . import elitea_base
+            
+            file_operation_tools = [
+                {
+                    "name": "read_file_chunk",
+                    "mode": "read_file_chunk",
+                    "ref": self.read_file_chunk,
+                    "description": self.read_file_chunk.__doc__,
+                    "args_schema": elitea_base.ReadFileChunkInput
+                },
+                {
+                    "name": "read_multiple_files",
+                    "mode": "read_multiple_files",
+                    "ref": self.read_multiple_files,
+                    "description": self.read_multiple_files.__doc__,
+                    "args_schema": elitea_base.ReadMultipleFilesInput
+                },
+                {
+                    "name": "search_file",
+                    "mode": "search_file",
+                    "ref": self.search_file,
+                    "description": self.search_file.__doc__,
+                    "args_schema": elitea_base.SearchFileInput
+                },
+                {
+                    "name": "edit_file",
+                    "mode": "edit_file",
+                    "ref": self.edit_file,
+                    "description": self.edit_file.__doc__,
+                    "args_schema": elitea_base.EditFileInput
+                },
+            ]
+            
+            tools.extend(file_operation_tools)
+        
+        return tools
+    
+    return wrapper
+
+
 def filter_missconfigured_index_tools(method):
     def wrapper(self, *args, **kwargs):
         toolkit = method(self, *args, **kwargs)
 
         # Validate index tools misconfiguration and exclude them if necessary
-        is_index_toolkit = any(tool.name.rsplit(TOOLKIT_SPLITTER)[1]
-                               if TOOLKIT_SPLITTER in tool.name else tool.name
-                                                                     in INDEX_TOOL_NAMES for tool in toolkit.tools)
+        is_index_toolkit = any(tool.name in INDEX_TOOL_NAMES for tool in toolkit.tools)
         is_index_configuration_missing = not (kwargs.get('embedding_model')
                                               and kwargs.get('pgvector_configuration'))
 
         if is_index_toolkit and is_index_configuration_missing:
-            toolkit.tools = [tool for tool in toolkit.tools if (tool.name.rsplit(TOOLKIT_SPLITTER, 1)[
-                                                                    1] if TOOLKIT_SPLITTER in tool.name else tool.name) not in INDEX_TOOL_NAMES]
+            toolkit.tools = [tool for tool in toolkit.tools if tool.name not in INDEX_TOOL_NAMES]
 
         return toolkit
 

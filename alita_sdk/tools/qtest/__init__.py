@@ -7,7 +7,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field, SecretStr
 from .api_wrapper import QtestApiWrapper
 from .tool import QtestAction
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, get_max_toolkit_length, TOOLKIT_SPLITTER, check_connection_response
+from ..utils import clean_string, get_max_toolkit_length, check_connection_response
 from ...configurations.qtest import QtestConfiguration
 
 name = "qtest"
@@ -27,12 +27,10 @@ def get_tools(tool):
 
 class QtestToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in QtestApiWrapper.model_construct().get_available_tools()}
-        QtestToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
             qtest_configuration=(QtestConfiguration, Field(description="QTest API token", json_schema_extra={
@@ -44,7 +42,6 @@ class QtestToolkit(BaseToolkit):
         selected_tools=(List[Literal[tuple(selected_tools)]],
                             Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "QTest", "icon_url": "qtest.svg",
-                                                                  "max_length": QtestToolkit.toolkit_max_length,
                                                                   "categories": ["test management"],
                                                                   "extra_categories": ["quality assurance",
                                                                                        "test case management",
@@ -76,18 +73,21 @@ class QtestToolkit(BaseToolkit):
             **kwargs['qtest_configuration'],
         }
         qtest_api_wrapper = QtestApiWrapper(**wrapper_payload)
-        prefix = clean_string(str(toolkit_name), cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = qtest_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = f"{tool['description']}\nUrl: {qtest_api_wrapper.base_url}. Project id: {qtest_api_wrapper.qtest_project_id}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(QtestAction(
                 api_wrapper=qtest_api_wrapper,
-                name=prefix + tool["name"],
+                name=tool["name"],
                 mode=tool["mode"],
-                description=f"{tool['description']}\nUrl: {qtest_api_wrapper.base_url}. Project id: {qtest_api_wrapper.qtest_project_id}",
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

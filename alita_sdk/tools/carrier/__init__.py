@@ -7,7 +7,7 @@ from functools import lru_cache
 from .api_wrapper import CarrierAPIWrapper
 from .tools import __all__
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.carrier import CarrierConfiguration
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,6 @@ name = 'carrier'
 
 class AlitaCarrierToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 100
 
     @classmethod
     @lru_cache(maxsize=32)
@@ -26,7 +25,6 @@ class AlitaCarrierToolkit(BaseToolkit):
         for t in __all__:
             default = t['tool'].__pydantic_fields__['args_schema'].default
             selected_tools[t['name']] = default.schema() if default else default
-        cls.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             project_id=(Optional[str], Field(None, description="Optional project ID for scoped operations")),
@@ -70,15 +68,15 @@ class AlitaCarrierToolkit(BaseToolkit):
             logger.exception(f"[AlitaCarrierToolkit] Error initializing CarrierAPIWrapper: {e}")
             raise ValueError(f"CarrierAPIWrapper initialization error: {e}")
 
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
-
         tools = []
         for tool_def in __all__:
             if selected_tools and tool_def['name'] not in selected_tools:
                 continue
             try:
                 tool_instance = tool_def['tool'](api_wrapper=carrier_api_wrapper)
-                tool_instance.name = prefix + tool_instance.name
+                if toolkit_name:
+                    tool_instance.description = f"{tool_instance.description}\nToolkit: {toolkit_name}"
+                    tool_instance.description = tool_instance.description[:1000]
                 tools.append(tool_instance)
                 logger.info(f"[AlitaCarrierToolkit] Successfully initialized tool '{tool_instance.name}'")
             except Exception as e:

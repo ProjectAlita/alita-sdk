@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ConfigDict, create_model
 
 from ..base.tool import BaseAction
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+from ..utils import clean_string, get_max_toolkit_length, check_connection_response
 from ...configurations.bitbucket import BitbucketConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 import requests
@@ -38,13 +38,11 @@ def get_tools(tool):
 
 class AlitaBitbucketToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           BitbucketAPIWrapper.model_construct().get_available_tools()}
-        AlitaBitbucketToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
             project=(str, Field(description="Project/Workspace")),
@@ -61,7 +59,6 @@ class AlitaBitbucketToolkit(BaseToolkit):
                 'metadata':
                     {
                         "label": "Bitbucket", "icon_url": "bitbucket-icon.svg",
-                        "max_length": AlitaBitbucketToolkit.toolkit_max_length,
                         "categories": ["code repositories"],
                         "extra_categories": ["bitbucket", "git", "repository", "code", "version control"],
                     }
@@ -100,16 +97,19 @@ class AlitaBitbucketToolkit(BaseToolkit):
         }
         bitbucket_api_wrapper = BitbucketAPIWrapper(**wrapper_payload)
         available_tools: List[Dict] = bitbucket_api_wrapper.get_available_tools()
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool['name'] not in selected_tools:
                     continue
+            description = tool["description"] + f"\nrepo: {bitbucket_api_wrapper.repository}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=bitbucket_api_wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"] + f"\nrepo: {bitbucket_api_wrapper.repository}",
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

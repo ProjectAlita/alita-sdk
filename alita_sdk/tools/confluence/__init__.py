@@ -6,7 +6,7 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, parse_list, check_connection_response
+from ..utils import clean_string, get_max_toolkit_length, parse_list, check_connection_response
 from ...configurations.confluence import ConfluenceConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 import requests
@@ -38,13 +38,11 @@ def get_tools(tool):
 
 class ConfluenceToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           ConfluenceAPIWrapper.model_construct().get_available_tools()}
-        ConfluenceToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
 
         @check_connection_response
         def check_connection(self):
@@ -94,7 +92,6 @@ class ConfluenceToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Confluence",
                     "icon_url": None,
-                    "max_length": ConfluenceToolkit.toolkit_max_length,
                     "categories": ["documentation"],
                     "extra_categories": ["confluence", "wiki", "knowledge base", "documentation", "atlassian"]
                 }
@@ -115,17 +112,21 @@ class ConfluenceToolkit(BaseToolkit):
             **(kwargs.get('pgvector_configuration') or {}),
         }
         confluence_api_wrapper = ConfluenceAPIWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, ConfluenceToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = confluence_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = f"Confluence space: {confluence_api_wrapper.space}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=confluence_api_wrapper,
-                name=prefix + tool["name"],
-                description=f"Confluence space: {confluence_api_wrapper.space}" + tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

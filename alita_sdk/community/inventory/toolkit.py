@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict, create_model
 
 from .retrieval import InventoryRetrievalApiWrapper
 from ...tools.base.tool import BaseAction
-from ...tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...tools.utils import clean_string, get_max_toolkit_length
 
 
 class InventoryRetrievalToolkit(BaseToolkit):
@@ -144,17 +144,21 @@ class InventoryRetrievalToolkit(BaseToolkit):
         # Build tool mapping
         tool_map = {t['name']: t for t in available_tools}
         
-        # Create tools with toolkit prefix
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
+        # Use clean toolkit name for context (max 1000 chars in description)
+        toolkit_context = f" [Toolkit: {clean_string(toolkit_name, 0)}]" if toolkit_name else ''
         
         tools = []
         for tool_name in selected_tools:
             if tool_name in tool_map:
                 tool_info = tool_map[tool_name]
+                # Add toolkit context to description with character limit
+                description = tool_info['description']
+                if toolkit_context and len(description + toolkit_context) <= 1000:
+                    description = description + toolkit_context
                 tools.append(BaseAction(
                     api_wrapper=api_wrapper,
-                    name=f"{prefix}{tool_name}",
-                    description=tool_info['description'],
+                    name=tool_name,
+                    description=description,
                     args_schema=tool_info['args_schema']
                 ))
         

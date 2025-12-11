@@ -8,7 +8,7 @@ from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
 from .google_search_rag import GoogleSearchResults
 from .crawler import SingleURLCrawler, MultiURLCrawler, GetHTMLContent, GetPDFContent
 from .wiki import WikipediaQueryRun
-from ..utils import get_max_toolkit_length, clean_string, TOOLKIT_SPLITTER
+from ..utils import get_max_toolkit_length, clean_string
 from ...configurations.browser import BrowserConfiguration
 from logging import getLogger
 
@@ -42,7 +42,6 @@ class BrowserToolkit(BaseToolkit):
             'google': GoogleSearchResults.__pydantic_fields__['args_schema'].default.schema(),
             'wiki': WikipediaQueryRun.__pydantic_fields__['args_schema'].default.schema()
         }
-        BrowserToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
 
         def validate_google_fields(cls, values):
             if 'google' in values.get('selected_tools', []):
@@ -90,7 +89,6 @@ class BrowserToolkit(BaseToolkit):
         }
 
         tools = []
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         if not selected_tools:
             selected_tools = [
                 'single_url_crawler',
@@ -127,7 +125,9 @@ class BrowserToolkit(BaseToolkit):
 
             # Only add the tool if it was successfully created
             if tool_entry is not None:
-                tool_entry.name = f"{prefix}{tool_entry.name}"
+                if toolkit_name:
+                    tool_entry.description = f"{tool_entry.description}\nToolkit: {toolkit_name}"
+                    tool_entry.description = tool_entry.description[:1000]
                 tools.append(tool_entry)
         return cls(tools=tools)
 

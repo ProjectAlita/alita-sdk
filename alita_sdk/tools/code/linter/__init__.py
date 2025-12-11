@@ -5,7 +5,7 @@ from pydantic import BaseModel, create_model, Field
 
 from .api_wrapper import PythonLinter
 from ...base.tool import BaseAction
-from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...utils import clean_string, get_max_toolkit_length
 
 name = "python_linter"
 
@@ -19,11 +19,9 @@ def get_tools(tool):
 
 class PythonLinterToolkit(BaseToolkit):
     tools: list[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
-        PythonLinterToolkit.toolkit_max_length = get_max_toolkit_length([])
         return create_model(
             name,
             error_codes=(str, Field(description="Error codes to be used by the linter")),
@@ -39,15 +37,17 @@ class PythonLinterToolkit(BaseToolkit):
         python_linter = PythonLinter(**kwargs)
         available_tools = python_linter.get_available_tools()
         tools = []
-        toolkit_max_length = get_max_toolkit_length(selected_tools)
-        prefix = clean_string(toolkit_name, PythonLinterToolkit.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         for tool in available_tools:
             if selected_tools and tool["name"] not in selected_tools:
                 continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=python_linter,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

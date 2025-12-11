@@ -7,7 +7,7 @@ from .api_wrapper import SQLApiWrapper
 from ..base.tool import BaseAction
 from .models import SQLDialect
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.sql import SqlConfiguration
 
 name = "sql"
@@ -24,12 +24,10 @@ def get_tools(tool):
 
 class SQLToolkit(BaseToolkit):
     tools: list[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in SQLApiWrapper.model_construct().get_available_tools()}
-        SQLToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         supported_dialects = (d.value for d in SQLDialect)
         return create_model(
             name,
@@ -42,7 +40,6 @@ class SQLToolkit(BaseToolkit):
                                       'metadata':
                                           {
                                               "label": "SQL", "icon_url": "sql-icon.svg",
-                                              "max_length": SQLToolkit.toolkit_max_length,
                                               "categories": ["development"],
                                               "extra_categories": ["sql", "data management", "data analysis"]}})
         )
@@ -57,16 +54,19 @@ class SQLToolkit(BaseToolkit):
             **kwargs.get('sql_configuration', {}),
         }
         sql_api_wrapper = SQLApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = sql_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools and tool["name"] not in selected_tools:
                 continue
+            description = f"{tool['description']}\nDatabase: {sql_api_wrapper.database_name}. Host: {sql_api_wrapper.host}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=sql_api_wrapper,
-                name=prefix + tool["name"],
-                description=f"{tool['description']}\nDatabase: {sql_api_wrapper.database_name}. Host: {sql_api_wrapper.host}",
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

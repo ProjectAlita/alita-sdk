@@ -5,7 +5,7 @@ from .api_wrapper import RallyApiWrapper
 from langchain_core.tools import BaseTool
 from ..base.tool import BaseAction
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.rally import RallyConfiguration
 
 name = "rally"
@@ -21,12 +21,10 @@ def get_tools(tool):
 
 class RallyToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in RallyApiWrapper.model_construct().get_available_tools()}
-        RallyToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             rally_configuration=(RallyConfiguration, Field(description="Rally configuration", json_schema_extra={'configuration_types': ['rally']})),
@@ -37,7 +35,6 @@ class RallyToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Rally",
                     "icon_url": "rally.svg",
-                    "max_length": RallyToolkit.toolkit_max_length,
                     "categories": ["project management"],
                     "extra_categories": ["agile management", "test management", "scrum", "kanban"]
                 }
@@ -54,17 +51,20 @@ class RallyToolkit(BaseToolkit):
             **kwargs.get('rally_configuration'),
         }
         rally_api_wrapper = RallyApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = rally_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = f"{tool['description']}\nWorkspace: {rally_api_wrapper.workspace}. Project: {rally_api_wrapper.project}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=rally_api_wrapper,
-                name=prefix + tool["name"],
-                description=f"{tool['description']}\nWorkspace: {rally_api_wrapper.workspace}. Project: {rally_api_wrapper.project}",
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

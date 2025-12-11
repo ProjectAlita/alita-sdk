@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from ..base.tool import BaseAction
 from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.figma import FigmaConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -36,7 +36,6 @@ def get_tools(tool):
 
 class FigmaToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
@@ -44,7 +43,6 @@ class FigmaToolkit(BaseToolkit):
             x["name"]: x["args_schema"].schema()
             for x in FigmaApiWrapper.model_construct().get_available_tools()
         }
-        FigmaToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT)),
@@ -66,7 +64,6 @@ class FigmaToolkit(BaseToolkit):
                      "metadata": {
                          "label": "Figma",
                          "icon_url": "figma-icon.svg",
-                         "max_length": FigmaToolkit.toolkit_max_length,
                          "categories": ["other"],
                          "extra_categories": ["figma", "design", "ui/ux", "prototyping", "collaboration"],
                      }
@@ -85,18 +82,21 @@ class FigmaToolkit(BaseToolkit):
             **(kwargs.get('pgvector_configuration') or {}),
         }
         figma_api_wrapper = FigmaApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = figma_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(
                 BaseAction(
                     api_wrapper=figma_api_wrapper,
-                    name=prefix + tool["name"],
-                    description=tool["description"],
+                    name=tool["name"],
+                    description=description,
                     args_schema=tool["args_schema"],
                 )
             )

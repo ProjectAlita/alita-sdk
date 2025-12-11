@@ -21,7 +21,7 @@ from ..tools.image_generation import ImageGenerationToolkit
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
 from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
-from ...tools.utils import TOOLKIT_SPLITTER
+from ...tools.utils import clean_string
 from alita_sdk.tools import _inject_toolkit_id
 
 logger = logging.getLogger(__name__)
@@ -110,10 +110,11 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
                     embedding_model=tool['settings'].get('embedding_model'),
                     collection_name=f"{tool.get('toolkit_name')}",
-                    collection_schema=str(tool['id']),
+                    collection_schema=str(tool['settings'].get('id', tool.get('id', ''))),
                 ).get_tools()
                 # Inject toolkit_id for artifact tools as well
-                _inject_toolkit_id(tool, toolkit_tools)
+                # Pass settings as the tool config since that's where the id field is
+                _inject_toolkit_id(tool['settings'], toolkit_tools)
                 tools.extend(toolkit_tools)
 
             elif tool['type'] == 'vectorstore':
@@ -319,11 +320,18 @@ def _mcp_tools(tools_list, alita):
 
 def _init_single_mcp_tool(server_toolkit_name, toolkit_name, available_tool, alita, toolkit_settings):
     try:
-
-        tool_name = f'{toolkit_name}{TOOLKIT_SPLITTER}{available_tool["name"]}'
+        # Use clean tool name without prefix
+        tool_name = available_tool["name"]
+        # Add toolkit context to description (max 1000 chars)
+        toolkit_context = f" [Toolkit: {clean_string(toolkit_name)}]" if toolkit_name else ''
+        base_description = f"MCP for a tool '{tool_name}': {available_tool.get('description', '')}"
+        description = base_description
+        if toolkit_context and len(base_description + toolkit_context) <= 1000:
+            description = base_description + toolkit_context
+        
         return McpServerTool(
             name=tool_name,
-            description=f"MCP for a tool '{tool_name}': {available_tool.get('description', '')}",
+            description=description,
             args_schema=McpServerTool.create_pydantic_model_from_schema(
                 available_tool.get("inputSchema", {})
             ),

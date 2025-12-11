@@ -1,6 +1,8 @@
 import re
 from enum import Enum
 
+# DEPRECATED: Tool names no longer use prefixes
+# Kept for backward compatibility only
 TOOLKIT_SPLITTER = "___"
 
 class IndexerKeywords(Enum):

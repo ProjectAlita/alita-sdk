@@ -6,7 +6,7 @@ from pydantic import create_model, BaseModel, Field
 from .api_wrapper import ZephyrEssentialApiWrapper
 from ..base.tool import BaseAction
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.pgvector import PgVectorConfiguration
 from ...configurations.zephyr_essential import ZephyrEssentialConfiguration
 
@@ -29,12 +29,10 @@ def get_tools(tool):
 
 class ZephyrEssentialToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in ZephyrEssentialApiWrapper.model_construct().get_available_tools()}
-        ZephyrEssentialToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
             zephyr_essential_configuration=(ZephyrEssentialConfiguration, Field(description="Zephyr Essential Configuration", json_schema_extra={'configuration_types': ['zephyr_essential']})),
@@ -46,7 +44,6 @@ class ZephyrEssentialToolkit(BaseToolkit):
             # embedder settings
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
             __config__={'json_schema_extra': {'metadata': {"label": "Zephyr Essential", "icon_url": "zephyr.svg",
-                                                           "max_length": ZephyrEssentialToolkit.toolkit_max_length,
                             "categories": ["test management"],
                             "extra_categories": ["test automation", "test case management", "test planning"]
                         }}}
@@ -63,17 +60,20 @@ class ZephyrEssentialToolkit(BaseToolkit):
             **(kwargs.get('pgvector_configuration') or {}),
         }
         zephyr_api_wrapper = ZephyrEssentialApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = zephyr_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=zephyr_api_wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

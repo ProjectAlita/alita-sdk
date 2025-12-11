@@ -10,7 +10,7 @@ from ....configurations.ado import AdoReposConfiguration
 from ....configurations.pgvector import PgVectorConfiguration
 from ...base.tool import BaseAction
 from .repos_wrapper import ReposApiWrapper
-from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+from ...utils import clean_string, get_max_toolkit_length, check_connection_response
 
 name = "ado_repos"
 
@@ -38,12 +38,10 @@ def get_tools(tool):
 
 class AzureDevOpsReposToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in ReposApiWrapper.model_construct().get_available_tools()}
-        AzureDevOpsReposToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
             ado_repos_configuration=(AdoReposConfiguration, Field(description="Ado Repos configuration", default=None,
@@ -63,7 +61,6 @@ class AzureDevOpsReposToolkit(BaseToolkit):
                     "icon_url": "ado-repos-icon.svg",
                     "categories": ["code repositories"],
                     "extra_categories": ["code", "repository", "version control"],
-                    "max_length": AzureDevOpsReposToolkit.toolkit_max_length
                 }}}
         )
 
@@ -99,16 +96,19 @@ class AzureDevOpsReposToolkit(BaseToolkit):
         azure_devops_repos_wrapper = ReposApiWrapper(**wrapper_payload)
         available_tools = azure_devops_repos_wrapper.get_available_tools()
         tools = []
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"] + f"\nADO instance: {azure_devops_repos_wrapper.organization_url}/{azure_devops_repos_wrapper.project}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(
                 BaseAction(
                     api_wrapper=azure_devops_repos_wrapper,
-                    name=prefix + tool["name"],
-                    description=tool["description"] + f"\nADO instance: {azure_devops_repos_wrapper.organization_url}/{azure_devops_repos_wrapper.project}",
+                    name=tool["name"],
+                    description=description,
                     args_schema=tool["args_schema"],
                 )
             )

@@ -16,7 +16,7 @@ from pydantic.fields import FieldInfo
 
 from ..tools.planning import PlanningWrapper
 from ...tools.base.tool import BaseAction
-from ...tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ...tools.utils import clean_string, get_max_toolkit_length
 
 
 class PlanningToolkit(BaseToolkit):
@@ -150,8 +150,8 @@ class PlanningToolkit(BaseToolkit):
             plan_callback=plan_callback,
         )
         
-        # Build tool name prefix
-        prefix = clean_string(toolkit_name, cls._toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
+        # Use clean toolkit name for context (max 1000 chars in description)
+        toolkit_context = f" [Toolkit: {clean_string(toolkit_name, 0)}]" if toolkit_name else ''
         
         # Create tools from wrapper
         available_tools = wrapper.get_available_tools()
@@ -159,10 +159,15 @@ class PlanningToolkit(BaseToolkit):
             if tool["name"] not in selected_tools:
                 continue
             
+            # Add toolkit context to description with character limit
+            description = tool["description"]
+            if toolkit_context and len(description + toolkit_context) <= 1000:
+                description = description + toolkit_context
+            
             tools.append(BaseAction(
                 api_wrapper=wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         

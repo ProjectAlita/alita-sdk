@@ -5,7 +5,7 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER,get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.salesforce import SalesforceConfiguration
 
 name = "salesforce"
@@ -19,11 +19,9 @@ def get_tools(tool):
 
 class SalesforceToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         available_tools = {x['name']: x['args_schema'].schema() for x in SalesforceApiWrapper.model_construct().get_available_tools()}
-        SalesforceToolkit.toolkit_max_length = get_max_toolkit_length(available_tools)
         return create_model(
             name,
             api_version=(str, Field(description="Salesforce API Version", default='v59.0')),
@@ -31,7 +29,6 @@ class SalesforceToolkit(BaseToolkit):
             selected_tools=(List[Literal[tuple(available_tools)]], Field(default=[], json_schema_extra={'args_schemas': available_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {
                 "label": "Salesforce", "icon_url": "salesforce-icon.svg",
-                "max_length": SalesforceToolkit.toolkit_max_length,
                 "categories": ["other"],
                 "extra_categories": ["customer relationship management", "cloud computing", "marketing automation", "salesforce"]
                                                                   }})
@@ -48,17 +45,19 @@ class SalesforceToolkit(BaseToolkit):
             **kwargs.get('salesforce_configuration', {}),
         }
         api_wrapper = SalesforceApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         tools = []
 
         for tool in api_wrapper.get_available_tools():
             if selected_tools and tool["name"] not in selected_tools:
                 continue
-
+            description = f"Salesforce Tool: {tool['description']}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=api_wrapper,
-                name=prefix + tool["name"],
-                description=f"Salesforce Tool: {tool['description']}",
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
 

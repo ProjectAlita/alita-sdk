@@ -6,7 +6,7 @@ from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from ...elitea_base import filter_missconfigured_index_tools
-from ...utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length, check_connection_response
+from ...utils import clean_string, get_max_toolkit_length, check_connection_response
 from ....configurations.azure_search import AzureSearchConfiguration
 import requests
 
@@ -31,12 +31,10 @@ def get_toolkit():
 
 class AzureSearchToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in AzureSearchApiWrapper.model_construct().get_available_tools()}
-        AzureSearchToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         m = create_model(
             name,
             index_name=(str, Field(description="Azure Search index name")),
@@ -79,16 +77,19 @@ class AzureSearchToolkit(BaseToolkit):
         }
         azure_search_api_wrapper = AzureSearchApiWrapper(**wrapper_payload)
         available_tools = azure_search_api_wrapper.get_available_tools()
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         tools = []
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=azure_search_api_wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

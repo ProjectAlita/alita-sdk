@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, create_model, Field, SecretStr
 
 from .api_wrapper import KeycloakApiWrapper
 from ..base.tool import BaseAction
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 
 name = "keycloak"
 
@@ -21,15 +21,13 @@ def get_tools(tool):
 
 class KeycloakToolkit(BaseToolkit):
     tools: list[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in KeycloakApiWrapper.model_construct().get_available_tools()}
-        KeycloakToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
-            base_url=(str, Field(default="", title="Server URL", description="Keycloak server URL", json_schema_extra={'toolkit_name': True, 'max_toolkit_length': KeycloakToolkit.toolkit_max_length})),
+            base_url=(str, Field(default="", title="Server URL", description="Keycloak server URL", json_schema_extra={'toolkit_name': True})),
             realm=(str, Field(default="", title="Realm", description="Keycloak realm")),
             client_id=(str, Field(default="", title="Client ID", description="Keycloak client ID")),
             client_secret=(SecretStr, Field(default="", title="Client sercet", description="Keycloak client secret", json_schema_extra={'secret': True})),
@@ -42,16 +40,19 @@ class KeycloakToolkit(BaseToolkit):
         if selected_tools is None:
             selected_tools = []
         keycloak_api_wrapper = KeycloakApiWrapper(**kwargs)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = keycloak_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools and tool["name"] not in selected_tools:
                 continue
+            description = f"{tool['description']}\nUrl: {keycloak_api_wrapper.base_url}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=keycloak_api_wrapper,
-                name=prefix + tool["name"],
-                description=f"{tool['description']}\nUrl: {keycloak_api_wrapper.base_url}",
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

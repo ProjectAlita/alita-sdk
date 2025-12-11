@@ -99,7 +99,6 @@ class McpRemoteTool(McpServerTool):
 
     async def _execute_remote_tool(self, kwargs: Dict[str, Any]) -> str:
         """Execute the actual remote MCP tool call using SSE client."""
-        from ...tools.utils import TOOLKIT_SPLITTER
         
         # Check for session_id requirement
         if not self.session_id:
@@ -109,8 +108,8 @@ class McpRemoteTool(McpServerTool):
         # Use the original tool name from discovery for MCP server invocation
         tool_name_for_server = self.original_tool_name
         if not tool_name_for_server:
-            tool_name_for_server = self.name.rsplit(TOOLKIT_SPLITTER, 1)[-1] if TOOLKIT_SPLITTER in self.name else self.name
-            logger.warning(f"original_tool_name not set for '{self.name}', using extracted: {tool_name_for_server}")
+            tool_name_for_server = self.name
+            logger.warning(f"original_tool_name not set for '{self.name}', using: {tool_name_for_server}")
         
         logger.info(f"[MCP] Executing tool '{tool_name_for_server}' with session {self.session_id}")
         

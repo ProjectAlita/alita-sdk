@@ -6,7 +6,7 @@ from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 from alita_sdk.configurations.delta_lake import DeltaLakeConfiguration
-from ...utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length
+from ...utils import clean_string, get_max_toolkit_length
 from .api_wrapper import DeltaLakeApiWrapper
 from .tool import DeltaLakeAction
 
@@ -20,10 +20,6 @@ def get_available_tools() -> dict[str, dict]:
         for x in api_wrapper.get_available_tools()
     }
     return available_tools
-
-toolkit_max_length = lru_cache(maxsize=1)(
-    lambda: get_max_toolkit_length(get_available_tools())
-)
 
 class DeltaLakeToolkitConfig(BaseModel):
     class Config:
@@ -87,9 +83,10 @@ class DeltaLakeToolkit(BaseToolkit):
 
     @computed_field
     @property
-    def tool_prefix(self) -> str:
+    def toolkit_context(self) -> str:
+        """Returns toolkit context for descriptions (max 1000 chars)."""
         return (
-            clean_string(self.toolkit_name, toolkit_max_length()) + TOOLKIT_SPLITTER
+            f" [Toolkit: {clean_string(self.toolkit_name, 0)}]"
             if self.toolkit_name
             else ""
         )
@@ -118,11 +115,16 @@ class DeltaLakeToolkit(BaseToolkit):
             selected_tools = set(selected_tools)
             for t in instance.available_tools:
                 if t["name"] in selected_tools:
+                    description = t["description"]
+                    if toolkit_name:
+                        description = f"Toolkit: {toolkit_name}\n{description}"
+                    description = f"S3 Path: {getattr(instance.api_wrapper, 's3_path', '')} Table Path: {getattr(instance.api_wrapper, 'table_path', '')}\n{description}"
+                    description = description[:1000]
                     instance.tools.append(
                         DeltaLakeAction(
                             api_wrapper=instance.api_wrapper,
-                            name=instance.tool_prefix + t["name"],
-                            description=f"S3 Path: {getattr(instance.api_wrapper, 's3_path', '')} Table Path: {getattr(instance.api_wrapper, 'table_path', '')}\n" + t["description"],
+                            name=t["name"],
+                            description=description,
                             args_schema=t["args_schema"],
                         )
                     )

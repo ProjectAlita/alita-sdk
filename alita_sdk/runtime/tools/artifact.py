@@ -13,6 +13,7 @@ from pydantic import create_model, Field, model_validator
 
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...tools.utils.available_tools_decorator import extend_with_parent_available_tools
+from ...tools.elitea_base import extend_with_file_operations
 from ...runtime.utils.utils import IndexerKeywords
 
 
@@ -31,7 +32,24 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         return super().validate_toolkit(values)
 
     def list_files(self, bucket_name = None, return_as_string = True):
-        return self.artifact.list(bucket_name, return_as_string)
+        """List all files in the artifact bucket with API download links."""
+        result = self.artifact.list(bucket_name, return_as_string=False)
+        
+        # Add API download link to each file
+        if isinstance(result, dict) and 'rows' in result:
+            bucket = bucket_name or self.bucket
+            
+            # Get base_url and project_id from alita client
+            base_url = getattr(self.alita, 'base_url', '').rstrip('/')
+            project_id = getattr(self.alita, 'project_id', '')
+            
+            for file_info in result['rows']:
+                if 'name' in file_info:
+                    # Generate API download link
+                    file_name = file_info['name']
+                    file_info['link'] = f"{base_url}/api/v2/artifacts/artifact/default/{project_id}/{bucket}/{file_name}"
+        
+        return str(result) if return_as_string else result
 
     def create_file(self, filename: str, filedata: str, bucket_name = None):
         # Sanitize filename to prevent regex errors during indexing
@@ -128,6 +146,94 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                                   sheet_name=sheet_name,
                                   excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
+    
+    def _read_file(
+        self,
+        file_path: str,
+        branch: str = None,
+        bucket_name: str = None,
+        **kwargs
+    ) -> str:
+        """
+        Read a file from artifact bucket with optional partial read support.
+        
+        Parameters:
+            file_path: Name of the file in the bucket
+            branch: Not used for artifacts (kept for API consistency)
+            bucket_name: Name of the bucket (uses default if None)
+            **kwargs: Additional parameters (offset, limit, head, tail) - currently ignored,
+                     partial read handled client-side by base class methods
+        
+        Returns:
+            File content as string
+        """
+        return self.read_file(filename=file_path, bucket_name=bucket_name)
+    
+    def _write_file(
+        self,
+        file_path: str,
+        content: str,
+        branch: str = None,
+        commit_message: str = None,
+        bucket_name: str = None
+    ) -> str:
+        """
+        Write content to a file (create or overwrite).
+        
+        Parameters:
+            file_path: Name of the file in the bucket
+            content: New file content
+            branch: Not used for artifacts (kept for API consistency)
+            commit_message: Not used for artifacts (kept for API consistency)
+            bucket_name: Name of the bucket (uses default if None)
+            
+        Returns:
+            Success message
+        """
+        try:
+            # Sanitize filename
+            sanitized_filename, was_modified = self._sanitize_filename(file_path)
+            if was_modified:
+                logging.warning(f"Filename sanitized: '{file_path}' -> '{sanitized_filename}'")
+            
+            # Check if file exists
+            try:
+                self.artifact.get(artifact_name=sanitized_filename, bucket_name=bucket_name, llm=self.llm)
+                # File exists, overwrite it
+                result = self.artifact.overwrite(sanitized_filename, content, bucket_name)
+                
+                # Dispatch custom event
+                dispatch_custom_event("file_modified", {
+                    "message": f"File '{sanitized_filename}' updated successfully",
+                    "filename": sanitized_filename,
+                    "tool_name": "edit_file",
+                    "toolkit": "artifact",
+                    "operation_type": "modify",
+                    "meta": {
+                        "bucket": bucket_name or self.bucket
+                    }
+                })
+                
+                return f"Updated file {sanitized_filename}"
+            except:
+                # File doesn't exist, create it
+                result = self.artifact.create(sanitized_filename, content, bucket_name)
+                
+                # Dispatch custom event
+                dispatch_custom_event("file_modified", {
+                    "message": f"File '{sanitized_filename}' created successfully",
+                    "filename": sanitized_filename,
+                    "tool_name": "edit_file",
+                    "toolkit": "artifact",
+                    "operation_type": "create",
+                    "meta": {
+                        "bucket": bucket_name or self.bucket
+                    }
+                })
+                
+                return f"Created file {sanitized_filename}"
+        except Exception as e:
+            raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def delete_file(self, filename: str, bucket_name = None):
         return self.artifact.delete(filename, bucket_name)
@@ -167,7 +273,11 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         return result
 
     def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
-        return self.artifact.client.create_bucket(bucket_name, expiration_measure, expiration_value)
+        # Sanitize bucket name: replace underscores with hyphens and ensure lowercase
+        sanitized_name = bucket_name.replace('_', '-').lower()
+        if sanitized_name != bucket_name:
+            logging.warning(f"Bucket name '{bucket_name}' was sanitized to '{sanitized_name}' (underscores replaced with hyphens, converted to lowercase)")
+        return self.artifact.client.create_bucket(sanitized_name, expiration_measure, expiration_value)
 
     def _index_tool_params(self):
         return {
@@ -233,17 +343,20 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                 document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = document.metadata['name']
                 yield document
             except Exception as e:
-                logging.error(f"Failed while parsing the file '{document.metadata['name']}': {e}")
+                logger.error(f"Failed while parsing the file '{document.metadata['name']}': {e}")
                 yield document
 
-    @extend_with_parent_available_tools
+    @extend_with_file_operations
     def get_available_tools(self):
+        """Get available tools, including indexing tools only if vector store is configured."""
         bucket_name = (Optional[str], Field(description="Name of the bucket to work with."
                                                         "If bucket is not specified by user directly, the name should be taken from chat history."
                                                         "If bucket never mentioned in chat, the name will be taken from tool configuration."
                                                         " ***IMPORTANT*** Underscore `_` is prohibited in bucket name and should be replaced by `-`",
                                             default=None))
-        return [
+        
+        # Basic artifact tools (always available)
+        basic_tools = [
             {
                 "ref": self.list_files,
                 "name": "listFiles",
@@ -328,7 +441,10 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                 "description": "Creates new bucket specified by user.",
                 "args_schema": create_model(
                     "createNewBucket",
-                    bucket_name=(str, Field(description="Bucket name to create. ***IMPORTANT*** Underscore `_` is prohibited in bucket name and should be replaced by `-`.")),
+                    bucket_name=(str, Field(
+                        description="Bucket name to create. Must start with lowercase letter and contain only lowercase letters, numbers, and hyphens. Underscores will be automatically converted to hyphens.",
+                        pattern=r'^[a-z][a-z0-9_-]*$'  # Allow underscores in input, will be sanitized
+                    )),
                     expiration_measure=(Optional[str], Field(description="Measure of expiration time for bucket configuration."
                                                                          "Possible values: `days`, `weeks`, `months`, `years`.",
                                                              default="weeks")),
@@ -336,3 +452,23 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                 )
             }
         ]
+        
+        # Add indexing tools only if vector store is configured
+        has_vector_config = (
+            hasattr(self, 'embedding_model') and self.embedding_model and
+            hasattr(self, 'pgvector_configuration') and self.pgvector_configuration
+        )
+        
+        if has_vector_config:
+            try:
+                # Get indexing tools from parent class
+                indexing_tools = super(ArtifactWrapper, self).get_available_tools()
+                return indexing_tools + basic_tools
+            except Exception as e:
+                # If getting parent tools fails, log warning and return basic tools only
+                logging.warning(f"Failed to load indexing tools: {e}. Only basic artifact tools will be available.")
+                return basic_tools
+        else:
+            # No vector store config, return basic tools only
+            logging.info("Vector store not configured. Indexing tools (index_data, search_index, etc.) are not available.")
+            return basic_tools

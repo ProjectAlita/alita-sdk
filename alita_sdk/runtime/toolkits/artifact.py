@@ -1,6 +1,6 @@
 from typing import List, Any, Literal, Optional
 
-from alita_sdk.tools.utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from alita_sdk.tools.utils import clean_string, get_max_toolkit_length
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field
@@ -43,22 +43,28 @@ class ArtifactToolkit(BaseToolkit):
     def get_toolkit(cls, client: Any, bucket: str, toolkit_name: Optional[str] = None, selected_tools: list[str] = [], **kwargs):
         if selected_tools is None:
             selected_tools = []
+        
         tools = []
         wrapper_payload = {
             **kwargs,
             **(kwargs.get('pgvector_configuration') or {}),
         }
         artifact_wrapper = ArtifactWrapper(alita=client, bucket=bucket, **wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
+        # Use clean toolkit name for context (max 1000 chars in description)
+        toolkit_context = f" [Toolkit: {clean_string(toolkit_name, 0)}]" if toolkit_name else ''
         available_tools = artifact_wrapper.get_available_tools()
         for tool in available_tools:
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
+            # Add toolkit context to description with character limit
+            description = tool["description"]
+            if toolkit_context and len(description + toolkit_context) <= 1000:
+                description = description + toolkit_context
             tools.append(BaseAction(
                 api_wrapper=artifact_wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

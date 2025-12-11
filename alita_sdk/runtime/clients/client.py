@@ -20,7 +20,6 @@ from .prompt import AlitaPrompt
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
-from ..utils.utils import TOOLKIT_SPLITTER
 from ..utils.mcp_oauth import McpAuthorizationRequired
 from ...tools import get_available_toolkit_models
 from ...tools.base_indexer_toolkit import IndexTools
@@ -939,7 +938,6 @@ class AlitaClient:
             if target_tool is None:
                 available_tools = []
                 base_available_tools = []
-                full_available_tools = []
 
                 for tool in tools:
                     tool_name_attr = None
@@ -956,10 +954,6 @@ class AlitaClient:
                         if base_name not in base_available_tools:
                             base_available_tools.append(base_name)
 
-                        # Track full names separately
-                        if TOOLKIT_SPLITTER in tool_name_attr:
-                            full_available_tools.append(tool_name_attr)
-
                 # Create comprehensive error message
                 error_msg = f"Tool '{tool_name}' not found in toolkit '{toolkit_config.get('toolkit_name')}'.\n"
 
@@ -967,9 +961,7 @@ class AlitaClient:
                 if toolkit_name in [tool.value for tool in IndexTools]:
                     error_msg += f" Please make sure proper PGVector configuration and embedding model are set in the platform.\n"
 
-                if base_available_tools and full_available_tools:
-                    error_msg += f" Available tools: {base_available_tools} (base names) or {full_available_tools} (full names)"
-                elif base_available_tools:
+                if base_available_tools:
                     error_msg += f" Available tools: {base_available_tools}"
                 elif available_tools:
                     error_msg += f" Available tools: {available_tools}"
@@ -978,10 +970,7 @@ class AlitaClient:
 
                 # Add helpful hint about naming conventions
                 if '___' in tool_name:
-                    error_msg += f" Note: You provided a full name '{tool_name}'. Try using just the base name '{extract_base_tool_name(tool_name)}'."
-                elif full_available_tools:
-                    possible_full_name = create_full_tool_name(tool_name, toolkit_name)
-                    error_msg += f" Note: You provided a base name '{tool_name}'. The full name might be '{possible_full_name}'."
+                    error_msg += f" Note: Tool names no longer use '___' prefixes. Try using just the base name '{extract_base_tool_name(tool_name)}'."
 
                 return {
                     "success": False,

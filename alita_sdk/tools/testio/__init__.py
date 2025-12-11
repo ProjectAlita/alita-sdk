@@ -6,7 +6,7 @@ from pydantic import create_model, BaseModel, ConfigDict, Field
 from .api_wrapper import TestIOApiWrapper
 from ..base.tool import BaseAction
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
+from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.testio import TestIOConfiguration
 
 name = "testio"
@@ -18,8 +18,6 @@ def get_tools(tool):
         toolkit_name=tool['toolkit_name']
     ).get_tools()
 
-
-TOOLKIT_MAX_LENGTH = 25
 
 class TestIOToolkit(BaseToolkit):
     tools: list[BaseTool] = []
@@ -33,7 +31,6 @@ class TestIOToolkit(BaseToolkit):
             testio_configuration=(TestIOConfiguration, Field(description="TestIO Configuration", json_schema_extra={'configuration_types': ['testio']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "TestIO", "icon_url": "testio-icon.svg",
-                                                                  "max_length": TOOLKIT_MAX_LENGTH,
                                                                   "categories": ["testing"],
                                                                   "extra_categories": ["test automation", "test case management", "test planning"]}})
         )
@@ -48,16 +45,19 @@ class TestIOToolkit(BaseToolkit):
             **kwargs.get('testio_configuration', {}),
         }
         testio_api_wrapper = TestIOApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, TOOLKIT_MAX_LENGTH) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = testio_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools and tool["name"] not in selected_tools:
                 continue
+            description = tool["description"]
+            if toolkit_name:
+                description = f"Toolkit: {toolkit_name}\n{description}"
+            description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=testio_api_wrapper,
-                name=prefix + tool["name"],
-                description=tool["description"],
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"]
             ))
         return cls(tools=tools)

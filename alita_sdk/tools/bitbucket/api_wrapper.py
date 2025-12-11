@@ -13,6 +13,7 @@ from pydantic.fields import PrivateAttr
 
 from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..elitea_base import extend_with_file_operations
 
 logger = logging.getLogger(__name__)
 
@@ -360,12 +361,15 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
     #     except Exception as e:
     #         raise ToolException(f"Can't extract file commit hash (`{file_path}`) due to error:\n{str(e)}")
 
-    def _read_file(self, file_path: str, branch: str) -> str:
+    def _read_file(self, file_path: str, branch: str, **kwargs) -> str:
         """
-        Reads a file from the gitlab repo
+        Reads a file from the bitbucket repo with optional partial read support.
+        
         Parameters:
             file_path(str): the file path
             branch(str): branch name (by default: active_branch)
+            **kwargs: Additional parameters (offset, limit, head, tail) - currently ignored,
+                     partial read handled client-side by base class methods
         Returns:
             str: The file decoded as a string
         """
@@ -399,8 +403,46 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
             return self._read_file(file_path, branch)
         except Exception as e:
             return f"Failed to read file {file_path}: {str(e)}"
+    
+    def _write_file(
+        self,
+        file_path: str,
+        content: str,
+        branch: str = None,
+        commit_message: str = None
+    ) -> str:
+        """
+        Write content to a file (create or update).
+        
+        Parameters:
+            file_path: Path to the file
+            content: New file content
+            branch: Branch name (uses active branch if None)
+            commit_message: Commit message (not used by Bitbucket API)
+            
+        Returns:
+            Success message
+        """
+        try:
+            branch = branch or self._active_branch
+            
+            # Check if file exists by attempting to read it
+            try:
+                self._read_file(file_path, branch)
+                # File exists, update it using OLD/NEW format
+                old_content = self._read_file(file_path, branch)
+                update_query = f"OLD <<<<\n{old_content}\n>>>> OLD\nNEW <<<<\n{content}\n>>>> NEW"
+                self._bitbucket.update_file(file_path=file_path, update_query=update_query, branch=branch)
+                return f"Updated file {file_path}"
+            except:
+                # File doesn't exist, create it
+                self._bitbucket.create_file(file_path=file_path, file_contents=content, branch=branch)
+                return f"Created file {file_path}"
+        except Exception as e:
+            raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     @extend_with_parent_available_tools
+    @extend_with_file_operations
     def get_available_tools(self):
         return [
             {

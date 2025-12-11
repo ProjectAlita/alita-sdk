@@ -12,7 +12,7 @@ from pydantic import create_model, BaseModel, Field
 from ..base.tool import BaseAction
 
 from .api_wrapper import SlackApiWrapper
-from ..utils import TOOLKIT_SPLITTER, clean_string, get_max_toolkit_length, check_connection_response
+from ..utils import clean_string, get_max_toolkit_length, check_connection_response
 from slack_sdk.errors import SlackApiError
 from slack_sdk import WebClient
 
@@ -28,12 +28,10 @@ def get_tools(tool):
 
 class SlackToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
          selected_tools = {x['name']: x['args_schema'].schema() for x in SlackApiWrapper.model_construct().get_available_tools()}
-         SlackToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
 
          @check_connection_response
          def check_connection(self):
@@ -59,7 +57,6 @@ class SlackToolkit(BaseToolkit):
                 'metadata': {
                     "label": "Slack",
                     "icon_url": "slack-icon.svg",
-                    "max_length": SlackToolkit.toolkit_max_length,
                     "categories": ["communication"],
                     "extra_categories": ["slack", "chat", "messaging", "collaboration"],
                 }
@@ -79,16 +76,19 @@ class SlackToolkit(BaseToolkit):
             **kwargs['slack_configuration'],
         }
         slack_api_wrapper = SlackApiWrapper(**wrapper_payload)
-        prefix = clean_string(toolkit_name, cls.toolkit_max_length) + TOOLKIT_SPLITTER if toolkit_name else ''
         available_tools = slack_api_wrapper.get_available_tools()
         tools = []
         for tool in available_tools:
             if selected_tools and tool["name"] not in selected_tools:
                 continue
+            description = f"Slack Tool: {tool['description']}"
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            description = description[:1000]
             tools.append(BaseAction(                
                 api_wrapper=slack_api_wrapper,
-                name=prefix + tool["name"],
-                description=f"Slack Tool: {tool['description']}",
+                name=tool["name"],
+                description=description,
                 args_schema=tool["args_schema"],
             ))
         return cls(tools=tools)

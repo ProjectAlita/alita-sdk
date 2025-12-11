@@ -30,7 +30,7 @@ from ..tools.loop import LoopNode
 from ..tools.loop_output import LoopToolNode
 from ..tools.tool import ToolNode
 from ..utils.evaluate import EvaluateTemplate
-from ..utils.utils import clean_string, TOOLKIT_SPLITTER
+from ..utils.utils import clean_string
 from ..tools.router import RouterNode
 
 logger = logging.getLogger(__name__)
@@ -483,8 +483,7 @@ def create_graph(
             node_id = clean_string(node['id'])
             toolkit_name = node.get('toolkit_name')
             tool_name = clean_string(node.get('tool', node_id))
-            if toolkit_name:
-                tool_name = f"{clean_string(toolkit_name)}{TOOLKIT_SPLITTER}{tool_name}"
+            # Tool names are now clean (no prefix needed)
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
             if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
                 if node_type == 'mcp' and tool_name not in [tool.name for tool in tools]:
@@ -550,8 +549,8 @@ def create_graph(
                             loop_toolkit_name = node.get('loop_toolkit_name')
                             loop_tool_name = node.get('loop_tool')
                             if (loop_toolkit_name and loop_tool_name) or loop_tool_name:
-                                loop_tool_name = f"{clean_string(loop_toolkit_name)}{TOOLKIT_SPLITTER}{loop_tool_name}" if loop_toolkit_name else clean_string(
-                                    loop_tool_name)
+                                # Use clean tool name (no prefix)
+                                loop_tool_name = clean_string(loop_tool_name)
                                 for t in tools:
                                     if t.name == loop_tool_name:
                                         logger.debug(f"Loop tool discovered: {t}")
@@ -609,10 +608,10 @@ def create_graph(
                 tool_names = []
                 if isinstance(connected_tools, dict):
                     for toolkit, selected_tools in connected_tools.items():
-                        for tool in selected_tools:
-                            tool_names.append(f"{toolkit}{TOOLKIT_SPLITTER}{tool}")
+                        # Add tool names directly (no prefix)
+                        tool_names.extend(selected_tools)
                 elif isinstance(connected_tools, list):
-                    # for cases when tools are provided as a list of names with already bound toolkit_name
+                    # Use provided tool names as-is
                     tool_names = connected_tools
                 
                 if tool_names:
