@@ -98,6 +98,14 @@ class McpClient:
     
     async def _auto_detect_and_connect(self):
         """Try Streamable HTTP first, fall back to SSE."""
+        # If URL ends with /sse, use SSE transport directly
+        if self.url.rstrip('/').endswith('/sse'):
+            logger.debug("[MCP Client] URL ends with /sse, using SSE transport")
+            await self._connect_sse()
+            self._detected_transport = "sse"
+            logger.info("[MCP Client] Using SSE transport")
+            return
+            
         try:
             logger.debug("[MCP Client] Auto-detecting transport, trying Streamable HTTP first...")
             await self._connect_streamable_http()
@@ -105,8 +113,8 @@ class McpClient:
             logger.info("[MCP Client] Using Streamable HTTP transport")
         except Exception as e:
             error_str = str(e).lower()
-            # Check for 405 or indicators that SSE is needed
-            if "405" in error_str or "method not allowed" in error_str:
+            # Check for 405, 404, or indicators that SSE is needed
+            if "405" in error_str or "method not allowed" in error_str or "404" in error_str:
                 logger.debug(f"[MCP Client] Streamable HTTP not supported ({e}), trying SSE...")
                 await self._connect_sse()
                 self._detected_transport = "sse"
@@ -144,7 +152,7 @@ class McpClient:
         else:
             return await self._initialize_sse()
     
-    async def _initialize_streamable_http(self) -> Dict[str, Any]:
+    async def _initialize_streamable_http(self, retry_without_session: bool = False) -> Dict[str, Any]:
         """Initialize via Streamable HTTP transport."""
         headers = {
             "Content-Type": "application/json",
@@ -152,8 +160,9 @@ class McpClient:
             **self.headers
         }
         
-        # Add session ID header if we have one
-        if self.session_id:
+        # Add session ID header if we have one (for session resumption)
+        # Skip if retrying without session due to invalid session error
+        if self.session_id and not retry_without_session:
             headers["Mcp-Session-Id"] = self.session_id
         
         # Debug: log headers (mask sensitive data)
@@ -186,6 +195,24 @@ class McpClient:
             
             if response.status == 405:
                 raise Exception("HTTP 405 Method Not Allowed - server may require SSE transport")
+            
+            # Handle invalid session error - retry without session_id
+            if response.status == 400 and not retry_without_session and self.session_id:
+                try:
+                    error_body = await response.text()
+                    if "invalid session" in error_body.lower():
+                        logger.warning(f"[MCP Client] Invalid session, retrying without session_id")
+                        return await self._initialize_streamable_http(retry_without_session=True)
+                except Exception:
+                    pass
+            
+            # Log error response body for debugging
+            if response.status >= 400:
+                try:
+                    error_body = await response.text()
+                    logger.error(f"[MCP Client] HTTP {response.status} error response: {error_body[:1000]}")
+                except Exception:
+                    pass
             
             response.raise_for_status()
             
