@@ -386,7 +386,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     def remove_index(self, index_name: str = ""):
         """Cleans the indexed data in the collection."""
-        super()._clean_collection(index_name=index_name)
+        super()._clean_collection(index_name=index_name, including_index_meta=True)
         return (f"Collection '{index_name}' has been removed from the vector store.\n"
                 f"Available collections: {self.list_collections()}") if index_name \
             else "All collections have been removed from the vector store." 

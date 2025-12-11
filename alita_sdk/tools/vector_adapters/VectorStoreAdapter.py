@@ -31,8 +31,8 @@ class VectorStoreAdapter(ABC):
         pass
 
     @abstractmethod
-    def clean_collection(self, vectorstore_wrapper, index_name: str = ''):
-        """Clean the vectorstore collection by deleting all indexed data."""
+    def clean_collection(self, vectorstore_wrapper, index_name: str = '', including_index_meta: bool = False):
+        """Clean the vectorstore collection by deleting all indexed data. If including_index_meta is True, skip the index_meta records."""
         pass
 
     @abstractmethod
@@ -132,24 +132,22 @@ class PGVectorAdapter(VectorStoreAdapter):
             logger.error(f"Failed to get indexed IDs from PGVector: {str(e)}")
             return []
 
-    def clean_collection(self, vectorstore_wrapper, index_name: str = ''):
-        """Clean the vectorstore collection by deleting all indexed data."""
-        # This logic deletes all data from the vectorstore collection without removal of collection.
-        # Collection itself remains available for future indexing.
+    def clean_collection(self, vectorstore_wrapper, index_name: str = '', including_index_meta: bool = False):
+        """Clean the vectorstore collection by deleting all indexed data. If including_index_meta is True, skip the index_meta records."""
         from sqlalchemy.orm import Session
         from sqlalchemy import func, or_
-
         store = vectorstore_wrapper.vectorstore
         with Session(store.session_maker.bind) as session:
-            # Delete entries matching the index_name and not of type index_meta
-            session.query(store.EmbeddingStore).filter(
-                func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name,
-                        or_(
-                            func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'type').is_(None),
-                            func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata,
-                                                         'type') != IndexerKeywords.INDEX_META_TYPE.value
-                        )
-            ).delete(synchronize_session=False)
+            if including_index_meta:
+                session.query(store.EmbeddingStore).filter(
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name
+                ).delete(synchronize_session=False)
+            else:
+                session.query(store.EmbeddingStore).filter(
+                    func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'collection') == index_name,
+                    or_(func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'type').is_(None),
+                        func.jsonb_extract_path_text(store.EmbeddingStore.cmetadata, 'type') != IndexerKeywords.INDEX_META_TYPE.value)
+                ).delete(synchronize_session=False)
             session.commit()
 
     def is_vectorstore_type(self, vectorstore) -> bool:
@@ -340,8 +338,8 @@ class ChromaAdapter(VectorStoreAdapter):
             logger.error(f"Failed to get indexed IDs from Chroma: {str(e)}")
             return []
 
-    def clean_collection(self, vectorstore_wrapper, index_name: str = ''):
-        """Clean the vectorstore collection by deleting all indexed data."""
+    def clean_collection(self, vectorstore_wrapper, index_name: str = '', including_index_meta: bool = False):
+        """Clean the vectorstore collection by deleting all indexed data. including_index_meta is ignored."""
         vectorstore_wrapper.vectorstore.delete(ids=self.get_indexed_ids(vectorstore_wrapper, index_name))
 
     def get_indexed_data(self, vectorstore_wrapper):

@@ -270,7 +270,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
                 )
             ).count()
 
-    def _clean_collection(self, index_name: str = ''):
+    def _clean_collection(self, index_name: str = '', including_index_meta: bool = False):
         """
         Clean the vectorstore collection by deleting all indexed data.
         """
@@ -279,7 +279,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
             f"Cleaning collection '{self.dataset}'",
             tool_name="_clean_collection"
         )
-        self.vector_adapter.clean_collection(self, index_name)
+        self.vector_adapter.clean_collection(self, index_name, including_index_meta)
         self._log_tool_event(
             f"Collection '{self.dataset}' has been cleaned. ",
             tool_name="_clean_collection"
@@ -303,7 +303,7 @@ class VectorStoreWrapperBase(BaseToolApiWrapper):
         logger.info("Cleaning index before re-indexing all documents.")
         self._log_tool_event("Cleaning index before re-indexing all documents. Previous index will be removed", tool_name="index_documents")
         try:
-            self._clean_collection(index_name)
+            self._clean_collection(index_name, including_index_meta=False)
             self._log_tool_event("Previous index has been removed",
                            tool_name="index_documents")
         except Exception as e:
