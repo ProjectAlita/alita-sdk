@@ -480,21 +480,69 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         """Gets pages with specific label in the Confluence space."""
 
         start = 0
-        pages_info = []
-        for _ in range((self.max_pages + self.limit - 1) // self.limit):
-            pages = self.client.get_all_pages_by_label(label, start=start,
-                                                       limit=self.limit)  # , expand="body.view.value"
+        pages_info: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        # Use a while-loop driven by unique pages collected and
+        # presence of additional results instead of a fixed number
+        # of iterations based purely on max_pages/limit.
+        while len(pages_info) < (self.max_pages or 0):
+            pages = self.client.get_all_pages_by_label(
+                label,
+                start=start,
+                limit=self.limit,
+            )  # , expand="body.view.value"
             if not pages:
                 break
 
-            pages_info += [{
-                'page_id': page.metadata['id'],
-                'page_title': page.metadata['title'],
-                'page_url': page.metadata['source'],
-                'content': page.page_content
-            } for page in self.get_pages_by_id([page["id"] for page in pages])]
+            # Collect only ids we haven't processed yet to avoid
+            # calling get_page_by_id multiple times for the same
+            # Confluence page.
+            new_ids: List[str] = []
+            for p in pages:
+                page_id = p["id"] if isinstance(p, dict) else getattr(p, "id", None)
+                if page_id is None:
+                    continue
+                if page_id in seen_ids:
+                    continue
+                seen_ids.add(page_id)
+                new_ids.append(page_id)
+
+            if new_ids:
+                for page in self.get_pages_by_id(new_ids):
+                    meta = getattr(page, "metadata", {}) or {}
+                    page_id = meta.get("id")
+                    page_title = meta.get("title")
+                    page_url = meta.get("source")
+                    content = getattr(page, "page_content", None)
+
+                    if page_id is None:
+                        continue
+
+                    pages_info.append(
+                        {
+                            "page_id": page_id,
+                            "page_title": page_title,
+                            "page_url": page_url,
+                            "content": content,
+                        }
+                    )
+
+                    # Respect max_pages on unique pages collected.
+                    if len(pages_info) >= (self.max_pages or 0):
+                        break
+
+            # Advance the offset by the requested page size.
             start += self.limit
-        return pages_info
+
+            # Defensive break: if the API returns fewer items than
+            # requested, there are likely no more pages to fetch.
+            if len(pages) < self.limit:
+                break
+
+        # Slice as an extra safety net in case of any race conditions
+        # around the max_pages guard in the loop above.
+        return pages_info[: (self.max_pages or len(pages_info))]
 
     def is_public_page(self, page: dict) -> bool:
         """Check if a page is publicly accessible."""
@@ -1821,3 +1869,4 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 "args_schema": GetPageAttachmentsInput,
             }
         ]
+
