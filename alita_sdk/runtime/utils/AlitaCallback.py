@@ -23,8 +23,44 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
         self.tokens_out = 0
         self.pending_llm_requests = defaultdict(int)
         self.current_model_name = 'gpt-4'
+        self._event_queue = []  # Queue for events when context is unavailable
         #
         super().__init__()
+
+    def _has_streamlit_context(self) -> bool:
+        """Check if Streamlit context is available in the current thread."""
+        try:
+            # Try to import streamlit runtime context checker
+            from streamlit.runtime.scriptrunner import get_script_run_ctx
+            ctx = get_script_run_ctx()
+            return ctx is not None
+        except (ImportError, Exception) as e:
+            if self.debug:
+                log.debug(f"Streamlit context check failed: {e}")
+            return False
+
+    def _safe_streamlit_call(self, func, *args, **kwargs):
+        """Safely execute a Streamlit UI operation, handling missing context gracefully."""
+        if not self._has_streamlit_context():
+            func_name = getattr(func, '__name__', str(func))
+            if self.debug:
+                log.warning(f"Streamlit context not available for {func_name}, queueing event")
+            # Store the event for potential replay when context is available
+            self._event_queue.append({
+                'func': func_name,
+                'args': args,
+                'kwargs': kwargs,
+                'timestamp': datetime.now(tz=timezone.utc)
+            })
+            return None
+
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            func_name = getattr(func, '__name__', str(func))
+            # Handle any Streamlit-specific exceptions gracefully
+            log.warning(f"Streamlit operation {func_name} failed: {e}")
+            return None
 
     #
     # Chain
@@ -76,10 +112,14 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
             json.dumps(payload, ensure_ascii=False, default=lambda o: str(o))
         )
 
-        self.callback_state[str(run_id)] = self.st.status(
-            f"Running {payload.get('tool_name')}...", expanded=True
+        status_widget = self._safe_streamlit_call(
+            self.st.status,
+            f"Running {payload.get('tool_name')}...",
+            expanded=True
         )
-        self.callback_state[str(run_id)].write(f"Tool inputs: {payload}")
+        if status_widget:
+            self.callback_state[str(run_id)] = status_widget
+            self._safe_streamlit_call(status_widget.write, f"Tool inputs: {payload}")
 
     def on_tool_start(self, *args, run_id: UUID, **kwargs):
         """ Callback """
@@ -95,8 +135,15 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
             "tool_inputs": kwargs.get('inputs')
         }
         payload = json.loads(json.dumps(payload, ensure_ascii=False, default=lambda o: str(o)))
-        self.callback_state[tool_run_id] = self.st.status(f"Running {tool_name}...", expanded=True)
-        self.callback_state[tool_run_id].write(f"Tool inputs: {kwargs.get('inputs')}")
+
+        status_widget = self._safe_streamlit_call(
+            self.st.status,
+            f"Running {tool_name}...",
+            expanded=True
+        )
+        if status_widget:
+            self.callback_state[tool_run_id] = status_widget
+            self._safe_streamlit_call(status_widget.write, f"Tool inputs: {kwargs.get('inputs')}")
 
     def on_tool_end(self, *args, run_id: UUID, **kwargs):
         """ Callback """
@@ -104,11 +151,16 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
             log.info("on_tool_end(%s, %s)", args, kwargs)
         tool_run_id = str(run_id)
         tool_output = args[0]
-        if self.callback_state[tool_run_id]:
-            self.callback_state[tool_run_id].write(f"Tool output: {tool_output}")
-            self.callback_state[tool_run_id].update(label=f"Completed {kwargs.get('name')}", state="complete", expanded=False)
+        if self.callback_state.get(tool_run_id):
+            status_widget = self.callback_state[tool_run_id]
+            self._safe_streamlit_call(status_widget.write, f"Tool output: {tool_output}")
+            self._safe_streamlit_call(
+                status_widget.update,
+                label=f"Completed {kwargs.get('name')}",
+                state="complete",
+                expanded=False
+            )
             self.callback_state.pop(tool_run_id, None)
-            del self.callback_state[run_id]
 
     def on_tool_error(self, *args, run_id: UUID, **kwargs):
         """ Callback """
@@ -116,9 +168,19 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
             log.info("on_tool_error(%s, %s)", args, kwargs)
         tool_run_id = str(run_id)
         tool_exception = args[0]
-        self.callback_state[tool_run_id].write(f"{traceback.format_exception(tool_exception)}")
-        self.callback_state[tool_run_id].update(label=f"Error {kwargs.get('name')}", state="error", expanded=False)
-        self.callback_state.pop(tool_run_id, None)
+        if self.callback_state.get(tool_run_id):
+            status_widget = self.callback_state[tool_run_id]
+            self._safe_streamlit_call(
+                status_widget.write,
+                f"{traceback.format_exception(tool_exception)}"
+            )
+            self._safe_streamlit_call(
+                status_widget.update,
+                label=f"Error {kwargs.get('name')}",
+                state="error",
+                expanded=False
+            )
+            self.callback_state.pop(tool_run_id, None)
 
     #
     # Agent
@@ -156,8 +218,14 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
         self.current_model_name = metadata.get('ls_model_name', self.current_model_name)
         llm_run_id = str(run_id)
 
-        self.callback_state[llm_run_id] = self.st.status(f"Running LLM ...", expanded=True)
-        self.callback_state[llm_run_id].write(f"LLM inputs: {messages}")
+        status_widget = self._safe_streamlit_call(
+            self.st.status,
+            f"Running LLM ...",
+            expanded=True
+        )
+        if status_widget:
+            self.callback_state[llm_run_id] = status_widget
+            self._safe_streamlit_call(status_widget.write, f"LLM inputs: {messages}")
 
     def on_llm_start(self, *args, **kwargs):
         """ Callback """
@@ -178,16 +246,27 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
         content = None
         if chunk:
             content = chunk.text
-        self.callback_state[str(run_id)].write(content)
+
+        llm_run_id = str(run_id)
+        if self.callback_state.get(llm_run_id):
+            status_widget = self.callback_state[llm_run_id]
+            self._safe_streamlit_call(status_widget.write, content)
 
     def on_llm_error(self, *args, run_id: UUID, **kwargs):
         """ Callback """
         if self.debug:
             log.error("on_llm_error(%s, %s)", args, kwargs)
         llm_run_id = str(run_id)
-        self.callback_state[llm_run_id].write(f"on_llm_error({args}, {kwargs})")
-        self.callback_state[llm_run_id].update(label=f"Error {kwargs.get('name')}", state="error", expanded=False)
-        self.callback_state.pop(llm_run_id, None)
+        if self.callback_state.get(llm_run_id):
+            status_widget = self.callback_state[llm_run_id]
+            self._safe_streamlit_call(status_widget.write, f"on_llm_error({args}, {kwargs})")
+            self._safe_streamlit_call(
+                status_widget.update,
+                label=f"Error {kwargs.get('name')}",
+                state="error",
+                expanded=False
+            )
+            self.callback_state.pop(llm_run_id, None)
         #
         # exception = args[0]
         # FIXME: should we emit an error here too?
@@ -205,5 +284,12 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
         if self.debug:
             log.debug("on_llm_end(%s, %s)", response, kwargs)
         llm_run_id = str(run_id)
-        self.callback_state[llm_run_id].update(label=f"Completed LLM call", state="complete", expanded=False)
-        self.callback_state.pop(llm_run_id, None)
+        if self.callback_state.get(llm_run_id):
+            status_widget = self.callback_state[llm_run_id]
+            self._safe_streamlit_call(
+                status_widget.update,
+                label=f"Completed LLM call",
+                state="complete",
+                expanded=False
+            )
+            self.callback_state.pop(llm_run_id, None)
