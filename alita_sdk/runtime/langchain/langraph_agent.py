@@ -635,6 +635,7 @@ def create_graph(
                     output_variables=output_vars,
                     input_variables=node.get('input', ['messages']),
                     structured_output=node.get('structured_output', False),
+                    tool_execution_timeout=node.get('tool_execution_timeout', 900),
                     available_tools=available_tools,
                     tool_names=tool_names,
                     steps_limit=kwargs.get('steps_limit', 25)
@@ -1010,7 +1011,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             thread_id: str,
             current_recursion_limit: int,
     ) -> dict:
-        """Handle GraphRecursionError by returning a soft\-boundary response."""
+        """Handle GraphRecursionError by returning a soft-boundary response."""
         config_state = self.get_state(config)
         is_execution_finished = False
 

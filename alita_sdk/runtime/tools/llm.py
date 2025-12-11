@@ -34,6 +34,7 @@ class LLMNode(BaseTool):
     available_tools: Optional[List[BaseTool]] = Field(default=None, description='Available tools for binding')
     tool_names: Optional[List[str]] = Field(default=None, description='Specific tool names to filter')
     steps_limit: Optional[int] = Field(default=25, description='Maximum steps for tool execution')
+    tool_execution_timeout: Optional[int] = Field(default=900, description='Timeout (seconds) for tool execution. Default is 15 minutes.')
 
     def get_filtered_tools(self) -> List[BaseTool]:
         """
@@ -243,40 +244,108 @@ class LLMNode(BaseTool):
         
         For MCP tools with persistent sessions, we reuse the same event loop
         that was used to create the MCP client and sessions (set by CLI).
+
+        When called from within a running event loop (e.g., nested LLM nodes),
+        we need to handle this carefully to avoid "event loop already running" errors.
+
+        This method handles three scenarios:
+        1. Called from async context (event loop running) - creates new thread with new loop
+        2. Called from sync context with persistent loop - reuses persistent loop
+        3. Called from sync context without loop - creates new persistent loop
         """
+        import threading
+
+        # Check if there's a running loop
         try:
-            loop = asyncio.get_running_loop()
-            # Already in async context - run in thread with new loop
-            import threading
-            
+            running_loop = asyncio.get_running_loop()
+            loop_is_running = True
+            logger.debug(f"Detected running event loop (id: {id(running_loop)}), executing tool calls in separate thread")
+        except RuntimeError:
+            loop_is_running = False
+
+        # Scenario 1: Loop is currently running - MUST use thread
+        if loop_is_running:
             result_container = []
-            
+            exception_container = []
+
             def run_in_thread():
+                """Run coroutine in a new thread with its own event loop."""
                 new_loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(new_loop)
                 try:
-                    result_container.append(new_loop.run_until_complete(coro))
+                    result = new_loop.run_until_complete(coro)
+                    result_container.append(result)
+                except Exception as e:
+                    logger.debug(f"Exception in async thread: {e}")
+                    exception_container.append(e)
                 finally:
                     new_loop.close()
-            
-            thread = threading.Thread(target=run_in_thread)
+                    asyncio.set_event_loop(None)
+
+            thread = threading.Thread(target=run_in_thread, daemon=False)
             thread.start()
-            thread.join()
+            thread.join(timeout=self.tool_execution_timeout)  # 15 minute timeout for safety
+
+            if thread.is_alive():
+                logger.error("Async operation timed out after 5 minutes")
+                raise TimeoutError("Async operation in thread timed out")
+
+            # Re-raise exception if one occurred
+            if exception_container:
+                raise exception_container[0]
+
             return result_container[0] if result_container else None
-            
-        except RuntimeError:
-            # No event loop running - use/create persistent loop
-            # This loop is shared with MCP session creation for stateful tools
+
+        # Scenario 2 & 3: No loop running - use or create persistent loop
+        else:
+            # Get or create persistent loop
             if not hasattr(self.__class__, '_persistent_loop') or \
                self.__class__._persistent_loop is None or \
                self.__class__._persistent_loop.is_closed():
                 self.__class__._persistent_loop = asyncio.new_event_loop()
                 logger.debug("Created persistent event loop for async tools")
-            
+
             loop = self.__class__._persistent_loop
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(coro)
-    
+
+            # Double-check the loop is not running (safety check)
+            if loop.is_running():
+                logger.debug("Persistent loop is unexpectedly running, using thread execution")
+
+                result_container = []
+                exception_container = []
+
+                def run_in_thread():
+                    """Run coroutine in a new thread with its own event loop."""
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        result = new_loop.run_until_complete(coro)
+                        result_container.append(result)
+                    except Exception as ex:
+                        logger.debug(f"Exception in async thread: {ex}")
+                        exception_container.append(ex)
+                    finally:
+                        new_loop.close()
+                        asyncio.set_event_loop(None)
+
+                thread = threading.Thread(target=run_in_thread, daemon=False)
+                thread.start()
+                thread.join(timeout=self.tool_execution_timeout)
+
+                if thread.is_alive():
+                    logger.error("Async operation timed out after 15 minutes")
+                    raise TimeoutError("Async operation in thread timed out")
+
+                if exception_container:
+                    raise exception_container[0]
+
+                return result_container[0] if result_container else None
+            else:
+                # Loop exists but not running - safe to use run_until_complete
+                logger.debug(f"Using persistent loop (id: {id(loop)}) with run_until_complete")
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(coro)
+
     async def _arun(self, *args, **kwargs):
         # Legacy async support
         return self.invoke(kwargs, **kwargs)
@@ -324,12 +393,14 @@ class LLMNode(BaseTool):
                         
                         # Try async invoke first (for MCP tools), fallback to sync
                         tool_result = None
-                        try:
-                            # Try async invocation first
-                            tool_result = await tool_to_execute.ainvoke(tool_args, config=config)
-                        except NotImplementedError:
-                            # Tool doesn't support async, use sync invoke
-                            logger.debug(f"Tool '{tool_name}' doesn't support async, using sync invoke")
+                        if hasattr(tool_to_execute, 'ainvoke'):
+                            try:
+                                tool_result = await tool_to_execute.ainvoke(tool_args, config=config)
+                            except (NotImplementedError, AttributeError):
+                                logger.debug(f"Tool '{tool_name}' ainvoke failed, falling back to sync invoke")
+                                tool_result = tool_to_execute.invoke(tool_args, config=config)
+                        else:
+                            # Sync-only tool
                             tool_result = tool_to_execute.invoke(tool_args, config=config)
 
                         # Create tool message with result - preserve structured content
