@@ -46,19 +46,16 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         result = self.artifact.create(sanitized_filename, filedata, bucket_name)
         
         # Dispatch custom event for file creation
-        self._log_tool_event(
-            tool_name="file_modified",
-            message="""
-            {
-                "message": f"File '{sanitized_filename}' created successfully",
-                "filename": sanitized_filename,
-                "tool_name": "createFile",
-                "toolkit": "artifact",
-                "operation_type": "create",
-                "meta": {
-                    "bucket": bucket_name or self.bucket
-                }
-            }""")
+        dispatch_custom_event("file_modified", {
+            "message": f"File '{filename}' created successfully",
+            "filename": filename,
+            "tool_name": "createFile",
+            "toolkit": "artifact",
+            "operation_type": "create",
+            "meta": {
+                "bucket": bucket_name or self.bucket
+            }
+        })
 
         return result
     
