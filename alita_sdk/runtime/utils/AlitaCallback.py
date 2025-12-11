@@ -130,10 +130,32 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
         tool_run_id = str(run_id)
         
         # Extract metadata from tool if available (from BaseAction.metadata)
-        # kwargs may contain 'serialized' with full tool info including metadata
+        # Try multiple sources for metadata with toolkit_name
         tool_meta = args[0].copy()
+        
+        # Source 1: kwargs['serialized']['metadata'] - LangChain's full tool serialization
         if 'serialized' in kwargs and 'metadata' in kwargs['serialized']:
             tool_meta['metadata'] = kwargs['serialized']['metadata']
+            log.info(f"[METADATA] Extracted from serialized: {kwargs['serialized']['metadata']}")
+        # Source 2: Check if metadata is directly in args[0] (some LangChain versions)
+        elif 'metadata' in args[0]:
+            tool_meta['metadata'] = args[0]['metadata']
+            log.info(f"[METADATA] Extracted from args[0]: {args[0]['metadata']}")
+        else:
+            log.info(f"[METADATA] No metadata found. args[0] keys: {list(args[0].keys())}, kwargs keys: {list(kwargs.keys())}")
+            # Fallback: Try to extract toolkit_name from description
+            description = args[0].get('description', '')
+            if description:
+                import re
+                # Try pattern 1: [Toolkit: name]
+                match = re.search(r'\[Toolkit:\s*([^\]]+)\]', description)
+                if not match:
+                    # Try pattern 2: Toolkit: name at start or end
+                    match = re.search(r'(?:^|\n)Toolkit:\s*([^\n]+)', description)
+                if match:
+                    toolkit_name = match.group(1).strip()
+                    tool_meta['metadata'] = {'toolkit_name': toolkit_name}
+                    log.info(f"[METADATA] Extracted toolkit_name from description: {toolkit_name}")
         
         payload = {
             "tool_name": tool_name,
