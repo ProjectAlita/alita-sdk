@@ -29,6 +29,10 @@ class BigQueryAction(BaseTool):
     ) -> str:
         """Use the GitHub API to run an operation."""
         try:
-            return self.api_wrapper.run(self.mode, *args, **kwargs)
+            # Strip numeric suffix added for deduplication (_2, _3, etc.)
+            # to get the original tool name that exists in the wrapper
+            import re
+            mode = re.sub(r'_\d+$', '', self.mode) if self.mode else self.mode
+            return self.api_wrapper.run(mode, *args, **kwargs)
         except Exception as e:
             return f"Error: {format_exc()}"

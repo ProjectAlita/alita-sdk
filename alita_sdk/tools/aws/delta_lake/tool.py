@@ -29,7 +29,11 @@ class DeltaLakeAction(BaseTool):
     ) -> str:
         """Use the Delta Lake API to run an operation."""
         try:
+            # Strip numeric suffix added for deduplication (_2, _3, etc.)
+            # to get the original tool name that exists in the wrapper
+            import re
+            tool_name = re.sub(r'_\d+$', '', self.name)
             # Use the tool name to dispatch to the correct API wrapper method
-            return self.api_wrapper.run(self.name, *args, **kwargs)
+            return self.api_wrapper.run(tool_name, *args, **kwargs)
         except Exception as e:
             return f"Error: {format_exc()}"
