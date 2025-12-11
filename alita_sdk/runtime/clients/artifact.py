@@ -38,8 +38,8 @@ class Artifact:
         if len(data) == 0:
             # empty file might be created
             return ""
-        if isinstance(data, dict) and data['error']:
-            return f"{data['error']}. {data['content'] if data['content'] else ''}"
+        if isinstance(data, dict) and data.get('error'):
+            return f"{data['error']}. {data.get('content', '')}"
         detected = chardet.detect(data)
         if detected['encoding'] is not None:
             try:
