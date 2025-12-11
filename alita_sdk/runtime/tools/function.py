@@ -107,7 +107,8 @@ class FunctionTool(BaseTool):
 
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
-            code = func_args['code']
+            # replace new lines in strings in code block
+            code = func_args['code'].replace('\\n', '\\\\n')
             func_args['code'] = f"{self._prepare_pyodide_input(state)}\n{code}"
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
