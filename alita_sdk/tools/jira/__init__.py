@@ -116,7 +116,7 @@ class JiraToolkit(BaseToolkit):
             description = tool["description"]
             if toolkit_name:
                 description = f"Toolkit: {toolkit_name}\n{description}"
-            description = f"Jira instance: {jira_api_wrapper.url}\n{description}"
+            description = f"Jira instance: {jira_api_wrapper.base_url}\n{description}"
             description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=jira_api_wrapper,
