@@ -174,12 +174,14 @@ class LLMNode(BaseTool):
                     for key, value in (self.structured_output_dict or {}).items()
                 }
                 # Add default output field for proper response to user
-                struct_params['elitea_response'] = {'description': 'final output to user', 'type': 'str'}
+                struct_params['elitea_response'] = {
+                    'description': 'final output to user (summarized output from LLM)', 'type': 'str',
+                    "default": None}
                 struct_model = create_pydantic_model(f"LLMOutput", struct_params)
-                completion = llm_client.invoke(messages, config=config)
-                if hasattr(completion, 'tool_calls') and completion.tool_calls:
+                initial_completion = llm_client.invoke(messages, config=config)
+                if hasattr(initial_completion, 'tool_calls') and initial_completion.tool_calls:
                     new_messages, _ = self._run_async_in_sync_context(
-                        self.__perform_tool_calling(completion, messages, llm_client, config)
+                        self.__perform_tool_calling(initial_completion, messages, llm_client, config)
                     )
                     llm = self.__get_struct_output_model(llm_client, struct_model)
                     completion = llm.invoke(new_messages, config=config)
@@ -193,7 +195,8 @@ class LLMNode(BaseTool):
                 if result.get('messages') and isinstance(result['messages'], list):
                     result['messages'] = [{'role': 'assistant', 'content': '\n'.join(result['messages'])}]
                 else:
-                    result['messages'] = messages + [AIMessage(content=result.get(ELITEA_RS, ''))]
+                    result['messages'] = messages + [
+                        AIMessage(content=result.get(ELITEA_RS, '') or initial_completion.content)]
 
                 return result
             else:

@@ -208,7 +208,12 @@ def safe_format(template, mapping):
 def create_pydantic_model(model_name: str, variables: dict[str, dict]):
     fields = {}
     for var_name, var_data in variables.items():
-        fields[var_name] = (parse_pydantic_type(var_data['type']), Field(description=var_data.get('description', None)))
+        if 'default' in var_data:
+            # allow user to define if it is required or not
+            fields[var_name] = (parse_pydantic_type(var_data['type']),
+                                Field(description=var_data.get('description', None), default=var_data.get('default')))
+        else:
+            fields[var_name] = (parse_pydantic_type(var_data['type']), Field(description=var_data.get('description', None)))
     return create_model(model_name, **fields)
 
 def parse_pydantic_type(type_name: str):
