@@ -21,6 +21,7 @@ from .AlitaDocxMammothLoader import AlitaDocxMammothLoader
 from .AlitaExcelLoader import AlitaExcelLoader
 from .AlitaImageLoader import AlitaImageLoader
 from .AlitaJSONLoader import AlitaJSONLoader
+from .AlitaJSONLinesLoader import AlitaJSONLinesLoader
 from .AlitaPDFLoader import AlitaPDFLoader
 from .AlitaPowerPointLoader import AlitaPowerPointLoader
 from .AlitaTextLoader import AlitaTextLoader
@@ -208,7 +209,7 @@ document_loaders_map = {
         'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.jsonl': {
-        'class': AirbyteJSONLoader,
+        'class': AlitaJSONLinesLoader,
         'mime_type': 'application/jsonl',
         'is_multimodal_processing': False,
         'kwargs': {},

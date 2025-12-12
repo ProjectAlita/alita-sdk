@@ -32,6 +32,8 @@ class AlitaJSONLoader(BaseLoader):
             elif hasattr(self, 'file_content') and self.file_content:
                 if isinstance(self.file_content, bytes):
                     return json.loads(self.file_content.decode(self.encoding))
+                elif isinstance(self.file_content, str):
+                    return json.loads(self.file_content)
                 else:
                     return json.load(self.file_content)
             else:
@@ -45,7 +47,6 @@ class AlitaJSONLoader(BaseLoader):
                         try:
                             with open(self.file_path, encoding=encoding.encoding) as f:
                                 return f.read()
-                            break
                         except UnicodeDecodeError:
                             continue
                 elif hasattr(self, 'file_content') and self.file_content:
