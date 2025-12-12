@@ -43,6 +43,23 @@ class McpAuthorizationRequired(ToolException):
         }
 
 
+def extract_authorization_uri(www_authenticate: Optional[str]) -> Optional[str]:
+    """
+    Extract authorization_uri from WWW-Authenticate header.
+    This points directly to the OAuth authorization server metadata URL.
+    Should be used before falling back to resource_metadata.
+    """
+    if not www_authenticate:
+        return None
+    
+    # Look for authorization_uri="<url>" in the header
+    match = re.search(r'authorization_uri\s*=\s*\"?([^\", ]+)\"?', www_authenticate)
+    if match:
+        return match.group(1)
+    
+    return None
+
+
 def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: Optional[str] = None) -> Optional[str]:
     """
     Pull the resource_metadata URL from a WWW-Authenticate header if present.
@@ -62,15 +79,33 @@ def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: O
     # or using well-known OAuth discovery endpoints directly
     return None
 
-
-def fetch_oauth_authorization_server_metadata(base_url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+def fetch_oauth_authorization_server_metadata(url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
     """
     Fetch OAuth authorization server metadata from well-known endpoints.
-    Tries both oauth-authorization-server and openid-configuration discovery endpoints.
+    
+    Args:
+        url: Either a full well-known URL (e.g., https://api.figma.com/.well-known/oauth-authorization-server)
+             or a base URL (e.g., https://api.figma.com) where we'll try discovery endpoints.
+        timeout: Request timeout in seconds.
+    
+    Returns:
+        OAuth authorization server metadata dict, or None if not found.
     """
+    # If the URL is already a .well-known endpoint, try it directly first
+    if '/.well-known/' in url:
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as exc:
+            logger.debug(f"Failed to fetch OAuth metadata from {url}: {exc}")
+        # If direct fetch failed, don't try other endpoints
+        return None
+    
+    # Otherwise, try standard discovery endpoints
     discovery_endpoints = [
-        f"{base_url}/.well-known/oauth-authorization-server",
-        f"{base_url}/.well-known/openid-configuration",
+        f"{url}/.well-known/oauth-authorization-server",
+        f"{url}/.well-known/openid-configuration",
     ]
     
     for endpoint in discovery_endpoints:
@@ -323,4 +358,90 @@ def refresh_oauth_token(
         error_msg = token_data.get("error_description") or token_data.get("error") or response.text
         logger.error(f"MCP OAuth: token refresh failed - {response.status_code}: {error_msg}")
         raise ValueError(f"Token refresh failed: {error_msg}")
+
+
+def register_dynamic_client(
+    registration_endpoint: str,
+    redirect_uris: list,
+    client_name: Optional[str] = None,
+    grant_types: Optional[list] = None,
+    response_types: Optional[list] = None,
+    token_endpoint_auth_method: Optional[str] = None,
+    application_type: Optional[str] = None,
+    scope: Optional[str] = None,
+    software_id: Optional[str] = None,
+    software_version: Optional[str] = None,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    """
+    Register a dynamic OAuth client with the authorization server.
+    
+    This implements RFC 7591 (OAuth 2.0 Dynamic Client Registration).
+    Used when the MCP server requires DCR instead of pre-registered clients.
+    
+    Args:
+        registration_endpoint: OAuth client registration endpoint URL
+        redirect_uris: List of redirect URIs for the client
+        client_name: Human-readable name for the client (optional)
+        grant_types: List of grant types the client will use (default: authorization_code, refresh_token)
+        response_types: List of response types the client will use (default: code)
+        token_endpoint_auth_method: Authentication method for token endpoint (default: none for public clients)
+        application_type: Application type per RFC 7591 - 'web' or 'native' (default: web)
+        scope: Space-separated scopes the client will request (optional)
+        software_id: Unique identifier for the client software (optional)
+        software_version: Version of the client software (optional)
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Client registration response containing client_id, client_secret (if issued), etc.
+        
+    Raises:
+        requests.RequestException: If the HTTP request fails
+        ValueError: If the registration fails
+    """
+    # Build the registration request body per RFC 7591
+    registration_body = {
+        "redirect_uris": redirect_uris,
+        "grant_types": grant_types or ["authorization_code", "refresh_token"],
+        "response_types": response_types or ["code"],
+        "token_endpoint_auth_method": token_endpoint_auth_method or "none",
+        "application_type": application_type or "web",
+    }
+    
+    if client_name:
+        registration_body["client_name"] = client_name
+    if scope:
+        registration_body["scope"] = scope
+    if software_id:
+        registration_body["software_id"] = software_id
+    if software_version:
+        registration_body["software_version"] = software_version
+
+    logger.info(f"MCP OAuth: registering dynamic client at {registration_endpoint}")
+    logger.debug(f"MCP OAuth DCR request: redirect_uris={redirect_uris}, client_name={client_name}")
+    
+    response = requests.post(
+        registration_endpoint,
+        json=registration_body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        timeout=timeout
+    )
+    
+    # Parse the response
+    try:
+        registration_data = response.json()
+    except Exception:
+        logger.error(f"MCP OAuth DCR: failed to parse response as JSON: {response.text[:500]}")
+        raise ValueError(f"DCR failed: invalid response format")
+    
+    if response.ok:
+        logger.info(f"MCP OAuth DCR: registration successful, client_id={registration_data.get('client_id')}")
+        return registration_data
+    else:
+        error_msg = registration_data.get("error_description") or registration_data.get("error") or response.text
+        logger.error(f"MCP OAuth DCR: registration failed - {response.status_code}: {error_msg}")
+        raise ValueError(f"Dynamic client registration failed: {error_msg}")
 
