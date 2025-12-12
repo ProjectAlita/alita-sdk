@@ -168,7 +168,7 @@ def exchange_oauth_token(
     token_endpoint: str,
     code: str,
     redirect_uri: str,
-    client_id: str,
+    client_id: Optional[str] = None,
     client_secret: Optional[str] = None,
     code_verifier: Optional[str] = None,
     scope: Optional[str] = None,
@@ -184,7 +184,7 @@ def exchange_oauth_token(
         token_endpoint: OAuth token endpoint URL
         code: Authorization code from OAuth provider
         redirect_uri: Redirect URI used in authorization request
-        client_id: OAuth client ID
+        client_id: OAuth client ID (optional for DCR/public clients)
         client_secret: OAuth client secret (optional for public clients)
         code_verifier: PKCE code verifier (optional)
         scope: OAuth scope (optional)
@@ -196,15 +196,22 @@ def exchange_oauth_token(
     Raises:
         requests.RequestException: If the HTTP request fails
         ValueError: If the token exchange fails
+    
+    Note:
+        client_id may be optional for:
+        - Dynamic Client Registration (DCR): client_id may be in the code
+        - OIDC public clients: some providers don't require it
+        - Some MCP servers handle auth differently
     """
     # Build the token request body
     token_body = {
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "client_id": client_id,
     }
     
+    if client_id:
+        token_body["client_id"] = client_id
     if client_secret:
         token_body["client_secret"] = client_secret
     if code_verifier:
@@ -241,4 +248,79 @@ def exchange_oauth_token(
         error_msg = token_data.get("error_description") or token_data.get("error") or response.text
         logger.error(f"MCP OAuth: token exchange failed - {response.status_code}: {error_msg}")
         raise ValueError(f"Token exchange failed: {error_msg}")
+
+
+def refresh_oauth_token(
+    token_endpoint: str,
+    refresh_token: str,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    scope: Optional[str] = None,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    """
+    Refresh an OAuth access token using a refresh token.
+    
+    Args:
+        token_endpoint: OAuth token endpoint URL
+        refresh_token: Refresh token from previous authorization
+        client_id: OAuth client ID (optional for DCR/public clients)
+        client_secret: OAuth client secret (optional for public clients)
+        scope: OAuth scope (optional)
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Token response from OAuth provider containing access_token, etc.
+        May also include a new refresh_token depending on the provider.
+        
+    Raises:
+        requests.RequestException: If the HTTP request fails
+        ValueError: If the token refresh fails
+    
+    Note:
+        client_id may be optional for:
+        - Dynamic Client Registration (DCR): client_id embedded in refresh_token
+        - OIDC public clients: some providers don't require it
+        - Some MCP servers handle auth differently
+    """
+    token_body = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    
+    if client_id:
+        token_body["client_id"] = client_id
+    if client_secret:
+        token_body["client_secret"] = client_secret
+    if scope:
+        token_body["scope"] = scope
+
+    logger.info(f"MCP OAuth: refreshing token at {token_endpoint}")
+    
+    response = requests.post(
+        token_endpoint,
+        data=token_body,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+        timeout=timeout
+    )
+    
+    # Try to parse as JSON
+    try:
+        token_data = response.json()
+    except Exception:
+        # Some providers return URL-encoded response
+        from urllib.parse import parse_qs
+        token_data = {k: v[0] if len(v) == 1 else v 
+                     for k, v in parse_qs(response.text).items()}
+    
+    if response.ok:
+        logger.info("MCP OAuth: token refresh successful")
+        return token_data
+    else:
+        error_msg = token_data.get("error_description") or token_data.get("error") or response.text
+        logger.error(f"MCP OAuth: token refresh failed - {response.status_code}: {error_msg}")
+        raise ValueError(f"Token refresh failed: {error_msg}")
 
