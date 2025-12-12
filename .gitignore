@@ -176,3 +176,4 @@ node_modules/
 .serena/
 .alita/tests/results/*
 !.alita/tests/results/.gitkeep
+.alita/plans/*
