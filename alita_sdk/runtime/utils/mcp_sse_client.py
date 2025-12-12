@@ -71,6 +71,7 @@ class McpSseClient:
                     McpAuthorizationRequired,
                     canonical_resource,
                     extract_resource_metadata_url,
+                    extract_authorization_uri,
                     fetch_resource_metadata_async,
                     infer_authorization_servers_from_realm,
                     fetch_oauth_authorization_server_metadata
@@ -79,13 +80,41 @@ class McpSseClient:
                 auth_header = self._stream_response.headers.get('WWW-Authenticate', '')
                 resource_metadata_url = extract_resource_metadata_url(auth_header, self.url)
                 
+                # First, try authorization_uri from WWW-Authenticate header (preferred)
+                authorization_uri = extract_authorization_uri(auth_header)
+                
                 metadata = None
-                if resource_metadata_url:
-                    metadata = await fetch_resource_metadata_async(
-                        resource_metadata_url,
-                        session=self._stream_session,
-                        timeout=30
-                    )
+                if authorization_uri:
+                    # Fetch OAuth metadata directly from authorization_uri
+                    auth_server_metadata = fetch_oauth_authorization_server_metadata(authorization_uri, timeout=30)
+                    if auth_server_metadata:
+                        # Extract base authorization server URL from the issuer or the well-known URL
+                        base_auth_server = auth_server_metadata.get('issuer')
+                        if not base_auth_server and '/.well-known/' in authorization_uri:
+                            base_auth_server = authorization_uri.split('/.well-known/')[0]
+                        
+                        metadata = {
+                            'authorization_servers': [base_auth_server] if base_auth_server else [authorization_uri],
+                            'oauth_authorization_server': auth_server_metadata
+                        }
+                        logger.info(f"[MCP SSE Client] Using authorization_uri: {authorization_uri}, base: {base_auth_server}")
+                
+                # Fall back to resource_metadata if authorization_uri didn't work
+                if not metadata:
+                    if resource_metadata_url:
+                        metadata = await fetch_resource_metadata_async(
+                            resource_metadata_url,
+                            session=self._stream_session,
+                            timeout=30
+                        )
+                        # If we got resource_metadata, also fetch oauth_authorization_server
+                        if metadata and metadata.get('authorization_servers'):
+                            auth_server_metadata = fetch_oauth_authorization_server_metadata(
+                                metadata['authorization_servers'][0], timeout=30
+                            )
+                            if auth_server_metadata:
+                                metadata['oauth_authorization_server'] = auth_server_metadata
+                                logger.info(f"[MCP SSE Client] Fetched OAuth metadata from resource_metadata")
                 
                 # Infer authorization servers if not in metadata
                 if not metadata or not metadata.get('authorization_servers'):

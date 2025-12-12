@@ -43,6 +43,23 @@ class McpAuthorizationRequired(ToolException):
         }
 
 
+def extract_authorization_uri(www_authenticate: Optional[str]) -> Optional[str]:
+    """
+    Extract authorization_uri from WWW-Authenticate header.
+    This points directly to the OAuth authorization server metadata URL.
+    Should be used before falling back to resource_metadata.
+    """
+    if not www_authenticate:
+        return None
+    
+    # Look for authorization_uri="<url>" in the header
+    match = re.search(r'authorization_uri\s*=\s*\"?([^\", ]+)\"?', www_authenticate)
+    if match:
+        return match.group(1)
+    
+    return None
+
+
 def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: Optional[str] = None) -> Optional[str]:
     """
     Pull the resource_metadata URL from a WWW-Authenticate header if present.
@@ -62,15 +79,33 @@ def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: O
     # or using well-known OAuth discovery endpoints directly
     return None
 
-
-def fetch_oauth_authorization_server_metadata(base_url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+def fetch_oauth_authorization_server_metadata(url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
     """
     Fetch OAuth authorization server metadata from well-known endpoints.
-    Tries both oauth-authorization-server and openid-configuration discovery endpoints.
+    
+    Args:
+        url: Either a full well-known URL (e.g., https://api.figma.com/.well-known/oauth-authorization-server)
+             or a base URL (e.g., https://api.figma.com) where we'll try discovery endpoints.
+        timeout: Request timeout in seconds.
+    
+    Returns:
+        OAuth authorization server metadata dict, or None if not found.
     """
+    # If the URL is already a .well-known endpoint, try it directly first
+    if '/.well-known/' in url:
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as exc:
+            logger.debug(f"Failed to fetch OAuth metadata from {url}: {exc}")
+        # If direct fetch failed, don't try other endpoints
+        return None
+    
+    # Otherwise, try standard discovery endpoints
     discovery_endpoints = [
-        f"{base_url}/.well-known/oauth-authorization-server",
-        f"{base_url}/.well-known/openid-configuration",
+        f"{url}/.well-known/oauth-authorization-server",
+        f"{url}/.well-known/openid-configuration",
     ]
     
     for endpoint in discovery_endpoints:
