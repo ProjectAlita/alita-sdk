@@ -85,6 +85,13 @@ from .ingestion import (
 # Retrieval Toolkit - for querying graphs
 from .retrieval import InventoryRetrievalApiWrapper
 
+# Toolkit utilities - for configuration and instantiation
+from .toolkit_utils import (
+    load_toolkit_config,
+    get_llm_for_config,
+    get_source_toolkit,
+)
+
 # Core graph types
 from .knowledge_graph import KnowledgeGraph, Citation
 
@@ -186,6 +193,11 @@ __all__ = [
     # Retrieval (toolkit)
     'InventoryRetrievalToolkit',
     'InventoryRetrievalApiWrapper',
+    
+    # Toolkit utilities
+    'load_toolkit_config',
+    'get_llm_for_config',
+    'get_source_toolkit',
     
     # Core types
     'KnowledgeGraph',

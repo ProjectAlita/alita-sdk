@@ -1048,209 +1048,26 @@ def _get_checkpoint_path(graph: str, source_name: str) -> str:
 
 
 def _load_toolkit_config(toolkit_path: str) -> Dict[str, Any]:
-    """
-    Load and parse a toolkit config JSON file.
-    
-    Supports environment variable substitution for values like ${GITHUB_PAT}.
-    """
-    with open(toolkit_path, 'r') as f:
-        config = json.load(f)
-    
-    # Recursively resolve environment variables
-    def resolve_env_vars(obj):
-        if isinstance(obj, str):
-            # Match ${VAR_NAME} pattern
-            pattern = r'\$\{([^}]+)\}'
-            matches = re.findall(pattern, obj)
-            for var_name in matches:
-                env_value = os.environ.get(var_name, '')
-                obj = obj.replace(f'${{{var_name}}}', env_value)
-            return obj
-        elif isinstance(obj, dict):
-            return {k: resolve_env_vars(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [resolve_env_vars(item) for item in obj]
-        return obj
-    
-    return resolve_env_vars(config)
+    """Deprecated: Use alita_sdk.community.inventory.toolkit_utils.load_toolkit_config instead."""
+    from alita_sdk.community.inventory.toolkit_utils import load_toolkit_config
+    return load_toolkit_config(toolkit_path)
 
 
 def _get_llm(ctx, model: Optional[str] = None, temperature: float = 0.0):
-    """Get LLM instance from Alita client context."""
+    """Deprecated: Use alita_sdk.community.inventory.toolkit_utils.get_llm_for_config instead."""
     from .cli import get_client
+    from alita_sdk.community.inventory.toolkit_utils import get_llm_for_config
     
-    # Get Alita client - this will raise ClickException if not configured
     client = get_client(ctx)
-    
-    # Get model name from parameter or default
-    model_name = model or 'gpt-4o-mini'
-    
-    # Use client.get_llm() which is the actual method
-    return client.get_llm(
-        model_name=model_name,
-        model_config={
-            'temperature': temperature,
-            'max_tokens': 4096
-        }
-    )
+    return get_llm_for_config(client, model=model, temperature=temperature)
 
 
 def _get_source_toolkit(toolkit_config: Dict[str, Any]):
-    """
-    Get configured source toolkit instance from toolkit config.
+    """Deprecated: Use alita_sdk.community.inventory.toolkit_utils.get_source_toolkit instead."""
+    from alita_sdk.community.inventory.toolkit_utils import get_source_toolkit
     
-    Uses the SDK's toolkit factory pattern - all toolkits extend BaseCodeToolApiWrapper
-    or BaseVectorStoreToolApiWrapper, which have loader() and chunker() methods.
-    
-    Also supports CLI-specific toolkits like 'filesystem' for local document loading.
-    
-    Args:
-        toolkit_config: Toolkit configuration dict with 'type' and settings
-        
-    Returns:
-        API wrapper instance with loader() method
-    """
-    source = toolkit_config.get('type')
-    if not source:
-        raise click.ClickException("Toolkit config missing 'type' field")
-    
-    # Handle filesystem type (CLI-specific, not in AVAILABLE_TOOLS)
-    if source == 'filesystem':
-        from .tools.filesystem import FilesystemApiWrapper
-        
-        base_directory = (
-            toolkit_config.get('base_directory') or
-            toolkit_config.get('path') or
-            toolkit_config.get('git_root_dir')
-        )
-        
-        if not base_directory:
-            raise click.ClickException(
-                "Filesystem toolkit requires 'base_directory' or 'path' field"
-            )
-        
-        return FilesystemApiWrapper(
-            base_directory=base_directory,
-            recursive=toolkit_config.get('recursive', True),
-            follow_symlinks=toolkit_config.get('follow_symlinks', False),
-        )
-    
-    # Handle standard SDK toolkits via AVAILABLE_TOOLS registry
-    from alita_sdk.tools import AVAILABLE_TOOLS
-    
-    # Check if toolkit type is available
-    if source not in AVAILABLE_TOOLS:
-        raise click.ClickException(
-            f"Unknown toolkit type: {source}. "
-            f"Available: {', '.join(list(AVAILABLE_TOOLS.keys()) + ['filesystem'])}"
-        )
-    
-    toolkit_info = AVAILABLE_TOOLS[source]
-    
-    # Get the toolkit class
-    if 'toolkit_class' not in toolkit_info:
-        raise click.ClickException(
-            f"Toolkit '{source}' does not have a toolkit_class registered"
-        )
-    
-    toolkit_class = toolkit_info['toolkit_class']
-    
-    # Build kwargs from toolkit config - we need to map config to API wrapper params
-    kwargs = dict(toolkit_config)
-    
-    # Remove fields that aren't needed for the API wrapper
-    kwargs.pop('type', None)
-    kwargs.pop('toolkit_name', None)
-    kwargs.pop('selected_tools', None)
-    kwargs.pop('excluded_tools', None)
-    
-    # Handle common config patterns - flatten nested configurations
-    config_key = f"{source}_configuration"
-    if config_key in kwargs:
-        nested_config = kwargs.pop(config_key)
-        if isinstance(nested_config, dict):
-            kwargs.update(nested_config)
-    
-    # Handle ADO-specific config pattern
-    if 'ado_configuration' in kwargs:
-        ado_config = kwargs.pop('ado_configuration')
-        if isinstance(ado_config, dict):
-            kwargs.update(ado_config)
-    
-    # Expand environment variables in string values (e.g., ${GITHUB_PAT})
-    def expand_env_vars(value):
-        """Recursively expand environment variables in values."""
-        if isinstance(value, str):
-            import re
-            # Match ${VAR} or $VAR patterns
-            pattern = r'\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)'
-            def replace(match):
-                var_name = match.group(1) or match.group(2)
-                return os.environ.get(var_name, match.group(0))
-            return re.sub(pattern, replace, value)
-        elif isinstance(value, dict):
-            return {k: expand_env_vars(v) for k, v in value.items()}
-        elif isinstance(value, list):
-            return [expand_env_vars(v) for v in value]
-        return value
-    
-    kwargs = expand_env_vars(kwargs)
-    
-    # Map common field names to API wrapper expected names
-    # GitHub: personal_access_token -> github_access_token
-    if 'personal_access_token' in kwargs and source == 'github':
-        kwargs['github_access_token'] = kwargs.pop('personal_access_token')
-    
-    # GitHub: repository -> github_repository
-    if 'repository' in kwargs and source == 'github':
-        kwargs['github_repository'] = kwargs.pop('repository')
-    
-    # Ensure active_branch has a default
-    if 'active_branch' not in kwargs:
-        kwargs['active_branch'] = kwargs.get('base_branch', 'main')
-    
-    # Get the API wrapper class from the toolkit
-    # Introspect toolkit to find the API wrapper class it uses
     try:
-        # Try to get the API wrapper class from the toolkit's module
-        import importlib
-        module_path = f"alita_sdk.tools.{source}.api_wrapper"
-        try:
-            wrapper_module = importlib.import_module(module_path)
-        except ImportError:
-            # Try alternate path for nested modules
-            module_path = f"alita_sdk.tools.{source.replace('_', '.')}.api_wrapper"
-            wrapper_module = importlib.import_module(module_path)
-        
-        # Find the API wrapper class - look for class containing ApiWrapper/APIWrapper
-        api_wrapper_class = None
-        for name in dir(wrapper_module):
-            obj = getattr(wrapper_module, name)
-            if (isinstance(obj, type) and 
-                ('ApiWrapper' in name or 'APIWrapper' in name) and 
-                name not in ('BaseCodeToolApiWrapper', 'BaseVectorStoreToolApiWrapper', 'BaseToolApiWrapper')):
-                api_wrapper_class = obj
-                break
-        
-        if not api_wrapper_class:
-            raise click.ClickException(
-                f"Could not find API wrapper class in {module_path}"
-            )
-        
-        # Instantiate the API wrapper directly
-        api_wrapper = api_wrapper_class(**kwargs)
-        
-        # Verify it has loader method
-        if not hasattr(api_wrapper, 'loader'):
-            raise click.ClickException(
-                f"API wrapper '{api_wrapper_class.__name__}' has no loader() method"
-            )
-        
-        return api_wrapper
-        
-    except ImportError as e:
-        logger.exception(f"Failed to import API wrapper for {source}")
-        raise click.ClickException(f"Failed to import {source} API wrapper: {e}")
-    except Exception as e:
-        logger.exception(f"Failed to instantiate toolkit {source}")
-        raise click.ClickException(f"Failed to create {source} toolkit: {e}")
+        return get_source_toolkit(toolkit_config)
+    except ValueError as e:
+        # Convert ValueError to ClickException for CLI context
+        raise click.ClickException(str(e))
