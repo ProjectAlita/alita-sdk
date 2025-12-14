@@ -15,7 +15,7 @@ from ...configurations.pgvector import PgVectorConfiguration
 name = "gitlab"
 
 
-def get_tools(tool):
+def get_toolkit(tool):
     return AlitaGitlabToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         repository=tool['settings']['repository'],
@@ -30,7 +30,10 @@ def get_tools(tool):
         embedding_model=tool['settings'].get('embedding_model'),
         vectorstore_type="PGVector",
         toolkit_name=tool.get('toolkit_name')
-    ).get_tools()
+    )
+
+def get_tools(tool):
+    return get_toolkit(tool).get_tools()
 
 class AlitaGitlabToolkit(BaseToolkit):
     tools: List[BaseTool] = []

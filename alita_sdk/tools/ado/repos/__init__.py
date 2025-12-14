@@ -15,7 +15,7 @@ from ...utils import clean_string, get_max_toolkit_length, check_connection_resp
 name = "ado_repos"
 
 
-def _get_toolkit(tool) -> BaseToolkit:
+def get_toolkit(tool) -> BaseToolkit:
     return AzureDevOpsReposToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         ado_repos_configuration=tool['settings']['ado_repos_configuration'],
@@ -30,11 +30,8 @@ def _get_toolkit(tool) -> BaseToolkit:
         llm=tool['settings'].get('llm', None),
     )
 
-def get_toolkit():
-    return AzureDevOpsReposToolkit.toolkit_config_schema()
-
 def get_tools(tool):
-    return _get_toolkit(tool).get_tools()
+    return get_toolkit(tool).get_tools()
 
 class AzureDevOpsReposToolkit(BaseToolkit):
     tools: List[BaseTool] = []

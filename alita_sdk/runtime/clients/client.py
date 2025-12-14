@@ -21,7 +21,7 @@ from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..utils.mcp_oauth import McpAuthorizationRequired
-from ...tools import get_available_toolkit_models
+from ...tools import get_available_toolkit_models, instantiate_toolkit
 from ...tools.base_indexer_toolkit import IndexTools
 
 logger = logging.getLogger(__name__)
@@ -144,6 +144,19 @@ class AlitaClient:
         url = f"{self.app}/{application_id}"
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
+
+    def toolkit(self, toolkit_id: int):
+        url = f"{self.base_url}{self.api_path}/tool/prompt_lib/{self.project_id}/{toolkit_id}"
+        response = requests.get(url, headers=self.headers, verify=False)
+        if not response.ok:
+            raise ValueError(f"Failed to fetch toolkit {toolkit_id}: {response.text}")
+        
+        tool_data = response.json()
+        if 'settings' not in tool_data:
+            tool_data['settings'] = {}
+        tool_data['settings']['alita'] = self
+        
+        return instantiate_toolkit(tool_data)
 
     def get_list_of_apps(self):
         apps = []

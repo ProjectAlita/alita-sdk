@@ -13,7 +13,7 @@ from ...configurations.pgvector import PgVectorConfiguration
 
 name = "github"
 
-def _get_toolkit(tool) -> BaseToolkit:
+def get_toolkit(tool) -> BaseToolkit:
     return AlitaGitHubToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         github_base_url=tool['settings'].get('base_url', ''),
@@ -31,11 +31,8 @@ def _get_toolkit(tool) -> BaseToolkit:
         toolkit_name=tool.get('toolkit_name')
     )
 
-def get_toolkit():
-    return AlitaGitHubToolkit.toolkit_config_schema()
-
 def get_tools(tool):
-    return _get_toolkit(tool).get_tools()
+    return get_toolkit(tool).get_tools()
 
 class AlitaGitHubToolkit(BaseToolkit):
     tools: List[BaseTool] = []

@@ -45,6 +45,9 @@ def _safe_import_tool(tool_name, module_path, get_tools_name=None, toolkit_class
         imported = {}
         if get_tools_name and hasattr(module, get_tools_name):
             imported['get_tools'] = getattr(module, get_tools_name)
+        
+        if hasattr(module, 'get_toolkit'):
+            imported['get_toolkit'] = getattr(module, 'get_toolkit')
 
         if toolkit_class_name and hasattr(module, toolkit_class_name):
             imported['toolkit_class'] = getattr(module, toolkit_class_name)
@@ -208,6 +211,18 @@ def get_toolkits():
 
     logger.info(f"Successfully loaded {len(toolkit_configs)} toolkit configurations")
     return toolkit_configs
+
+def instantiate_toolkit(tool_config):
+    """Instantiate a toolkit from its configuration."""
+    tool_type = tool_config.get('type')
+    
+    if tool_type in AVAILABLE_TOOLS:
+        tool_module = AVAILABLE_TOOLS[tool_type]
+        
+        if 'get_toolkit' in tool_module:
+             return tool_module['get_toolkit'](tool_config)
+             
+    raise ValueError(f"Toolkit type '{tool_type}' does not support direct instantiation or is not available.")
 
 def get_available_tools():
     """Return list of available tool types."""

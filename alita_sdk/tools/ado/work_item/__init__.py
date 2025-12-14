@@ -13,6 +13,21 @@ from ...utils import clean_string, get_max_toolkit_length, check_connection_resp
 
 name = "ado_boards"
 
+def get_toolkit(tool):
+    return AzureDevOpsWorkItemsToolkit().get_toolkit(
+        selected_tools=tool['settings'].get('selected_tools', []),
+        ado_configuration=tool['settings']['ado_configuration'],
+        limit=tool['settings'].get('limit', 5),
+        toolkit_name=tool.get('toolkit_name', ''),
+        alita=tool['settings'].get('alita', None),
+        llm=tool['settings'].get('llm', None),
+        pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
+        collection_name=tool['toolkit_name'],
+        doctype='doc',
+        embedding_model=tool['settings'].get('embedding_model'),
+        vectorstore_type="PGVector"
+    )
+
 class AzureDevOpsWorkItemsToolkit(BaseToolkit):
     tools: List[BaseTool] = []
 

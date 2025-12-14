@@ -6,6 +6,7 @@ import requests
 from typing import Any
 from json import dumps
 import chardet
+from ...tools import instantiate_toolkit
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,19 @@ class SandboxClient:
         url = f'{self.app}/{application_id}'
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
+
+    def toolkit(self, toolkit_id: int):
+        url = f"{self.base_url}{self.api_path}/tool/prompt_lib/{self.project_id}/{toolkit_id}"
+        response = requests.get(url, headers=self.headers, verify=False)
+        if not response.ok:
+            raise ValueError(f"Failed to fetch toolkit {toolkit_id}: {response.text}")
+        
+        tool_data = response.json()
+        if 'settings' not in tool_data:
+            tool_data['settings'] = {}
+        tool_data['settings']['alita'] = self
+        
+        return instantiate_toolkit(tool_data)
 
     def get_list_of_apps(self):
         apps = []

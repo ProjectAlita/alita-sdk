@@ -12,7 +12,7 @@ from ...configurations.pgvector import PgVectorConfiguration
 
 name = "jira"
 
-def get_tools(tool):
+def get_toolkit(tool):
     return JiraToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         base_url=tool['settings'].get('base_url'),
@@ -32,7 +32,10 @@ def get_tools(tool):
         embedding_model=tool['settings'].get('embedding_model'),
         vectorstore_type="PGVector",
         toolkit_name=tool.get('toolkit_name')
-    ).get_tools()
+    )
+
+def get_tools(tool):
+    return get_toolkit(tool).get_tools()
             
 
 class JiraToolkit(BaseToolkit):

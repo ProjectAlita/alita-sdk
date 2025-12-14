@@ -18,7 +18,7 @@ import requests
 name = "bitbucket"
 
 
-def get_tools(tool):
+def get_toolkit(tool):
     return AlitaBitbucketToolkit.get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         project=tool['settings']['project'],
@@ -33,7 +33,10 @@ def get_tools(tool):
         doctype='code',
         embedding_model=tool['settings'].get('embedding_model'),
         toolkit_name=tool.get('toolkit_name')
-    ).get_tools()
+    )
+
+def get_tools(tool):
+    return get_toolkit(tool).get_tools()
 
 
 class AlitaBitbucketToolkit(BaseToolkit):

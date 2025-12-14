@@ -13,7 +13,7 @@ import requests
 
 name = "confluence"
 
-def get_tools(tool):
+def get_toolkit(tool):
     return ConfluenceToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         space=tool['settings'].get('space', None),
@@ -33,7 +33,10 @@ def get_tools(tool):
         doctype='doc',
         embedding_model=tool['settings'].get('embedding_model'),
         vectorstore_type="PGVector"
-    ).get_tools()
+    )
+
+def get_tools(tool):
+    return get_toolkit(tool).get_tools()
 
 
 class ConfluenceToolkit(BaseToolkit):
