@@ -656,7 +656,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             "toolkit_id": self.toolkit_id,
             "project_id": self.alita.project_id,
         }
-        logger.warning(f"#########_1\n{event_data}")
         # Emit the event
         try:
             dispatch_custom_event("index_data_removed", event_data)
