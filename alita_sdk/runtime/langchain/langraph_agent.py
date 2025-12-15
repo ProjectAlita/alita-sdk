@@ -191,7 +191,7 @@ Answer only with step name, no need to add descrip in case none of the steps are
                     additional_info = """### Additoinal info: """
                 additional_info += "{field}: {value}\n".format(field=field, value=state.get(field, ""))
         decision_input.append(HumanMessage(
-            self.prompt.format(steps=self.steps, description=self.description, additional_info=additional_info)))
+            self.prompt.format(steps=self.steps, description=safe_format(self.description, state), additional_info=additional_info)))
         completion = self.client.invoke(decision_input)
         result = clean_string(completion.content.strip())
         logger.info(f"Plan to transition to: {result}")
