@@ -660,5 +660,5 @@ class LLMNode(BaseTool):
 
         return new_messages, current_completion
 
-    def __get_struct_output_model(self, llm_client, pydantic_model):
-        return llm_client.with_structured_output(pydantic_model)
+    def __get_struct_output_model(self, llm_client, pydantic_model, method: Literal["function_calling", "json_mode", "json_schema"] = "json_schema"):
+        return llm_client.with_structured_output(pydantic_model, method=method)
