@@ -360,7 +360,7 @@ class AlitaClient:
                     application_variables: Optional[dict] = None,
                     version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
                     llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
-                    conversation_id: Optional[str] = None):
+                    conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -409,12 +409,12 @@ class AlitaClient:
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
-                                      conversation_id=conversation_id)
+                                      conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
-                                      conversation_id=conversation_id).runnable()
+                                      conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 
@@ -668,7 +668,8 @@ class AlitaClient:
                       tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                       memory=None, runtime='langchain', variables: Optional[list] = None,
                       store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False,
-                      mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None):
+                      mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None,
+                      ignored_mcp_servers: Optional[list] = None):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -684,6 +685,7 @@ class AlitaClient:
             variables: Optional list of variables for the agent
             store: Optional store for memory
             debug_mode: Enable debug mode for cases when assistant can be initialized without tools
+            ignored_mcp_servers: Optional list of MCP server URLs to ignore (user chose to continue without auth)
 
         Returns:
             Runnable agent ready for execution
@@ -717,7 +719,8 @@ class AlitaClient:
             store=store,
             debug_mode=debug_mode,
             mcp_tokens=mcp_tokens,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            ignored_mcp_servers=ignored_mcp_servers
         ).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,

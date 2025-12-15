@@ -41,7 +41,7 @@ def get_toolkits():
     return core_toolkits + community_toolkits() + alita_toolkits()
 
 
-def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None) -> list:
+def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None) -> list:
     prompts = []
     tools = []
 
@@ -165,6 +165,14 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 # remote mcp tool initialization with token injection
                 settings = dict(tool['settings'])
                 url = settings.get('url')
+                
+                # Check if this MCP server should be ignored (user chose to continue without auth)
+                if ignored_mcp_servers and url:
+                    canonical_url = canonical_resource(url)
+                    if canonical_url in ignored_mcp_servers or url in ignored_mcp_servers:
+                        logger.info(f"[MCP Auth] Skipping ignored MCP server: {url}")
+                        continue
+                
                 headers = settings.get('headers')
                 token_data = None
                 session_id = None
