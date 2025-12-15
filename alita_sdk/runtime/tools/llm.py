@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from traceback import format_exc
-from typing import Any, Optional, List, Union
+from typing import Any, Optional, List, Union, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -187,8 +187,15 @@ class LLMNode(BaseTool):
                     completion = llm.invoke(new_messages, config=config)
                     result = completion.model_dump()
                 else:
-                    llm = self.__get_struct_output_model(llm_client, struct_model)
-                    completion = llm.invoke(messages, config=config)
+                    try:
+                        llm = self.__get_struct_output_model(llm_client, struct_model)
+                        completion = llm.invoke(messages, config=config)
+                    except ValueError as e:
+                        logger.error(f"Error invoking structured output model: {format_exc()}")
+                        logger.info("Attemping to fall back to json mode")
+                        # Fallback to regular LLM with JSON extraction
+                        completion = self.__get_struct_output_model(llm_client, struct_model,
+                                                                    method="json_mode").invoke(messages, config=config)
                     result = completion.model_dump()
 
                 # Ensure messages are properly formatted
