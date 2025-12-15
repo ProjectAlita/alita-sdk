@@ -129,6 +129,7 @@ class BigQueryToolkit(BaseToolkit):
                             name=t["name"],
                             description=description,
                             args_schema=t["args_schema"],
+                            metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
                         )
                     )
         return instance
