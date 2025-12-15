@@ -387,6 +387,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
     def remove_index(self, index_name: str = ""):
         """Cleans the indexed data in the collection."""
         super()._clean_collection(index_name=index_name, including_index_meta=True)
+        self._emit_index_data_removed_event(index_name)
         return (f"Collection '{index_name}' has been removed from the vector store.\n"
                 f"Available collections: {self.list_collections()}") if index_name \
             else "All collections have been removed from the vector store." 
@@ -640,6 +641,31 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             )
         except Exception as e:
             logger.warning(f"Failed to emit index_data_status event: {e}")
+
+    def _emit_index_data_removed_event(self, index_name: str):
+        """
+        Emit custom event for index data removing.
+
+        Args:
+            index_name: The name of the index
+            toolkit_id: The toolkit identifier
+        """
+        # Build event message
+        event_data = {
+            "index_name": index_name,
+            "toolkit_id": self.toolkit_id,
+            "project_id": self.alita.project_id,
+        }
+        logger.warning(f"#########_1\n{event_data}")
+        # Emit the event
+        try:
+            dispatch_custom_event("index_data_removed", event_data)
+            logger.debug(
+                f"Emitted index_data_removed event for index "
+                f"'{index_name}': {event_data}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to emit index_data_removed event: {e}")
 
     def get_available_tools(self):
         """
