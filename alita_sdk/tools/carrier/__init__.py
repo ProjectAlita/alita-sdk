@@ -77,6 +77,7 @@ class AlitaCarrierToolkit(BaseToolkit):
                 if toolkit_name:
                     tool_instance.description = f"{tool_instance.description}\nToolkit: {toolkit_name}"
                     tool_instance.description = tool_instance.description[:1000]
+                    tool_instance.metadata = {"toolkit_name": toolkit_name}
                 tools.append(tool_instance)
                 logger.info(f"[AlitaCarrierToolkit] Successfully initialized tool '{tool_instance.name}'")
             except Exception as e:

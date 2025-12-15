@@ -80,13 +80,14 @@ class MemoryToolkit(BaseToolkit):
         )
 
     @classmethod
-    def get_toolkit(cls, namespace: str, store=None, **kwargs):
+    def get_toolkit(cls, namespace: str, store=None, toolkit_name: str = None, **kwargs):
         """
         Get toolkit with memory tools.
         
         Args:
             namespace: Memory namespace
             store: PostgresStore instance (imported dynamically)
+            toolkit_name: Optional toolkit name for metadata
             **kwargs: Additional arguments
         """
         try:
@@ -109,10 +110,17 @@ class MemoryToolkit(BaseToolkit):
         if store is not None and not isinstance(store, PostgresStore):
             raise TypeError(f"Expected PostgresStore, got {type(store)}")
         
-        return cls(tools=[
+        tools = [
             create_manage_memory_tool(namespace=namespace, store=store),
             create_search_memory_tool(namespace=namespace, store=store)
-        ])
+        ]
+        
+        # Add metadata to tools if toolkit_name is provided
+        if toolkit_name:
+            for tool in tools:
+                tool.metadata = {"toolkit_name": toolkit_name}
+        
+        return cls(tools=tools)
 
     def get_tools(self):
         return self.tools

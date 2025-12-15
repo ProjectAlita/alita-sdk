@@ -128,6 +128,7 @@ class BrowserToolkit(BaseToolkit):
                 if toolkit_name:
                     tool_entry.description = f"{tool_entry.description}\nToolkit: {toolkit_name}"
                     tool_entry.description = tool_entry.description[:1000]
+                    tool_entry.metadata = {"toolkit_name": toolkit_name}
                 tools.append(tool_entry)
         return cls(tools=tools)
 

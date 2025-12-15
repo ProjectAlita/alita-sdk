@@ -96,7 +96,8 @@ class AlitaOpenAPIToolkit(BaseToolkit):
     @classmethod
     def get_toolkit(cls, openapi_spec: str | dict,
                     selected_tools: list[dict] | None = None,
-                    headers: Optional[Dict[str, str]] = None):
+                    headers: Optional[Dict[str, str]] = None,
+                    toolkit_name: Optional[str] = None):
         if selected_tools is not None:
             tools_set = set([i if not isinstance(i, dict) else i.get('name') for i in selected_tools])
         else:
@@ -124,7 +125,10 @@ class AlitaOpenAPIToolkit(BaseToolkit):
                 tool = c.operations[i]
                 if not isinstance(tool, Operation):
                     raise ToolException(f"Operation {i} is not an instance of Operation class.")
-                tools.append(create_api_tool(i, tool))
+                api_tool = create_api_tool(i, tool)
+                if toolkit_name:
+                    api_tool.metadata = {"toolkit_name": toolkit_name}
+                tools.append(api_tool)
             except ToolException:
                 raise
             except Exception as e:
