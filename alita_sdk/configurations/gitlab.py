@@ -99,6 +99,8 @@ class GitlabConfiguration(BaseModel):
                 return f"GitLab API returned status code {response.status_code}"
 
         except requests.exceptions.SSLError as e:
+            if 'Hostname mismatch' in str(e):
+                return "GitLab API endpoint not found: verify the GitLab URL"
             return f"SSL certificate verification failed: {str(e)}"
         except requests.exceptions.ConnectionError:
             return f"Cannot connect to GitLab at {url}: connection refused"
