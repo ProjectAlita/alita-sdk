@@ -86,7 +86,9 @@ Answer must be JSON only extractable by JSON.LOADS."""
         else:
             input_[-1].content += self.unstructured_output
             completion = self.client.invoke(input_, config=config)
-            result = _extract_json(completion.content.strip())
+            from ..langchain.utils import extract_text_from_completion
+            content_text = extract_text_from_completion(completion)
+            result = _extract_json(content_text.strip())
             logger.info(f"ToolNode tool params: {result}")
         try:
             # handler for application added as a tool

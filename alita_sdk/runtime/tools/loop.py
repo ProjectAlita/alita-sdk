@@ -102,7 +102,9 @@ Input Data:
         logger.debug(f"LoopNode input: {predict_input}")
         completion = self.client.invoke(predict_input, config=config)
         logger.debug(f"LoopNode pure output: {completion}")
-        loop_data = _old_extract_json(completion.content.strip())
+        from ..langchain.utils import extract_text_from_completion
+        content_text = extract_text_from_completion(completion)
+        loop_data = _old_extract_json(content_text.strip())
         logger.debug(f"LoopNode output: {loop_data}")
         if self.return_type == "str":
             accumulated_response = ''

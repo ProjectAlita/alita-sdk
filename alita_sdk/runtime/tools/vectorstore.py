@@ -12,8 +12,10 @@ from alita_sdk.tools.vector_adapters.VectorStoreAdapter import VectorStoreAdapte
 from logging import getLogger
 
 from ..utils.logging import dispatch_custom_event
+from ..langchain.utils import extract_text_from_completion
 
 logger = getLogger(__name__)
+
 
 class IndexDocumentsModel(BaseModel):
     documents: Any = Field(description="Generator of documents to index")
@@ -684,8 +686,10 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 ]
             )
         ])
+        # Extract text content safely (handles both string and list content from thinking models)
+        search_query = extract_text_from_completion(result)
         search_results = self.search_documents(
-            result.content, doctype, filter, cut_off, search_top, 
+            search_query, doctype, filter, cut_off, search_top, 
             full_text_search=full_text_search,
             reranking_config=reranking_config,
             extended_search=extended_search
@@ -714,7 +718,8 @@ class VectorStoreWrapper(BaseToolApiWrapper):
                 ]
             )
         ])
-        return result.content
+        # Extract text content safely (handles both string and list content from thinking models)
+        return extract_text_from_completion(result)
 
     def _log_data(self, message: str, tool_name: str = "index_data"):
         """Log data and dispatch custom event for indexing progress"""

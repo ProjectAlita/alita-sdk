@@ -39,7 +39,9 @@ class CodeGenerator:
                 {"role": "user",  "content": [{"type": "text", "text": prompt}]}
             ]
             # Generate the code
-            code = self.llm.invoke(messages).content
+            from alita_sdk.runtime.langchain.utils import extract_text_from_completion
+            completion = self.llm.invoke(messages)
+            code = extract_text_from_completion(completion)
             return self.validate_and_clean_code(code)
 
         except Exception as e:
