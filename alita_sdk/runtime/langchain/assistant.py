@@ -13,7 +13,7 @@ from langchain_core.messages import (
     BaseMessage, SystemMessage, HumanMessage
 )
 from langchain_core.prompts import MessagesPlaceholder
-from .constants import REACT_ADDON, REACT_VARS, XML_ADDON
+from .constants import REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON, DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from langchain_core.tools import BaseTool, ToolException
@@ -276,34 +276,29 @@ class Assistant:
         # Only use prompt_instructions if explicitly specified (for predict app_type)
         if self.app_type == "predict" and isinstance(self.prompt, str):
             prompt_instructions = self.prompt
-
-        # take the system message from the openai prompt as a prompt instructions
-        if self.app_type == "openai" and hasattr(self.prompt, 'messages'):
-            prompt_instructions = self.__take_prompt_from_openai_messages()
-        
-        # Create a unified YAML schema with conditional tool binding
-        # Build the base node configuration
-        node_config = {
-            'id': 'agent',
-            'type': 'llm',
-            'prompt': {
-                'template': prompt_instructions or "You are a helpful assistant."
-            },
-            'input': ['messages'],
-            'output': ['messages'],
-            'transition': 'END'
-        }
         
         # Add tool binding only if tools are present
         if simple_tools:
             tool_names = [tool.name for tool in simple_tools]
-            tool_names_yaml = str(tool_names).replace("'", '"')  # Convert to YAML-compatible format
-            node_config['tool_names'] = tool_names_yaml
             logger.info("Binding tools: %s", tool_names)
+        
+        # take the system message from the openai prompt as a prompt instructions
+        if self.app_type == "openai" and hasattr(self.prompt, 'messages'):
+            prompt_instructions = self.__take_prompt_from_openai_messages()
+        
+        user_addon = USER_ADDON.format(prompt=str(prompt_instructions)) if prompt_instructions else ""
+        plan_addon = PLAN_ADDON if 'update_plan' in tool_names else ""
+        pyodite_addon = PYODITE_ADDON if 'pyodide_sandbox' in tool_names else ""
+        escaped_prompt = DEFAULT_ASSISTANT.format(
+            user_addon=user_addon,
+            plan_addon=plan_addon,
+            pyodite_addon=pyodite_addon
+        )
+            
         
         # Properly setup the prompt for YAML
         import yaml
-        escaped_prompt = prompt_instructions or "You are a helpful assistant."
+        
         
         # Create the schema as a dictionary first, then convert to YAML
         state_messages_config = {'type': 'list'}
