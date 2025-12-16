@@ -291,8 +291,8 @@ class Assistant:
         plan_addon = PLAN_ADDON if 'update_plan' in tool_names else ""
         pyodite_addon = PYODITE_ADDON if 'pyodide_sandbox' in tool_names else ""
         escaped_prompt = DEFAULT_ASSISTANT.format(
-            user_addon=user_addon,
-            plan_addon=plan_addon,
+            users_instructions=user_addon,
+            planning_instructions=plan_addon,
             pyodite_addon=pyodite_addon
         )
             
