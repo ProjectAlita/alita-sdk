@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import json
@@ -14,7 +15,7 @@ from pydantic import create_model, Field, model_validator
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...tools.utils.available_tools_decorator import extend_with_parent_available_tools
 from ...tools.elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
-from ...runtime.utils.utils import IndexerKeywords
+from ...runtime.utils.utils import IndexerKeywords, resolve_image_from_cache
 
 
 class ArtifactWrapper(NonCodeIndexerToolkit):
@@ -63,23 +64,30 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         if was_modified:
             logging.warning(f"Filename sanitized: '{filename}' -> '{sanitized_filename}'")
         
+        # Auto-detect and extract base64 from image_url structures (from image_generation tool)
+        # Returns tuple: (processed_data, is_from_image_generation)
+        filedata, is_from_image_generation = self._extract_base64_if_needed(filedata)
+        
         if sanitized_filename.endswith(".xlsx"):
             data = json.loads(filedata)
             filedata = self.create_xlsx_filedata(data)
 
         result = self.artifact.create(sanitized_filename, filedata, bucket_name)
         
-        # Dispatch custom event for file creation
-        dispatch_custom_event("file_modified", {
-            "message": f"File '{filename}' created successfully",
-            "filename": filename,
-            "tool_name": "createFile",
-            "toolkit": "artifact",
-            "operation_type": "create",
-            "meta": {
-                "bucket": bucket_name or self.bucket
-            }
-        })
+        # Skip file_modified event for images from image_generation tool
+        # These are already tracked in the tool output and don't need duplicate events
+        if not is_from_image_generation:
+            # Dispatch custom event for file creation
+            dispatch_custom_event("file_modified", {
+                "message": f"File '{filename}' created successfully",
+                "filename": filename,
+                "tool_name": "createFile",
+                "toolkit": "artifact",
+                "operation_type": "create",
+                "meta": {
+                    "bucket": bucket_name or self.bucket
+                }
+            })
 
         return result
     
@@ -109,6 +117,43 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         
         sanitized = sanitized_name + extension
         return sanitized, (sanitized != original)
+    
+    def _extract_base64_if_needed(self, filedata: str) -> tuple[str | bytes, bool]:
+        """
+        Resolve cached_image_id references from cache and decode to binary data.
+        
+        Requires JSON format with cached_image_id field: {"cached_image_id": "img_xxx"}
+        LLM must extract specific cached_image_id from generate_image response.
+        
+        Returns:
+            tuple: (processed_data, is_from_image_generation)
+                - processed_data: Original filedata or resolved binary image data
+                - is_from_image_generation: True if data came from image_generation cache
+        """
+        if not filedata or not isinstance(filedata, str):
+            return filedata, False
+        
+        # Require JSON format - fail fast if not JSON
+        if '{' not in filedata:
+            return filedata, False
+        
+        try:
+            data = json.loads(filedata)
+        except json.JSONDecodeError:
+            # Not valid JSON, return as-is (regular file content)
+            return filedata, False
+        
+        if not isinstance(data, dict):
+            return filedata, False
+        
+        # Only accept direct cached_image_id format: {"cached_image_id": "img_xxx"}
+        # LLM must parse generate_image response and extract specific cached_image_id
+        if 'cached_image_id' in data:
+            binary_data = resolve_image_from_cache(self.alita, data['cached_image_id'])
+            return binary_data, True  # Mark as from image_generation
+        
+        # If JSON doesn't have cached_image_id, treat as regular file content
+        return filedata, False
 
     def create_xlsx_filedata(self, data: dict[str, list[list]]) -> bytes:
         try:
@@ -377,15 +422,19 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                     "createFile", 
                     filename=(str, Field(description="Filename")),
                     filedata=(str, Field(description="""Stringified content of the file.
-                    Example for .xlsx filedata format:
-                    {
-                        "Sheet1":[
-                            ["Name", "Age", "City"],
-                            ["Alice", 25, "New York"],
-                            ["Bob", 30, "San Francisco"],
-                            ["Charlie", 35, "Los Angeles"]
-                        ]
-                    }
+                    
+                    Supports three input formats:
+                    
+                    1. CACHED IMAGE REFERENCE (for generated/cached images):
+                       Pass JSON with cached_image_id field: {"cached_image_id": "img_xxx"}
+                       The tool will automatically resolve and decode the image from cache.
+                       This is typically used when another tool returns an image reference.
+                    
+                    2. EXCEL FILES (.xlsx extension):
+                       Pass JSON with sheet structure: {"Sheet1": [["Name", "Age"], ["Alice", 25], ["Bob", 30]]}
+                    
+                    3. TEXT/OTHER FILES:
+                       Pass the plain text string directly.
                     """)),
                     bucket_name=bucket_name
                 )
