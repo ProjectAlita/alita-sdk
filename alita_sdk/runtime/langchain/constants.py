@@ -345,14 +345,136 @@ PYODITE_ADDON = """
 
 ## Using the Python (Pyodide) sandbox
 
-Python sandbox is available, it runs in a **Pyodide (browser-based) environment** with limitations:
+Python sandbox available via `pyodide_sandbox` (stateless) or `stateful_pyodide_sandbox` tools.
 
-- Use it only for lightweight data analysis, parsing, transformation, or validation
-- Do not assume access to the local filesystem, network, OS commands, or background processes
-- Do not attempt `pip install` or rely on unavailable native extensions
-- Treat all inputs as in-memory data provided by the harness or previous tool outputs
-- For large datasets, long-running tasks, or environment-dependent execution, request an external tool or user-provided artifacts instead
+### Use for:
+- Lightweight data analysis, parsing, validation
+- Testing algorithms and calculations
+- Processing standard library modules
 
-If a task cannot be reliably executed in Pyodide, explicitly state the limitation and propose an alternative approach.
+### Limitations:
+- No local filesystem access (beyond sandbox cache)
+- No OS commands or subprocess operations
+- No native C extensions
+- No background processes
+
+### CRITICAL: How to return results
+
+The sandbox returns a dict with these keys:
+- **`result`**: The last evaluated expression (final line without assignment)
+- **`output`**: Anything printed via `print()`
+- **`error`**: Any stderr output
+- **`execution_info`**: Timing and package info
+
+**Two valid patterns to return data:**
+
+✅ Option 1 - Last expression (returned in `result` key):
+```python
+import json
+data = {"result": 42, "status": "complete"}
+data  # Auto-captured as result
+```
+
+✅ Option 2 - Print output (returned in `output` key):
+```python
+import json
+data = {"result": 42, "status": "complete"}
+print(json.dumps(data))  # Captured as output
+```
+
+Both work! Choose based on preference. For structured data, JSON format is recommended.
+
+### Using alita_client (auto-injected)
+
+The `alita_client` object is automatically available in sandbox code. It provides access to Alita platform APIs.
+
+**Key capabilities:**
+
+**Artifacts** - Store/retrieve files in buckets:
+```python
+# Get artifact from bucket and decode
+csv_data = alita_client.artifact('my_bucket').get('file.csv').decode('utf-8')
+
+# Create/overwrite artifact
+alita_client.artifact('my_bucket').create('output.txt', 'data content')
+
+# List artifacts in bucket
+files = alita_client.artifact('my_bucket').list()
+
+# Append to artifact
+alita_client.artifact('my_bucket').append('log.txt', 'new line\\n')
+
+# Delete artifact
+alita_client.artifact('my_bucket').delete('old_file.txt')
+```
+
+**Secrets** - Access stored credentials:
+```python
+api_key = alita_client.unsecret('my_api_key')
+```
+
+**MCP Tools** - Call Model Context Protocol tools:
+```python
+# List available tools
+tools = alita_client.get_mcp_toolkits()
+
+# Call a tool
+result = alita_client.mcp_tool_call({
+    'server_name': 'my_server',
+    'params': {
+        'name': 'tool_name',
+        'arguments': {'arg1': 'value1'}
+    }
+})
+```
+
+**Toolkits** - Instantiate and use toolkits:
+```python
+toolkit = alita_client.toolkit(toolkit_id=123)
+```
+
+**Applications** - Get app details:
+```python
+apps = alita_client.get_list_of_apps()
+app_details = alita_client.get_app_details(application_id=456)
+```
+
+**Image Generation**:
+```python
+result = alita_client.generate_image(
+    prompt="A sunset over mountains",
+    n=1,
+    size="1024x1024"
+)
+```
+
+**Common pattern - Load CSV from artifacts:**
+```python
+import csv
+from io import StringIO
+
+# Load CSV from artifact
+csv_text = alita_client.artifact('tests').get('data.csv').decode('utf-8')
+
+# Parse CSV
+reader = csv.DictReader(StringIO(csv_text))
+data = list(reader)
+
+# Return result
+data
+```
+
+### Execution modes:
+- **Stateless** (default): Faster, each run starts fresh
+- **Stateful**: Preserves variables/imports between calls
+
+### Code requirements:
+1. Always include necessary imports
+2. Either end with an expression OR use `print()` for output
+3. Work with in-memory data only
+4. Include error handling with try-except
+
+### When NOT to use:
+For large datasets, long-running tasks, or native system access, request alternative tools instead.
 
 """
