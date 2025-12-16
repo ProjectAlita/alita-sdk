@@ -15,8 +15,6 @@ from langgraph.store.base import BaseStore
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 
-from elitea_core.models.pd import llm
-
 from ..langchain.assistant import Assistant as LangChainAssistant
 # from ..llamaindex.assistant import Assistant as LLamaAssistant
 from .prompt import AlitaPrompt
@@ -276,7 +274,7 @@ class AlitaClient:
                 "max_retries": model_config.get("max_retries", 3),
                 "default_headers": {"openai-organization": str(self.project_id)},
             }
-                
+
             # Add http_client if provided
             if "http_client" in model_config:
                 target_kwargs["http_client"] = model_config["http_client"]
