@@ -6,6 +6,7 @@ from typing import Any, Optional, List, Union, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
+from langchain_core.exceptions import OutputParserException
 from pydantic import Field
 
 from ..langchain.constants import ELITEA_RS
@@ -219,12 +220,19 @@ class LLMNode(BaseTool):
                     try:
                         llm = self.__get_struct_output_model(llm_client, struct_model)
                         completion = llm.invoke(messages, config=config)
-                    except ValueError as e:
+                    except (ValueError, OutputParserException) as e:
                         logger.error(f"Error invoking structured output model: {format_exc()}")
-                        logger.info("Attemping to fall back to json mode")
-                        # Fallback to regular LLM with JSON extraction
-                        completion = self.__get_struct_output_model(llm_client, struct_model,
-                                                                    method="json_mode").invoke(messages, config=config)
+                        logger.info("Attempting to fall back to json mode")
+                        try:
+                            # Fallback to regular LLM with JSON extraction
+                            completion = self.__get_struct_output_model(llm_client, struct_model,
+                                                                        method="json_mode").invoke(messages, config=config)
+                        except (ValueError, OutputParserException) as e2:
+                            logger.error(f"json_mode fallback also failed: {format_exc()}")
+                            logger.info("Attempting to fall back to function_calling")
+                            # Final fallback to function_calling method
+                            completion = self.__get_struct_output_model(llm_client, struct_model,
+                                                                        method="json_schema").invoke(messages, config=config)
                     result = completion.model_dump()
 
                 # Ensure messages are properly formatted
