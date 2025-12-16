@@ -59,7 +59,8 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     alita_client,
                     application_id=int(tool['settings']['application_id']),
                     application_version_id=int(tool['settings']['application_version_id']),
-                    selected_tools=[]
+                    selected_tools=[],
+                    ignored_mcp_servers=ignored_mcp_servers
                 ).get_tools())
                 # backward compatibility for pipeline application type as subgraph node
                 if tool.get('agent_type', '') == 'pipeline':
