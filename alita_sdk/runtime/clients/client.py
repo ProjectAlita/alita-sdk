@@ -44,6 +44,7 @@ class AlitaClient:
         self.base_url = base_url.rstrip('/')
         self.api_path = '/api/v1'
         self.llm_path = '/llm/v1'
+        self.allm_path = '/llm'
         self.project_id = project_id
         self.auth_token = auth_token
         self.headers = {
@@ -268,17 +269,32 @@ class AlitaClient:
         if is_anthropic:
             # ChatAnthropic configuration
             target_kwargs = {
-                "base_url": f"{self.base_url}{self.llm_path}",
+                "base_url": f"{self.base_url}{self.allm_path}",
                 "model": model_name,
                 "api_key": self.auth_token,
                 "streaming": model_config.get("streaming", True),
                 "max_tokens": llm_max_tokens,
-                "effort": model_config.get("reasoning_effort"),
                 "temperature": model_config.get("temperature"),
                 "max_retries": model_config.get("max_retries", 3),
-                "default_headers": {"openai-organization": str(self.project_id)},
+                "default_headers": {"openai-organization": str(self.project_id),
+                                    "Authorization": f"Bearer {self.auth_token}"},
             }
-
+            
+            # TODO": Check on ChatAnthropic client when they get "effort" support back
+            if model_config.get("reasoning_effort"):
+                if model_config["reasoning_effort"].lower() == "low":
+                    target_kwargs['thinking'] = {"type": "enabled", "budget_tokens": 2048}
+                    target_kwargs['temperature'] = 1
+                    target_kwargs["max_tokens"] = 2048 + target_kwargs["max_tokens"]
+                elif model_config["reasoning_effort"].lower() == "medium":
+                    target_kwargs['thinking'] = {"type": "enabled", "budget_tokens": 4096}
+                    target_kwargs['temperature'] = 1
+                    target_kwargs["max_tokens"] = 4096 + target_kwargs["max_tokens"]
+                elif model_config["reasoning_effort"].lower() == "high":
+                    target_kwargs['thinking'] = {"type": "enabled", "budget_tokens": 9092}
+                    target_kwargs['temperature'] = 1
+                    target_kwargs["max_tokens"] = 9092 + target_kwargs["max_tokens"]
+                    
             # Add http_client if provided
             if "http_client" in model_config:
                 target_kwargs["http_client"] = model_config["http_client"]
@@ -304,7 +320,6 @@ class AlitaClient:
                 target_kwargs["use_responses_api"] = True
             
             llm = ChatOpenAI(**target_kwargs)
-        
         return llm
         
     def generate_image(self,
