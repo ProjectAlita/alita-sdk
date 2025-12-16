@@ -22,7 +22,8 @@ class ApplicationToolkit(BaseToolkit):
     
     @classmethod
     def get_toolkit(cls, client: 'AlitaClient', application_id: int, application_version_id: int,
-                    selected_tools: list[str] = [], store: Optional[BaseStore] = None):
+                    selected_tools: list[str] = [], store: Optional[BaseStore] = None,
+                    ignored_mcp_servers: Optional[list] = None):
         
         app_details = client.get_app_details(application_id)
         version_details = client.get_app_version_details(application_id, application_version_id)
@@ -34,7 +35,8 @@ class ApplicationToolkit(BaseToolkit):
 
         app = client.application(application_id, application_version_id, store=store, 
                                  llm=client.get_llm(version_details['llm_settings']['model_name'], 
-                                                    model_settings))
+                                                    model_settings),
+                                 ignored_mcp_servers=ignored_mcp_servers)
         return cls(tools=[Application(name=app_details.get("name"), 
                                       description=app_details.get("description"), 
                                       application=app, 
@@ -46,6 +48,7 @@ class ApplicationToolkit(BaseToolkit):
                                           "application_version_id": application_version_id,
                                           "store": store,
                                           "llm": client.get_llm(version_details['llm_settings']['model_name'], model_settings),
+                                          "ignored_mcp_servers": ignored_mcp_servers,
                                       })])
             
     def get_tools(self):
