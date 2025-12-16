@@ -242,7 +242,12 @@ class LLMNode(BaseTool):
                     return {"messages": new_messages}
 
         except Exception as e:
+            # Enhanced error logging with model diagnostics
+            model_info = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'unknown')
             logger.error(f"Error in LLM Node: {format_exc()}")
+            logger.error(f"Model being used: {model_info}")
+            logger.error(f"Error type: {type(e).__name__}")
+            
             error_msg = f"Error: {e}"
             new_messages = messages + [AIMessage(content=error_msg)]
             return {"messages": new_messages}
@@ -511,6 +516,20 @@ class LLMNode(BaseTool):
             except Exception as e:
                 error_str = str(e).lower()
                 
+                # Check for non-recoverable errors that should fail immediately
+                # These indicate configuration or permission issues, not content size issues
+                is_non_recoverable = any(indicator in error_str for indicator in [
+                    'model identifier is invalid',
+                    'authentication',
+                    'unauthorized',
+                    'access denied',
+                    'permission denied',
+                    'invalid credentials',
+                    'api key',
+                    'quota exceeded',
+                    'rate limit'
+                ])
+                
                 # Check for context window / token limit errors
                 is_context_error = any(indicator in error_str for indicator in [
                     'context window', 'context_window', 'token limit', 'too long',
@@ -518,16 +537,44 @@ class LLMNode(BaseTool):
                     'contextwindowexceedederror', 'max_tokens', 'content too large'
                 ])
                 
-                # Check for Bedrock/Claude output limit errors
-                # These often manifest as "model identifier is invalid" when output exceeds limits
+                # Check for Bedrock/Claude output limit errors (recoverable by truncation)
                 is_output_limit_error = any(indicator in error_str for indicator in [
-                    'model identifier is invalid',
-                    'bedrockexception',
                     'output token',
                     'response too large',
                     'max_tokens_to_sample',
-                    'output_token_limit'
+                    'output_token_limit',
+                    'output exceeds'
                 ])
+                
+                # Handle non-recoverable errors immediately
+                if is_non_recoverable:
+                    # Enhanced error logging with model information for better diagnostics
+                    model_info = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'unknown')
+                    logger.error(f"Non-recoverable error during tool execution iteration {iteration}")
+                    logger.error(f"Model: {model_info}")
+                    logger.error(f"Error details: {e}")
+                    logger.error(f"Error type: {type(e).__name__}")
+                    
+                    # Provide detailed error message for debugging
+                    error_details = []
+                    error_details.append(f"Model configuration error: {str(e)}")
+                    error_details.append(f"Model identifier: {model_info}")
+                    
+                    # Check for common Bedrock model ID issues
+                    if 'model identifier is invalid' in error_str:
+                        error_details.append("\nPossible causes:")
+                        error_details.append("1. Model not available in the configured AWS region")
+                        error_details.append("2. Model not enabled in your AWS Bedrock account")
+                        error_details.append("3. LiteLLM model group prefix not stripped (check for prefixes like '1_')")
+                        error_details.append("4. Incorrect model version or typo in model name")
+                        error_details.append("\nPlease verify:")
+                        error_details.append("- AWS Bedrock console shows this model as available")
+                        error_details.append("- LiteLLM router configuration is correct")
+                        error_details.append("- Model ID doesn't contain unexpected prefixes")
+                    
+                    error_msg = "\n".join(error_details)
+                    new_messages.append(AIMessage(content=error_msg))
+                    break
                 
                 if is_context_error or is_output_limit_error:
                     error_type = "output limit" if is_output_limit_error else "context window"
@@ -595,9 +642,27 @@ class LLMNode(BaseTool):
                         )
                         new_messages[last_tool_msg_idx] = truncated_msg
                         
-                        logger.info(f"Truncated large tool result from '{last_tool_name}' and continuing")
-                        # Continue to next iteration - the model will see the truncation message
-                        continue
+                        logger.info(f"Truncated large tool result from '{last_tool_name}' and retrying LLM call")
+                        
+                        # CRITICAL FIX: Call LLM again with truncated message to get fresh completion
+                        # This prevents duplicate tool_call_ids that occur when we continue with
+                        # the same current_completion that still has the original tool_calls
+                        try:
+                            current_completion = llm_client.invoke(new_messages, config=config)
+                            new_messages.append(current_completion)
+                            
+                            # Continue to process any new tool calls in the fresh completion
+                            if hasattr(current_completion, 'tool_calls') and current_completion.tool_calls:
+                                logger.info(f"LLM requested {len(current_completion.tool_calls)} more tool calls after truncation")
+                                continue
+                            else:
+                                logger.info("LLM completed after truncation without requesting more tools")
+                                break
+                        except Exception as retry_error:
+                            logger.error(f"Error retrying LLM after truncation: {retry_error}")
+                            error_msg = f"Failed to retry after truncation: {str(retry_error)}"
+                            new_messages.append(AIMessage(content=error_msg))
+                            break
                     else:
                         # Couldn't find tool message, add error and break
                         if is_output_limit_error:
