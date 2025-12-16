@@ -13,6 +13,9 @@ from langchain_core.messages import (
 from langchain_core.tools import ToolException
 from langgraph.store.base import BaseStore
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+
+from elitea_core.models.pd import llm
 
 from ..langchain.assistant import Assistant as LangChainAssistant
 # from ..llamaindex.assistant import Assistant as LLamaAssistant
@@ -219,21 +222,25 @@ class AlitaClient:
             request_timeout=self.model_timeout
         )
 
-    def get_llm(self, model_name: str, model_config: dict) -> ChatOpenAI:
+    def get_llm(self, model_name: str, model_config: dict):
         """
-        Get a ChatOpenAI model instance based on the model name and configuration.
+        Get a ChatOpenAI or ChatAnthropic model instance based on the model name and configuration.
 
         Args:
             model_name: Name of the model to retrieve
             model_config: Configuration parameters for the model
 
         Returns:
-            An instance of ChatOpenAI configured with the provided parameters.
+            An instance of ChatOpenAI or ChatAnthropic configured with the provided parameters.
         """
         if not model_name:
             raise ValueError("Model name must be provided")
 
-        logger.info(f"Creating ChatOpenAI model: {model_name} with config: {model_config}")
+        # Determine if this is an Anthropic model
+        model_name_lower = model_name.lower()
+        is_anthropic = "anthropic" in model_name_lower or "claude" in model_name_lower
+
+        logger.info(f"Creating {'ChatAnthropic' if is_anthropic else 'ChatOpenAI'} model: {model_name} with config: {model_config}")
 
         try:
             from tools import this  # pylint: disable=E0401,C0415
@@ -256,25 +263,48 @@ class AlitaClient:
             # default nuber for a case when auto is selected for an agent
             llm_max_tokens = 4000
 
-        target_kwargs = {
-            "base_url": f"{self.base_url}{self.llm_path}",
-            "model": model_name,
-            "api_key": self.auth_token,
-            "streaming": model_config.get("streaming", True),
-            "stream_usage": model_config.get("stream_usage", True),
-            "max_tokens": llm_max_tokens,
-            "temperature": model_config.get("temperature"),
-            "reasoning_effort": model_config.get("reasoning_effort"),
-            "max_retries": model_config.get("max_retries", 3),
-            "seed": model_config.get("seed", None),
-            "openai_organization": str(self.project_id),
-        }
+        if is_anthropic:
+            # ChatAnthropic configuration
+            target_kwargs = {
+                "base_url": f"{self.base_url}{self.llm_path}",
+                "model": model_name,
+                "api_key": self.auth_token,
+                "streaming": model_config.get("streaming", True),
+                "max_tokens": llm_max_tokens,
+                "effort": model_config.get("reasoning_effort"),
+                "temperature": model_config.get("temperature"),
+                "max_retries": model_config.get("max_retries", 3),
+                "default_headers": {"openai-organization": str(self.project_id)},
+            }
+                
+            # Add http_client if provided
+            if "http_client" in model_config:
+                target_kwargs["http_client"] = model_config["http_client"]
+            
+            llm = ChatAnthropic(**target_kwargs)
+        else:
+            # ChatOpenAI configuration
+            target_kwargs = {
+                "base_url": f"{self.base_url}{self.llm_path}",
+                "model": model_name,
+                "api_key": self.auth_token,
+                "streaming": model_config.get("streaming", True),
+                "stream_usage": model_config.get("stream_usage", True),
+                "max_tokens": llm_max_tokens,
+                "temperature": model_config.get("temperature"),
+                "reasoning_effort": model_config.get("reasoning_effort"),
+                "max_retries": model_config.get("max_retries", 3),
+                "seed": model_config.get("seed", None),
+                "openai_organization": str(self.project_id),
+            }
 
-        if use_responses_api:
-            target_kwargs["use_responses_api"] = True
-
-        return ChatOpenAI(**target_kwargs)
-
+            if use_responses_api:
+                target_kwargs["use_responses_api"] = True
+            
+            llm = ChatOpenAI(**target_kwargs)
+        
+        return llm
+        
     def generate_image(self,
                        prompt: str,
                        n: int = 1,

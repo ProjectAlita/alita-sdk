@@ -14,91 +14,33 @@ from ..langchain.utils import create_pydantic_model, propagate_the_input_mapping
 logger = logging.getLogger(__name__)
 
 
-def _is_thinking_model(model_name: str, llm_client: Any = None) -> bool:
-    """
-    Detect if a model uses extended thinking capability.
+# def _is_thinking_model(llm_client: Any) -> bool:
+#     """
+#     Check if a model uses extended thinking capability by reading cached metadata.
     
-    Thinking models require special message formatting where assistant messages
-    must start with thinking blocks before tool_use blocks.
+#     Thinking models require special message formatting where assistant messages
+#     must start with thinking blocks before tool_use blocks.
     
-    Tries to fetch model metadata from AlitaClient API first (supports_reasoning field),
-    falls back to name-based pattern matching if API unavailable.
+#     This function reads the `_supports_reasoning` attribute that should be set
+#     when the LLM client is created (by checking the model's supports_reasoning field).
     
-    Args:
-        model_name: The model identifier
-        llm_client: Optional LLM client instance to extract API credentials for metadata lookup
+#     Args:
+#         llm_client: LLM client instance with optional _supports_reasoning attribute
         
-    Returns:
-        True if the model is a thinking model
-    """
-    if not model_name:
-        return False
+#     Returns:
+#         True if the model is a thinking model, False otherwise
+#     """
+#     if not llm_client:
+#         return False
     
-    # Try to get model metadata from the client if available
-    if llm_client:
-        try:
-            # Get credentials from LangChain client
-            # lc_attributes contains project_id and base_url
-            lc_attrs = getattr(llm_client, 'lc_attributes', {})
-            
-            project_id = lc_attrs.get('openai_organization')
-            base_url = lc_attrs.get('openai_api_base')
-            
-            # API key is stored in the OpenAI sync client or as SecretStr
-            api_key = None
-            if hasattr(llm_client, 'client') and hasattr(llm_client.client, '_client'):
-                # Get from internal OpenAI sync client
-                sync_client = llm_client.client._client
-                if hasattr(sync_client, 'api_key'):
-                    api_key = str(sync_client.api_key)
-            
-            # Fallback to direct attributes if needed
-            if not all([project_id, base_url, api_key]):
-                project_id = project_id or getattr(llm_client, 'openai_organization', None)
-                base_url = base_url or getattr(llm_client, 'openai_api_base', None)
-                if not api_key and hasattr(llm_client, 'openai_api_key'):
-                    # openai_api_key is a SecretStr, convert to string
-                    api_key_secret = llm_client.openai_api_key
-                    api_key = str(api_key_secret) if api_key_secret else None
-            
-            if project_id and base_url and api_key:
-                # Import AlitaClient to fetch model metadata
-                from ..clients.client import AlitaClient
-                import re
-                
-                # Extract base URL (remove /llm/v1 suffix if present)
-                base_url_clean = re.sub(r'/llm/v1/?$', '', str(base_url))
-                
-                # Create temporary client to fetch model metadata
-                temp_client = AlitaClient(
-                    base_url=base_url_clean,
-                    auth_token=str(api_key),
-                    project_id=int(project_id)
-                )
-                
-                # Get available models and check if this model supports reasoning
-                models = temp_client.get_available_models()
-                for model in models:
-                    api_model_name = model.get('name', '')
-                    # Match either exact name or if model_name is contained in API model name
-                    # (e.g., "claude-3-7-sonnet-20250219" matches "eu.anthropic.claude-3-7-sonnet-20250219-v1:0")
-                    if api_model_name == model_name or model_name in api_model_name:
-                        supports_reasoning = model.get('supports_reasoning', False)
-                        if supports_reasoning:
-                            logger.info(f"Model '{model_name}' (API: '{api_model_name}') detected as thinking/reasoning model via API metadata (supports_reasoning=true)")
-                        else:
-                            logger.debug(f"Model '{model_name}' (API: '{api_model_name}') is not a thinking/reasoning model (supports_reasoning=false)")
-                        return supports_reasoning
-                        
-                # Model not found in available models
-                logger.debug(f"Model '{model_name}' not found in available models list")
-        except Exception as e:
-            logger.debug(f"Could not fetch model metadata from API: {e}")
+#     # Check if supports_reasoning was cached on the client
+#     supports_reasoning = getattr(llm_client, '_supports_reasoning', False)
     
-    # Fallback: Return False if API detection unavailable
-    # We rely on the authoritative API metadata rather than guessing from model names
-    logger.debug(f"Could not determine if '{model_name}' is a thinking model via API, assuming False")
-    return False
+#     if supports_reasoning:
+#         model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'unknown')
+#         logger.debug(f"Model '{model_name}' is a thinking/reasoning model (cached from API metadata)")
+    
+#     return supports_reasoning
 
 
 class LLMNode(BaseTool):
@@ -497,17 +439,17 @@ class LLMNode(BaseTool):
         logger.info(f"__perform_tool_calling called with {len(completion.tool_calls) if hasattr(completion, 'tool_calls') else 0} tool calls")
         
         # Check if this is a thinking model - they require special message handling
-        model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', '')
-        if _is_thinking_model(model_name, llm_client):
-            logger.warning(
-                f"⚠️ THINKING/REASONING MODEL DETECTED: '{model_name}'\n"
-                f"Tool execution with thinking models may fail due to message format requirements.\n"
-                f"Thinking models require 'thinking_blocks' to be preserved between turns, which this "
-                f"framework cannot do.\n"
-                f"Recommendation: Use standard model variants (e.g., claude-3-5-sonnet-20241022-v2:0) "
-                f"instead of thinking/reasoning variants for tool calling.\n"
-                f"See: https://docs.litellm.ai/docs/reasoning_content"
-            )
+        # model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', '')
+        # if _is_thinking_model(llm_client):
+        #     logger.warning(
+        #         f"⚠️ THINKING/REASONING MODEL DETECTED: '{model_name}'\n"
+        #         f"Tool execution with thinking models may fail due to message format requirements.\n"
+        #         f"Thinking models require 'thinking_blocks' to be preserved between turns, which this "
+        #         f"framework cannot do.\n"
+        #         f"Recommendation: Use standard model variants (e.g., claude-3-5-sonnet-20241022-v2:0) "
+        #         f"instead of thinking/reasoning variants for tool calling.\n"
+        #         f"See: https://docs.litellm.ai/docs/reasoning_content"
+        #     )
         
         new_messages = messages + [completion]
         iteration = 0
