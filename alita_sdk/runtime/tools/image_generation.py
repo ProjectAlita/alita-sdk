@@ -1,7 +1,9 @@
 """
 Image generation tool for Alita SDK.
 """
+import json
 import logging
+import uuid
 from typing import Optional, Type, Any, List, Literal
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, Field, create_model, ConfigDict
@@ -76,7 +78,12 @@ class ImageGenerationTool(BaseTool):
     """Tool for generating images using the Alita client."""
     
     name: str = "generate_image"
-    description: str = "Generate images from text prompts using AI models"
+    description: str = (
+        "Generate images from text prompts using AI models. "
+        "Returns a JSON object with 'cached_image_id' field containing a reference to the generated image data. "
+        "The cached_image_id can be used to save or process the image. "
+        "The actual image data is stored temporarily and can be retrieved using the cached_image_id reference."
+    )
     args_schema: Type[BaseModel] = ImageGenerationInput
     alita_client: Any = None
     
@@ -85,10 +92,10 @@ class ImageGenerationTool(BaseTool):
         self.alita_client = client
     
     def _run(self, prompt: str, n: int = 1, size: str = "auto",
-             quality: str = "auto", style: Optional[str] = None) -> list:
+             quality: str = "auto", style: Optional[str] = None) -> str:
         """Generate an image based on the provided parameters."""
         try:
-            logger.info(f"Generating image with prompt: {prompt[:50]}...")
+            logger.debug(f"Generating image with prompt: {prompt[:50]}...")
             
             result = self.alita_client.generate_image(
                 prompt=prompt,
@@ -98,57 +105,56 @@ class ImageGenerationTool(BaseTool):
                 style=style
             )
             
-            # Return multimodal content format for LLM consumption
+            # Return simple JSON structure with reference ID instead of full base64
             if 'data' in result:
                 images = result['data']
-                content_chunks = []
                 
-                # Add a text description of what was generated
-                if len(images) == 1:
-                    content_chunks.append({
-                        "type": "text",
-                        "text": f"Generated image for prompt: '{prompt}'"
+                # Process all images with unified structure
+                images_list = []
+                for idx, image_data in enumerate(images, 1):
+                    if not image_data.get('b64_json'):
+                        continue
+                    
+                    cached_image_id = f"img_{uuid.uuid4().hex[:12]}"
+                    
+                    # Store in cache
+                    if hasattr(self.alita_client, '_generated_images_cache'):
+                        self.alita_client._generated_images_cache[cached_image_id] = {
+                            'base64_data': image_data['b64_json']
+                        }
+                        logger.debug(f"Stored generated image in cache with ID: {cached_image_id}")
+                    
+                    images_list.append({
+                        "image_number": idx,
+                        "image_type": "png",
+                        "cached_image_id": cached_image_id
                     })
-                else:
-                    content_chunks.append({
-                        "type": "text",
-                        "text": f"Generated {len(images)} images for "
-                                f"prompt: '{prompt}'"
+                
+                if not images_list:
+                    return json.dumps({
+                        "status": "error",
+                        "message": "No base64 image data found"
                     })
                 
-                # Add image content for each generated image
-                for image_data in images:
-                    if image_data.get('url'):
-                        content_chunks.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": image_data['url']
-                            }
-                        })
-                    elif image_data.get('b64_json'):
-                        content_chunks.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,"
-                                       f"{image_data['b64_json']}"
-                            }
-                        })
-                
-                return content_chunks
+                return json.dumps({
+                    "status": "success",
+                    "prompt": prompt,
+                    "total_images": len(images_list),
+                    "images": images_list
+                })
             
-            # Fallback to text response if no images in result
-            return [{
-                "type": "text",
-                "text": f"Image generation completed but no images "
-                        f"returned: {result}"
-            }]
+            # Fallback to error response if no images in result
+            return json.dumps({
+                "status": "error",
+                "message": f"Image generation completed but no images returned: {result}"
+            })
             
         except Exception as e:
             logger.error(f"Error generating image: {e}")
-            return [{
-                "type": "text",
-                "text": f"Error generating image: {str(e)}"
-            }]
+            return json.dumps({
+                "status": "error",
+                "message": f"Error generating image: {str(e)}"
+            })
     
     async def _arun(self, prompt: str, n: int = 1, size: str = "256x256",
                     quality: str = "auto",

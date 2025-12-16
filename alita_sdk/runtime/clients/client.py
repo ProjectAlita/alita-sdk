@@ -74,6 +74,10 @@ class AlitaClient:
         self.configurations: list = configurations or []
         self.model_timeout = kwargs.get('model_timeout', 120)
         self.model_image_generation = kwargs.get('model_image_generation')
+        
+        # Cache for generated images to avoid token consumption
+        # This is used by image_generation and artifact toolkits to pass data via reference
+        self._generated_images_cache: Dict[str, Dict[str, Any]] = {}
 
     def get_mcp_toolkits(self):
         if user_id := self._get_real_user_id():
