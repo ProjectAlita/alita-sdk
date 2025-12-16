@@ -697,7 +697,7 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                 'id': str(case.get('id', '')),
                 IndexerKeywords.UPDATED_ON.value: case.get('updated_on') or -1,
                 'labels': [lbl['title'] for lbl in case.get('labels', [])],
-                'type': case.get('type_id') or -1,
+                'type': "testrail_test_case",
                 'priority': case.get('priority_id') or -1,
                 'milestone': case.get('milestone_id') or -1,
                 'estimate': case.get('estimate') or '',
