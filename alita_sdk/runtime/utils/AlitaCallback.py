@@ -313,7 +313,8 @@ class AlitaStreamlitCallback(BaseCallbackHandler):
         if self.debug:
             log.debug("on_llm_end(%s, %s)", response, kwargs)
         llm_run_id = str(run_id)
-        if self.callback_state.get(llm_run_id):
+        # Check if callback_state exists and is not None before accessing
+        if self.callback_state is not None and self.callback_state.get(llm_run_id):
             status_widget = self.callback_state[llm_run_id]
             self._safe_streamlit_call(
                 status_widget.update,

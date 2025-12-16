@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from langchain_core.exceptions import OutputParserException
+from langchain_core.callbacks import dispatch_custom_event
 from pydantic import Field
 
 from ..langchain.constants import ELITEA_RS
@@ -239,8 +240,35 @@ class LLMNode(BaseTool):
                 if result.get('messages') and isinstance(result['messages'], list):
                     result['messages'] = [{'role': 'assistant', 'content': '\n'.join(result['messages'])}]
                 else:
-                    result['messages'] = messages + [
-                        AIMessage(content=result.get(ELITEA_RS, '') or initial_completion.content)]
+                    # Extract content from initial_completion, handling thinking blocks
+                    fallback_content = result.get(ELITEA_RS, '')
+                    if not fallback_content and initial_completion:
+                        content_parts = self._extract_content_from_completion(initial_completion)
+                        fallback_content = content_parts.get('text') or ''
+                        thinking = content_parts.get('thinking')
+                        
+                        # Dispatch thinking event if present
+                        if thinking:
+                            try:
+                                model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'LLM')
+                                dispatch_custom_event(
+                                    name="thinking_step",
+                                    data={
+                                        "message": thinking,
+                                        "tool_name": f"LLM ({model_name})",
+                                        "toolkit": "reasoning",
+                                    },
+                                    config=config,
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to dispatch thinking event: {e}")
+                        
+                        if not fallback_content:
+                            # Final fallback to raw content
+                            content = initial_completion.content
+                            fallback_content = content if isinstance(content, str) else str(content)
+                    
+                    result['messages'] = messages + [AIMessage(content=fallback_content)]
 
                 return result
             else:
@@ -258,24 +286,89 @@ class LLMNode(BaseTool):
                     if self.output_variables:
                         if self.output_variables[0] == 'messages':
                             return output_msgs
-                        output_msgs[self.output_variables[0]] = current_completion.content if current_completion else None
+                        # Extract content properly from thinking-enabled responses
+                        if current_completion:
+                            content_parts = self._extract_content_from_completion(current_completion)
+                            text_content = content_parts.get('text')
+                            thinking = content_parts.get('thinking')
+                            
+                            # Dispatch thinking event if present
+                            if thinking:
+                                try:
+                                    model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'LLM')
+                                    dispatch_custom_event(
+                                        name="thinking_step",
+                                        data={
+                                            "message": thinking,
+                                            "tool_name": f"LLM ({model_name})",
+                                            "toolkit": "reasoning",
+                                        },
+                                        config=config,
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Failed to dispatch thinking event: {e}")
+                            
+                            if text_content:
+                                output_msgs[self.output_variables[0]] = text_content
+                            else:
+                                # Fallback to raw content
+                                content = current_completion.content
+                                output_msgs[self.output_variables[0]] = content if isinstance(content, str) else str(content)
+                        else:
+                            output_msgs[self.output_variables[0]] = None
 
                     return output_msgs
                 else:
-                    # Regular text response
-                    content = completion.content.strip() if hasattr(completion, 'content') else str(completion)
+                    # Regular text response - handle both simple strings and thinking-enabled responses
+                    content_parts = self._extract_content_from_completion(completion)
+                    thinking = content_parts.get('thinking')
+                    text_content = content_parts.get('text') or ''
+                    
+                    # Fallback to string representation if no content extracted
+                    if not text_content:
+                        if hasattr(completion, 'content'):
+                            content = completion.content
+                            text_content = content.strip() if isinstance(content, str) else str(content)
+                        else:
+                            text_content = str(completion)
+                    
+                    # Dispatch thinking step event to chat if present
+                    if thinking:
+                        logger.info(f"Model thinking: {thinking[:200]}..." if len(thinking) > 200 else f"Model thinking: {thinking}")
+                        
+                        # Dispatch custom event for thinking step to be displayed in chat
+                        try:
+                            model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'LLM')
+                            dispatch_custom_event(
+                                name="thinking_step",
+                                data={
+                                    "message": thinking,
+                                    "tool_name": f"LLM ({model_name})",
+                                    "toolkit": "reasoning",
+                                },
+                                config=config,
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to dispatch thinking event: {e}")
+                    
+                    # Build the AI message with both thinking and text
+                    # Store thinking in additional_kwargs for potential future use
+                    ai_message_kwargs = {'content': text_content}
+                    if thinking:
+                        ai_message_kwargs['additional_kwargs'] = {'thinking': thinking}
+                    ai_message = AIMessage(**ai_message_kwargs)
 
                     # Try to extract JSON if output variables are specified (but exclude 'messages' which is handled separately)
                     json_output_vars = [var for var in (self.output_variables or []) if var != 'messages']
                     if json_output_vars:
                         # set response to be the first output variable for non-structured output
-                        response_data = {json_output_vars[0]: content}
-                        new_messages = messages + [AIMessage(content=content)]
+                        response_data = {json_output_vars[0]: text_content}
+                        new_messages = messages + [ai_message]
                         response_data['messages'] = new_messages
                         return response_data
 
                     # Simple text response (either no output variables or JSON parsing failed)
-                    new_messages = messages + [AIMessage(content=content)]
+                    new_messages = messages + [ai_message]
                     return {"messages": new_messages}
 
         except Exception as e:
@@ -292,6 +385,56 @@ class LLMNode(BaseTool):
     def _run(self, *args, **kwargs):
         # Legacy support for old interface
         return self.invoke(kwargs, **kwargs)
+    
+    @staticmethod
+    def _extract_content_from_completion(completion) -> dict:
+        """Extract thinking and text content from LLM completion.
+        
+        Handles Anthropic's extended thinking format where content is a list
+        of blocks with types: 'thinking' and 'text'.
+        
+        Args:
+            completion: LLM completion object with content attribute
+            
+        Returns:
+            dict with 'thinking' and 'text' keys
+        """
+        result = {'thinking': None, 'text': None}
+        
+        if not hasattr(completion, 'content'):
+            return result
+            
+        content = completion.content
+        
+        # Handle list of content blocks (Anthropic extended thinking format)
+        if isinstance(content, list):
+            thinking_blocks = []
+            text_blocks = []
+            
+            for block in content:
+                if isinstance(block, dict):
+                    block_type = block.get('type', '')
+                    if block_type == 'thinking':
+                        thinking_blocks.append(block.get('thinking', ''))
+                    elif block_type == 'text':
+                        text_blocks.append(block.get('text', ''))
+                elif hasattr(block, 'type'):
+                    # Handle object format
+                    if block.type == 'thinking':
+                        thinking_blocks.append(getattr(block, 'thinking', ''))
+                    elif block.type == 'text':
+                        text_blocks.append(getattr(block, 'text', ''))
+            
+            if thinking_blocks:
+                result['thinking'] = '\n\n'.join(thinking_blocks)
+            if text_blocks:
+                result['text'] = '\n\n'.join(text_blocks)
+        
+        # Handle simple string content
+        elif isinstance(content, str):
+            result['text'] = content
+        
+        return result
     
     def _run_async_in_sync_context(self, coro):
         """Run async coroutine from sync context.
