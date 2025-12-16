@@ -259,21 +259,22 @@ class AlitaClient:
                     use_responses_api = True
                     break
 
-        # handle case when max_tokens are auto-configurable == -1
+        # handle case when max_tokens are auto-configurable == -1 or None
         llm_max_tokens = model_config.get("max_tokens", None)
-        if llm_max_tokens and llm_max_tokens == -1:
-            logger.warning(f'User selected `MAX COMPLETION TOKENS` as `auto`')
-            # default nuber for a case when auto is selected for an agent
+        if llm_max_tokens is None or llm_max_tokens == -1:
+            logger.warning(f'User selected `MAX COMPLETION TOKENS` as `auto` or value is None/missing')
+            # default number for a case when auto is selected for an agent
             llm_max_tokens = 4000
 
         if is_anthropic:
             # ChatAnthropic configuration
+            # Anthropic requires max_tokens to be an integer, never None
             target_kwargs = {
                 "base_url": f"{self.base_url}{self.allm_path}",
                 "model": model_name,
                 "api_key": self.auth_token,
                 "streaming": model_config.get("streaming", True),
-                "max_tokens": llm_max_tokens,
+                "max_tokens": llm_max_tokens,  # Always an integer now
                 "temperature": model_config.get("temperature"),
                 "max_retries": model_config.get("max_retries", 3),
                 "default_headers": {"openai-organization": str(self.project_id),
