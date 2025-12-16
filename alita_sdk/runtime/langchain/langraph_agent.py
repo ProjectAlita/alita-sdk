@@ -937,7 +937,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 "with no accompanying text."
             )
         
-        logging.info(f"Input: {thread_id} - {input}")
+        logger.info(f"Input: {thread_id} - {input}")
         try:
             if self.checkpointer and self.checkpointer.get_tuple(config):
                 if config.pop("should_continue", False):
