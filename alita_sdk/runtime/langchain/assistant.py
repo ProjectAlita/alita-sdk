@@ -278,6 +278,7 @@ class Assistant:
             prompt_instructions = self.prompt
         
         # Add tool binding only if tools are present
+        tool_names = []
         if simple_tools:
             tool_names = [tool.name for tool in simple_tools]
             logger.info("Binding tools: %s", tool_names)
