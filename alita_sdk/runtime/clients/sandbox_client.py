@@ -48,27 +48,6 @@ class SandboxArtifact:
             return f'{data['error']}. {data['content'] if data['content'] else ''}'
         detected = chardet.detect(data)
         return data
-        # TODO: add proper handling for binary files (images, pdf, etc.) for sandbox
-        # if detected['encoding'] is not None:
-        #     try:
-        #         return data.decode(detected['encoding'])
-        #     except Exception:
-        #         logger.error('Error while default encoding')
-        #         return parse_file_content(file_name=artifact_name,
-        #                                   file_content=data,
-        #                                   is_capture_image=is_capture_image,
-        #                                   page_number=page_number,
-        #                                   sheet_name=sheet_name,
-        #                                   excel_by_sheets=excel_by_sheets,
-        #                                   llm=llm)
-        # else:
-        #     return parse_file_content(file_name=artifact_name,
-        #                               file_content=data,
-        #                               is_capture_image=is_capture_image,
-        #                               page_number=page_number,
-        #                               sheet_name=sheet_name,
-        #                               excel_by_sheets=excel_by_sheets,
-        #                               llm=llm)
 
     def delete(self, artifact_name: str, bucket_name=None):
         if not bucket_name:
@@ -183,33 +162,6 @@ class SandboxClient:
         url = f'{self.app}/{application_id}'
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
-
-    # TODO: disable until required functionality will be injected into isolated environment
-    # def toolkit(self, toolkit_id: int):
-    #     """Fetch and instantiate a toolkit by ID.
-    #
-    #     Note: This method may not be available in sandbox environments due to import restrictions.
-    #     """
-    #     url = f"{self.base_url}{self.api_path}/tool/prompt_lib/{self.project_id}/{toolkit_id}"
-    #     response = requests.get(url, headers=self.headers, verify=False)
-    #     if not response.ok:
-    #         raise ValueError(f"Failed to fetch toolkit {toolkit_id}: {response.text}")
-    #
-    #     tool_data = response.json()
-    #     if 'settings' not in tool_data:
-    #         tool_data['settings'] = {}
-    #     tool_data['settings']['alita'] = self
-    #
-    #     # Check if instantiate_toolkit is available (may not be in sandbox environments)
-    #     try:
-    #         return instantiate_toolkit(tool_data)
-    #     except NameError:
-    #         raise RuntimeError(
-    #             f"Toolkit instantiation is not available in this environment.\n"
-    #             f"The 'instantiate_toolkit' function is not accessible, likely because this code "
-    #             f"is running in a restricted sandbox environment (e.g., Pyodide).\n"
-    #             f"Toolkit ID: {toolkit_id}, Type: {tool_data.get('type', 'unknown')}"
-    #         )
 
     def get_list_of_apps(self):
         apps = []
