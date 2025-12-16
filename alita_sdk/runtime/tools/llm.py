@@ -14,6 +14,93 @@ from ..langchain.utils import create_pydantic_model, propagate_the_input_mapping
 logger = logging.getLogger(__name__)
 
 
+def _is_thinking_model(model_name: str, llm_client: Any = None) -> bool:
+    """
+    Detect if a model uses extended thinking capability.
+    
+    Thinking models require special message formatting where assistant messages
+    must start with thinking blocks before tool_use blocks.
+    
+    Tries to fetch model metadata from AlitaClient API first (supports_reasoning field),
+    falls back to name-based pattern matching if API unavailable.
+    
+    Args:
+        model_name: The model identifier
+        llm_client: Optional LLM client instance to extract API credentials for metadata lookup
+        
+    Returns:
+        True if the model is a thinking model
+    """
+    if not model_name:
+        return False
+    
+    # Try to get model metadata from the client if available
+    if llm_client:
+        try:
+            # Get credentials from LangChain client
+            # lc_attributes contains project_id and base_url
+            lc_attrs = getattr(llm_client, 'lc_attributes', {})
+            
+            project_id = lc_attrs.get('openai_organization')
+            base_url = lc_attrs.get('openai_api_base')
+            
+            # API key is stored in the OpenAI sync client or as SecretStr
+            api_key = None
+            if hasattr(llm_client, 'client') and hasattr(llm_client.client, '_client'):
+                # Get from internal OpenAI sync client
+                sync_client = llm_client.client._client
+                if hasattr(sync_client, 'api_key'):
+                    api_key = str(sync_client.api_key)
+            
+            # Fallback to direct attributes if needed
+            if not all([project_id, base_url, api_key]):
+                project_id = project_id or getattr(llm_client, 'openai_organization', None)
+                base_url = base_url or getattr(llm_client, 'openai_api_base', None)
+                if not api_key and hasattr(llm_client, 'openai_api_key'):
+                    # openai_api_key is a SecretStr, convert to string
+                    api_key_secret = llm_client.openai_api_key
+                    api_key = str(api_key_secret) if api_key_secret else None
+            
+            if project_id and base_url and api_key:
+                # Import AlitaClient to fetch model metadata
+                from ..clients.client import AlitaClient
+                import re
+                
+                # Extract base URL (remove /llm/v1 suffix if present)
+                base_url_clean = re.sub(r'/llm/v1/?$', '', str(base_url))
+                
+                # Create temporary client to fetch model metadata
+                temp_client = AlitaClient(
+                    base_url=base_url_clean,
+                    auth_token=str(api_key),
+                    project_id=int(project_id)
+                )
+                
+                # Get available models and check if this model supports reasoning
+                models = temp_client.get_available_models()
+                for model in models:
+                    api_model_name = model.get('name', '')
+                    # Match either exact name or if model_name is contained in API model name
+                    # (e.g., "claude-3-7-sonnet-20250219" matches "eu.anthropic.claude-3-7-sonnet-20250219-v1:0")
+                    if api_model_name == model_name or model_name in api_model_name:
+                        supports_reasoning = model.get('supports_reasoning', False)
+                        if supports_reasoning:
+                            logger.info(f"Model '{model_name}' (API: '{api_model_name}') detected as thinking/reasoning model via API metadata (supports_reasoning=true)")
+                        else:
+                            logger.debug(f"Model '{model_name}' (API: '{api_model_name}') is not a thinking/reasoning model (supports_reasoning=false)")
+                        return supports_reasoning
+                        
+                # Model not found in available models
+                logger.debug(f"Model '{model_name}' not found in available models list")
+        except Exception as e:
+            logger.debug(f"Could not fetch model metadata from API: {e}")
+    
+    # Fallback: Return False if API detection unavailable
+    # We rely on the authoritative API metadata rather than guessing from model names
+    logger.debug(f"Could not determine if '{model_name}' is a thinking model via API, assuming False")
+    return False
+
+
 class LLMNode(BaseTool):
     """Enhanced LLM node with chat history and tool binding support"""
     
@@ -408,6 +495,20 @@ class LLMNode(BaseTool):
     async def __perform_tool_calling(self, completion, messages, llm_client, config):
         # Handle iterative tool-calling and execution
         logger.info(f"__perform_tool_calling called with {len(completion.tool_calls) if hasattr(completion, 'tool_calls') else 0} tool calls")
+        
+        # Check if this is a thinking model - they require special message handling
+        model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', '')
+        if _is_thinking_model(model_name, llm_client):
+            logger.warning(
+                f"⚠️ THINKING/REASONING MODEL DETECTED: '{model_name}'\n"
+                f"Tool execution with thinking models may fail due to message format requirements.\n"
+                f"Thinking models require 'thinking_blocks' to be preserved between turns, which this "
+                f"framework cannot do.\n"
+                f"Recommendation: Use standard model variants (e.g., claude-3-5-sonnet-20241022-v2:0) "
+                f"instead of thinking/reasoning variants for tool calling.\n"
+                f"See: https://docs.litellm.ai/docs/reasoning_content"
+            )
+        
         new_messages = messages + [completion]
         iteration = 0
 
@@ -516,6 +617,15 @@ class LLMNode(BaseTool):
             except Exception as e:
                 error_str = str(e).lower()
                 
+                # Check for thinking model message format errors
+                is_thinking_format_error = any(indicator in error_str for indicator in [
+                    'expected `thinking`',
+                    'expected `redacted_thinking`',
+                    'thinking block',
+                    'must start with a thinking block',
+                    'when `thinking` is enabled'
+                ])
+                
                 # Check for non-recoverable errors that should fail immediately
                 # These indicate configuration or permission issues, not content size issues
                 is_non_recoverable = any(indicator in error_str for indicator in [
@@ -545,6 +655,37 @@ class LLMNode(BaseTool):
                     'output_token_limit',
                     'output exceeds'
                 ])
+                
+                # Handle thinking model format errors
+                if is_thinking_format_error:
+                    model_info = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'unknown')
+                    logger.error(f"Thinking model message format error during tool execution iteration {iteration}")
+                    logger.error(f"Model: {model_info}")
+                    logger.error(f"Error details: {e}")
+                    
+                    error_msg = (
+                        f"⚠️ THINKING MODEL FORMAT ERROR\n\n"
+                        f"The model '{model_info}' uses extended thinking and requires specific message formatting.\n\n"
+                        f"**Issue**: When 'thinking' is enabled, assistant messages must start with thinking blocks "
+                        f"before any tool_use blocks. This framework cannot preserve thinking_blocks during iterative "
+                        f"tool execution.\n\n"
+                        f"**Root Cause**: Anthropic's Messages API is stateless - clients must manually preserve and "
+                        f"resend thinking_blocks with every tool response. LangChain's message abstraction doesn't "
+                        f"include thinking_blocks, so they are lost between turns.\n\n"
+                        f"**Solutions**:\n"
+                        f"1. **Recommended**: Use non-thinking model variants:\n"
+                        f"   - claude-3-5-sonnet-20241022-v2:0 (instead of thinking variants)\n"
+                        f"   - anthropic.claude-3-5-sonnet-20241022-v2:0 (Bedrock)\n"
+                        f"2. Disable extended thinking: Set reasoning_effort=None or remove thinking config\n"
+                        f"3. Use LiteLLM directly with modify_params=True (handles thinking_blocks automatically)\n"
+                        f"4. Avoid tool calling with thinking models (use for reasoning tasks only)\n\n"
+                        f"**Technical Context**: {str(e)}\n\n"
+                        f"References:\n"
+                        f"- https://docs.claude.com/en/docs/build-with-claude/extended-thinking\n"
+                        f"- https://docs.litellm.ai/docs/reasoning_content (See 'Tool Calling with thinking' section)"
+                    )
+                    new_messages.append(AIMessage(content=error_msg))
+                    raise ValueError(error_msg)
                 
                 # Handle non-recoverable errors immediately
                 if is_non_recoverable:
