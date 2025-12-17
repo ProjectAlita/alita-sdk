@@ -14,6 +14,7 @@ from .prompt import PromptToolkit
 from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from .mcp import McpToolkit
+from .skill_router import SkillRouterToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
 from ..tools.image_generation import ImageGenerationToolkit
@@ -35,19 +36,40 @@ def get_toolkits():
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
         ImageGenerationToolkit.toolkit_config_schema(),
-        McpToolkit.toolkit_config_schema()
+        McpToolkit.toolkit_config_schema(),
+        SkillRouterToolkit.toolkit_config_schema()
     ]
 
     return core_toolkits + community_toolkits() + alita_toolkits()
 
 
 def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None) -> list:
+    # Sanitize tools_list to handle corrupted tool configurations
+    sanitized_tools = []
+    for tool in tools_list:
+        if isinstance(tool, dict):
+            # Check for corrupted structure where 'type' and 'name' contain the full tool config
+            if 'type' in tool and isinstance(tool['type'], dict):
+                # This is a corrupted tool - use the inner dict instead
+                logger.warning(f"Detected corrupted tool configuration, fixing: {tool}")
+                actual_tool = tool['type']  # or tool['name'], they should be the same
+                sanitized_tools.append(actual_tool)
+            else:
+                sanitized_tools.append(tool)
+        else:
+            sanitized_tools.append(tool)
+
     prompts = []
     tools = []
+    unhandled_tools = []  # Track tools not handled by main processing
 
-    for tool in tools_list:
+    for tool in sanitized_tools:
+        # Flag to track if this tool was processed by the main loop
+        # Used to prevent double processing by fallback systems
+        tool_handled = False
         try:
             if tool['type'] == 'datasource':
+                tool_handled = True
                 tools.extend(DatasourcesToolkit.get_toolkit(
                     alita_client,
                     datasource_ids=[int(tool['settings']['datasource_id'])],
@@ -55,6 +77,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
                 ).get_tools())
             elif tool['type'] == 'application':
+                tool_handled = True
                 tools.extend(ApplicationToolkit.get_toolkit(
                     alita_client,
                     application_id=int(tool['settings']['application_id']),
@@ -74,6 +97,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         llm=llm
                     ))
             elif tool['type'] == 'memory':
+                tool_handled = True
                 tools += MemoryToolkit.get_toolkit(
                     namespace=tool['settings'].get('namespace', str(tool['id'])),
                     pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
@@ -81,6 +105,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 ).get_tools()
             # TODO: update configuration of internal tools
             elif tool['type'] == 'internal_tool':
+                tool_handled = True
                 if tool['name'] == 'pyodide':
                     tools += SandboxToolkit.get_toolkit(
                         stateful=False,
@@ -101,6 +126,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         conversation_id=conversation_id,
                     ).get_tools()
             elif tool['type'] == 'artifact':
+                tool_handled = True
                 toolkit_tools = ArtifactToolkit.get_toolkit(
                     client=alita_client,
                     bucket=tool['settings']['bucket'],
@@ -119,11 +145,13 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 tools.extend(toolkit_tools)
 
             elif tool['type'] == 'vectorstore':
+                tool_handled = True
                 tools.extend(VectorStoreToolkit.get_toolkit(
                     llm=llm,
                     toolkit_name=tool.get('toolkit_name', ''),
                     **tool['settings']).get_tools())
             elif tool['type'] == 'planning':
+                tool_handled = True
                 # Planning toolkit for multi-step task tracking
                 settings = tool.get('settings', {})
                 
@@ -163,6 +191,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     conversation_id=conversation_id or settings.get('conversation_id'),
                 ).get_tools())
             elif tool['type'] == 'mcp':
+                tool_handled = True
                 # remote mcp tool initialization with token injection
                 settings = dict(tool['settings'])
                 url = settings.get('url')
@@ -214,6 +243,22 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     toolkit_name=tool.get('toolkit_name', ''),
                     client=alita_client,
                     **settings).get_tools())
+            elif tool['type'] == 'skill_router':
+                tool_handled = True
+                # Skills Registry Router Toolkit
+                logger.info(f"Processing skill_router toolkit: {tool}")
+                try:
+                    settings = tool.get('settings', {})
+                    toolkit_tools = SkillRouterToolkit.get_toolkit(
+                        client=alita_client,
+                        **settings
+                    ).get_tools()
+
+                    tools.extend(toolkit_tools)
+                    logger.info(f"✅ Successfully added {len(toolkit_tools)} tools from SkillRouterToolkit")
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize SkillRouterToolkit: {e}")
+                    raise
         except McpAuthorizationRequired:
             # Re-raise auth required exceptions directly
             raise
@@ -224,17 +269,21 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 continue
             else:
                 raise ToolException(f"Error initializing toolkit for tool '{tool.get('name', 'unknown')}': {e}")
-    
+
+        # Track unhandled tools (make a copy to avoid reference issues)
+        if not tool_handled:
+            unhandled_tools.append(dict(tool))
+
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita_client, prompts).get_tools()
-    
-    # Add community tools
-    tools += community_tools(tools_list, alita_client, llm)
-    # Add alita tools
-    tools += alita_tools(tools_list, alita_client, llm, memory_store)
+
+    # Add community tools (only for unhandled tools)
+    tools += community_tools(unhandled_tools, alita_client, llm)
+    # Add alita tools (only for unhandled tools)
+    tools += alita_tools(unhandled_tools, alita_client, llm, memory_store)
     # Add MCP tools registered via alita-mcp CLI (static registry)
     # Note: Tools with type='mcp' are already handled in main loop above
-    tools += _mcp_tools(tools_list, alita_client)
+    tools += _mcp_tools(unhandled_tools, alita_client)
     
     # Sanitize tool names to meet OpenAI's function naming requirements
     # tools = _sanitize_tool_names(tools)

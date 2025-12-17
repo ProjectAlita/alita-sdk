@@ -96,18 +96,22 @@ def get_toolkits():
 def get_tools(tools_list: list, alita_client, llm) -> list:
     """Get community tools based on the tools list configuration."""
     tools = []
-    
+
     # Tool type to class mapping
     _tool_mapping = {
         'analyse_jira': 'AnalyseJira',
         'analyse_ado': 'AnalyseAdo',
-        'analyse_gitlab': 'AnalyseGitLab', 
+        'analyse_gitlab': 'AnalyseGitLab',
         'analyse_github': 'AnalyseGithub',
         'inventory': 'InventoryToolkit'
     }
-    
+
     for tool in tools_list:
-        tool_type = tool.get('type')
+        if isinstance(tool, dict):
+            tool_type = tool.get('type')
+        else:
+            logger.error(f"Community tools received non-dict tool: {tool} (type: {type(tool)})")
+            continue
         class_name = _tool_mapping.get(tool_type)
         
         if class_name and class_name in globals():
