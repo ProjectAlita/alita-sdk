@@ -40,11 +40,18 @@ class SkillRouterToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         return create_model(
             "skill_router",
-            skills=(List[SkillConfig], Field(
-                description="List of skills to make available",
+            # Separate fields for agents and pipelines
+            agents=(List[SkillConfig], Field(
+                description="List of agents to make available as skills",
                 default_factory=list,
                 json_schema_extra={
-                    "agent_tags": ["skill"],
+                    "agent_tags": ["skill"]
+                }
+            )),
+            pipelines=(List[SkillConfig], Field(
+                description="List of pipelines to make available as skills",
+                default_factory=list,
+                json_schema_extra={
                     "pipeline_tags": ["skill"]
                 }
             )),
@@ -67,7 +74,8 @@ class SkillRouterToolkit(BaseToolkit):
         cls,
         client: 'AlitaClient',
         llm = None,
-        skills: List[SkillConfig] = None,
+        agents: List[SkillConfig] = None,
+        pipelines: List[SkillConfig] = None,
         prompt: Optional[str] = None,
         skills_paths: Optional[List[str]] = None,
         timeout: Optional[int] = None,
@@ -82,15 +90,25 @@ class SkillRouterToolkit(BaseToolkit):
         if skills_paths:
             registry.discover(refresh=True)
 
-        # Add configured skills
-        if skills:
-            for skill_config_dict in skills:
-                # Convert dict to SkillConfig object
-                skill_config = SkillConfig(**skill_config_dict)
-                skill_metadata = cls._create_skill_from_config(skill_config, client)
-                if skill_metadata:
-                    # Add skill to registry manually
-                    registry.discovery.cache[skill_metadata.name] = skill_metadata
+        # Helper function to process skill configs
+        def add_skills_to_registry(skill_configs, default_type=None):
+            if skill_configs:
+                for skill_config_dict in skill_configs:
+                    # Convert dict to SkillConfig object
+                    skill_config = SkillConfig(**skill_config_dict)
+                    # Set default type if not specified
+                    if default_type and not skill_config.type:
+                        skill_config.type = default_type
+                    skill_metadata = cls._create_skill_from_config(skill_config, client)
+                    if skill_metadata:
+                        # Add skill to registry manually
+                        registry.discovery.cache[skill_metadata.name] = skill_metadata
+
+        # Add configured agents
+        add_skills_to_registry(agents, "agent")
+
+        # Add configured pipelines
+        add_skills_to_registry(pipelines, "pipeline")
 
         # Create skill router tool with custom configuration
         skill_router = SkillRouterTool(
@@ -214,7 +232,8 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None):
     toolkit_name = tool_config.get('toolkit_name')
 
     # Extract configuration
-    skills = settings.get('skills', [])
+    agents = settings.get('agents', [])
+    pipelines = settings.get('pipelines', [])
     prompt = settings.get('prompt')
     skills_paths = settings.get('skills_paths')
     timeout = settings.get('timeout', 300)
@@ -224,7 +243,8 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None):
         toolkit = SkillRouterToolkit.get_toolkit(
             client=alita_client,
             llm=llm,
-            skills=skills,
+            agents=agents,
+            pipelines=pipelines,
             prompt=prompt,
             skills_paths=skills_paths,
             timeout=timeout,
