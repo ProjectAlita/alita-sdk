@@ -40,24 +40,24 @@ class SkillRouterToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         return create_model(
             "skill_router",
-            # Separate fields for agents and pipelines - now optional
+            # Separate fields for agents and pipelines - optional but default to empty lists
             agents=(Optional[List[SkillConfig]], Field(
                 description="List of agents to make available as skills",
-                default=None,
+                default_factory=list,
                 json_schema_extra={
                     "agent_tags": ["skill"]
                 }
             )),
             pipelines=(Optional[List[SkillConfig]], Field(
                 description="List of pipelines to make available as skills",
-                default=None,
+                default_factory=list,
                 json_schema_extra={
                     "pipeline_tags": ["skill"]
                 }
             )),
             prompt=(Optional[str], Field(
                 description="Custom system prompt for skill routing",
-                default=None,
+                default="",
                 json_schema_extra={"lines": 4}
             )),
             # Hidden skills_paths field - not exposed in UI
