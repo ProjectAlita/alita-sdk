@@ -22,14 +22,9 @@ from ..tools.skill_router import SkillRouterWrapper
 class SkillConfig(BaseModel):
     """Configuration for a single skill."""
 
-    type: str = Field(description="Skill type: 'filesystem', 'agent', or 'pipeline'")
-
-    # Filesystem skill fields
-    path: Optional[str] = Field(default=None, description="Path to skill directory (for filesystem skills)")
-
-    # Platform skill fields
-    id: Optional[int] = Field(default=None, description="Platform ID (for agent/pipeline skills)")
-    version_id: Optional[int] = Field(default=None, description="Platform version ID (for agent/pipeline skills)")
+    # Platform skill fields (type is implicit from parent field: agents or pipelines)
+    id: int = Field(description="Platform ID (for agent/pipeline skills)")
+    version_id: int = Field(description="Platform version ID (for agent/pipeline skills)")
     name: Optional[str] = Field(default=None, description="Skill name (optional override)")
 
 
@@ -41,19 +36,22 @@ class SkillRouterToolkit(BaseToolkit):
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         """Define the configuration schema for the skill router toolkit."""
+        # Get available tools for selected_tools field
+        selected_tools_options = {x['name']: x['args_schema'].schema() for x in SkillRouterWrapper.model_construct().get_available_tools()}
+        
         return create_model(
             "skill_router",
             # Separate fields for agents and pipelines - optional but default to empty lists
             agents=(Optional[List[SkillConfig]], Field(
                 description="List of agents to make available as skills",
-                default_factory=list,
+                default=[],
                 json_schema_extra={
                     "agent_tags": ["skill"]
                 }
             )),
             pipelines=(Optional[List[SkillConfig]], Field(
                 description="List of pipelines to make available as skills",
-                default_factory=list,
+                default=[],
                 json_schema_extra={
                     "pipeline_tags": ["skill"]
                 }
@@ -63,21 +61,16 @@ class SkillRouterToolkit(BaseToolkit):
                 default="",
                 json_schema_extra={"lines": 4}
             )),
-            # Hidden skills_paths field - not exposed in UI
-            skills_paths=(Optional[List[str]], Field(
-                description="Additional filesystem paths to search for skills",
-                default=None,
-                json_schema_extra={"hidden": True}
-            )),
             timeout=(Optional[int], Field(description="Default timeout in seconds for skill execution", default=300)),
             execution_mode=(Optional[str], Field(
                 description="Default execution mode for skills",
                 default=None,
                 json_schema_extra={"enum": ["subprocess", "remote"]}
             )),
-            selected_tools=(Optional[List[str]], Field(
+            selected_tools=(List[str], Field(
                 description="List of tools to enable",
-                default=[]
+                default=list(selected_tools_options.keys()),
+                json_schema_extra={'args_schemas': selected_tools_options}
             )),
             __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Skill Router", "icon_url": None}})
         )
@@ -92,7 +85,6 @@ class SkillRouterToolkit(BaseToolkit):
         agents: List[SkillConfig] = None,
         pipelines: List[SkillConfig] = None,
         prompt: Optional[str] = None,
-        skills_paths: Optional[str] = None,
         timeout: Optional[int] = None,
         execution_mode: Optional[str] = None
     ):
@@ -102,22 +94,15 @@ class SkillRouterToolkit(BaseToolkit):
             selected_tools = []
 
         # Create a custom registry for this toolkit
-        registry = SkillsRegistry(search_paths=skills_paths or [])
-
-        # Add filesystem-based skills from paths (if any)
-        if skills_paths:
-            registry.discover(refresh=True)
+        registry = SkillsRegistry(search_paths=[])
 
         # Helper function to process skill configs
-        def add_skills_to_registry(skill_configs, default_type=None):
+        def add_skills_to_registry(skill_configs, skill_type):
             if skill_configs:
                 for skill_config_dict in skill_configs:
                     # Convert dict to SkillConfig object
                     skill_config = SkillConfig(**skill_config_dict)
-                    # Set default type if not specified
-                    if default_type and not skill_config.type:
-                        skill_config.type = default_type
-                    skill_metadata = cls._create_skill_from_config(skill_config, client)
+                    skill_metadata = cls._create_skill_from_config(skill_config, client, skill_type)
                     if skill_metadata:
                         # Add skill to registry manually
                         registry.discovery.cache[skill_metadata.name] = skill_metadata
@@ -168,42 +153,40 @@ class SkillRouterToolkit(BaseToolkit):
         return cls(tools=tools)
 
     @classmethod
-    def _create_skill_from_config(cls, config: SkillConfig, client: 'AlitaClient') -> Optional[SkillMetadata]:
-        """Create SkillMetadata from SkillConfig."""
+    def _create_skill_from_config(cls, config: SkillConfig, client: 'AlitaClient', skill_type: str) -> Optional[SkillMetadata]:
+        """Create SkillMetadata from SkillConfig.
+        
+        Args:
+            config: SkillConfig with id, version_id, and optional name
+            client: AlitaClient for fetching skill details
+            skill_type: Either "agent" or "pipeline" (from parent field)
+        """
         try:
-            if config.type == "filesystem":
-                # Filesystem skills are handled by discovery
-                return None
+            # Get skill details from platform
+            if skill_type == "agent":
+                skill_details = cls._get_agent_details(client, config.id, config.version_id)
+                metadata_type = SkillType.AGENT
+            else:  # pipeline
+                skill_details = cls._get_pipeline_details(client, config.id, config.version_id)
+                metadata_type = SkillType.PIPELINE
 
-            elif config.type in ["agent", "pipeline"]:
-                if not config.id or not config.version_id:
-                    raise ValueError(f"Platform skill type '{config.type}' requires id and version_id")
-
-                # Get skill details from platform
-                if config.type == "agent":
-                    skill_details = cls._get_agent_details(client, config.id, config.version_id)
-                    skill_type = SkillType.AGENT
-                else:  # pipeline
-                    skill_details = cls._get_pipeline_details(client, config.id, config.version_id)
-                    skill_type = SkillType.PIPELINE
-
-                # Create SkillMetadata for platform skill
-                return SkillMetadata(
-                    name=config.name or skill_details.get('name', f"{config.type}_{config.id}"),
-                    skill_type=skill_type,
-                    source=SkillSource.PLATFORM,
-                    id=config.id,
-                    version_id=config.version_id,
-                    description=skill_details.get('description', ''),
-                    capabilities=skill_details.get('capabilities', []),
-                    tags=skill_details.get('tags', []),
-                    version=skill_details.get('version', '1.0.0'),
-                    # Set default execution config - platform skills run remotely
-                    execution={"mode": "remote", "timeout": 300},
-                    results={"format": "text_with_links"},
-                    inputs={},
-                    outputs={}
-                )
+            # Create SkillMetadata for platform skill
+            return SkillMetadata(
+                name=config.name or skill_details.get('name', f"{skill_type}_{config.id}"),
+                skill_type=metadata_type,
+                source=SkillSource.PLATFORM,
+                id=config.id,
+                version_id=config.version_id,
+                description=skill_details.get('description', ''),
+                capabilities=skill_details.get('capabilities', []),
+                tags=skill_details.get('tags', []),
+                version=skill_details.get('version', '1.0.0'),
+                # Set default execution config - platform skills run remotely
+                execution={"mode": "remote", "timeout": 300},
+                results={"format": "text_with_links"},
+                inputs={},
+                outputs={}
+            )
 
         except Exception as e:
             import logging
