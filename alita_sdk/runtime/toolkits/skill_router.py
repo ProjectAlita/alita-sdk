@@ -194,3 +194,51 @@ class SkillRouterToolkit(BaseToolkit):
     def get_tools(self):
         """Get the configured tools."""
         return self.tools
+
+
+def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None):
+    """
+    Create skill router tools from configuration.
+    This function is called by the main tool loading system.
+
+    Args:
+        tool_config: Tool configuration dictionary
+        alita_client: Alita client instance
+        llm: Language model (not used by skill router)
+        memory_store: Memory store (not used by skill router)
+
+    Returns:
+        List of configured skill router tools
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    settings = tool_config.get('settings', {})
+    toolkit_name = tool_config.get('toolkit_name')
+
+    # Extract configuration
+    skills = settings.get('skills', [])
+    prompt = settings.get('prompt')
+    model = settings.get('model')
+    temperature = settings.get('temperature')
+    max_tokens = settings.get('max_tokens')
+    skills_paths = settings.get('skills_paths')
+    timeout = settings.get('timeout', 300)
+    execution_mode = settings.get('execution_mode')
+
+    try:
+        toolkit = SkillRouterToolkit.get_toolkit(
+            client=alita_client,
+            skills=skills,
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            skills_paths=skills_paths,
+            timeout=timeout,
+            execution_mode=execution_mode
+        )
+        return toolkit.get_tools()
+    except Exception as e:
+        logger.error(f"Failed to create skill router toolkit: {e}")
+        return []

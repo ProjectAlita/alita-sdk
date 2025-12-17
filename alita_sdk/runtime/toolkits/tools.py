@@ -51,13 +51,23 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
             # Check for corrupted structure where 'type' and 'name' contain the full tool config
             if 'type' in tool and isinstance(tool['type'], dict):
                 # This is a corrupted tool - use the inner dict instead
-                logger.warning(f"Detected corrupted tool configuration, fixing: {tool}")
+                logger.warning(f"Detected corrupted tool configuration (type=dict), fixing: {tool}")
                 actual_tool = tool['type']  # or tool['name'], they should be the same
                 sanitized_tools.append(actual_tool)
-            else:
+            elif 'name' in tool and isinstance(tool['name'], dict):
+                # Another corruption pattern where name contains the full config
+                logger.warning(f"Detected corrupted tool configuration (name=dict), fixing: {tool}")
+                actual_tool = tool['name']
+                sanitized_tools.append(actual_tool)
+            elif 'type' in tool and isinstance(tool['type'], str):
+                # Valid tool configuration
                 sanitized_tools.append(tool)
+            else:
+                # Skip invalid/corrupted tools that can't be fixed
+                logger.warning(f"Skipping invalid tool configuration: {tool}")
         else:
-            sanitized_tools.append(tool)
+            logger.warning(f"Skipping non-dict tool: {tool}")
+            # Skip non-dict tools
 
     prompts = []
     tools = []
@@ -272,7 +282,9 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
 
         # Track unhandled tools (make a copy to avoid reference issues)
         if not tool_handled:
-            unhandled_tools.append(dict(tool))
+            # Ensure we only add valid tool configurations to unhandled_tools
+            if isinstance(tool, dict) and 'type' in tool and isinstance(tool['type'], str):
+                unhandled_tools.append(dict(tool))
 
     if len(prompts) > 0:
         tools += PromptToolkit.get_toolkit(alita_client, prompts).get_tools()
