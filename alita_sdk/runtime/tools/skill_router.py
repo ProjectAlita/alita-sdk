@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from alita_sdk.tools.elitea_base import BaseToolApiWrapper
 from ..skills import (
@@ -98,6 +98,8 @@ class SkillRouterWrapper(BaseToolApiWrapper):
     This wrapper provides methods for listing, describing, and executing skills
     with intelligent routing capabilities and proper input handling.
     """
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     # Declare Pydantic fields for the wrapper components
     registry: Optional[SkillsRegistry] = Field(default=None)

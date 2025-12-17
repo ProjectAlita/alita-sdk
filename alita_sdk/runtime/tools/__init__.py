@@ -10,7 +10,7 @@ from .image_generation import (
     create_image_generation_tool,
     ImageGenerationToolkit
 )
-from .skill_router import SkillRouterTool
+from .skill_router import SkillRouterWrapper
 
 __all__ = [
     "PyodideSandboxTool",
@@ -20,5 +20,5 @@ __all__ = [
     "ImageGenerationTool",
     "ImageGenerationToolkit",
     "create_image_generation_tool",
-    "SkillRouterTool"
+    "SkillRouterWrapper"
 ]
