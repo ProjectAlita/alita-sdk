@@ -576,9 +576,40 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         return b"".join(content_generator)
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        for attachment_id, file_name in document.metadata.get('attachment_ids', {}).items():
+        raw_attachment_ids = document.metadata.get('attachment_ids', {})
+
+        # Normalize attachment_ids: accept dict or JSON string, raise otherwise
+        if isinstance(raw_attachment_ids, str):
+            try:
+                loaded = json.loads(raw_attachment_ids)
+            except json.JSONDecodeError:
+                raise TypeError(
+                    f"Expected dict or JSON string for 'attachment_ids', got non-JSON string for id="
+                    f"{document.metadata.get('id')}: {raw_attachment_ids!r}"
+                )
+            if not isinstance(loaded, dict):
+                raise TypeError(
+                    f"'attachment_ids' JSON did not decode to dict for id={document.metadata.get('id')}: {loaded!r}"
+                )
+            attachment_ids = loaded
+        elif isinstance(raw_attachment_ids, dict):
+            attachment_ids = raw_attachment_ids
+        else:
+            raise TypeError(
+                f"Expected 'attachment_ids' to be dict or JSON string, got {type(raw_attachment_ids)} "
+                f"for id={document.metadata.get('id')}: {raw_attachment_ids!r}"
+            )
+
+        for attachment_id, file_name in attachment_ids.items():
             content = self.get_attachment_content(attachment_id=attachment_id)
-            yield Document(page_content="", metadata={'id': attachment_id, IndexerKeywords.CONTENT_FILE_NAME.value: file_name, IndexerKeywords.CONTENT_IN_BYTES.value: content})
+            yield Document(
+                page_content="",
+                metadata={
+                    'id': attachment_id,
+                    IndexerKeywords.CONTENT_FILE_NAME.value: file_name,
+                    IndexerKeywords.CONTENT_IN_BYTES.value: content,
+                },
+            )
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
