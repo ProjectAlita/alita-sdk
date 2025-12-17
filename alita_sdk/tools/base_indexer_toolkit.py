@@ -29,12 +29,6 @@ class IndexTools(str, Enum):
     REMOVE_INDEX = "remove_index"
     LIST_COLLECTIONS = "list_collections"
 
-# Base Vector Store Schema Models
-BaseIndexParams = create_model(
-    "BaseIndexParams",
-    index_name=(str, Field(description="Index name (max 7 characters)", min_length=1, max_length=7)),
-)
-
 RemoveIndexParams = create_model(
     "RemoveIndexParams",
     index_name=(Optional[str], Field(description="Optional index name (max 7 characters)", default="", max_length=7)),
@@ -99,16 +93,6 @@ BaseStepbackSearchParams = create_model(
             description="Reranking configuration. Can be a dictionary with reranking settings.",
             default=None
         )),
-)
-
-BaseIndexDataParams = create_model(
-    "indexData",
-    __base__=BaseIndexParams,
-    clean_index=(Optional[bool], Field(default=False,
-                       description="Optional flag to enforce clean existing index before indexing new data")),
-    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
-                         description="Optional step size for progress reporting during indexing")),
-    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default=loaders_allowed_to_override)),
 )
 
 
@@ -670,21 +654,49 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """
         Returns the standardized vector search tools (search operations only).
         Index operations are toolkit-specific and should be added manually to each toolkit.
-        
+
+        This method constructs the argument schemas for each tool, merging base parameters with any extra parameters
+        defined in the subclass. It also handles the special case for chunking tools and their configuration.
+
         Returns:
-            List of tool dictionaries with name, ref, description, and args_schema
+            list: List of tool dictionaries with name, ref, description, and args_schema.
         """
+        index_params = {
+            "index_name": (
+                str,
+                Field(description="Index name (max 7 characters)", min_length=1, max_length=7)
+            ),
+            "clean_index": (
+                Optional[bool],
+                Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")
+            ),
+            "progress_step": (
+                Optional[int],
+                Field(default=10, ge=0, le=100, description="Optional step size for progress reporting during indexing")
+            ),
+        }
+        chunking_config = (
+            Optional[dict],
+            Field(description="Chunking tool configuration", default=loaders_allowed_to_override)
+        )
+
+        index_extra_params = self._index_tool_params() or {}
+        chunking_tool = index_extra_params.pop("chunking_tool", None)
+        if chunking_tool:
+            index_params = {
+                **index_params,
+                "chunking_tool": chunking_tool,
+            }
+        index_params["chunking_config"] = chunking_config
+        index_args_schema = create_model("IndexData", **index_params, **index_extra_params)
+
         return [
             {
                 "name": IndexTools.INDEX_DATA.value,
                 "mode": IndexTools.INDEX_DATA.value,
                 "ref": self.index_data,
                 "description": "Loads data to index.",
-                "args_schema": create_model(
-                    "IndexData",
-                    __base__=BaseIndexDataParams,
-                    **self._index_tool_params() if self._index_tool_params() else {}
-                )
+                "args_schema": index_args_schema,
             },
             {
                 "name": IndexTools.SEARCH_INDEX.value,
