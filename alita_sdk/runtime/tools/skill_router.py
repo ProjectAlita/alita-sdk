@@ -32,7 +32,7 @@ class SkillRouterInput(BaseModel):
 
     skill_name: Optional[str] = Field(
         default=None,
-        description="Name of the skill to describe or execute (required for describe and execute modes)"
+        description="Name of the skill to describe or execute (required for describe mode, optional for execute mode - if not provided, LLM will select best skill)"
     )
 
     # Universal task field
@@ -97,13 +97,13 @@ class SkillRouterTool(BaseTool):
     name: str = "skill_router"
     description: str = """Route to and execute specialized skills for complex tasks.
 
-This tool provides access to a registry of specialized skills that can handle specific domains and tasks.
-Router-level configuration allows setting default timeout and execution mode for all skills.
+This tool provides access to a registry of specialized skills with intelligent routing capabilities.
+When no skill_name is specified in execute mode, the LLM will automatically select the best skill based on the task description.
 
 Use cases:
 - List available skills with 'mode: list'
 - Get detailed information about a skill with 'mode: describe'
-- Execute a skill with 'mode: execute'
+- Execute a skill with 'mode: execute' (skill_name optional - LLM will auto-select if not provided)
 
 Skills come in two types:
 - Agent skills: Conversational, use variables and chat history
@@ -132,10 +132,8 @@ Examples:
     # Router-level configuration
     default_timeout: Optional[int] = Field(default=None)
     default_execution_mode: Optional[str] = Field(default=None)
-    custom_prompt: Optional[str] = Field(default=None)
-    custom_model: Optional[str] = Field(default=None)
-    custom_temperature: Optional[float] = Field(default=None)
-    custom_max_tokens: Optional[int] = Field(default=None)
+    llm: Optional[Any] = Field(default=None, description="LLM for intelligent skill selection")
+    custom_prompt: Optional[str] = Field(default=None, description="Custom prompt for skill routing")
 
     # Private attribute for callback manager (not a Pydantic field)
     _callback_manager: Optional[CallbackManager] = None
@@ -144,13 +142,11 @@ Examples:
         self,
         registry: Optional[SkillsRegistry] = None,
         alita_client=None,
+        llm=None,
         enable_callbacks: bool = True,
         default_timeout: Optional[int] = None,
         default_execution_mode: Optional[str] = None,
         custom_prompt: Optional[str] = None,
-        custom_model: Optional[str] = None,
-        custom_temperature: Optional[float] = None,
-        custom_max_tokens: Optional[int] = None,
         **kwargs
     ):
         """
@@ -173,10 +169,8 @@ Examples:
             enable_callbacks=enable_callbacks,
             default_timeout=default_timeout,
             default_execution_mode=default_execution_mode,
+            llm=llm,
             custom_prompt=custom_prompt,
-            custom_model=custom_model,
-            custom_temperature=custom_temperature,
-            custom_max_tokens=custom_max_tokens,
             **kwargs
         )
 
@@ -188,6 +182,88 @@ Examples:
                 self._callback_manager.add_callback(callback)
 
         logger.info("SkillRouterTool initialized")
+
+    def _select_skill_with_llm(self, task: str) -> Optional[str]:
+        """Use LLM to intelligently select the best skill for a given task."""
+        if not self.llm or not task:
+            logger.warning("LLM or task not available for skill selection")
+            return None
+
+        try:
+            # Get available skills for LLM to choose from
+            skills = self.registry.list()
+            if not skills:
+                logger.warning("No skills available for selection")
+                return None
+
+            # Format skills list for the prompt
+            skills_list = []
+            for skill in skills:
+                skill_info = f"- {skill.name}"
+                if skill.description:
+                    skill_info += f": {skill.description}"
+                if skill.capabilities:
+                    skill_info += f" (capabilities: {', '.join(skill.capabilities)})"
+                skills_list.append(skill_info)
+
+            skills_text = "\n".join(skills_list)
+
+            # Create routing prompt - use custom_prompt if provided, otherwise default
+            if self.custom_prompt:
+                # If custom prompt provided, combine it with routing instructions
+                routing_template = f"""{self.custom_prompt}
+
+Your task is to analyze the user's request and select the most appropriate skill from the available options.
+
+Available skills:
+{{skills_list}}
+
+Task: {{task}}
+
+IMPORTANT: Respond with only the skill name that best matches the task. If no skill is appropriate, respond with "no_match"."""
+            else:
+                # Use default routing prompt
+                routing_template = """You are a skill router. Analyze the user's task and select the most appropriate skill.
+
+Available skills:
+{skills_list}
+
+Task: {task}
+
+Respond with only the skill name that best matches the task. If no skill is appropriate, respond with "no_match"."""
+
+            # Format the routing prompt
+            formatted_prompt = routing_template.format(
+                skills_list=skills_text,
+                task=task
+            )
+
+            logger.info(f"Using LLM to select skill for task: {task}")
+
+            # Get LLM response
+            response = self.llm.invoke(formatted_prompt)
+            if hasattr(response, 'content'):
+                selected_skill = response.content.strip()
+            else:
+                selected_skill = str(response).strip()
+
+            # Validate that the selected skill exists
+            if selected_skill == "no_match":
+                logger.info("LLM determined no skill matches the task")
+                return None
+
+            # Check if the selected skill actually exists
+            skill = self.registry.get(selected_skill)
+            if skill:
+                logger.info(f"LLM selected skill: {selected_skill}")
+                return selected_skill
+            else:
+                logger.warning(f"LLM selected non-existent skill: {selected_skill}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error in LLM skill selection: {e}")
+            return None
 
     def _run(
         self,
@@ -379,11 +455,14 @@ Examples:
         enable_callbacks: bool
     ) -> str:
         """Handle execute mode operation with comprehensive input validation."""
-        if not skill_name:
-            return "Error: skill_name is required for execute mode."
-
         if not task:
             return "Error: task is required for execute mode."
+
+        # If no skill_name provided, use LLM to intelligently select the best skill
+        if not skill_name:
+            skill_name = self._select_skill_with_llm(task)
+            if not skill_name:
+                return "Error: No appropriate skill found for the given task."
 
         try:
             # Get skill metadata

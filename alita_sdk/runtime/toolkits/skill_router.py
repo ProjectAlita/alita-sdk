@@ -48,10 +48,11 @@ class SkillRouterToolkit(BaseToolkit):
                     "pipeline_tags": ["skill"]
                 }
             )),
-            prompt=(Optional[str], Field(description="Custom system prompt for skill routing", default=None)),
-            model=(Optional[str], Field(description="LLM model for skill routing", default=None)),
-            temperature=(Optional[float], Field(description="Temperature for skill routing", default=None)),
-            max_tokens=(Optional[int], Field(description="Max tokens for skill routing", default=None)),
+            prompt=(Optional[str], Field(
+                description="Custom system prompt for skill routing",
+                default=None,
+                json_schema_extra={"lines": 4}
+            )),
             skills_paths=(Optional[List[str]], Field(description="Additional filesystem paths to search for skills", default=None)),
             timeout=(Optional[int], Field(description="Default timeout in seconds for skill execution", default=300)),
             execution_mode=(Optional[str], Field(
@@ -65,11 +66,9 @@ class SkillRouterToolkit(BaseToolkit):
     def get_toolkit(
         cls,
         client: 'AlitaClient',
+        llm = None,
         skills: List[SkillConfig] = None,
         prompt: Optional[str] = None,
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         skills_paths: Optional[List[str]] = None,
         timeout: Optional[int] = None,
         execution_mode: Optional[str] = None
@@ -97,13 +96,11 @@ class SkillRouterToolkit(BaseToolkit):
         skill_router = SkillRouterTool(
             registry=registry,
             alita_client=client,
+            llm=llm,
             enable_callbacks=True,
             default_timeout=timeout,
             default_execution_mode=execution_mode,
-            custom_prompt=prompt,
-            custom_model=model,
-            custom_temperature=temperature,
-            custom_max_tokens=max_tokens
+            custom_prompt=prompt
         )
 
         return cls(tools=[skill_router])
@@ -219,9 +216,6 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None):
     # Extract configuration
     skills = settings.get('skills', [])
     prompt = settings.get('prompt')
-    model = settings.get('model')
-    temperature = settings.get('temperature')
-    max_tokens = settings.get('max_tokens')
     skills_paths = settings.get('skills_paths')
     timeout = settings.get('timeout', 300)
     execution_mode = settings.get('execution_mode')
@@ -229,11 +223,9 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None):
     try:
         toolkit = SkillRouterToolkit.get_toolkit(
             client=alita_client,
+            llm=llm,
             skills=skills,
             prompt=prompt,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
             skills_paths=skills_paths,
             timeout=timeout,
             execution_mode=execution_mode

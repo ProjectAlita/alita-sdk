@@ -261,6 +261,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     settings = tool.get('settings', {})
                     toolkit_tools = SkillRouterToolkit.get_toolkit(
                         client=alita_client,
+                        llm=llm,
                         **settings
                     ).get_tools()
 
