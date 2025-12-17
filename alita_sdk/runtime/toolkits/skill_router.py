@@ -6,15 +6,17 @@ specific skills from filesystem or platform-hosted agents/pipelines.
 """
 
 from typing import List, Optional, TYPE_CHECKING
-from pydantic import create_model, BaseModel, Field
+from pydantic import create_model, BaseModel, Field, ConfigDict
 from langchain_community.agent_toolkits.base import BaseToolkit
 from langchain_core.tools import BaseTool
 
 if TYPE_CHECKING:
     from alita_sdk.clients import AlitaClient
 
+from alita_sdk.tools.base.tool import BaseAction
+from alita_sdk.tools.utils import clean_string
 from ..skills import SkillsRegistry, SkillMetadata, SkillType, SkillSource
-from ..tools.skill_router import SkillRouterTool
+from ..tools.skill_router import SkillRouterWrapper
 
 
 class SkillConfig(BaseModel):
@@ -38,6 +40,7 @@ class SkillRouterToolkit(BaseToolkit):
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
+        """Define the configuration schema for the skill router toolkit."""
         return create_model(
             "skill_router",
             # Separate fields for agents and pipelines - optional but default to empty lists
@@ -71,7 +74,12 @@ class SkillRouterToolkit(BaseToolkit):
                 description="Default execution mode for skills",
                 default=None,
                 json_schema_extra={"enum": ["subprocess", "remote"]}
-            ))
+            )),
+            selected_tools=(Optional[List[str]], Field(
+                description="List of tools to enable",
+                default=[]
+            )),
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Skill Router", "icon_url": None}})
         )
 
     @classmethod
@@ -79,14 +87,19 @@ class SkillRouterToolkit(BaseToolkit):
         cls,
         client: 'AlitaClient',
         llm = None,
+        toolkit_name: Optional[str] = None,
+        selected_tools: List[str] = None,
         agents: List[SkillConfig] = None,
         pipelines: List[SkillConfig] = None,
         prompt: Optional[str] = None,
-        skills_paths: Optional[List[str]] = None,
+        skills_paths: Optional[str] = None,
         timeout: Optional[int] = None,
         execution_mode: Optional[str] = None
     ):
         """Create a skill router toolkit with configured skills."""
+        
+        if selected_tools is None:
+            selected_tools = []
 
         # Create a custom registry for this toolkit
         registry = SkillsRegistry(search_paths=skills_paths or [])
@@ -115,8 +128,8 @@ class SkillRouterToolkit(BaseToolkit):
         # Add configured pipelines (if provided)
         add_skills_to_registry(pipelines or [], "pipeline")
 
-        # Create skill router tool with custom configuration
-        skill_router = SkillRouterTool(
+        # Create skill router wrapper with custom configuration
+        wrapper = SkillRouterWrapper(
             registry=registry,
             alita_client=client,
             llm=llm,
@@ -125,8 +138,34 @@ class SkillRouterToolkit(BaseToolkit):
             default_execution_mode=execution_mode,
             custom_prompt=prompt
         )
+        
+        # Get available tools from wrapper
+        available_tools = wrapper.get_available_tools()
+        
+        # Filter by selected_tools if provided
+        tools = []
+        toolkit_context = f" [Toolkit: {clean_string(toolkit_name, 0)}]" if toolkit_name else ''
+        
+        for tool in available_tools:
+            if selected_tools:
+                if tool["name"] not in selected_tools:
+                    continue
+            
+            # Add toolkit context to description with character limit
+            description = tool["description"]
+            if toolkit_context and len(description + toolkit_context) <= 1000:
+                description = description + toolkit_context
+            
+            # Wrap in BaseAction
+            tools.append(BaseAction(
+                api_wrapper=wrapper,
+                name=tool["name"],
+                description=description,
+                args_schema=tool["args_schema"],
+                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+            ))
 
-        return cls(tools=[skill_router])
+        return cls(tools=tools)
 
     @classmethod
     def _create_skill_from_config(cls, config: SkillConfig, client: 'AlitaClient') -> Optional[SkillMetadata]:
@@ -214,48 +253,3 @@ class SkillRouterToolkit(BaseToolkit):
     def get_tools(self):
         """Get the configured tools."""
         return self.tools
-
-
-def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None):
-    """
-    Create skill router tools from configuration.
-    This function is called by the main tool loading system.
-
-    Args:
-        tool_config: Tool configuration dictionary
-        alita_client: Alita client instance
-        llm: Language model (not used by skill router)
-        memory_store: Memory store (not used by skill router)
-
-    Returns:
-        List of configured skill router tools
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    settings = tool_config.get('settings', {})
-    toolkit_name = tool_config.get('toolkit_name')
-
-    # Extract configuration - handle optional fields
-    agents = settings.get('agents') or []
-    pipelines = settings.get('pipelines') or []
-    prompt = settings.get('prompt')
-    skills_paths = settings.get('skills_paths')
-    timeout = settings.get('timeout', 300)
-    execution_mode = settings.get('execution_mode')
-
-    try:
-        toolkit = SkillRouterToolkit.get_toolkit(
-            client=alita_client,
-            llm=llm,
-            agents=agents,
-            pipelines=pipelines,
-            prompt=prompt,
-            skills_paths=skills_paths,
-            timeout=timeout,
-            execution_mode=execution_mode
-        )
-        return toolkit.get_tools()
-    except Exception as e:
-        logger.error(f"Failed to create skill router toolkit: {e}")
-        return []

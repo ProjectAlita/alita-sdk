@@ -259,9 +259,14 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 logger.info(f"Processing skill_router toolkit: {tool}")
                 try:
                     settings = tool.get('settings', {})
+                    toolkit_name = tool.get('toolkit_name', '')
+                    selected_tools = settings.get('selected_tools', [])
+                    
                     toolkit_tools = SkillRouterToolkit.get_toolkit(
                         client=alita_client,
                         llm=llm,
+                        toolkit_name=toolkit_name,
+                        selected_tools=selected_tools,
                         **settings
                     ).get_tools()
 
