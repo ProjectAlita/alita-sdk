@@ -236,7 +236,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             self._log_tool_event(f"Dependent documents were processed. "
                                  f"Applying chunking tool '{chunking_tool}' if specified and preparing documents for indexing...")
             documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
-            self._clean_metadata(documents)
+            documents = self._clean_metadata(documents)
 
             logger.debug(f"Indexing base document #{base_doc_counter}: {base_doc} and all dependent documents: {documents}")
 
