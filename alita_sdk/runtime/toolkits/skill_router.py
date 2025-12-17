@@ -40,17 +40,17 @@ class SkillRouterToolkit(BaseToolkit):
     def toolkit_config_schema() -> BaseModel:
         return create_model(
             "skill_router",
-            # Separate fields for agents and pipelines
-            agents=(List[SkillConfig], Field(
+            # Separate fields for agents and pipelines - now optional
+            agents=(Optional[List[SkillConfig]], Field(
                 description="List of agents to make available as skills",
-                default_factory=list,
+                default=None,
                 json_schema_extra={
                     "agent_tags": ["skill"]
                 }
             )),
-            pipelines=(List[SkillConfig], Field(
+            pipelines=(Optional[List[SkillConfig]], Field(
                 description="List of pipelines to make available as skills",
-                default_factory=list,
+                default=None,
                 json_schema_extra={
                     "pipeline_tags": ["skill"]
                 }
@@ -60,7 +60,12 @@ class SkillRouterToolkit(BaseToolkit):
                 default=None,
                 json_schema_extra={"lines": 4}
             )),
-            skills_paths=(Optional[List[str]], Field(description="Additional filesystem paths to search for skills", default=None)),
+            # Hidden skills_paths field - not exposed in UI
+            skills_paths=(Optional[List[str]], Field(
+                description="Additional filesystem paths to search for skills",
+                default=None,
+                json_schema_extra={"hidden": True}
+            )),
             timeout=(Optional[int], Field(description="Default timeout in seconds for skill execution", default=300)),
             execution_mode=(Optional[str], Field(
                 description="Default execution mode for skills",
@@ -104,11 +109,11 @@ class SkillRouterToolkit(BaseToolkit):
                         # Add skill to registry manually
                         registry.discovery.cache[skill_metadata.name] = skill_metadata
 
-        # Add configured agents
-        add_skills_to_registry(agents, "agent")
+        # Add configured agents (if provided)
+        add_skills_to_registry(agents or [], "agent")
 
-        # Add configured pipelines
-        add_skills_to_registry(pipelines, "pipeline")
+        # Add configured pipelines (if provided)
+        add_skills_to_registry(pipelines or [], "pipeline")
 
         # Create skill router tool with custom configuration
         skill_router = SkillRouterTool(
@@ -231,9 +236,9 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None):
     settings = tool_config.get('settings', {})
     toolkit_name = tool_config.get('toolkit_name')
 
-    # Extract configuration
-    agents = settings.get('agents', [])
-    pipelines = settings.get('pipelines', [])
+    # Extract configuration - handle optional fields
+    agents = settings.get('agents') or []
+    pipelines = settings.get('pipelines') or []
     prompt = settings.get('prompt')
     skills_paths = settings.get('skills_paths')
     timeout = settings.get('timeout', 300)
