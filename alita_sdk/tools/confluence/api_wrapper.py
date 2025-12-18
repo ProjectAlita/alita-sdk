@@ -962,6 +962,9 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                     created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
                     last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
 
+                    attachment_path = attachment['_links']['download'] if attachment.get(
+                            '_links', {}).get('download') else ''
+                    download_url = self.client.url.rstrip('/') + attachment_path
                     metadata = {
                         'name': title,
                         'size': attachment.get('extensions', {}).get('fileSize', None),
@@ -971,14 +974,10 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                         'media_type': media_type,
                         'labels': [label['name'] for label in
                                    attachment.get('metadata', {}).get('labels', {}).get('results', [])],
-                        'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get(
-                            '_links', {}).get('download') else None
+                        'download_url': download_url
                     }
-
-                    download_url = self.base_url.rstrip('/') + attachment['_links']['download']
-
                     try:
-                        resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
+                        resp = self.client.request(method="GET", path=attachment_path, advanced_mode=True)
                         if resp.status_code == 200:
                             content = resp.content
                         else:
