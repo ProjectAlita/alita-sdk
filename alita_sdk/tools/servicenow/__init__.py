@@ -7,7 +7,6 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import get_max_toolkit_length
 from ...configurations.service_now import ServiceNowConfiguration
 
 
@@ -15,20 +14,11 @@ name = "service_now"
 
 def get_tools(tool):
     settings = tool.get('settings') or {}
-    servicenow_conf = settings.get('servicenow_configuration', None)
-
-    if isinstance(servicenow_conf, BaseModel):
-        base_url = getattr(servicenow_conf, "base_url", None)
-    elif isinstance(servicenow_conf, dict):
-        base_url = servicenow_conf.get("base_url")
-    else:
-        base_url = None
 
     return ServiceNowToolkit().get_toolkit(
         selected_tools=settings.get('selected_tools', []),
         instance_alias=settings.get('instance_alias', None),
-        servicenow_configuration=servicenow_conf,
-        base_url=base_url,
+        servicenow_configuration=settings.get('servicenow_configuration', None),
         response_fields=settings.get('response_fields', None),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
@@ -36,15 +26,13 @@ def get_tools(tool):
 
 class ServiceNowToolkit(BaseToolkit):
     tools: List[BaseTool] = []
-    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           ServiceNowAPIWrapper.model_construct().get_available_tools()}
-        ServiceNowToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
-            name=(str, Field(description="Toolkit name")),
+            name,
             response_fields=(Optional[str], Field(description="Response fields", default=None)),
             servicenow_configuration=(ServiceNowConfiguration, Field(description="ServiceNow Configuration",
                                                                                json_schema_extra={
@@ -56,7 +44,6 @@ class ServiceNowToolkit(BaseToolkit):
                 'metadata': {
                     "label": "ServiceNow",
                     "icon_url": "service-now.svg",
-                    "max_length": ServiceNowToolkit.toolkit_max_length,
                     "hidden": False,
                     "sections": {
                         "auth": {
