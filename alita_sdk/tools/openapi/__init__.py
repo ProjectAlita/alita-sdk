@@ -1,140 +1,300 @@
+from __future__ import annotations
+
 import json
-import re
-import logging
+from typing import Any, Dict, List, Optional
+
+from langchain_core.tools import BaseTool, BaseToolkit
+from pydantic import BaseModel, ConfigDict, Field, create_model
 import yaml
-from typing import List, Any, Optional, Dict
-from langchain_core.tools import BaseTool, BaseToolkit, ToolException
-from requests_openapi import Operation, Client, Server
 
-from pydantic import create_model, Field
-from functools import partial
+from .api_wrapper import _get_base_url_from_spec, build_wrapper
+from .tool import OpenApiAction
+from ..elitea_base import filter_missconfigured_index_tools
+from ...configurations.openapi import OpenApiConfiguration
 
-logger = logging.getLogger(__name__)
+name = 'openapi'
 
-name = "openapi"
 
-def get_tools(tool):
-    headers = {}
-    if tool['settings'].get('authentication'):
-        if tool['settings']['authentication']['type'] == 'api_key':
-            auth_type = tool['settings']['authentication']['settings']['auth_type']
-            auth_key = tool["settings"]["authentication"]["settings"]["api_key"]
-            if auth_type.lower() == 'bearer':
-                headers['Authorization'] = f'Bearer {auth_key}'
-            if auth_type.lower() == 'basic':
-                headers['Authorization'] = f'Basic {auth_key}'
-            if auth_type.lower() == 'custom':
-                headers[
-                    tool["settings"]["authentication"]["settings"]["custom_header_name"]] = f'{auth_key}'
+def get_toolkit(tool) -> BaseToolkit:
+    settings = tool.get('settings', {}) or {}
+    # Extract selected_tools separately to avoid duplicate keyword argument when unpacking **settings
+    selected_tools = settings.get('selected_tools', [])
+    # Filter out selected_tools from settings to prevent "got multiple values for keyword argument"
+    filtered_settings = {k: v for k, v in settings.items() if k != 'selected_tools'}
     return AlitaOpenAPIToolkit.get_toolkit(
-        openapi_spec=tool['settings']['schema_settings'],
-        selected_tools=tool['settings'].get('selected_tools', []),
-        headers=headers).get_tools()
-
-
-def create_api_tool(name: str, op: Operation):
-    fields = {}
-    headers = {}
-    headers_descriptions = []
-
-    for parameter in op.spec.parameters:
-        if "header" in parameter.param_in:
-            headers[parameter.name] = parameter.param_schema.default
-            headers_descriptions.append(f"Header: {parameter.name}. Description: {parameter.description}.")
-            continue
-        fields[parameter.name] = (str, Field(default=parameter.param_schema.default,
-                                             description=parameter.description))
-
-    # add headers
-    if headers:
-        fields['headers'] = (Optional[dict], Field(default = headers, description="The dict that represents headers for request:\n" + '\n'.join(headers_descriptions)))
-
-    if op.spec.requestBody:
-        fields['json'] = (Optional[str], Field(default = None, description="JSON request body provided as a string"))
-
-    op.server = Server.from_openapi_server(op.server)  # patch this
-    op.server.get_url = partial(Server.get_url, op.server)
-    op.server.set_url = partial(Server.set_url, op.server)
-    return ApiTool(
-        name=name,
-        description=op.spec.description if op.spec.description else op.spec.summary,
-        args_schema=create_model(
-            'request_params',
-            regexp = (Optional[str], Field(description="Regular expression used to remove from final output if any", default=None)),
-            **fields),
-        callable=op
+        selected_tools=selected_tools,
+        toolkit_name=tool.get('toolkit_name'),
+        **filtered_settings,
     )
 
-class ApiTool(BaseTool):
-    name: str
-    description: str
-    callable: Operation
 
-    def _run(self, regexp: str = None, **kwargs):
-        # set in query parameter from header (actual for authentication)
-        rq_args = self.args.keys()
-        headers = self.callable.requestor.headers
-        for arg in rq_args:
-            arg_value = headers.get(arg)
-            if arg_value:
-                kwargs.update({arg : arg_value})
+def get_tools(tool):
+    return get_toolkit(tool).get_tools()
 
-        if kwargs.get("json"):
-            # add json to payload
-            kwargs.update({"json": json.loads(kwargs.get("json"))})
-        output = self.callable(**kwargs).content
+
+def get_toolkit_available_tools(settings: dict) -> dict:
+    """Return instance-dependent tool list + per-tool args JSON schemas.
+
+    This is used by backend services when the UI needs spec-derived tool names
+    and input schemas (one tool per operationId). It must be JSON-serializable.
+    """
+    if not isinstance(settings, dict):
+        settings = {}
+
+    # Extract and merge openapi_configuration if present (same pattern as get_toolkit)
+    openapi_configuration = settings.get('openapi_configuration') or {}
+    if hasattr(openapi_configuration, 'model_dump'):
+        openapi_configuration = openapi_configuration.model_dump(mode='json')
+    if not isinstance(openapi_configuration, dict):
+        openapi_configuration = {}
+
+    # Merge settings with openapi_configuration so api_key, auth_type etc. are at root level
+    merged_settings: Dict[str, Any] = {
+        **settings,
+        **openapi_configuration,
+    }
+
+    spec = merged_settings.get('spec') or merged_settings.get('schema_settings') or merged_settings.get('openapi_spec')
+    base_url_override = merged_settings.get('base_url') or merged_settings.get('base_url_override')
+
+    if not spec or not isinstance(spec, (str, dict)):
+        return {"tools": [], "args_schemas": {}, "error": "OpenAPI spec is missing"}
+
+    try:
+        headers = _build_headers_from_settings(merged_settings)
+        api_wrapper = build_wrapper(
+            openapi_spec=spec,
+            base_headers=headers,
+            base_url_override=base_url_override,
+        )
+
+        tool_defs = api_wrapper.get_available_tools(selected_tools=None)
+
+        tools = []
+        args_schemas = {}
+
+        for tool_def in tool_defs:
+            name_val = tool_def.get('name')
+            if not isinstance(name_val, str) or not name_val:
+                continue
+
+            desc_val = tool_def.get('description')
+            if not isinstance(desc_val, str):
+                desc_val = ''
+
+            tools.append({"name": name_val, "description": desc_val})
+
+            args_schema = tool_def.get('args_schema')
+            if args_schema is None:
+                args_schemas[name_val] = {"type": "object", "properties": {}, "required": []}
+                continue
+
+            try:
+                if hasattr(args_schema, 'model_json_schema'):
+                    args_schemas[name_val] = args_schema.model_json_schema()
+                elif hasattr(args_schema, 'schema'):
+                    args_schemas[name_val] = args_schema.schema()
+                else:
+                    args_schemas[name_val] = {"type": "object", "properties": {}, "required": []}
+            except Exception:
+                args_schemas[name_val] = {"type": "object", "properties": {}, "required": []}
+
+        # Ensure stable JSON-serializability.
         try:
-            if regexp is not None:
-                output = re.sub(rf'{regexp}', "", str(output))
-        finally:
-            return output
+            json.dumps({"tools": tools, "args_schemas": args_schemas})
+        except Exception:
+            return {"tools": tools, "args_schemas": {}}
+
+        return {"tools": tools, "args_schemas": args_schemas}
+
+    except Exception as e:  # pylint: disable=W0718
+        return {"tools": [], "args_schemas": {}, "error": str(e)}
 
 class AlitaOpenAPIToolkit(BaseToolkit):
     request_session: Any  #: :meta private:
     tools: List[BaseTool] = []
 
-    @classmethod
-    def get_toolkit(cls, openapi_spec: str | dict,
-                    selected_tools: list[dict] | None = None,
-                    headers: Optional[Dict[str, str]] = None,
-                    toolkit_name: Optional[str] = None):
-        if selected_tools is not None:
-            tools_set = set([i if not isinstance(i, dict) else i.get('name') for i in selected_tools])
-        else:
-            tools_set = {}
-        if isinstance(openapi_spec, str):
-            # Try to detect if it's YAML or JSON by attempting to parse as JSON first
-            try:
-                openapi_spec = json.loads(openapi_spec)
-            except json.JSONDecodeError:
-                # If JSON parsing fails, try YAML
-                try:
-                    openapi_spec = yaml.safe_load(openapi_spec)
-                except yaml.YAMLError as e:
-                    raise ToolException(f"Failed to parse OpenAPI spec as JSON or YAML: {e}")
-        c = Client()
-        c.load_spec(openapi_spec)
-        if headers:
-            c.requestor.headers.update(headers)
-        tools = []
-        for i in tools_set:
+    @staticmethod
+    def toolkit_config_schema() -> BaseModel:
+        # OpenAPI tool names + per-tool args schemas depend on the user-provided spec,
+        # so `selected_tools` cannot be an enum here (unlike most toolkits).
 
-            try:
-                if not i:
-                    raise ToolException("Operation id is missing for some of declared operations.")
-                tool = c.operations[i]
-                if not isinstance(tool, Operation):
-                    raise ToolException(f"Operation {i} is not an instance of Operation class.")
-                api_tool = create_api_tool(i, tool)
-                if toolkit_name:
-                    api_tool.metadata = {"toolkit_name": toolkit_name}
-                tools.append(api_tool)
-            except ToolException:
-                raise
-            except Exception as e:
-                logger.warning(f"Tool {i} not found in OpenAPI spec.")
-                raise ToolException(f"Cannot create API tool ({i}): \n{e}.")
-        return cls(request_session=c, tools=tools)
+        model = create_model(
+            name,
+            __config__=ConfigDict(
+                extra='ignore',
+                json_schema_extra={
+                    'metadata': {
+                        'label': 'OpenAPI',
+                        'icon_url': 'openapi.svg',
+                        'categories': ['integrations'],
+                        'extra_categories': ['api', 'openapi', 'swagger'],
+                    }
+                }
+            ),
+            openapi_configuration=(
+                OpenApiConfiguration,
+                Field(
+                    description='OpenAPI credentials configuration',
+                    json_schema_extra={'configuration_types': ['openapi']},
+                ),
+            ),
+            base_url=(
+                Optional[str],
+                Field(
+                    default=None,
+                    description=(
+                        "Optional base URL override (absolute, starting with http:// or https://). "
+                        "Use this when your OpenAPI spec has no `servers` entry, or when `servers[0].url` "
+                        "is not absolute (e.g. '/api/v3'). Example: 'https://petstore3.swagger.io'."
+                    ),
+                ),
+            ),
+            spec=(
+                str,
+                Field(
+                    description=(
+                        'OpenAPI specification (URL or raw JSON/YAML text). '
+                        'Used to generate per-operation tools (one tool per operationId).'
+                    ),
+                    json_schema_extra={'ui_component': 'openapi_spec'},
+                ),
+            ),
+            selected_tools=(
+                List[str],
+                Field(
+                    default=[],
+                    description='Optional list of operationIds to enable. If empty, all operations are enabled.',
+                    json_schema_extra={'args_schemas': {}},
+                ),
+            ),
+        )
+        return model
+
+    @classmethod
+    @filter_missconfigured_index_tools
+    def get_toolkit(
+        cls,
+        selected_tools: list[str] | None = None,
+        toolkit_name: Optional[str] = None,
+        **kwargs,
+    ):
+        if selected_tools is None:
+            selected_tools = []
+
+        tool_names = _coerce_selected_tool_names(selected_tools)
+
+        openapi_configuration = kwargs.get('openapi_configuration') or {}
+        if hasattr(openapi_configuration, 'model_dump'):
+            openapi_configuration = openapi_configuration.model_dump(mode='json')
+        if not isinstance(openapi_configuration, dict):
+            openapi_configuration = {}
+
+        merged_settings: Dict[str, Any] = {
+            **kwargs,
+            **openapi_configuration,
+        }
+
+        openapi_spec = merged_settings.get('spec') or merged_settings.get('schema_settings') or merged_settings.get('openapi_spec')
+        base_url_override = merged_settings.get('base_url') or merged_settings.get('base_url_override')
+        headers = _build_headers_from_settings(merged_settings)
+
+        api_wrapper = build_wrapper(
+            openapi_spec=openapi_spec,
+            base_headers=headers,
+            base_url_override=base_url_override,
+        )
+        base_url = _get_base_url_from_spec(api_wrapper.spec)
+
+        tools: List[BaseTool] = []
+        for tool_def in api_wrapper.get_available_tools(selected_tools=tool_names):
+            description = tool_def.get('description') or ''
+            if toolkit_name:
+                description = f"{description}\nToolkit: {toolkit_name}"
+            if base_url:
+                description = f"{description}\nBase URL: {base_url}"
+            description = description[:1000]
+
+            tools.append(
+                OpenApiAction(
+                    api_wrapper=api_wrapper,
+                    name=tool_def['name'],
+                    description=description,
+                    args_schema=tool_def.get('args_schema'),
+                    metadata={"toolkit_name": toolkit_name} if toolkit_name else {},
+                )
+            )
+
+        return cls(request_session=api_wrapper, tools=tools)
 
     def get_tools(self):
         return self.tools
+
+
+def _coerce_selected_tool_names(selected_tools: Any) -> list[str]:
+    if not selected_tools:
+        return []
+
+    if isinstance(selected_tools, list):
+        tool_names: List[str] = []
+        for item in selected_tools:
+            if isinstance(item, str):
+                tool_names.append(item)
+            elif isinstance(item, dict):
+                name_val = item.get('name')
+                if isinstance(name_val, str) and name_val.strip():
+                    tool_names.append(name_val)
+        return [t for t in tool_names if t]
+
+    return []
+
+
+def _secret_to_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, 'get_secret_value'):
+        try:
+            value = value.get_secret_value()
+        except Exception:
+            pass
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _build_headers_from_settings(settings: Dict[str, Any]) -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+
+    # Legacy structure used by the custom OpenAPI UI
+    auth = settings.get('authentication')
+    if isinstance(auth, dict) and auth.get('type') == 'api_key':
+        auth_settings = auth.get('settings') or {}
+        if isinstance(auth_settings, dict):
+            auth_type = str(auth_settings.get('auth_type', '')).strip().lower()
+            api_key = _secret_to_str(auth_settings.get('api_key'))
+            if api_key:
+                if auth_type == 'bearer':
+                    headers['Authorization'] = f'Bearer {api_key}'
+                elif auth_type == 'basic':
+                    headers['Authorization'] = f'Basic {api_key}'
+                elif auth_type == 'custom':
+                    header_name = auth_settings.get('custom_header_name')
+                    if header_name:
+                        headers[str(header_name)] = f'{api_key}'
+
+    # New regular-schema structure (GitHub-style sections) uses flattened fields
+    if not headers:
+        api_key = _secret_to_str(settings.get('api_key'))
+        if api_key:
+            auth_type = str(settings.get('auth_type', 'Bearer'))
+            auth_type_norm = auth_type.strip().lower()
+            if auth_type_norm == 'bearer':
+                headers['Authorization'] = f'Bearer {api_key}'
+            elif auth_type_norm == 'basic':
+                headers['Authorization'] = f'Basic {api_key}'
+            elif auth_type_norm == 'custom':
+                header_name = settings.get('custom_header_name')
+                if header_name:
+                    headers[str(header_name)] = f'{api_key}'
+
+    return headers
