@@ -45,7 +45,7 @@ class OpenApiConfiguration(BaseModel):
             "API key value (stored as a secret). Used when selecting 'API Key' authentication subsection."
         ),
     )
-    auth_type: Optional[Literal['Basic', 'Bearer', 'custom']] = Field(
+    auth_type: Optional[Literal['Basic', 'Bearer', 'Custom']] = Field(
         default='Bearer',
         description=(
             "How to apply the API key. "
