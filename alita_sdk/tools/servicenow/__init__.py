@@ -69,27 +69,11 @@ class ServiceNowToolkit(BaseToolkit):
             selected_tools = []
         if 'response_fields' in kwargs and isinstance(kwargs['response_fields'], str):
             kwargs['fields'] = [field.strip().lower() for field in kwargs['response_fields'].split(',') if field.strip()]
-        servicenow_conf = kwargs.get('servicenow_configuration')
-        conf_dict: dict = {}
-        if servicenow_conf:
-            if isinstance(servicenow_conf, BaseModel):
-                try:
-                    conf_dict = servicenow_conf.model_dump()
-                except Exception:
-                    conf_dict = servicenow_conf.dict() if hasattr(servicenow_conf, 'dict') else {}
-            elif isinstance(servicenow_conf, dict):
-                conf_dict = servicenow_conf
-            else:
-                try:
-                    conf_dict = dict(servicenow_conf)
-                except Exception:
-                    conf_dict = {}
-
-        conf_dict = {k: v for k, v in conf_dict.items() if v is not None}
-
-        wrapper_payload = {**conf_dict, **kwargs}
-
-        wrapper_payload.pop('servicenow_configuration', None)
+        wrapper_payload = {
+            **kwargs,
+            # TODO use servicenow_configuration fields
+            **kwargs['servicenow_configuration'],
+        }
         servicenow_api_wrapper = ServiceNowAPIWrapper(**wrapper_payload)
         available_tools = servicenow_api_wrapper.get_available_tools()
         tools = []
