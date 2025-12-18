@@ -1154,3 +1154,158 @@ class AlitaClient:
                 "events_dispatched": [],
                 "execution_time_seconds": 0.0
             }
+
+    def test_mcp_connection(self, toolkit_config: dict, mcp_tokens: dict = None) -> dict:
+        """
+        Test MCP server connection using protocol-level list_tools.
+
+        This method verifies MCP server connectivity and authentication by calling
+        the protocol-level tools/list JSON-RPC method (NOT executing a tool).
+        This is ideal for auth checks as it validates the connection without
+        requiring any tool execution.
+
+        Args:
+            toolkit_config: Configuration dictionary for the MCP toolkit containing:
+                - toolkit_name: Name of the toolkit
+                - settings: Dictionary with 'url', optional 'headers', 'session_id'
+            mcp_tokens: Optional dictionary of MCP OAuth tokens by server URL
+                Format: {canonical_url: {access_token: str, session_id: str}}
+
+        Returns:
+            Dictionary containing:
+                - success: Boolean indicating if the connection was successful
+                - tools: List of tool names available on the MCP server (if successful)
+                - tools_count: Number of tools discovered
+                - server_session_id: Session ID provided by the server (if any)
+                - error: Error message (if unsuccessful)
+                - toolkit_config: Original toolkit configuration
+
+        Raises:
+            McpAuthorizationRequired: If MCP server requires OAuth authorization
+
+        Example:
+            >>> config = {
+            ...     'toolkit_name': 'my-mcp-server',
+            ...     'type': 'mcp',
+            ...     'settings': {
+            ...         'url': 'https://mcp-server.example.com/mcp',
+            ...         'headers': {'X-Custom': 'value'}
+            ...     }
+            ... }
+            >>> result = client.test_mcp_connection(config)
+            >>> if result['success']:
+            ...     print(f"Connected! Found {result['tools_count']} tools")
+        """
+        import asyncio
+        import time
+        from ..utils.mcp_client import McpClient
+        from ..utils.mcp_oauth import canonical_resource
+
+        toolkit_name = toolkit_config.get('toolkit_name', 'unknown')
+        settings = toolkit_config.get('settings', {})
+
+        # Extract connection parameters
+        url = settings.get('url')
+        if not url:
+            return {
+                "success": False,
+                "error": "MCP toolkit configuration missing 'url' in settings",
+                "toolkit_config": toolkit_config,
+                "tools": [],
+                "tools_count": 0
+            }
+
+        headers = settings.get('headers') or {}
+        session_id = settings.get('session_id')
+
+        # Apply OAuth token if available
+        if mcp_tokens and url:
+            canonical_url = canonical_resource(url)
+            token_data = mcp_tokens.get(canonical_url)
+            if token_data:
+                if isinstance(token_data, dict):
+                    access_token = token_data.get('access_token')
+                    if not session_id:
+                        session_id = token_data.get('session_id')
+                else:
+                    # Backward compatibility: plain token string
+                    access_token = token_data
+
+                if access_token:
+                    headers = dict(headers)  # Copy to avoid mutating original
+                    headers.setdefault('Authorization', f'Bearer {access_token}')
+                    logger.info(f"[MCP Auth Check] Applied OAuth token for {canonical_url}")
+
+        logger.info(f"Testing MCP connection to '{toolkit_name}' at {url}")
+
+        start_time = time.time()
+
+        async def _test_connection():
+            client = McpClient(
+                url=url,
+                session_id=session_id,
+                headers=headers,
+                timeout=60  # Reasonable timeout for connection test
+            )
+
+            async with client:
+                # Initialize MCP protocol session
+                await client.initialize()
+                logger.info(f"[MCP Auth Check] Session initialized (transport={client.detected_transport})")
+
+                # Call protocol-level list_tools (tools/list JSON-RPC method)
+                tools = await client.list_tools()
+
+                return {
+                    "tools": tools,
+                    "server_session_id": client.server_session_id,
+                    "transport": client.detected_transport
+                }
+
+        try:
+            # Run async operation
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If we're already in an async context, create a new task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, _test_connection())
+                        result = future.result(timeout=120)
+                else:
+                    result = loop.run_until_complete(_test_connection())
+            except RuntimeError:
+                # No event loop, create one
+                result = asyncio.run(_test_connection())
+
+            execution_time = time.time() - start_time
+
+            # Extract tool names for the response
+            tool_names = [tool.get('name', 'unknown') for tool in result.get('tools', [])]
+
+            logger.info(f"[MCP Auth Check] Connection successful to '{toolkit_name}': {len(tool_names)} tools in {execution_time:.3f}s")
+
+            return {
+                "success": True,
+                "tools": tool_names,
+                "tools_count": len(tool_names),
+                "server_session_id": result.get('server_session_id'),
+                "transport": result.get('transport'),
+                "toolkit_config": toolkit_config,
+                "execution_time_seconds": execution_time
+            }
+
+        except McpAuthorizationRequired:
+            # Re-raise to allow proper handling upstream
+            raise
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(f"[MCP Auth Check] Connection failed to '{toolkit_name}': {str(e)}")
+            return {
+                "success": False,
+                "error": f"MCP connection failed: {str(e)}",
+                "toolkit_config": toolkit_config,
+                "tools": [],
+                "tools_count": 0,
+                "execution_time_seconds": execution_time
+            }
