@@ -7,19 +7,19 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.service_now import ServiceNowConfiguration
 
 
 name = "service_now"
 
 def get_tools(tool):
+    settings = tool.get('settings') or {}
+
     return ServiceNowToolkit().get_toolkit(
-        selected_tools=tool['settings'].get('selected_tools', []),
-        instance_alias=tool['settings'].get('instance_alias', None),
-        base_url=tool['settings']['base_url'],
-        servicenow_configuration=tool['settings']['servicenow_configuration'],
-        response_fields=tool['settings'].get('response_fields', None),
+        selected_tools=settings.get('selected_tools', []),
+        instance_alias=settings.get('instance_alias', None),
+        servicenow_configuration=settings.get('servicenow_configuration', None),
+        response_fields=settings.get('response_fields', None),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
 
@@ -33,7 +33,6 @@ class ServiceNowToolkit(BaseToolkit):
                           ServiceNowAPIWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
-            name=(str, Field(description="Toolkit name")),
             response_fields=(Optional[str], Field(description="Response fields", default=None)),
             servicenow_configuration=(ServiceNowConfiguration, Field(description="ServiceNow Configuration",
                                                                                json_schema_extra={
@@ -82,10 +81,11 @@ class ServiceNowToolkit(BaseToolkit):
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
-            description = tool["description"]
+            base_url = getattr(servicenow_api_wrapper, "base_url", "") or ""
+            description = tool.get("description", "") if isinstance(tool, dict) else ""
             if toolkit_name:
                 description = f"Toolkit: {toolkit_name}\n{description}"
-            description = f"ServiceNow: {servicenow_api_wrapper.base_url}\n{description}"
+            description = f"ServiceNow: {base_url}\n{description}".strip()
             description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=servicenow_api_wrapper,
