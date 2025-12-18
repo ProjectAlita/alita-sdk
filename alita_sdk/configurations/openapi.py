@@ -57,6 +57,7 @@ class OpenApiConfiguration(BaseModel):
     custom_header_name: Optional[str] = Field(
         default=None,
         description="Custom header name to use when auth_type='custom' (e.g. 'X-Api-Key').",
+        json_schema_extra={'visible_when': {'field': 'auth_type', 'value': 'custom'}},
     )
 
     client_id: Optional[str] = Field(default=None, description='OAuth client ID')
