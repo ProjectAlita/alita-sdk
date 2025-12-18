@@ -58,7 +58,7 @@ class ServiceNowAPIWrapper(BaseToolApiWrapper):
         password = SecretStr(values['password'])
         username = values['username']
         cls.fields = values.get('fields', ['sys_id', 'number', 'state', 'short_description', 'description', 'priority', 'category', 'urgency', 'impact', 'creation_date'])
-        cls.client = ServiceNowClient(base_url, (username, password.get_secret_value()))
+        cls.client = ServiceNowClient(instance=base_url, auth=(username, password.get_secret_value()))
         return values
 
     def get_incidents(self, data: Optional[Dict[str, Any]] = None) -> ToolException | str:

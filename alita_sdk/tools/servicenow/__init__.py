@@ -7,32 +7,43 @@ from ..base.tool import BaseAction
 from pydantic import create_model, BaseModel, ConfigDict, Field
 
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, get_max_toolkit_length
+from ..utils import get_max_toolkit_length
 from ...configurations.service_now import ServiceNowConfiguration
 
 
 name = "service_now"
 
 def get_tools(tool):
+    settings = tool.get('settings') or {}
+    servicenow_conf = settings.get('servicenow_configuration', None)
+
+    if isinstance(servicenow_conf, BaseModel):
+        base_url = getattr(servicenow_conf, "base_url", None)
+    elif isinstance(servicenow_conf, dict):
+        base_url = servicenow_conf.get("base_url")
+    else:
+        base_url = None
+
     return ServiceNowToolkit().get_toolkit(
-        selected_tools=tool['settings'].get('selected_tools', []),
-        instance_alias=tool['settings'].get('instance_alias', None),
-        base_url=tool['settings']['base_url'],
-        servicenow_configuration=tool['settings']['servicenow_configuration'],
-        response_fields=tool['settings'].get('response_fields', None),
+        selected_tools=settings.get('selected_tools', []),
+        instance_alias=settings.get('instance_alias', None),
+        servicenow_configuration=servicenow_conf,
+        base_url=base_url,
+        response_fields=settings.get('response_fields', None),
         toolkit_name=tool.get('toolkit_name')
     ).get_tools()
 
 
 class ServiceNowToolkit(BaseToolkit):
     tools: List[BaseTool] = []
+    toolkit_max_length: int = 0
 
     @staticmethod
     def toolkit_config_schema() -> BaseModel:
         selected_tools = {x['name']: x['args_schema'].schema() for x in
                           ServiceNowAPIWrapper.model_construct().get_available_tools()}
+        ServiceNowToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
-            name,
             name=(str, Field(description="Toolkit name")),
             response_fields=(Optional[str], Field(description="Response fields", default=None)),
             servicenow_configuration=(ServiceNowConfiguration, Field(description="ServiceNow Configuration",
@@ -45,6 +56,7 @@ class ServiceNowToolkit(BaseToolkit):
                 'metadata': {
                     "label": "ServiceNow",
                     "icon_url": "service-now.svg",
+                    "max_length": ServiceNowToolkit.toolkit_max_length,
                     "hidden": False,
                     "sections": {
                         "auth": {
@@ -70,11 +82,27 @@ class ServiceNowToolkit(BaseToolkit):
             selected_tools = []
         if 'response_fields' in kwargs and isinstance(kwargs['response_fields'], str):
             kwargs['fields'] = [field.strip().lower() for field in kwargs['response_fields'].split(',') if field.strip()]
-        wrapper_payload = {
-            **kwargs,
-            # TODO use servicenow_configuration fields
-            **kwargs['servicenow_configuration'],
-        }
+        servicenow_conf = kwargs.get('servicenow_configuration')
+        conf_dict: dict = {}
+        if servicenow_conf:
+            if isinstance(servicenow_conf, BaseModel):
+                try:
+                    conf_dict = servicenow_conf.model_dump()
+                except Exception:
+                    conf_dict = servicenow_conf.dict() if hasattr(servicenow_conf, 'dict') else {}
+            elif isinstance(servicenow_conf, dict):
+                conf_dict = servicenow_conf
+            else:
+                try:
+                    conf_dict = dict(servicenow_conf)
+                except Exception:
+                    conf_dict = {}
+
+        conf_dict = {k: v for k, v in conf_dict.items() if v is not None}
+
+        wrapper_payload = {**conf_dict, **kwargs}
+
+        wrapper_payload.pop('servicenow_configuration', None)
         servicenow_api_wrapper = ServiceNowAPIWrapper(**wrapper_payload)
         available_tools = servicenow_api_wrapper.get_available_tools()
         tools = []
@@ -82,10 +110,11 @@ class ServiceNowToolkit(BaseToolkit):
             if selected_tools:
                 if tool["name"] not in selected_tools:
                     continue
-            description = tool["description"]
+            base_url = getattr(servicenow_api_wrapper, "base_url", "") or ""
+            description = tool.get("description", "") if isinstance(tool, dict) else ""
             if toolkit_name:
                 description = f"Toolkit: {toolkit_name}\n{description}"
-            description = f"ServiceNow: {servicenow_api_wrapper.base_url}\n{description}"
+            description = f"ServiceNow: {base_url}\n{description}".strip()
             description = description[:1000]
             tools.append(BaseAction(
                 api_wrapper=servicenow_api_wrapper,
