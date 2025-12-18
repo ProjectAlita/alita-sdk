@@ -239,20 +239,46 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 else:
                     access_token = None
                     
-                if access_token:
-                    merged_headers = dict(headers) if headers else {}
-                    merged_headers.setdefault('Authorization', f'Bearer {access_token}')
-                    settings['headers'] = merged_headers
-                    logger.info(f"[MCP Auth] Added Authorization header for {url}")
+                # Check if headers already contain an auth header (PAT takes priority)
+                existing_headers = dict(headers) if headers else {}
+                has_existing_auth = any(
+                    key.lower() in ('authorization', 'x-api-key', 'api-key', 'x-access-token')
+                    for key in existing_headers.keys()
+                )
+                
+                if has_existing_auth:
+                    # Use existing PAT/API key from headers - don't override
+                    logger.info(f"[MCP Auth] Using existing auth header from settings for {url}")
+                    settings['headers'] = existing_headers
+                elif access_token:
+                    # Fall back to OAuth token from mcp_tokens
+                    existing_headers['Authorization'] = f'Bearer {access_token}'
+                    settings['headers'] = existing_headers
+                    logger.info(f"[MCP Auth] Added OAuth Authorization header for {url}")
                     
                 # Pass session_id to MCP toolkit if available
                 if session_id:
                     settings['session_id'] = session_id
                     logger.info(f"[MCP Auth] Passing session_id to toolkit: {session_id}")
-                tools.extend(McpToolkit.get_toolkit(
-                    toolkit_name=tool.get('toolkit_name', ''),
-                    client=alita_client,
-                    **settings).get_tools())
+                
+                # Try to get tools, with OAuth fallback if PAT fails
+                try:
+                    tools.extend(McpToolkit.get_toolkit(
+                        toolkit_name=tool.get('toolkit_name', ''),
+                        client=alita_client,
+                        **settings).get_tools())
+                except McpAuthorizationRequired:
+                    # If PAT failed with 401 and OAuth token is available, retry with OAuth
+                    if has_existing_auth and access_token:
+                        logger.info(f"[MCP Auth] PAT auth failed for {url}, retrying with OAuth token")
+                        existing_headers['Authorization'] = f'Bearer {access_token}'
+                        settings['headers'] = existing_headers
+                        tools.extend(McpToolkit.get_toolkit(
+                            toolkit_name=tool.get('toolkit_name', ''),
+                            client=alita_client,
+                            **settings).get_tools())
+                    else:
+                        raise
             elif tool['type'] == 'skill_router':
                 tool_handled = True
                 # Skills Registry Router Toolkit
