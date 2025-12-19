@@ -4,7 +4,9 @@ Image generation tool for Alita SDK.
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Optional, Type, Any, List, Literal
+from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, Field, create_model, ConfigDict
 
@@ -57,6 +59,11 @@ class ImageGenerationInput(BaseModel):
     prompt: str = Field(
         description="Text prompt describing the image to generate"
     )
+    filename: str = Field(
+        default="image",
+        description="Base filename for the generated image(s) without extension (e.g., 'sunset', 'logo'). "
+                    "For multiple images, numbers will be appended (image_1.png, image_2.png)."
+    )
     n: int = Field(
         default=1, description="Number of images to generate (1-10)",
         ge=1, le=10
@@ -80,9 +87,9 @@ class ImageGenerationTool(BaseTool):
     name: str = "generate_image"
     description: str = (
         "Generate images from text prompts using AI models. "
-        "Returns a JSON object with 'cached_image_id' field containing a reference to the generated image data. "
-        "The cached_image_id can be used to save or process the image. "
-        "The actual image data is stored temporarily and can be retrieved using the cached_image_id reference."
+        "Images are automatically saved to the conversation bucket with the specified filename. "
+        "Returns a JSON array with bucket_name and image_name for each generated image. "
+        "These images persist across conversation turns and can be referenced by name in future prompts."
     )
     args_schema: Type[BaseModel] = ImageGenerationInput
     alita_client: Any = None
@@ -91,7 +98,7 @@ class ImageGenerationTool(BaseTool):
         super().__init__(**kwargs)
         self.alita_client = client
     
-    def _run(self, prompt: str, n: int = 1, size: str = "auto",
+    def _run(self, prompt: str, filename: str = "image", n: int = 1, size: str = "auto",
              quality: str = "auto", style: Optional[str] = None) -> str:
         """Generate an image based on the provided parameters."""
         try:
@@ -105,29 +112,57 @@ class ImageGenerationTool(BaseTool):
                 style=style
             )
             
-            # Return simple JSON structure with reference ID instead of full base64
+            # Get conversation bucket and artifact interface
+            if not hasattr(self.alita_client, 'conversation_bucket'):
+                return json.dumps({
+                    "status": "error",
+                    "message": "Conversation bucket not configured in client"
+                })
+            
+            bucket_name = self.alita_client.conversation_bucket
+            artifact = self.alita_client.artifact(bucket_name)
+            
+            # Save images to bucket instead of cache
             if 'data' in result:
                 images = result['data']
                 
-                # Process all images with unified structure
+                # Process all images and save to bucket
                 images_list = []
                 for idx, image_data in enumerate(images, 1):
                     if not image_data.get('b64_json'):
                         continue
                     
-                    cached_image_id = f"img_{uuid.uuid4().hex[:12]}"
+                    # Generate unique filename with timestamp to prevent conflicts between users
+                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]  # millisecond precision
+                    image_name = f"{filename}_{timestamp}.png"
                     
-                    # Store in cache
-                    if hasattr(self.alita_client, '_generated_images_cache'):
-                        self.alita_client._generated_images_cache[cached_image_id] = {
-                            'base64_data': image_data['b64_json']
+                    # Decode base64 to binary for storage
+                    import base64
+                    binary_data = base64.b64decode(image_data['b64_json'])
+                    
+                    # Save to bucket
+                    artifact.create(image_name, binary_data, bucket_name)
+                    logger.debug(f"Saved generated image to bucket '{bucket_name}' as '{image_name}'")
+                    
+                    # Dispatch custom event for file creation
+                    dispatch_custom_event("file_modified", {
+                        "message": f"Image '{image_name}' generated and saved successfully",
+                        "filename": image_name,
+                        "tool_name": "generate_image",
+                        "toolkit": "image_generation",
+                        "operation_type": "create",
+                        "meta": {
+                            "bucket": bucket_name,
+                            "image_number": idx,
+                            "prompt": prompt
                         }
-                        logger.debug(f"Stored generated image in cache with ID: {cached_image_id}")
+                    })
                     
                     images_list.append({
                         "image_number": idx,
                         "image_type": "png",
-                        "cached_image_id": cached_image_id
+                        "bucket_name": bucket_name,
+                        "image_name": image_name
                     })
                 
                 if not images_list:
@@ -156,11 +191,11 @@ class ImageGenerationTool(BaseTool):
                 "message": f"Error generating image: {str(e)}"
             })
     
-    async def _arun(self, prompt: str, n: int = 1, size: str = "256x256",
+    async def _arun(self, prompt: str, filename: str = "image", n: int = 1, size: str = "256x256",
                     quality: str = "auto",
                     style: Optional[str] = None) -> list:
         """Async version - for now just calls the sync version."""
-        return self._run(prompt, n, size, quality, style)
+        return self._run(prompt, filename, n, size, quality, style)
 
 
 def create_image_generation_tool(client):

@@ -28,6 +28,65 @@ from alita_sdk.tools import _inject_toolkit_id
 logger = logging.getLogger(__name__)
 
 
+def _get_image_library_tools(alita_client, llm):
+    """
+    Get read-only artifact and index tools for accessing generated images.
+    
+    Auto-injected when image_generation internal tool is enabled.
+    Provides search, index, and file operations on conversation_bucket.
+    
+    Args:
+        alita_client: AlitaClient instance with conversation_bucket configured
+        llm: Language model instance for artifact processing
+        
+    Returns:
+        List of filtered read-only tools for artifact access
+    """
+    # Allowed read-only + bucket creation tools
+    ALLOWED_TOOLS = {
+        # Index/Search operations
+        'search_index',
+        'stepback_search_index', 
+        'stepback_summary_index',
+        'list_collections',
+        
+        # File read operations
+        'listFiles',
+        'readFile',
+        'read_file_chunk',
+        'read_multiple_files',
+        'search_file',
+        
+        # Bucket management (needed for organization)
+        'createNewBucket',
+    }
+    
+    try:
+        # Create artifact toolkit pointing to conversation_bucket
+        toolkit = ArtifactToolkit.get_toolkit(
+            client=alita_client,
+            bucket=alita_client.conversation_bucket,
+            toolkit_name='_internal_image_library',
+            llm=llm,
+        )
+        
+        # Filter to allowed tools only
+        all_tools = toolkit.get_tools()
+        allowed_tools = [
+            tool for tool in all_tools 
+            if tool.name in ALLOWED_TOOLS
+        ]
+        
+        logger.info(f"Auto-injected {len(allowed_tools)} read-only artifact tools "
+                    f"for conversation_bucket: {alita_client.conversation_bucket}")
+        
+        return allowed_tools
+        
+    except Exception as e:
+        logger.error(f"Failed to auto-inject image library tools: {e}")
+        return []
+
+
 def get_toolkits():
     core_toolkits = [
         ArtifactToolkit.toolkit_config_schema(),
@@ -127,6 +186,10 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         tools += ImageGenerationToolkit.get_toolkit(
                             client=alita_client,
                         ).get_tools()
+                        
+                        # Auto-inject read-only artifact tools for image library access
+                        tools += _get_image_library_tools(alita_client, llm)
+                        
                     else:
                         logger.warning("Image generation internal tool requested "
                                        "but no image generation model configured")

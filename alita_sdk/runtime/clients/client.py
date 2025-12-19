@@ -77,9 +77,10 @@ class AlitaClient:
         self.model_timeout = kwargs.get('model_timeout', 120)
         self.model_image_generation = kwargs.get('model_image_generation')
         
-        # Cache for generated images to avoid token consumption
-        # This is used by image_generation and artifact toolkits to pass data via reference
-        self._generated_images_cache: Dict[str, Dict[str, Any]] = {}
+        # Bucket for storing generated images and other generated content
+        # This persists across conversation turns, unlike cache
+        # Default format: gencon<project_id> (e.g., gencon123)
+        self.conversation_bucket = kwargs.get('conversation_bucket', 'imagelibrary')
 
     def get_mcp_toolkits(self):
         if user_id := self._get_real_user_id():
