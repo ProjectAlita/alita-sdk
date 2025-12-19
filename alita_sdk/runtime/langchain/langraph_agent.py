@@ -967,7 +967,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     (msg.content for msg in reversed(messages)
                      if not isinstance(msg, HumanMessage)),
                     messages[-1].content
-                )
+                ) if messages else result.get('output')
             elif printer_output is not None:
                 # Printer node has output (interrupted state)
                 output = printer_output
@@ -981,7 +981,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 )
         except Exception:
             # Fallback: try to get last value or last message
-            output = list(result.values())[-1] if result else None
+            output = str(list(result.values())[-1]) if result else 'Output is undefined'
         config_state = self.get_state(config)
         is_execution_finished = not config_state.next
         if is_execution_finished:
