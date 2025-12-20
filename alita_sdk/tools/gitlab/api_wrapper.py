@@ -2,6 +2,7 @@
 import fnmatch
 from typing import Any, Dict, List, Optional
 
+from gitlab import GitlabGetError
 from langchain_core.tools import ToolException
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
@@ -9,6 +10,7 @@ from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 from ..utils.content_parser import parse_file_content
+from .utils import get_position
 
 AppendFileModel = create_model(
     "AppendFileModel",
@@ -90,9 +92,9 @@ GetPRChangesModel = create_model(
 CreatePRChangeCommentModel = create_model(
     "CreatePRChangeCommentModel",
     pr_number=(int, Field(description="GitLab Merge Request (Pull Request) number")),
-    file_path=(str, Field(description="File path of the changed file")),
-    line_number=(int, Field(description="Line number from the diff for a changed file")),
-    comment=(str, Field(description="Comment content")),
+    file_path=(str, Field(description="File path of the changed file as shown in the diff")),
+    line_number=(int, Field(description="Line index (0-based) from the diff output. Use get_pr_changes first to see the diff and identify the correct line index to comment on.")),
+    comment=(str, Field(description="Comment content to add to the specific line")),
 )
 GetCommitsModel = create_model(
     "GetCommitsModel",
@@ -503,10 +505,41 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         return res
 
     def create_pr_change_comment(self, pr_number: int, file_path: str, line_number: int, comment: str) -> str:
-        mr = self.repo_instance.mergerequests.get(pr_number)
-        position = {"position_type": "text", "new_path": file_path, "new_line": line_number}
-        mr.discussions.create({"body": comment, "position": position})
-        return "Comment added"
+        """
+        Create a comment on a specific line in a pull request (merge request) change in GitLab.
+
+        This method adds an inline comment to a specific line in the diff of a merge request.
+        The line_number parameter refers to the line index in the diff output (0-based),
+        not the line number in the original file.
+
+        **Important**: Use get_pr_changes first to see the diff and identify the correct
+        line index for commenting.
+
+        Parameters:
+            pr_number: GitLab Merge Request number
+            file_path: Path to the file being commented on (as shown in the diff)
+            line_number: Line index from the diff (0-based index)
+            comment: Comment text to add
+
+        Returns:
+            Success message or error description
+        """
+        try:
+            mr = self.repo_instance.mergerequests.get(pr_number)
+        except GitlabGetError as e:
+            if e.response_code == 404:
+                raise ToolException(f"Merge request number {pr_number} wasn't found: {e}")
+            raise ToolException(f"Error retrieving merge request {pr_number}: {e}")
+
+        try:
+            # Calculate proper position with SHA references and line mappings
+            position = get_position(file_path=file_path, line_number=line_number, mr=mr)
+
+            # Create discussion with the comment
+            mr.discussions.create({"body": comment, "position": position})
+            return f"Comment added successfully to line {line_number} in {file_path} on MR #{pr_number}"
+        except Exception as e:
+            raise ToolException(f"Failed to create comment on MR #{pr_number}: {e}")
 
     def get_commits(self, sha: Optional[str] = None, path: Optional[str] = None, since: Optional[str] = None, until: Optional[str] = None, author: Optional[str] = None):
         params = {}
@@ -629,7 +662,7 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             {
                 "name": "create_pr_change_comment",
                 "ref": self.create_pr_change_comment,
-                "description": "Create a comment on a pull request change.",
+                "description": self.create_pr_change_comment.__doc__ or "Create an inline comment on a specific line in a pull request change. Use get_pr_changes first to see the diff and identify the line index for commenting. The line_number is a 0-based index from the diff output, not the file line number.",
                 "args_schema": CreatePRChangeCommentModel,
             },
             {
