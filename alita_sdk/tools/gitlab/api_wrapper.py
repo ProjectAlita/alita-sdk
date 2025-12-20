@@ -237,6 +237,8 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         Returns:
             File content as string
         """
+        # Default to active branch if branch is None, consistent with other methods
+        branch = branch if branch else self._active_branch
         return self.read_file(file_path, branch)
 
     def create_branch(self, branch_name: str) -> str:
@@ -325,6 +327,8 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             return "Unable to make comment due to error:\n" + str(e)
 
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
+        # Default to active branch if branch is None
+        branch = branch if branch else self._active_branch
         try:
             self.set_active_branch(branch)
             self.repo_instance.files.get(file_path, branch)
@@ -341,6 +345,8 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             return "Created file " + file_path
 
     def read_file(self, file_path: str, branch: str) -> str:
+        # Default to active branch if branch is None
+        branch = branch if branch else self._active_branch
         self.set_active_branch(branch)
         file = self.repo_instance.files.get(file_path, branch)
         return parse_file_content(file_name=file_path,
