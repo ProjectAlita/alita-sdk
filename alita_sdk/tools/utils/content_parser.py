@@ -212,6 +212,41 @@ def load_content_from_bytes(file_content: bytes, extension: str = None, loader_e
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
+
+def _load_content_from_bytes_with_prompt(file_content: bytes, extension: str = None, loader_extra_config: dict = None, llm = None, prompt: str = image_processing_prompt) -> str:
+    """Internal helper that behaves like load_content_from_bytes but also propagates prompt.
+
+    This keeps the public load_content_from_bytes API unchanged while allowing newer
+    code paths to pass an explicit prompt through to the loader.
+    """
+    temp_file_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w+b', delete=False, suffix=extension or '') as temp_file:
+            temp_file.write(file_content)
+            temp_file.flush()
+            temp_file_path = temp_file.name
+
+        # Use prepare_loader so that prompt and other kwargs are handled consistently
+        loader = prepare_loader(
+            file_name=None,
+            file_content=None,
+            is_capture_image=loader_extra_config.get('extract_images') if loader_extra_config else False,
+            page_number=loader_extra_config.get('page_number') if loader_extra_config else None,
+            sheet_name=loader_extra_config.get('sheet_name') if loader_extra_config else None,
+            llm=llm or (loader_extra_config.get('llm') if loader_extra_config else None),
+            file_path=temp_file_path,
+            excel_by_sheets=loader_extra_config.get('excel_by_sheets') if loader_extra_config else False,
+            prompt=prompt or (loader_extra_config.get('prompt') if loader_extra_config else image_processing_prompt),
+        )
+
+        documents = loader.load()
+        page_contents = [doc.page_content for doc in documents]
+        return "\n".join(page_contents)
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+
 def process_document_by_type(content, extension_source: str, document: Document = None, llm = None, chunking_config=None) \
         -> Generator[Document, None, None]:
     """Process the content of a file based on its type using a configured loader cosidering the origin document."""
