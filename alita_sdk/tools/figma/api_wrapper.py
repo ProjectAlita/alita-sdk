@@ -7,7 +7,6 @@ from typing import Dict, List, Generator, Optional, Union
 from urllib.parse import urlparse, parse_qs
 
 import requests
-from FigmaPy import FigmaPy
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
@@ -15,8 +14,9 @@ from pydantic import Field, PrivateAttr, create_model, model_validator, SecretSt
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..utils.content_parser import load_content_from_bytes
+from .figma_client import AlitaFigmaPy
 
-GLOBAL_LIMIT = 10000
+GLOBAL_LIMIT = 1000000
 GLOBAL_RETAIN = ['id', 'name', 'type', 'document', 'children']
 GLOBAL_REMOVE = []
 GLOBAL_DEPTH_START = 4
@@ -25,14 +25,10 @@ EXTRA_PARAMS = (
     Optional[Dict[str, Union[str, int, List, None]]],
     Field(
         description=(
-            "Additional parameters for customizing response processing:\n"
-            "- `limit`: Maximum size of the output in characters.\n"
-            "- `regexp`: Regex pattern to filter or clean the output.\n"
-            "- `fields_retain`: List of field names to always keep in the output, on levels starting from `depth_start`.\n"
-            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects."
+            "Optional output controls: `limit` (max characters, always applied), `regexp` (regex cleanup on text), "
+            "`fields_retain`/`fields_remove` (which keys to keep or drop), and `depth_start`/`depth_end` (depth range "
+            "where that key filtering is applied). Field/depth filters are only used when the serialized JSON result "
+            "exceeds `limit` to reduce its size."
         ),
         default={
             "limit": GLOBAL_LIMIT, "regexp": None,
@@ -190,11 +186,64 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     global_fields_remove: Optional[List[str]] = GLOBAL_REMOVE
     global_depth_start: Optional[int] = GLOBAL_DEPTH_START
     global_depth_end: Optional[int] = GLOBAL_DEPTH_END
-    _client: Optional[FigmaPy] = PrivateAttr()
+    _client: Optional[AlitaFigmaPy] = PrivateAttr()
+
+    def _parse_figma_url(self, url: str) -> tuple[str, Optional[List[str]]]:
+        """Parse and validate a Figma URL.
+
+        Returns a tuple of (file_key, node_ids_from_url or None).
+        Raises ToolException with a clear message if the URL is malformed.
+        """
+        try:
+            parsed = urlparse(url)
+
+            # Basic structural validation
+            if not parsed.scheme or not parsed.netloc:
+                raise ToolException(
+                    "Figma URL must include protocol and host (e.g., https://www.figma.com/file/...). "
+                    f"Got: {url}"
+                )
+
+            path_parts = parsed.path.strip('/').split('/') if parsed.path else []
+
+            # Supported URL patterns:
+            #  - /file/<file_key>/...
+            #  - /design/<file_key>/... (older / embedded variant)
+            if len(path_parts) < 2 or path_parts[0] not in {"file", "design"}:
+                raise ToolException(
+                    "Unsupported Figma URL format. Expected path like '/file/<FILE_KEY>/...' or "
+                    "'/design/<FILE_KEY>/...'. "
+                    f"Got path: '{parsed.path}' from URL: {url}"
+                )
+
+            file_key = path_parts[1]
+            if not file_key:
+                raise ToolException(
+                    "Figma URL is missing the file key segment after '/file/' or '/design/'. "
+                    f"Got path: '{parsed.path}' from URL: {url}"
+                )
+
+            # Optional node-id is passed via query parameter
+            query_params = parse_qs(parsed.query or "")
+            node_ids_from_url = query_params.get("node-id", []) or None
+
+            return file_key, node_ids_from_url
+
+        except ToolException:
+            # Re-raise our own clear ToolException as-is
+            raise
+        except Exception as e:
+            # Catch any unexpected parsing issues and wrap them clearly
+            raise ToolException(
+                "Unexpected error while processing Figma URL. "
+                "Please provide a valid Figma file or page URL, for example: "
+                "'https://www.figma.com/file/<FILE_KEY>/...'? "
+                f"Original error: {e}"
+            )
 
     def _base_loader(
             self,
-            file_or_page_url: Optional[str] = None,
+            url: Optional[str] = None,
             project_id: Optional[str] = None,
             file_keys_include: Optional[List[str]] = None,
             file_keys_exclude: Optional[List[str]] = None,
@@ -204,23 +253,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_types_exclude: Optional[List[str]] = None,
             **kwargs
     ) -> Generator[Document, None, None]:
-        if file_or_page_url:
-            # If URL is provided and valid, extract and override file_keys_include and node_ids_include
-            try:
-                parsed = urlparse(file_or_page_url)
-                path_parts = parsed.path.strip('/').split('/')
-    
-                # Check if the path matches the expected format
-                if len(path_parts) >= 2 and path_parts[0] == 'design':
-                    file_keys_include = [path_parts[1]]
-                    if len(path_parts) == 3:
-                        # To ensure url structure matches Figma's format with 3 path segments
-                        query_params = parse_qs(parsed.query)
-                        if "node-id" in query_params:
-                            node_ids_include = query_params.get('node-id', [])
-            except Exception as e:
-                raise ToolException(
-                    f"Unexpected error while processing Figma url {file_or_page_url}: {e}")
+        if url:
+            file_key, node_ids_from_url = self._parse_figma_url(url)
+            # Override include params based on URL
+            file_keys_include = [file_key]
+            if node_ids_from_url:
+                node_ids_include = node_ids_from_url
         
         # If both include and exclude are provided, use only include
         if file_keys_include:
@@ -401,8 +439,13 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
-            "file_or_page_url": (Optional[str], Field(
-                description="Url to file or page to index: i.e. https://www.figma.com/design/[YOUR_FILE_KEY]/Login-page-designs?node-id=[YOUR_PAGE_ID]",
+            "url": (Optional[str], Field(
+                description=(
+                    "Full Figma file or page URL to index. Must be in one of the following formats: "
+                    "'https://www.figma.com/file/<FILE_KEY>/...' or 'https://www.figma.com/design/<FILE_KEY>/...'. "
+                    "If present, the 'node-id' query parameter (e.g. '?node-id=<PAGE_ID>') will be used to limit "
+                    "indexing to that page or node. When this URL is provided, it overrides 'file_keys_include' ('node_ids_include')."
+                ),
                 default=None)),
             "project_id": (Optional[str], Field(
                 description="ID of the project to list files from: i.e. 55391681",
@@ -476,22 +519,22 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             except re.error as e:
                 msg = f"Failed to compile regex pattern: {str(e)}"
                 logging.error(msg)
-                return ToolException(msg)
+                raise ToolException(msg)
 
         try:
             if token:
-                cls._client = FigmaPy(token=token, oauth2=False)
+                cls._client = AlitaFigmaPy(token=token, oauth2=False)
                 logging.info("Authenticated with Figma token")
             elif oauth2:
-                cls._client = FigmaPy(token=oauth2, oauth2=True)
+                cls._client = AlitaFigmaPy(token=oauth2, oauth2=True)
                 logging.info("Authenticated with OAuth2 token")
             else:
-                return ToolException("You have to define Figma token.")
+                raise ToolException("You have to define Figma token.")
             logging.info("Successfully authenticated to Figma.")
         except Exception as e:
             msg = f"Failed to authenticate with Figma: {str(e)}"
             logging.error(msg)
-            return ToolException(msg)
+            raise ToolException(msg)
 
         return values
 
