@@ -35,7 +35,7 @@ ReadFileModel = create_model(
 )
 UpdateFileModel = create_model(
     "UpdateFileModel",
-    file_query=(str, Field(description="The file query string")),
+    file_query=(str, Field(description="The file query string containing file path on first line, followed by OLD/NEW markers. Format: file_path\\nOLD <<<< old content >>>> OLD\\nNEW <<<< new content >>>> NEW")),
     branch=(str, Field(description="The branch to update the file in")),
 )
 CommentOnIssueModel = create_model(
@@ -406,43 +406,52 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def update_file(self, file_query: str, branch: str) -> str:
+        """
+        Update file using edit_file functionality.
+
+        This method now delegates to edit_file which uses OLD/NEW markers.
+        For backwards compatibility, it extracts the file_path from the query.
+
+        Expected format:
+            file_path
+            OLD <<<<
+            old content
+            >>>> OLD
+            NEW <<<<
+            new content
+            >>>> NEW
+
+        Args:
+            file_query: File path on first line, followed by OLD/NEW markers
+            branch: Branch to update the file in
+
+        Returns:
+            Success or error message
+        """
         if branch == self.branch:
             return (
-                "You're attempting to commit to the directly"
+                "You're attempting to commit directly "
                 f"to the {self.branch} branch, which is protected. "
                 "Please create a new branch and try again."
             )
         try:
-            file_path: str = file_query.split("\n")[0]
-            self.set_active_branch(branch)
-            file_content = self.read_file(file_path, branch)
-            updated_file_content = file_content
-            for old, new in self.extract_old_new_pairs(file_query):
-                if not old.strip():
-                    continue
-                updated_file_content = updated_file_content.replace(old, new)
-
-            if file_content == updated_file_content:
+            # Extract file path from first line
+            lines = file_query.split("\n", 1)
+            if len(lines) < 2:
                 return (
-                    "File content was not updated because old content was not found or empty."
-                    "It may be helpful to use the read_file action to get "
-                    "the current file contents."
+                    "Invalid file_query format. Expected:\n"
+                    "file_path\n"
+                    "OLD <<<< old content >>>> OLD\n"
+                    "NEW <<<< new content >>>> NEW"
                 )
 
-            commit = {
-                "branch": branch,
-                "commit_message": "Create " + file_path,
-                "actions": [
-                    {
-                        "action": "update",
-                        "file_path": file_path,
-                        "content": updated_file_content,
-                    }
-                ],
-            }
+            file_path = lines[0].strip()
+            edit_content = lines[1] if len(lines) > 1 else ""
 
-            self.repo_instance.commits.create(commit)
-            return "Updated file " + file_path
+            # Delegate to edit_file method with appropriate commit message
+            commit_message = f"Update {file_path}"
+            return self.edit_file(file_path, edit_content, branch, commit_message)
+
         except Exception as e:
             return "Unable to update file due to error:\n" + str(e)
 
