@@ -7,16 +7,16 @@ from typing import Dict, List, Generator, Optional, Union
 from urllib.parse import urlparse, parse_qs
 
 import requests
-from FigmaPy import FigmaPy
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
-from ..utils.content_parser import load_content_from_bytes
+from ..utils.content_parser import _load_content_from_bytes_with_prompt
+from .figma_client import AlitaFigmaPy
 
-GLOBAL_LIMIT = 10000
+GLOBAL_LIMIT = 1000000
 GLOBAL_RETAIN = ['id', 'name', 'type', 'document', 'children']
 GLOBAL_REMOVE = []
 GLOBAL_DEPTH_START = 4
@@ -25,14 +25,10 @@ EXTRA_PARAMS = (
     Optional[Dict[str, Union[str, int, List, None]]],
     Field(
         description=(
-            "Additional parameters for customizing response processing:\n"
-            "- `limit`: Maximum size of the output in characters.\n"
-            "- `regexp`: Regex pattern to filter or clean the output.\n"
-            "- `fields_retain`: List of field names to always keep in the output, on levels starting from `depth_start`.\n"
-            "- `fields_remove`: List of field names to exclude from the output, unless also present in `fields_retain`.\n"
-            "- `depth_start`: The depth in the object hierarchy at which field filtering begins (fields are retained or removed).\n"
-            "- `depth_end`: The depth at which all fields are ignored and recursion stops.\n"
-            "Use these parameters to control the granularity and size of the returned data, especially for large or deeply nested objects."
+            "Optional output controls: `limit` (max characters, always applied), `regexp` (regex cleanup on text), "
+            "`fields_retain`/`fields_remove` (which keys to keep or drop), and `depth_start`/`depth_end` (depth range "
+            "where that key filtering is applied). Field/depth filters are only used when the serialized JSON result "
+            "exceeds `limit` to reduce its size."
         ),
         default={
             "limit": GLOBAL_LIMIT, "regexp": None,
@@ -179,6 +175,92 @@ class ArgsSchema(Enum):
         ),
         extra_params=EXTRA_PARAMS,
     )
+    FileSummary = create_model(
+        "FileSummary",
+        url=(
+            Optional[str],
+            Field(
+                description=(
+                    "Full Figma URL with file key and optional node-id. "
+                    "Example: 'https://www.figma.com/file/<FILE_KEY>/...?...node-id=<NODE_ID>'. "
+                    "If provided and valid, URL is used and file_key/node_ids arguments are ignored."
+                ),
+                default=None,
+            ),
+        ),
+        file_key=(
+            Optional[str],
+            Field(
+                description=(
+                    "Explicit file key used only when URL is not provided."
+                ),
+                default=None,
+                examples=["Fp24FuzPwH0L74ODSrCnQo"],
+            ),
+        ),
+        node_ids=(
+            Optional[str],
+            Field(
+                description=(
+                    "Optional comma-separated top-level node ids (pages) used only when URL has no node-id and URL is not set. "
+                    "Example: '8:6,1:7'."
+                ),
+                default=None,
+                examples=["8:6,1:7"],
+            ),
+        ),
+        images_prompt=(
+            Optional[Dict[str, str]],
+            Field(
+                description=(
+                    "Optional instruction object for how to treat image-based nodes in the summary. "
+                    "For example, describe screenshots or diagrams differently from generic images."
+                ),
+                default={
+                    "prompt": (
+                        "You are an AI model for image analysis. "
+                        "For each image, first identify its type "
+                        "(diagram, screenshot, photograph, illustration/drawing, text-centric, or mixed), "
+                        "then describe all visible elements and extract any readable text. "
+                        "For diagrams, capture titles, labels, legends, axes, and all numerical values, "
+                        "and summarize key patterns or trends. For screenshots, describe the interface or page, "
+                        "key UI elements, and any conversations or messages with participants and timestamps if visible. "
+                        "For photos and illustrations, describe the setting, main objects/people, "
+                        "their actions, style, colors, and composition. "
+                        "Be precise and thorough; when something is unclear or illegible, state that explicitly instead of guessing."
+                    )
+                },
+                examples=[
+                    {
+                        "prompt": "For image nodes, briefly describe what is visible in the screenshot or diagram and how it relates to the UI.",
+                    }
+                ],
+            ),
+        ),
+        summary_prompt=(
+            Optional[Dict[str, str]],
+            Field(
+                description=(
+                    "Optional instruction object for the LLM on how to summarize loaded Figma pages and nodes. "
+                    "Should contain a 'text' field with the main instruction."
+                ),
+                default={
+                    "prompt": (
+                        "You are summarizing a visual design document exported from Figma as a sequence of images and text. "
+                        "Provide a clear, concise overview of the main purpose, key elements, and notable changes or variations in the screens. "
+                        "Infer a likely user flow or sequence of steps across the screens, calling out entry points, decisions, and outcomes. "
+                        "Explain how this design could impact planning, development, testing, and review activities in a typical software lifecycle. "
+                        "Return the result as structured Markdown with headings and bullet lists so it can be reused in SDLC documentation."
+                    )
+                },
+                examples=[
+                    {
+                        "prompt": "Summarize Figma pages focusing on component names and user-visible text only.",
+                    }
+                ],
+            ),
+        ),
+    )
 
 
 class FigmaApiWrapper(NonCodeIndexerToolkit):
@@ -190,11 +272,64 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     global_fields_remove: Optional[List[str]] = GLOBAL_REMOVE
     global_depth_start: Optional[int] = GLOBAL_DEPTH_START
     global_depth_end: Optional[int] = GLOBAL_DEPTH_END
-    _client: Optional[FigmaPy] = PrivateAttr()
+    _client: Optional[AlitaFigmaPy] = PrivateAttr()
+
+    def _parse_figma_url(self, url: str) -> tuple[str, Optional[List[str]]]:
+        """Parse and validate a Figma URL.
+
+        Returns a tuple of (file_key, node_ids_from_url or None).
+        Raises ToolException with a clear message if the URL is malformed.
+        """
+        try:
+            parsed = urlparse(url)
+
+            # Basic structural validation
+            if not parsed.scheme or not parsed.netloc:
+                raise ToolException(
+                    "Figma URL must include protocol and host (e.g., https://www.figma.com/file/...). "
+                    f"Got: {url}"
+                )
+
+            path_parts = parsed.path.strip('/').split('/') if parsed.path else []
+
+            # Supported URL patterns:
+            #  - /file/<file_key>/...
+            #  - /design/<file_key>/... (older / embedded variant)
+            if len(path_parts) < 2 or path_parts[0] not in {"file", "design"}:
+                raise ToolException(
+                    "Unsupported Figma URL format. Expected path like '/file/<FILE_KEY>/...' or "
+                    "'/design/<FILE_KEY>/...'. "
+                    f"Got path: '{parsed.path}' from URL: {url}"
+                )
+
+            file_key = path_parts[1]
+            if not file_key:
+                raise ToolException(
+                    "Figma URL is missing the file key segment after '/file/' or '/design/'. "
+                    f"Got path: '{parsed.path}' from URL: {url}"
+                )
+
+            # Optional node-id is passed via query parameter
+            query_params = parse_qs(parsed.query or "")
+            node_ids_from_url = query_params.get("node-id", []) or None
+
+            return file_key, node_ids_from_url
+
+        except ToolException:
+            # Re-raise our own clear ToolException as-is
+            raise
+        except Exception as e:
+            # Catch any unexpected parsing issues and wrap them clearly
+            raise ToolException(
+                "Unexpected error while processing Figma URL. "
+                "Please provide a valid Figma file or page URL, for example: "
+                "'https://www.figma.com/file/<FILE_KEY>/...'? "
+                f"Original error: {e}"
+            )
 
     def _base_loader(
             self,
-            file_or_page_url: Optional[str] = None,
+            url: Optional[str] = None,
             project_id: Optional[str] = None,
             file_keys_include: Optional[List[str]] = None,
             file_keys_exclude: Optional[List[str]] = None,
@@ -204,23 +339,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_types_exclude: Optional[List[str]] = None,
             **kwargs
     ) -> Generator[Document, None, None]:
-        if file_or_page_url:
-            # If URL is provided and valid, extract and override file_keys_include and node_ids_include
-            try:
-                parsed = urlparse(file_or_page_url)
-                path_parts = parsed.path.strip('/').split('/')
-    
-                # Check if the path matches the expected format
-                if len(path_parts) >= 2 and path_parts[0] == 'design':
-                    file_keys_include = [path_parts[1]]
-                    if len(path_parts) == 3:
-                        # To ensure url structure matches Figma's format with 3 path segments
-                        query_params = parse_qs(parsed.query)
-                        if "node-id" in query_params:
-                            node_ids_include = query_params.get('node-id', [])
-            except Exception as e:
-                raise ToolException(
-                    f"Unexpected error while processing Figma url {file_or_page_url}: {e}")
+        if url:
+            file_key, node_ids_from_url = self._parse_figma_url(url)
+            # Override include params based on URL
+            file_keys_include = [file_key]
+            if node_ids_from_url:
+                node_ids_include = node_ids_from_url
         
         # If both include and exclude are provided, use only include
         if file_keys_include:
@@ -294,7 +418,11 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             # try to fetch only specified pages/nodes in one request
             file = self._get_file_nodes(file_key,','.join(node_ids_include)) # attempt to fetch only specified pages/nodes in one request
             if file:
-                return [node['document'] for node in file.get('nodes', {}).values() if 'document' in node]
+                return [
+                    node["document"]
+                    for node in (file.get("nodes") or {}).values()
+                    if node is not None and "document" in node
+                ]
         else:
             # 
             file = self._client.get_file(file_key)
@@ -319,7 +447,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     result.append(page_res)
             return result
 
-    def _process_document(self, document: Document) -> Generator[Document, None, None]:
+    def _process_document(self, document: Document, prompt: str = "") -> Generator[Document, None, None]:
         file_key = document.metadata.get('id', '')
         self._log_tool_event(f"Loading details (images) for `{file_key}`")
         figma_pages = self._load_pages(document)
@@ -361,9 +489,9 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     content_type = response.headers.get('Content-Type', '')
                     if 'text/html' not in content_type.lower():
                         extension = f".{content_type.split('/')[-1]}" if content_type.startswith('image') else '.txt'
-                        page_content = load_content_from_bytes(
+                        page_content = _load_content_from_bytes_with_prompt(
                             file_content=response.content,
-                            extension=extension, llm=self.llm)
+                            extension=extension, llm=self.llm, prompt=prompt)
                         yield Document(
                             page_content=page_content,
                             metadata={
@@ -401,8 +529,13 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
-            "file_or_page_url": (Optional[str], Field(
-                description="Url to file or page to index: i.e. https://www.figma.com/design/[YOUR_FILE_KEY]/Login-page-designs?node-id=[YOUR_PAGE_ID]",
+            "url": (Optional[str], Field(
+                description=(
+                    "Full Figma file or page URL to index. Must be in one of the following formats: "
+                    "'https://www.figma.com/file/<FILE_KEY>/...' or 'https://www.figma.com/design/<FILE_KEY>/...'. "
+                    "If present, the 'node-id' query parameter (e.g. '?node-id=<PAGE_ID>') will be used to limit "
+                    "indexing to that page or node. When this URL is provided, it overrides 'file_keys_include' ('node_ids_include')."
+                ),
                 default=None)),
             "project_id": (Optional[str], Field(
                 description="ID of the project to list files from: i.e. 55391681",
@@ -476,22 +609,22 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             except re.error as e:
                 msg = f"Failed to compile regex pattern: {str(e)}"
                 logging.error(msg)
-                return ToolException(msg)
+                raise ToolException(msg)
 
         try:
             if token:
-                cls._client = FigmaPy(token=token, oauth2=False)
+                cls._client = AlitaFigmaPy(token=token, oauth2=False)
                 logging.info("Authenticated with Figma token")
             elif oauth2:
-                cls._client = FigmaPy(token=oauth2, oauth2=True)
+                cls._client = AlitaFigmaPy(token=oauth2, oauth2=True)
                 logging.info("Authenticated with OAuth2 token")
             else:
-                return ToolException("You have to define Figma token.")
+                raise ToolException("You have to define Figma token.")
             logging.info("Successfully authenticated to Figma.")
         except Exception as e:
             msg = f"Failed to authenticate with Figma: {str(e)}"
             logging.error(msg)
-            return ToolException(msg)
+            raise ToolException(msg)
 
         return values
 
@@ -655,6 +788,108 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         return self._client.get_file(file_key, geometry, version)
 
     @process_output
+    def get_file_summary(
+            self,
+            url: Optional[str] = None,
+            file_key: Optional[str] = None,
+            node_ids: Optional[str] = None,
+            summary_prompt: Optional[Dict[str, str]] = None,
+            images_prompt: Optional[Dict[str, str]] = None,
+            **kwargs,
+    ):
+        """Summarizes a Figma file by loading pages and nodes via URL or file key, like index_data.
+
+        If `summary_prompt` is provided, an LLM-based summary over the loaded documents is generated
+        instead of returning the raw list of documents. `images_prompt`, when provided, can be used
+        to adjust how image nodes should be treated in the summary prompt (currently passed only as
+        additional context text)."""
+        # Resolve file key and optional node ids similarly to index_data URL handling
+        effective_url = url
+        effective_file_keys_include: Optional[List[str]] = None
+        effective_node_ids_include: Optional[List[str]] = None
+
+        if effective_url:
+            # URL has the highest priority: parse URL and ignore file_key / node_ids args
+            file_key_from_url, node_ids_from_url = self._parse_figma_url(effective_url)
+            effective_file_keys_include = [file_key_from_url]
+            if node_ids_from_url:
+                effective_node_ids_include = [nid for nid in node_ids_from_url if nid]
+        else:
+            if not file_key:
+                raise ToolException("Either 'url' or 'file_key' must be provided.")
+            effective_file_keys_include = [file_key]
+            # Only when URL is absent, we use explicit node_ids argument
+            if node_ids:
+                effective_node_ids_include = [nid.strip() for nid in node_ids.split(',') if nid.strip()]
+
+        # Use the same flow as index_data: base loader -> process_document
+        base_docs = self._base_loader(
+            url=effective_url if effective_url else None,
+            file_keys_include=effective_file_keys_include,
+            node_ids_include=effective_node_ids_include,
+        )
+
+        # Only return processed dependency documents (skip base docs) for output
+        images_prompt_str = images_prompt["prompt"] if images_prompt and "prompt" in images_prompt else ""
+        results: List[Dict] = []
+        for base_doc in base_docs:
+            for dep in self._process_document(base_doc, images_prompt_str):
+                results.append({
+                    "page_content": dep.page_content,
+                    "metadata": dep.metadata,
+                })
+
+        # If no summary_prompt object or no meaningful text, return the raw list of documents
+        if not summary_prompt or not isinstance(summary_prompt, dict) or not summary_prompt.get("prompt"):
+            return results
+
+        # If summary_prompt is provided, generate an LLM-based summary over the loaded docs
+        try:
+            # Build a structured, ordered view of images and texts to help the LLM infer flows.
+            # Each block is rendered in a simple, Markdown-friendly format:
+            # Image (<node_id>), <image_url>  /  Text (<node_id>)
+            # <description or text>
+            # --------------------
+            blocks = []
+            for item in results:
+                metadata = item.get("metadata", {}) or {}
+                node_type = str(metadata.get("type", "")).lower()
+                node_id = metadata.get("node_id") or metadata.get("id", "")
+                page_content = str(item.get("page_content", "")).strip()
+
+                if not page_content:
+                    continue
+
+                if node_type == "image":
+                    image_url = metadata.get("image_url", "")
+                    header = f"Image ({node_id}), {image_url}".strip().rstrip(',')
+                    body = page_content
+                else:
+                    header = f"Text ({node_id})".strip()
+                    body = page_content
+
+                block = f"{header}\n{body}\n--------------------"
+                blocks.append(block)
+
+            full_content = "\n".join(blocks) if blocks else "(no content)"
+
+            if not getattr(self, "llm", None):
+                raise RuntimeError("LLM is not configured for this toolkit; cannot apply summary_prompt.")
+
+            prompt_text = f"{summary_prompt['prompt']}\n\nCONTENT BEGIN\n{full_content}\nCONTENT END"
+            llm_response = self.llm.invoke(prompt_text) if hasattr(self.llm, "invoke") else self.llm(prompt_text)
+
+            if hasattr(llm_response, "content"):
+                summary_text = str(llm_response.content)
+            else:
+                summary_text = str(llm_response)
+
+            return summary_text
+        except Exception as e:
+            logging.warning(f"Failed to apply summary_prompt in get_file_summary: {e}")
+            return results
+
+    @process_output
     def get_file_versions(self, file_key: str, **kwargs):
         """Retrieves the version history of a specified file from Figma."""
         return self._client.get_file_versions(file_key)
@@ -723,6 +958,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 "description": self.get_file.__doc__,
                 "args_schema": ArgsSchema.File.value,
                 "ref": self.get_file,
+            },
+            {
+                "name": "get_file_summary",
+                "description": self.get_file_summary.__doc__,
+                "args_schema": ArgsSchema.FileSummary.value,
+                "ref": self.get_file_summary,
             },
             {
                 "name": "get_file_versions",
