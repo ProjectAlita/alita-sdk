@@ -1,0 +1,13 @@
+{
+  "type": "figma",
+  "toolkit_name": "figma",
+  "global_limit": 10000,
+  "global_regexp": null,
+  "selected_tools": [
+    "index_data",
+    "get_file_comments"
+  ],
+  "figma_configuration": {
+    "token": "FIGMA_TOKEN_2"
+  }
+}
