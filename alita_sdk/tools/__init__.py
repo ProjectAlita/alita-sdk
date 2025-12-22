@@ -102,7 +102,7 @@ _safe_import_tool('k8s', 'cloud.k8s', None, 'KubernetesToolkit')
 _safe_import_tool('elastic', 'elastic', None, 'ElasticToolkit')
 _safe_import_tool('keycloak', 'keycloak', None, 'KeycloakToolkit')
 _safe_import_tool('localgit', 'localgit', None, 'AlitaLocalGitToolkit')
-_safe_import_tool('pandas', 'pandas', 'get_tools', 'PandasToolkit')
+# pandas toolkit removed - use Data Analysis internal tool instead
 _safe_import_tool('azure_search', 'azure_ai.search', 'get_tools', 'AzureSearchToolkit')
 _safe_import_tool('figma', 'figma', 'get_tools', 'FigmaToolkit')
 _safe_import_tool('salesforce', 'salesforce', 'get_tools', 'SalesforceToolkit')

@@ -158,21 +158,17 @@ class PandasWrapper(BaseToolApiWrapper):
                         f"Retrying Code Generation ({attempts}/{max_retries})..."
                     )
     
-    def process_query(self, query: str, filename: str) -> str:
-        """Analyze and process using query on dataset""" 
+    def analyse_data(self, query: str, filename: str) -> str:
+        """Analyze data from a file using natural language query. Supports CSV, Excel, Parquet, JSON, and other common data formats."""
         df = self._get_dataframe(filename)
         code = self.generate_code_with_retries(df, query)
-        self._log_tool_event(tool_name="process_query",
+        self._log_tool_event(tool_name="analyse_data",
                              message=f"Executing generated code... \n\n```python\n{code}\n```")
         try:
             result = self.execute_code(df, code)
         except Exception as e:
             logger.error(f"Code execution failed: {format_exc()}")
-            self._log_tool_event(tool_name="process_query",
-                                 message=f"Executing generated code... \n\n```python\n{code}\n```")
             raise
-        self._log_tool_event(tool_name="process_query",
-                             message=f"Executing generated code... \n\n```python\n{code}\n```")
         if result.get("df") is not None:
             df = result.pop("df")
             # Not saving dataframe to artifact repo for now
@@ -253,23 +249,13 @@ class PandasWrapper(BaseToolApiWrapper):
     def get_available_tools(self):
         return [
             {
-                "name": "process_query",
-                "ref": self.process_query,
-                "description": self.process_query.__doc__,
+                "name": "analyse_data",
+                "ref": self.analyse_data,
+                "description": self.analyse_data.__doc__,
                 "args_schema": create_model(
-                    "ProcessQueryModel",
-                    query=(str, Field(description="Task to solve")),
-                    filename=(str, Field(description="File to be processed"))
-                )
-            },
-            {
-                "name": "save_dataframe",
-                "ref": self.save_dataframe,
-                "description": self.save_dataframe.__doc__,
-                "args_schema": create_model(
-                    "SaveDataFrameModel",
-                    source_df=(str, Field(description="Source dataframe file to be saved")),
-                    target_file=(str, Field(description="Target filename with extension for saving"))
+                    "AnalyseDataModel",
+                    query=(str, Field(description="Natural language query describing what analysis to perform on the data")),
+                    filename=(str, Field(description="Name of the file to analyze (e.g., 'data.csv', 'report.xlsx')"))
                 )
             }
         ]
