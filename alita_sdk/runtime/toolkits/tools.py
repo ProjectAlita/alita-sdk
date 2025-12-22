@@ -18,6 +18,7 @@ from .skill_router import SkillRouterToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
 from ..tools.image_generation import ImageGenerationToolkit
+from ..tools.data_analysis import DataAnalysisToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
@@ -36,6 +37,7 @@ def get_toolkits():
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
         ImageGenerationToolkit.toolkit_config_schema(),
+        DataAnalysisToolkit.toolkit_config_schema(),
         McpToolkit.toolkit_config_schema(),
         SkillRouterToolkit.toolkit_config_schema()
     ]
@@ -135,6 +137,19 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         pgvector_configuration=tool.get('settings', {}).get('pgvector_configuration'),
                         conversation_id=conversation_id,
                     ).get_tools()
+                elif tool['name'] == 'data_analysis':
+                    # Data Analysis internal tool - uses conversation attachment bucket
+                    settings = tool.get('settings', {})
+                    bucket_name = settings.get('bucket_name')
+                    if bucket_name:
+                        tools += DataAnalysisToolkit.get_toolkit(
+                            alita_client=alita_client,
+                            llm=llm,
+                            bucket_name=bucket_name,
+                        ).get_tools()
+                    else:
+                        logger.warning("Data Analysis internal tool requested "
+                                       "but no bucket_name provided in settings")
             elif tool['type'] == 'artifact':
                 tool_handled = True
                 toolkit_tools = ArtifactToolkit.get_toolkit(
