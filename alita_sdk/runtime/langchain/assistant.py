@@ -13,7 +13,7 @@ from langchain_core.messages import (
     BaseMessage, SystemMessage, HumanMessage
 )
 from langchain_core.prompts import MessagesPlaceholder
-from .constants import REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON, DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON
+from .constants import REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON, DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from langchain_core.tools import BaseTool, ToolException
@@ -89,8 +89,24 @@ class Assistant:
         # Handle internal tools
         meta = data.get('meta', {})
         if meta.get("internal_tools"):
+            # Find bucket from artifact toolkit marked with is_attachment flag
+            bucket_name = None
+            for tool in version_tools:
+                if tool.get('type') == 'artifact' and tool.get('is_attachment'):
+                    bucket_name = tool.get('settings', {}).get('bucket')
+                    break
+            # Fallback: use first artifact toolkit with a bucket
+            if not bucket_name:
+                for tool in version_tools:
+                    if tool.get('type') == 'artifact' and tool.get('settings', {}).get('bucket'):
+                        bucket_name = tool['settings']['bucket']
+                        break
+
             for internal_tool_name in meta.get("internal_tools"):
-                version_tools.append({"type": "internal_tool", "name": internal_tool_name})
+                tool_config = {"type": "internal_tool", "name": internal_tool_name, "settings": {}}
+                if bucket_name:
+                    tool_config["settings"]["bucket_name"] = bucket_name
+                version_tools.append(tool_config)
 
         self.tools = get_tools(
             version_tools,
@@ -289,11 +305,13 @@ class Assistant:
         
         user_addon = USER_ADDON.format(prompt=str(prompt_instructions)) if prompt_instructions else ""
         plan_addon = PLAN_ADDON if 'update_plan' in tool_names else ""
+        data_analysis_addon = DATA_ANALYSIS_ADDON if 'pandas_analyze_data' in tool_names else ""
         pyodite_addon = PYODITE_ADDON if 'pyodide_sandbox' in tool_names else ""
         escaped_prompt = DEFAULT_ASSISTANT.format(
             users_instructions=user_addon,
             planning_instructions=plan_addon,
-            pyodite_addon=pyodite_addon
+            pyodite_addon=pyodite_addon,
+            data_analysis_addon=data_analysis_addon
         )
             
         

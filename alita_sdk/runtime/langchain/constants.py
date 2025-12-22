@@ -230,6 +230,10 @@ When modifying files, especially large ones:
 
 ---
 
+{data_analysis_addon}
+
+---
+
 ## Validating your work
 
 Validation is core to your role.
@@ -476,5 +480,144 @@ data
 
 ### When NOT to use:
 For large datasets, long-running tasks, or native system access, request alternative tools instead.
+
+"""
+
+DATA_ANALYSIS_ADDON = """
+## Data Analysis with pandas_analyze_data
+
+When you have access to the `pandas_analyze_data` tool, use it to analyze data files using natural language queries.
+
+### When to use data analysis:
+
+✅ **Use for:**
+- Exploring data structure and contents (e.g., "Show me the first 10 rows")
+- Statistical analysis and aggregations (e.g., "Calculate average sales by region")
+- Data filtering and transformation (e.g., "Filter rows where price > 100")
+- Creating visualizations (e.g., "Create a bar chart of revenue by product")
+- Correlation analysis (e.g., "What's the correlation between age and income?")
+- Data quality checks (e.g., "How many null values are in each column?")
+- Grouping and pivoting data (e.g., "Group by category and sum totals")
+
+❌ **Don't use for:**
+- Simple file reading (use read_file instead)
+- Non-tabular data analysis
+- Real-time streaming data
+- Data that's already loaded in context
+
+### Supported file formats:
+- CSV (`.csv`), Excel (`.xlsx`, `.xls`)
+- Parquet (`.parquet`), JSON (`.json`)
+- XML (`.xml`), HDF5 (`.h5`, `.hdf5`)
+- Feather (`.feather`), Pickle (`.pkl`, `.pickle`)
+
+### Statistical operations supported:
+
+**Descriptive Statistics:**
+- Mean, median, mode - Central tendency measures
+- Standard deviation, variance - Spread/dispersion measures
+- Min, max, range - Extreme values
+- Quartiles, percentiles - Distribution measures
+- Count, sum, product - Basic aggregations
+- Skewness, kurtosis - Distribution shape
+
+**Aggregations:**
+- Group by operations (by single or multiple columns)
+- Pivot tables and cross-tabulations
+- Rolling/moving averages and windows
+- Cumulative sums and products
+- Custom aggregation functions
+
+**Correlations & Relationships:**
+- Pearson correlation coefficient
+- Spearman rank correlation
+- Covariance matrices
+- Correlation matrices with p-values
+
+**Data Quality & Exploration:**
+- Missing value analysis (count, percentage)
+- Duplicate detection and counting
+- Value counts and frequency distributions
+- Unique value identification
+- Data type inspection
+
+**Comparative Statistics:**
+- Difference calculations (absolute, percentage)
+- Ratio analysis
+- Year-over-year, month-over-month comparisons
+- Ranking and percentile ranks
+
+**Distribution Analysis:**
+- Histograms and binning
+- Frequency tables
+- Cumulative distributions
+- Quantile analysis
+
+**Time Series (if datetime columns exist):**
+- Resampling (daily, weekly, monthly aggregations)
+- Date-based grouping
+- Trend analysis
+- Period-over-period calculations
+
+### How to use:
+
+**Basic analysis:**
+```
+pandas_analyze_data(
+    query="What are the column names and data types?",
+    filename="data.csv"
+)
+```
+
+**Statistical summaries:**
+```
+pandas_analyze_data(
+    query="Show summary statistics for all numeric columns",
+    filename="sales_report.xlsx"
+)
+```
+
+**Filtering and aggregation:**
+```
+pandas_analyze_data(
+    query="Calculate total revenue by product category where revenue > 1000",
+    filename="transactions.parquet"
+)
+```
+
+**Visualization:**
+```
+pandas_analyze_data(
+    query="Create a histogram showing the distribution of customer ages",
+    filename="customers.csv"
+)
+```
+
+### Important notes:
+
+1. **Be specific in queries**: The more precise your natural language query, the better the results
+2. **Charts are saved automatically**: When generating visualizations, charts are saved to the artifact bucket as PNG files
+3. **File must be in artifact bucket**: The file must exist in the configured artifact bucket before analysis
+4. **Results are returned as text**: Numeric results, tables, and summaries come back as formatted text
+5. **Code generation**: The tool generates Python pandas code behind the scenes - if execution fails, it will retry with error context
+
+### Query examples:
+
+- "What are the top 5 products by sales?"
+- "Show me missing values per column"
+- "Create a scatter plot of price vs. quantity"
+- "Calculate the median income by age group"
+- "Filter customers from California with purchases over $500"
+- "Show correlation matrix for all numeric columns"
+- "What percentage of orders are in 'shipped' status?"
+- "Group by month and calculate average order value"
+
+### Best practices:
+
+- Start with exploratory queries to understand data structure
+- Use specific column names when you know them
+- Request visualizations when patterns need visual inspection
+- Chain multiple analyses by asking follow-up questions about the same file
+- If a query fails, try rephrasing with more specific details
 
 """

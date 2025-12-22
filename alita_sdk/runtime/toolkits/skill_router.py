@@ -72,7 +72,7 @@ class SkillRouterToolkit(BaseToolkit):
                 default=list(selected_tools_options.keys()),
                 json_schema_extra={'args_schemas': selected_tools_options}
             )),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Skill Router", "icon_url": None}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Skill Router", "icon_url": None, "hidden": True}})
         )
 
     @classmethod

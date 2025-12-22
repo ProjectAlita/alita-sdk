@@ -158,11 +158,34 @@ class PandasWrapper(BaseToolApiWrapper):
                         f"Retrying Code Generation ({attempts}/{max_retries})..."
                     )
     
-    def analyse_data(self, query: str, filename: str) -> str:
-        """Analyze data from a file using natural language query. Supports CSV, Excel, Parquet, JSON, and other common data formats."""
+    def pandas_analyze_data(self, query: str, filename: str) -> str:
+        """Analyze data from a file using natural language query.
+        
+        This tool allows you to perform data analysis operations on files using natural language.
+        It automatically generates and executes Python pandas code based on your query.
+        
+        Supported file formats: CSV, Excel (.xlsx, .xls), Parquet, JSON, XML, HDF5, Feather, Pickle
+        
+        Parameters:
+            query: Natural language description of the analysis to perform. Examples:
+                - "Calculate the average sales by region"
+                - "Show me a bar chart of products by revenue"
+                - "Filter rows where price > 100 and status is 'active'"
+                - "What is the correlation between age and income?"
+            filename: Name of the file in the artifact bucket (e.g., 'sales_data.csv', 'report.xlsx')
+        
+        Returns:
+            Analysis results as text, or confirmation message if a chart was generated and saved.
+            Charts are automatically saved to the artifact bucket as PNG files.
+        
+        Examples:
+            - pandas_analyze_data(query="Show summary statistics", filename="data.csv")
+            - pandas_analyze_data(query="Create a histogram of ages", filename="customers.xlsx")
+            - pandas_analyze_data(query="What's the total revenue by month?", filename="sales.parquet")
+        """
         df = self._get_dataframe(filename)
         code = self.generate_code_with_retries(df, query)
-        self._log_tool_event(tool_name="analyse_data",
+        self._log_tool_event(tool_name="pandas_analyze_data",
                              message=f"Executing generated code... \n\n```python\n{code}\n```")
         try:
             result = self.execute_code(df, code)
@@ -249,9 +272,9 @@ class PandasWrapper(BaseToolApiWrapper):
     def get_available_tools(self):
         return [
             {
-                "name": "analyse_data",
-                "ref": self.analyse_data,
-                "description": self.analyse_data.__doc__,
+                "name": "pandas_analyze_data",
+                "ref": self.pandas_analyze_data,
+                "description": self.pandas_analyze_data.__doc__,
                 "args_schema": create_model(
                     "AnalyseDataModel",
                     query=(str, Field(description="Natural language query describing what analysis to perform on the data")),
