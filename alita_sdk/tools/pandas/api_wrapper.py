@@ -193,11 +193,6 @@ class PandasWrapper(BaseToolApiWrapper):
                 result['result'] = f"Chart saved to {chart_filename}"
         return result.get("result", None)
 
-    # Backward compatibility alias for deprecated Pandas toolkit
-    def process_query(self, query: str, filename: str) -> str:
-        """Deprecated: Use analyse_data instead. Analyze and process using query on dataset."""
-        return self.analyse_data(query, filename)
-
     def save_dataframe(self, source_df: str, target_file: str) -> str:
         """Save the dataframe to a file in the artifact repo with the specified format.
         
