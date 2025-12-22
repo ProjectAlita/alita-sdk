@@ -29,9 +29,14 @@ class PandasToolkit(BaseToolkit):
             name,
             bucket_name=(str, Field(default=None, title="Bucket name", description="Bucket where the content file is stored")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__=ConfigDict(json_schema_extra={'metadata': {"label": "Pandas", "icon_url": "pandas-icon.svg",
-                                                                  "categories": ["analysis"],
-                                                                    "extra_categories": ["data science", "data manipulation", "dataframes"]}})
+            __config__=ConfigDict(json_schema_extra={'metadata': {
+                "label": "Pandas (Deprecated)",
+                "icon_url": "pandas-icon.svg",
+                "categories": ["analysis"],
+                "deprecated": True,
+                "deprecation_message": "This toolkit is deprecated. Use the 'Data Analysis' internal tool instead. Enable it via the 'Internal Tools' menu in chat.",
+                "extra_categories": ["data science", "data manipulation", "dataframes"]
+            }})
         )
 
     @classmethod
