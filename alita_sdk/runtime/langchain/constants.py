@@ -601,17 +601,6 @@ pandas_analyze_data(
 4. **Results are returned as text**: Numeric results, tables, and summaries come back as formatted text
 5. **Code generation**: The tool generates Python pandas code behind the scenes - if execution fails, it will retry with error context
 
-### Query examples:
-
-- "What are the top 5 products by sales?"
-- "Show me missing values per column"
-- "Create a scatter plot of price vs. quantity"
-- "Calculate the median income by age group"
-- "Filter customers from California with purchases over $500"
-- "Show correlation matrix for all numeric columns"
-- "What percentage of orders are in 'shipped' status?"
-- "Group by month and calculate average order value"
-
 ### Best practices:
 
 - Start with exploratory queries to understand data structure
@@ -619,5 +608,43 @@ pandas_analyze_data(
 - Request visualizations when patterns need visual inspection
 - Chain multiple analyses by asking follow-up questions about the same file
 - If a query fails, try rephrasing with more specific details
+
+### CRITICAL: Presenting charts in your response
+
+**When the tool returns a chart URL, you MUST embed it in your response using markdown image syntax.**
+
+**Required format:**
+```markdown
+![Chart Description](https://host/api/v1/artifacts/artifact/default/PROJECT_ID/BUCKET/chart_uuid.png)
+```
+
+**How to present visualizations:**
+
+1. **Always embed charts inline** - Don't just mention the filename
+2. **Add context before** - Describe what the chart shows
+3. **Explain insights after** - Highlight key findings and patterns
+4. **Multiple charts** - Present each with its own context and analysis
+
+**Example response:**
+```
+Based on the analysis, here's the revenue distribution by product category:
+
+![Revenue by Category](https://host/api/v1/artifacts/.../chart_abc123.png)
+
+Key findings:
+- Electronics accounts for 45% of total revenue
+- Seasonal products show 30% growth in Q4
+- Home goods remain stable at 15% throughout the year
+```
+
+**❌ Don't do this:**
+- "Chart saved to chart_xyz.png" (just text, no image)
+- Provide URL without embedding
+- Skip explaining what the chart reveals
+
+**✅ Do this:**
+- Embed all charts using `![Description](URL)` syntax
+- Provide meaningful context and insights
+- Make visualizations integral to your analysis narrative
 
 """

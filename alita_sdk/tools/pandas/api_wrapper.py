@@ -197,19 +197,23 @@ class PandasWrapper(BaseToolApiWrapper):
             # Not saving dataframe to artifact repo for now
             # self._save_dataframe(df, filename)
         if result.get('chart'):
+            chart_results = []
             if isinstance(result['chart'], list):
                 for ind, chart in enumerate(result['chart']):
                     chart_filename = f"chart_{uuid4()}.png"
                     chart_data = base64.b64decode(chart)
                     self.alita.create_artifact(self.bucket_name, chart_filename, chart_data)
-                    result['result'] = f"Chart #{ind} saved to {chart_filename}"
+                    chart_url = f"{self.alita.base_url}/api/v1/artifacts/artifact/default/{self.alita.project_id}/{self.bucket_name}/{chart_filename}"
+                    chart_results.append(f"Chart #{ind+1} saved and available at: {chart_url}")
+                result['result'] = "\n".join(chart_results)
             else:
                 # Handle single chart case (not in a list)
                 chart = result['chart']
                 chart_filename = f"chart_{uuid4()}.png"
                 chart_data = base64.b64decode(chart)
                 self.alita.create_artifact(self.bucket_name, chart_filename, chart_data)
-                result['result'] = f"Chart saved to {chart_filename}"
+                chart_url = f"{self.alita.base_url}/api/v1/artifacts/artifact/default/{self.alita.project_id}/{self.bucket_name}/{chart_filename}"
+                result['result'] = f"Chart saved and available at: {chart_url}\n\nYou can embed this image in your response using markdown: ![Chart]({chart_url})"
         return result.get("result", None)
 
     def save_dataframe(self, source_df: str, target_file: str) -> str:

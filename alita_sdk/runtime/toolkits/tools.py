@@ -146,6 +146,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                             alita_client=alita_client,
                             llm=llm,
                             bucket_name=bucket_name,
+                            toolkit_name="Data Analyst",
                         ).get_tools()
                     else:
                         logger.warning("Data Analysis internal tool requested "
