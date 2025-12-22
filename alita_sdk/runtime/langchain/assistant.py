@@ -13,7 +13,7 @@ from langchain_core.messages import (
     BaseMessage, SystemMessage, HumanMessage
 )
 from langchain_core.prompts import MessagesPlaceholder
-from .constants import REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON, DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON
+from .constants import REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON, DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON, SEARCH_INDEX_ADDON
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from langchain_core.tools import BaseTool, ToolException
@@ -307,11 +307,13 @@ class Assistant:
         plan_addon = PLAN_ADDON if 'update_plan' in tool_names else ""
         data_analysis_addon = DATA_ANALYSIS_ADDON if 'pandas_analyze_data' in tool_names else ""
         pyodite_addon = PYODITE_ADDON if 'pyodide_sandbox' in tool_names else ""
+        search_index_addon = SEARCH_INDEX_ADDON if 'stepback_summary_index' in tool_names else ""
         escaped_prompt = DEFAULT_ASSISTANT.format(
             users_instructions=user_addon,
             planning_instructions=plan_addon,
             pyodite_addon=pyodite_addon,
-            data_analysis_addon=data_analysis_addon
+            data_analysis_addon=data_analysis_addon,
+            search_index_addon=search_index_addon
         )
             
         

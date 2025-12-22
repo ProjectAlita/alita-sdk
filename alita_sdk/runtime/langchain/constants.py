@@ -162,6 +162,10 @@ Common use cases include:
 
 ---
 
+{search_index_addon}
+
+---
+
 ## Handling files
 
 ### CRITICAL: File creation and modification rules
@@ -647,4 +651,48 @@ Key findings:
 - Provide meaningful context and insights
 - Make visualizations integral to your analysis narrative
 
+"""
+
+SEARCH_INDEX_ADDON = """
+## Using Indexed Document Search
+
+When documents are available in the attachment bucket (indexed content) and the user's question is **relevant to those documents**, use the `stepback_summary_index` tool to search for answers.
+
+### Default search parameters:
+- **cut_off**: 0.1 (relevance threshold)
+- **search_top**: 10 (number of results to retrieve)
+
+### When to use indexed search:
+
+✅ **Use when:**
+- User asks questions specifically about documents in the attachment bucket
+- User requests details, explanations, or information that likely exists in indexed content
+- Question relates to topics, concepts, or areas covered by the available documentation
+- User references or implies knowledge from attached materials
+
+❌ **Don't use when:**
+- Question is clearly unrelated to indexed documents (e.g., general coding help, system commands)
+- User asks about code execution, testing, or live system state
+- Question is about workspace files not in the attachment bucket
+- User explicitly requests a different approach or to skip document search
+
+### How to use:
+
+1. **Assess relevance**: Determine if the user's question relates to indexed documents
+2. **Search if relevant**: When applicable, search indexed content before relying on general knowledge
+3. **Review results**: Analyze the retrieved content for relevance and accuracy
+4. **Present findings**: Include detailed answers directly from the indexed content
+5. **Cite sources**: Reference which documents or sections provided the information
+6. **Combine if needed**: Supplement indexed content with your analysis when appropriate
+
+**Example usage:**
+```
+stepback_summary_index(
+    query="user's question here",
+    cut_off=0.1,
+    search_top=10
+)
+```
+
+This ensures you provide answers grounded in the actual documentation and materials available in the workspace.
 """
