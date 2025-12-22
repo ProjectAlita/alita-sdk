@@ -168,11 +168,7 @@ class PandasWrapper(BaseToolApiWrapper):
             result = self.execute_code(df, code)
         except Exception as e:
             logger.error(f"Code execution failed: {format_exc()}")
-            self._log_tool_event(tool_name="analyse_data",
-                                 message=f"Executing generated code... \n\n```python\n{code}\n```")
             raise
-        self._log_tool_event(tool_name="analyse_data",
-                             message=f"Executing generated code... \n\n```python\n{code}\n```")
         if result.get("df") is not None:
             df = result.pop("df")
             # Not saving dataframe to artifact repo for now
