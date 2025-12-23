@@ -13,7 +13,10 @@ from langchain_core.messages import (
     BaseMessage, SystemMessage, HumanMessage
 )
 from langchain_core.prompts import MessagesPlaceholder
-from .constants import REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON, DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON, SEARCH_INDEX_ADDON
+from .constants import (REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON,
+                        QA_ASSISTANT, NERDY_ASSISTANT, QUIRKY_ASSISTANT, CYNICAL_ASSISTANT,
+                        DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
+                        SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS)
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from langchain_core.tools import BaseTool, ToolException
@@ -34,11 +37,13 @@ class Assistant:
                  debug_mode: Optional[bool] = False,
                  mcp_tokens: Optional[dict] = None,
                  conversation_id: Optional[str] = None,
-                 ignored_mcp_servers: Optional[list] = None):
+                 ignored_mcp_servers: Optional[list] = None,
+                 persona: Optional[str] = "generic"):
 
         self.app_type = app_type
         self.memory = memory
         self.store = store
+        self.persona = persona
         self.max_iterations = data.get('meta', {}).get('step_limit', 25)
 
         logger.debug("Data for agent creation: %s", data)
@@ -308,15 +313,25 @@ class Assistant:
         data_analysis_addon = DATA_ANALYSIS_ADDON if 'pandas_analyze_data' in tool_names else ""
         pyodite_addon = PYODITE_ADDON if 'pyodide_sandbox' in tool_names else ""
         search_index_addon = SEARCH_INDEX_ADDON if 'stepback_summary_index' in tool_names else ""
-        escaped_prompt = DEFAULT_ASSISTANT.format(
+
+        # Select assistant template based on persona
+        persona_templates = {
+            "qa": QA_ASSISTANT,
+            "nerdy": NERDY_ASSISTANT,
+            "quirky": QUIRKY_ASSISTANT,
+            "cynical": CYNICAL_ASSISTANT,
+        }
+        base_assistant = persona_templates.get(self.persona, DEFAULT_ASSISTANT)
+
+        escaped_prompt = base_assistant.format(
             users_instructions=user_addon,
             planning_instructions=plan_addon,
             pyodite_addon=pyodite_addon,
             data_analysis_addon=data_analysis_addon,
-            search_index_addon=search_index_addon
+            search_index_addon=search_index_addon,
+            file_handling_instructions=FILE_HANDLING_INSTRUCTIONS
         )
-            
-        
+
         # Properly setup the prompt for YAML
         import yaml
         

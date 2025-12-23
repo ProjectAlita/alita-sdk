@@ -717,7 +717,7 @@ class AlitaClient:
                       memory=None, runtime='langchain', variables: Optional[list] = None,
                       store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False,
                       mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None,
-                      ignored_mcp_servers: Optional[list] = None):
+                      ignored_mcp_servers: Optional[list] = None, persona: Optional[str] = "generic"):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -734,6 +734,7 @@ class AlitaClient:
             store: Optional store for memory
             debug_mode: Enable debug mode for cases when assistant can be initialized without tools
             ignored_mcp_servers: Optional list of MCP server URLs to ignore (user chose to continue without auth)
+            persona: Default persona for chat: 'generic' or 'qa' (default: 'generic')
 
         Returns:
             Runnable agent ready for execution
@@ -768,7 +769,8 @@ class AlitaClient:
             debug_mode=debug_mode,
             mcp_tokens=mcp_tokens,
             conversation_id=conversation_id,
-            ignored_mcp_servers=ignored_mcp_servers
+            ignored_mcp_servers=ignored_mcp_servers,
+            persona=persona
         ).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,
