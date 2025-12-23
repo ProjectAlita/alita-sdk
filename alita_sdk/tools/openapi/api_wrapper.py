@@ -2,18 +2,82 @@ import json
 import logging
 import re
 from urllib.parse import urlencode
-from typing import Any, Callable, Optional
+from typing import Annotated, Any, Callable, Optional
 import copy
 
 import yaml
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, Field, PrivateAttr, create_model
+from pydantic import BaseModel, BeforeValidator, Field, PrivateAttr, create_model
 from requests_openapi import Client, Operation
 
 from ..elitea_base import BaseToolApiWrapper
 from ..utils import clean_string
 
+
+def _coerce_empty_string_to_none(v: Any) -> Any:
+	"""Convert empty strings to None for optional fields.
+	
+	This handles UI/pipeline inputs where empty fields are sent as '' instead of null.
+	"""
+	if v == '':
+		return None
+	return v
+
+
+def _coerce_headers_value(v: Any) -> Optional[dict]:
+	"""Convert headers value to dict, handling empty strings and JSON strings.
+	
+	This handles UI/pipeline inputs where:
+	- Empty fields are sent as '' instead of null
+	- Dict values may be sent as JSON strings like '{}'
+	"""
+	if v is None or v == '':
+		return None
+	if isinstance(v, dict):
+		return v
+	if isinstance(v, str):
+		try:
+			parsed = json.loads(v)
+			if isinstance(parsed, dict):
+				return parsed
+		except json.JSONDecodeError:
+			# Intentionally ignore JSON decode errors - fall back to returning
+			# the original value which will be validated later in _execute
+			pass
+	# Return as-is, will be validated later in _execute
+	return v
+
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_param_name(name: str) -> str:
+	"""Sanitize OpenAPI parameter names for use as Python/Pydantic identifiers.
+
+	Pydantic's create_model requires valid Python identifiers as field names.
+	This function handles:
+	- Dots in names (e.g., 'searchCriteria.minTime' -> 'searchCriteria_minTime')
+	- Dollar sign prefix (e.g., '$top' -> 'dollar_top')
+	- Other special characters
+
+	Returns the sanitized name suitable for use as a Pydantic field name.
+	"""
+	if not name:
+		return name
+
+	sanitized = name
+	# Replace dots with underscores
+	sanitized = sanitized.replace('.', '_')
+	# Handle $ prefix (common in OData APIs like Azure DevOps)
+	if sanitized.startswith('$'):
+		sanitized = 'dollar_' + sanitized[1:]
+	# Replace any remaining invalid characters with underscores
+	# Python identifiers: [a-zA-Z_][a-zA-Z0-9_]*
+	sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', sanitized)
+	# Ensure it doesn't start with a digit
+	if sanitized and sanitized[0].isdigit():
+		sanitized = '_' + sanitized
+
+	return sanitized
 
 
 def _raise_openapi_tool_exception(
@@ -417,6 +481,8 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 	_op_meta: dict[str, dict] = PrivateAttr(default_factory=dict)
 	_tool_defs: list[dict[str, Any]] = PrivateAttr(default_factory=list)
 	_tool_ref_by_name: dict[str, Callable[..., str]] = PrivateAttr(default_factory=dict)
+	# Mapping: operation_id -> {sanitized_name: original_name}
+	_param_name_mapping: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
 
 	def model_post_init(self, __context: Any) -> None:
 		# Build meta from raw spec (method/path/examples)
@@ -501,6 +567,8 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 
 	def _create_args_schema(self, operation_id: str, op: Operation, op_raw: dict) -> type[BaseModel]:
 		fields: dict[str, tuple[Any, Any]] = {}
+		# Track sanitized -> original name mapping for this operation
+		name_mapping: dict[str, str] = {}
 
 		# Parameters
 		raw_params = op_raw.get("parameters") or []
@@ -512,6 +580,12 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 
 		for param in op.spec.parameters or []:
 			param_name = str(param.name)
+			# Sanitize parameter name for Pydantic field (handles dots, $ prefix, etc.)
+			sanitized_name = _sanitize_param_name(param_name)
+			if sanitized_name != param_name:
+				name_mapping[sanitized_name] = param_name
+				logger.debug(f"Sanitized parameter name '{param_name}' -> '{sanitized_name}' for operation '{operation_id}'")
+
 			param_in_obj = getattr(param, "param_in", None)
 			# requests_openapi uses an enum-like value for `param_in`.
 			# For prompt quality and stable matching against raw spec, normalize to e.g. "query".
@@ -530,7 +604,10 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 				example = schema.get("example")
 
 			default = getattr(param.param_schema, "default", None)
+			# Include original parameter name in description if sanitized
 			desc = (param.description or "").strip()
+			if sanitized_name != param_name:
+				desc = f"(API parameter: '{param_name}') {desc}".strip()
 			desc = f"({param_in}) {desc}".strip()
 			type_hint = _schema_type_hint(schema)
 			if type_hint:
@@ -542,15 +619,20 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 			if default is not None:
 				desc = f"{desc}\nDefault: {default}".strip()
 
-			# Required fields have no default.
+			# Required fields have no default. Use sanitized name for field.
 			if required:
-				fields[param_name] = (py_type, Field(description=desc))
+				fields[sanitized_name] = (py_type, Field(description=desc))
 			else:
-				fields[param_name] = (Optional[py_type], Field(default=default, description=desc))
+				fields[sanitized_name] = (Optional[py_type], Field(default=default, description=desc))
+
+		# Store the mapping for this operation
+		if name_mapping:
+			self._param_name_mapping[operation_id] = name_mapping
 
 		# Additional headers not modeled in spec
+		# Use Annotated with BeforeValidator to coerce empty strings and JSON strings to dict
 		fields["headers"] = (
-			Optional[dict],
+			Annotated[Optional[dict], BeforeValidator(_coerce_headers_value)],
 			Field(
 				default_factory=dict,
 				description=(
@@ -575,13 +657,18 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 			if body_required:
 				fields["body_json"] = (str, Field(description=body_desc))
 			else:
-				fields["body_json"] = (Optional[str], Field(default=None, description=body_desc))
+				# Use BeforeValidator to coerce empty strings to None for optional body_json
+				fields["body_json"] = (
+					Annotated[Optional[str], BeforeValidator(_coerce_empty_string_to_none)],
+					Field(default=None, description=body_desc),
+				)
 
 		model_name = f"OpenApi_{clean_string(operation_id, max_length=40) or 'Operation'}_Params"
 		return create_model(
 			model_name,
+			# Use BeforeValidator to coerce empty strings to None for optional regexp
 			regexp=(
-				Optional[str],
+				Annotated[Optional[str], BeforeValidator(_coerce_empty_string_to_none)],
 				Field(
 					description="Regular expression to remove from the final output (optional)",
 					default=None,
@@ -678,23 +765,34 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 		return url
 
 	def _execute(self, operation_id: str, *args: Any, **kwargs: Any) -> str:
+		# Extract special fields (already coerced by BeforeValidator at validation time)
 		regexp = kwargs.pop("regexp", None)
 		extra_headers = kwargs.pop("headers", None)
 
+		# Restore original parameter names from sanitized names
+		name_mapping = self._param_name_mapping.get(operation_id, {})
+		if name_mapping:
+			restored_kwargs = {}
+			for key, value in kwargs.items():
+				original_name = name_mapping.get(key, key)
+				restored_kwargs[original_name] = value
+			kwargs = restored_kwargs
+
+		# Validate headers type (should be dict or None after BeforeValidator coercion)
 		if extra_headers is not None and not isinstance(extra_headers, dict):
 			_raise_openapi_tool_exception(
 				code="invalid_headers",
-				message="'headers' must be a dict",
+				message="'headers' must be a dict or valid JSON object string",
 				operation_id=str(operation_id),
-				details={"provided_type": str(type(extra_headers))},
+				details={"provided_type": str(type(extra_headers)), "provided_value": str(extra_headers)[:100]},
 			)
 
-		# Preferred: body_json (string) -> parsed object -> Operation json=
-		if "body_json" in kwargs and kwargs.get("body_json") is not None:
-			raw_json = kwargs.pop("body_json")
-			if isinstance(raw_json, str):
+		# Handle body_json (already coerced to None for empty strings by BeforeValidator)
+		body_json = kwargs.pop("body_json", None)
+		if body_json is not None:
+			if isinstance(body_json, str):
 				try:
-					kwargs["json"] = json.loads(raw_json)
+					kwargs["json"] = json.loads(body_json)
 				except Exception as e:
 					_raise_openapi_tool_exception(
 						code="invalid_json_body",
@@ -703,7 +801,7 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 						details={"hint": "Ensure body_json is valid JSON (double quotes, no trailing commas)."},
 					)
 			else:
-				kwargs["json"] = raw_json
+				kwargs["json"] = body_json
 
 		# Backward compatible: accept `json` as a string too.
 		if "json" in kwargs and isinstance(kwargs.get("json"), str):

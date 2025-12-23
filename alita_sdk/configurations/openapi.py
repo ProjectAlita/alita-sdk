@@ -100,12 +100,3 @@ class OpenApiConfiguration(BaseModel):
                 raise ValueError("custom_header_name is required when auth_type='custom'")
 
         return values
-
-    @staticmethod
-    def check_connection(settings: dict) -> str | None:
-        """Best-effort validation for OpenAPI credentials.
-
-        This model is intended to store reusable credentials only.
-        Spec/base_url validation happens at toolkit configuration level.
-        """
-        return None
