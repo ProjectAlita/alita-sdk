@@ -209,11 +209,12 @@ class ArgsSchema(Enum):
                 examples=["8:6,1:7"],
             ),
         ),
+        apply_images_prompt=(Optional[bool], Field(description="Whether we need enable advanced single image processing instructions", default=False)),
         images_prompt=(
             Optional[Dict[str, str]],
             Field(
                 description=(
-                    "Optional instruction object for how to treat image-based nodes in the summary. "
+                    "Instruction object for how to treat image-based nodes in the summary. "
                     "For example, describe screenshots or diagrams differently from generic images."
                 ),
                 default={
@@ -237,11 +238,12 @@ class ArgsSchema(Enum):
                 ],
             ),
         ),
+        apply_summary_prompt=(Optional[bool], Field(description="Whether we need enable summarization for images", default=True)),
         summary_prompt=(
             Optional[Dict[str, str]],
             Field(
                 description=(
-                    "Optional instruction object for the LLM on how to summarize loaded Figma pages and nodes. "
+                    "Instruction object for the LLM on how to summarize loaded Figma pages and nodes. "
                     "Should contain a 'text' field with the main instruction."
                 ),
                 default={
@@ -523,9 +525,6 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                         }
                     )
 
-    def _remove_metadata_keys(self):
-        return super()._remove_metadata_keys() + ['figma_pages_include', 'figma_pages_exclude', 'figma_nodes_include', 'figma_nodes_exclude']
-
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
@@ -793,16 +792,29 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             url: Optional[str] = None,
             file_key: Optional[str] = None,
             node_ids: Optional[str] = None,
-            summary_prompt: Optional[Dict[str, str]] = None,
+            apply_images_prompt: Optional[bool] = False,
             images_prompt: Optional[Dict[str, str]] = None,
+            apply_summary_prompt: Optional[bool] = True,
+            summary_prompt: Optional[Dict[str, str]] = None,
             **kwargs,
     ):
-        """Summarizes a Figma file by loading pages and nodes via URL or file key, like index_data.
+        """Summarizes a Figma file by loading pages and nodes via URL or file key.
 
-        If `summary_prompt` is provided, an LLM-based summary over the loaded documents is generated
-        instead of returning the raw list of documents. `images_prompt`, when provided, can be used
-        to adjust how image nodes should be treated in the summary prompt (currently passed only as
-        additional context text)."""
+        Args mirror ArgsSchema.FileSummary:
+          - url: full Figma URL with file key and optional node-id; if set, takes precedence over file_key/node_ids.
+          - file_key: explicit file key, used only when url is not provided.
+          - node_ids: optional comma-separated top-level node ids (pages), used only when url has no node-id.
+          - apply_images_prompt: if True, pass images_prompt to the image-processing step; if False, images_prompt is ignored.
+          - images_prompt: instruction object for how to treat image-based nodes (passed as prompt to image extraction).
+          - apply_summary_prompt: if True and summary_prompt.prompt is present and an LLM is configured,
+            return a single summarized string; otherwise return the raw list of node documents.
+          - summary_prompt: instruction object for LLM summarization (must contain a 'prompt' key).
+
+        Returns:
+          - If apply_summary_prompt is True and summary_prompt.prompt is provided and LLM is available:
+            a single string summary.
+          - Otherwise: a list of dicts with 'page_content' and 'metadata' for each processed node.
+        """
         # Resolve file key and optional node ids similarly to index_data URL handling
         effective_url = url
         effective_file_keys_include: Optional[List[str]] = None
@@ -829,8 +841,10 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_ids_include=effective_node_ids_include,
         )
 
-        # Only return processed dependency documents (skip base docs) for output
-        images_prompt_str = images_prompt["prompt"] if images_prompt and "prompt" in images_prompt else ""
+        # Decide whether to apply images_prompt
+        use_images_prompt = bool(apply_images_prompt and images_prompt and images_prompt.get("prompt"))
+        images_prompt_str = images_prompt["prompt"] if use_images_prompt else ""
+
         results: List[Dict] = []
         for base_doc in base_docs:
             for dep in self._process_document(base_doc, images_prompt_str):
@@ -839,17 +853,15 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     "metadata": dep.metadata,
                 })
 
-        # If no summary_prompt object or no meaningful text, return the raw list of documents
-        if not summary_prompt or not isinstance(summary_prompt, dict) or not summary_prompt.get("prompt"):
+        # Decide whether to apply summary_prompt
+        has_summary_prompt = bool(summary_prompt and isinstance(summary_prompt, dict) and summary_prompt.get("prompt"))
+        if not apply_summary_prompt or not has_summary_prompt:
+            # Return raw docs when summary is disabled or no prompt provided
             return results
 
-        # If summary_prompt is provided, generate an LLM-based summary over the loaded docs
+        # If summary_prompt is enabled, generate an LLM-based summary over the loaded docs
         try:
             # Build a structured, ordered view of images and texts to help the LLM infer flows.
-            # Each block is rendered in a simple, Markdown-friendly format:
-            # Image (<node_id>), <image_url>  /  Text (<node_id>)
-            # <description or text>
-            # --------------------
             blocks = []
             for item in results:
                 metadata = item.get("metadata", {}) or {}
