@@ -7,7 +7,7 @@ import copy
 
 import yaml
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, BeforeValidator, Field, PrivateAttr, create_model
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr, create_model
 from requests_openapi import Client, Operation
 
 from ..elitea_base import BaseToolApiWrapper
@@ -481,7 +481,9 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 	_op_meta: dict[str, dict] = PrivateAttr(default_factory=dict)
 	_tool_defs: list[dict[str, Any]] = PrivateAttr(default_factory=list)
 	_tool_ref_by_name: dict[str, Callable[..., str]] = PrivateAttr(default_factory=dict)
-	# Mapping: operation_id -> {sanitized_name: original_name}
+	# Mapping: operation_id -> {sanitized_field_name: original_param_name}
+	# Needed because LangChain passes kwargs using Pydantic field names (sanitized),
+	# but the API expects original parameter names
 	_param_name_mapping: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
 
 	def model_post_init(self, __context: Any) -> None:
@@ -582,9 +584,12 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 			param_name = str(param.name)
 			# Sanitize parameter name for Pydantic field (handles dots, $ prefix, etc.)
 			sanitized_name = _sanitize_param_name(param_name)
-			if sanitized_name != param_name:
+			# Track if we need alias (original name differs from sanitized)
+			needs_alias = sanitized_name != param_name
+			if needs_alias:
+				# Store mapping for restoring original names in _execute
 				name_mapping[sanitized_name] = param_name
-				logger.debug(f"Sanitized parameter name '{param_name}' -> '{sanitized_name}' for operation '{operation_id}'")
+				logger.debug(f"Using alias for parameter '{param_name}' (field name: '{sanitized_name}') for operation '{operation_id}'")
 
 			param_in_obj = getattr(param, "param_in", None)
 			# requests_openapi uses an enum-like value for `param_in`.
@@ -604,10 +609,8 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 				example = schema.get("example")
 
 			default = getattr(param.param_schema, "default", None)
-			# Include original parameter name in description if sanitized
+			# Build description
 			desc = (param.description or "").strip()
-			if sanitized_name != param_name:
-				desc = f"(API parameter: '{param_name}') {desc}".strip()
 			desc = f"({param_in}) {desc}".strip()
 			type_hint = _schema_type_hint(schema)
 			if type_hint:
@@ -619,15 +622,19 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 			if default is not None:
 				desc = f"{desc}\nDefault: {default}".strip()
 
+			# Build Field kwargs - use alias if name was sanitized so schema shows original name
+			field_kwargs = {"description": desc}
+			if needs_alias:
+				# Use alias so JSON schema shows original param name (e.g., "$top", "searchCriteria.status")
+				# and Pydantic accepts input using original name
+				field_kwargs["alias"] = param_name
+
 			# Required fields have no default. Use sanitized name for field.
 			if required:
-				fields[sanitized_name] = (py_type, Field(description=desc))
+				fields[sanitized_name] = (py_type, Field(**field_kwargs))
 			else:
-				fields[sanitized_name] = (Optional[py_type], Field(default=default, description=desc))
-
-		# Store the mapping for this operation
-		if name_mapping:
-			self._param_name_mapping[operation_id] = name_mapping
+				field_kwargs["default"] = default
+				fields[sanitized_name] = (Optional[py_type], Field(**field_kwargs))
 
 		# Additional headers not modeled in spec
 		# Use Annotated with BeforeValidator to coerce empty strings and JSON strings to dict
@@ -664,8 +671,19 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 				)
 
 		model_name = f"OpenApi_{clean_string(operation_id, max_length=40) or 'Operation'}_Params"
+		
+		# Store the mapping for this operation (needed to restore original names in _execute)
+		if name_mapping:
+			self._param_name_mapping[operation_id] = name_mapping
+		
+		# Create a base class with model_config to support populate_by_name
+		# This allows both alias (original param name) and field name (sanitized) to work
+		class _BaseParamsModel(BaseModel):
+			model_config = ConfigDict(populate_by_name=True)
+		
 		return create_model(
 			model_name,
+			__base__=_BaseParamsModel,
 			# Use BeforeValidator to coerce empty strings to None for optional regexp
 			regexp=(
 				Annotated[Optional[str], BeforeValidator(_coerce_empty_string_to_none)],
@@ -769,10 +787,12 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
 		regexp = kwargs.pop("regexp", None)
 		extra_headers = kwargs.pop("headers", None)
 
-		# Restore original parameter names from sanitized names
+		# Restore original parameter names from sanitized field names
+		# LangChain passes kwargs using Pydantic field names (sanitized like 'dollar_top'),
+		# but the API expects original parameter names (like '$top')
 		name_mapping = self._param_name_mapping.get(operation_id, {})
 		if name_mapping:
-			restored_kwargs = {}
+			restored_kwargs: dict[str, Any] = {}
 			for key, value in kwargs.items():
 				original_name = name_mapping.get(key, key)
 				restored_kwargs[original_name] = value
