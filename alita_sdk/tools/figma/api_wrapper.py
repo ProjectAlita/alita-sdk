@@ -21,6 +21,26 @@ GLOBAL_RETAIN = ['id', 'name', 'type', 'document', 'children']
 GLOBAL_REMOVE = []
 GLOBAL_DEPTH_START = 4
 GLOBAL_DEPTH_END = 6
+# Default prompts for image analysis and summarization reused across toolkit and wrapper
+DEFAULT_FIGMA_IMAGES_PROMPT = (
+    "You are an AI model for image analysis. "
+    "For each image, first identify its type (diagram, screenshot, photograph, "
+    "illustration/drawing, text-centric, or mixed), then describe all visible elements "
+    "and extract any readable text. For diagrams, capture titles, labels, legends, axes, "
+    "and all numerical values, and summarize key patterns or trends. For screenshots, "
+    "describe the interface or page, key UI elements, and any conversations or messages "
+    "with participants and timestamps if visible. For photos and illustrations, describe "
+    "the setting, main objects/people, their actions, style, colors, and composition. "
+    "Be precise and thorough; when something is unclear or illegible, state that explicitly "
+    "instead of guessing."
+)
+DEFAULT_FIGMA_SUMMARY_PROMPT = (
+    "You are summarizing a visual design document exported from Figma as a sequence of images and text. "
+    "Provide a clear, concise overview of the main purpose, key elements, and notable changes or variations in the screens. "
+    "Infer a likely user flow or sequence of steps across the screens, calling out entry points, decisions, and outcomes. "
+    "Explain how this design could impact planning, development, testing, and review activities in a typical software lifecycle. "
+    "Return the result as structured Markdown with headings and bullet lists so it can be reused in SDLC documentation."
+)
 EXTRA_PARAMS = (
     Optional[Dict[str, Union[str, int, List, None]]],
     Field(
@@ -209,59 +229,6 @@ class ArgsSchema(Enum):
                 examples=["8:6,1:7"],
             ),
         ),
-        apply_images_prompt=(Optional[bool], Field(description="Whether we need enable advanced single image processing instructions", default=False)),
-        images_prompt=(
-            Optional[Dict[str, str]],
-            Field(
-                description=(
-                    "Instruction object for how to treat image-based nodes in the summary. "
-                    "For example, describe screenshots or diagrams differently from generic images."
-                ),
-                default={
-                    "prompt": (
-                        "You are an AI model for image analysis. "
-                        "For each image, first identify its type "
-                        "(diagram, screenshot, photograph, illustration/drawing, text-centric, or mixed), "
-                        "then describe all visible elements and extract any readable text. "
-                        "For diagrams, capture titles, labels, legends, axes, and all numerical values, "
-                        "and summarize key patterns or trends. For screenshots, describe the interface or page, "
-                        "key UI elements, and any conversations or messages with participants and timestamps if visible. "
-                        "For photos and illustrations, describe the setting, main objects/people, "
-                        "their actions, style, colors, and composition. "
-                        "Be precise and thorough; when something is unclear or illegible, state that explicitly instead of guessing."
-                    )
-                },
-                examples=[
-                    {
-                        "prompt": "For image nodes, briefly describe what is visible in the screenshot or diagram and how it relates to the UI.",
-                    }
-                ],
-            ),
-        ),
-        apply_summary_prompt=(Optional[bool], Field(description="Whether we need enable summarization for images", default=True)),
-        summary_prompt=(
-            Optional[Dict[str, str]],
-            Field(
-                description=(
-                    "Instruction object for the LLM on how to summarize loaded Figma pages and nodes. "
-                    "Should contain a 'text' field with the main instruction."
-                ),
-                default={
-                    "prompt": (
-                        "You are summarizing a visual design document exported from Figma as a sequence of images and text. "
-                        "Provide a clear, concise overview of the main purpose, key elements, and notable changes or variations in the screens. "
-                        "Infer a likely user flow or sequence of steps across the screens, calling out entry points, decisions, and outcomes. "
-                        "Explain how this design could impact planning, development, testing, and review activities in a typical software lifecycle. "
-                        "Return the result as structured Markdown with headings and bullet lists so it can be reused in SDLC documentation."
-                    )
-                },
-                examples=[
-                    {
-                        "prompt": "Summarize Figma pages focusing on component names and user-visible text only.",
-                    }
-                ],
-            ),
-        ),
     )
 
 
@@ -272,8 +239,13 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     global_regexp: Optional[str] = Field(default=None)
     global_fields_retain: Optional[List[str]] = GLOBAL_RETAIN
     global_fields_remove: Optional[List[str]] = GLOBAL_REMOVE
-    global_depth_start: Optional[int] = GLOBAL_DEPTH_START
-    global_depth_end: Optional[int] = GLOBAL_DEPTH_END
+    global_depth_start: Optional[int] = Field(default=GLOBAL_DEPTH_START)
+    global_depth_end: Optional[int] = Field(default=GLOBAL_DEPTH_END)
+    # prompt-related configuration, populated from FigmaToolkit.toolkit_config_schema
+    apply_images_prompt: Optional[bool] = Field(default=True)
+    images_prompt: Optional[str] = Field(default=DEFAULT_FIGMA_IMAGES_PROMPT)
+    apply_summary_prompt: Optional[bool] = Field(default=True)
+    summary_prompt: Optional[str] = Field(default=DEFAULT_FIGMA_SUMMARY_PROMPT)
     _client: Optional[AlitaFigmaPy] = PrivateAttr()
 
     def _parse_figma_url(self, url: str) -> tuple[str, Optional[List[str]]]:
@@ -792,28 +764,20 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             url: Optional[str] = None,
             file_key: Optional[str] = None,
             node_ids: Optional[str] = None,
-            apply_images_prompt: Optional[bool] = False,
-            images_prompt: Optional[Dict[str, str]] = None,
-            apply_summary_prompt: Optional[bool] = True,
-            summary_prompt: Optional[Dict[str, str]] = None,
             **kwargs,
     ):
         """Summarizes a Figma file by loading pages and nodes via URL or file key.
 
-        Args mirror ArgsSchema.FileSummary:
-          - url: full Figma URL with file key and optional node-id; if set, takes precedence over file_key/node_ids.
-          - file_key: explicit file key, used only when url is not provided.
-          - node_ids: optional comma-separated top-level node ids (pages), used only when url has no node-id.
-          - apply_images_prompt: if True, pass images_prompt to the image-processing step; if False, images_prompt is ignored.
-          - images_prompt: instruction object for how to treat image-based nodes (passed as prompt to image extraction).
-          - apply_summary_prompt: if True and summary_prompt.prompt is present and an LLM is configured,
-            return a single summarized string; otherwise return the raw list of node documents.
-          - summary_prompt: instruction object for LLM summarization (must contain a 'prompt' key).
+        Configuration for image processing and summarization is taken from the toolkit
+        configuration (see FigmaToolkit.toolkit_config_schema):
 
-        Returns:
-          - If apply_summary_prompt is True and summary_prompt.prompt is provided and LLM is available:
-            a single string summary.
-          - Otherwise: a list of dicts with 'page_content' and 'metadata' for each processed node.
+          - self.apply_images_prompt: if True, pass self.images_prompt to the image-processing step.
+          - self.images_prompt: instruction string for how to treat image-based nodes.
+          - self.apply_summary_prompt: if True and self.summary_prompt is set and an LLM is configured,
+            return a single summarized string; otherwise return the raw list of node documents.
+          - self.summary_prompt: instruction string for LLM summarization.
+
+        Tool arguments mirror ArgsSchema.FileSummary and control only which file/pages are loaded.
         """
         # Resolve file key and optional node ids similarly to index_data URL handling
         effective_url = url
@@ -841,9 +805,15 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_ids_include=effective_node_ids_include,
         )
 
+        # Read prompt-related configuration from toolkit instance (set via wrapper_payload)
+        apply_images_prompt = getattr(self, "apply_images_prompt", False)
+        images_prompt = getattr(self, "images_prompt", None)
+        apply_summary_prompt = getattr(self, "apply_summary_prompt", True)
+        summary_prompt = getattr(self, "summary_prompt", None)
+
         # Decide whether to apply images_prompt
-        use_images_prompt = bool(apply_images_prompt and images_prompt and images_prompt.get("prompt"))
-        images_prompt_str = images_prompt["prompt"] if use_images_prompt else ""
+        use_images_prompt = bool(apply_images_prompt and isinstance(images_prompt, str) and images_prompt.strip())
+        images_prompt_str = images_prompt.strip() if use_images_prompt else ""
 
         results: List[Dict] = []
         for base_doc in base_docs:
@@ -854,7 +824,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 })
 
         # Decide whether to apply summary_prompt
-        has_summary_prompt = bool(summary_prompt and isinstance(summary_prompt, dict) and summary_prompt.get("prompt"))
+        has_summary_prompt = bool(isinstance(summary_prompt, str) and summary_prompt.strip())
         if not apply_summary_prompt or not has_summary_prompt:
             # Return raw docs when summary is disabled or no prompt provided
             return results
@@ -888,7 +858,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             if not getattr(self, "llm", None):
                 raise RuntimeError("LLM is not configured for this toolkit; cannot apply summary_prompt.")
 
-            prompt_text = f"{summary_prompt['prompt']}\n\nCONTENT BEGIN\n{full_content}\nCONTENT END"
+            prompt_text = f"{summary_prompt}\n\nCONTENT BEGIN\n{full_content}\nCONTENT END"
             llm_response = self.llm.invoke(prompt_text) if hasattr(self.llm, "invoke") else self.llm(prompt_text)
 
             if hasattr(llm_response, "content"):
