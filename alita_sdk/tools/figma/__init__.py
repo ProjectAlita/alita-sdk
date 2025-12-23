@@ -4,7 +4,12 @@ from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..base.tool import BaseAction
-from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
+from .api_wrapper import (
+    FigmaApiWrapper,
+    GLOBAL_LIMIT,
+    DEFAULT_FIGMA_IMAGES_PROMPT,
+    DEFAULT_FIGMA_SUMMARY_PROMPT,
+)
 from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.figma import FigmaConfiguration
@@ -28,7 +33,12 @@ def get_tools(tool):
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
             embedding_model=tool['settings'].get('embedding_model'),
-            vectorstore_type="PGVector"
+            vectorstore_type="PGVector",
+            # figma summary/image prompt settings (toolkit-level)
+            apply_images_prompt=tool["settings"].get("apply_images_prompt"),
+            images_prompt=tool["settings"].get("images_prompt"),
+            apply_summary_prompt=tool["settings"].get("apply_summary_prompt"),
+            summary_prompt=tool["settings"].get("summary_prompt"),
         )
         .get_tools()
     )
@@ -45,6 +55,19 @@ class FigmaToolkit(BaseToolkit):
         }
         return create_model(
             name,
+            apply_images_prompt=(Optional[bool], Field(
+                description="Enable advanced image processing instructions for Figma image nodes.", default=True)),
+            images_prompt=(Optional[str], Field(
+                description="Instruction for how to analyze image-based nodes (screenshots, diagrams, etc.) during Figma file retrieving.",
+                default=DEFAULT_FIGMA_IMAGES_PROMPT,
+            )),
+            apply_summary_prompt=(Optional[bool],
+                                  Field(description="Enable LLM-based summarization over loaded Figma data.",
+                                        default=True)),
+            summary_prompt=(Optional[str], Field(
+                description="Instruction for the LLM on how to summarize loaded Figma data.",
+                default=DEFAULT_FIGMA_SUMMARY_PROMPT,
+            )),
             global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT)),
             global_regexp=(Optional[str], Field(description="Global regex pattern", default=None)),
             selected_tools=(
