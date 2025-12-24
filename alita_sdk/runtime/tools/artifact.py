@@ -57,15 +57,56 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         
         return str(result) if return_as_string else result
 
-    def create_file(self, filename: str, filedata: str, bucket_name = None):
+    def create_file(self, filename: str, bucket_name = None, filedata: str = None, artifact_id: str = None):
+        """Create a file in the artifact bucket from new content or by copying an existing artifact.
+        
+        Args:
+            filename: Target filename in destination bucket
+            bucket_name: Destination bucket (uses default if None)
+            filedata: Content for creating new files (text, JSON, CSV, etc.)
+            artifact_id: UUID of existing artifact to copy (preserves binary format)
+            
+        Note: Provide EITHER filedata OR artifact_id, not both or neither.
+        """
+        # Validation: exactly one source must be provided
+        if filedata is None and artifact_id is None:
+            raise ToolException(
+                "Must provide either 'filedata' (to create new content) or 'artifact_id' (to copy existing file). "
+                "Both parameters cannot be empty."
+            )
+        
+        if filedata is not None and artifact_id is not None:
+            raise ToolException(
+                "Cannot provide both 'filedata' and 'artifact_id'. "
+                "Use 'artifact_id' to copy existing files preserving binary format, "
+                "or 'filedata' to create new content from text/data."
+            )
+        
         # Sanitize filename to prevent regex errors during indexing
         sanitized_filename, was_modified = self._sanitize_filename(filename)
         if was_modified:
             logging.warning(f"Filename sanitized: '{filename}' -> '{sanitized_filename}'")
 
-        if sanitized_filename.endswith(".xlsx"):
-            data = json.loads(filedata)
-            filedata = self.create_xlsx_filedata(data)
+        # Determine operation type and get file content
+        if artifact_id:
+            # Copy mode: get raw bytes from existing artifact
+            operation_type = "copy"
+            try:
+                filedata = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+            except Exception as e:
+                raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
+            
+            file_size = len(filedata) if isinstance(filedata, bytes) else 0
+            source_artifact_id = artifact_id
+        else:
+            # Create mode: use provided content
+            operation_type = "create"
+            if sanitized_filename.endswith(".xlsx"):
+                data = json.loads(filedata)
+                filedata = self.create_xlsx_filedata(data)
+            
+            file_size = len(filedata) if isinstance(filedata, (str, bytes)) else 0
+            source_artifact_id = None
 
         create_response = self.artifact.create(sanitized_filename, filedata, bucket_name)
         
@@ -73,27 +114,34 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         if "error" in response_data:
             raise ToolException(f"Failed to create file '{sanitized_filename}': {response_data['error']}")
         
-        artifact_id = response_data['artifact_id']
+        new_artifact_id = response_data['artifact_id']
+
+        # Build event metadata
+        event_meta = {
+            "bucket": bucket_name or self.bucket,
+            "file_size": file_size,
+            "source": "generated"
+        }
+        if source_artifact_id:
+            event_meta["source_artifact_id"] = source_artifact_id
+            event_meta["operation"] = "copy"
 
         dispatch_custom_event("file_modified", {
-            "message": f"File '{filename}' created successfully",
-            "artifact_id": artifact_id,
+            "message": f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully",
+            "artifact_id": new_artifact_id,
             "filename": filename,
             "tool_name": "createFile",
             "toolkit": "artifact",
-            "operation_type": "create",
-            "meta": {
-                "bucket": bucket_name or self.bucket,
-                "file_size": len(filedata) if isinstance(filedata, (str, bytes)) else 0,
-                "source": "generated"
-            }
+            "operation_type": operation_type,
+            "meta": event_meta
         })
 
         return json.dumps({
-            "artifact_id": artifact_id,
+            "artifact_id": new_artifact_id,
             "filename": sanitized_filename,
             "bucket": bucket_name or self.bucket,
-            "message": response_data.get('message', f"File '{filename}' created successfully")
+            "message": response_data.get('message', 
+                f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully")
         })
     
     @staticmethod
@@ -470,22 +518,37 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             {
                 "ref": self.create_file,
                 "name": "createFile",
-                "description": "Create a file in the artifact",
+                "description": """Create a file in the artifact bucket. Supports two modes:
+                1. Create from content: Use 'filedata' parameter to create new files with text, JSON, CSV, or Excel data
+                2. Copy existing file: Use 'artifact_id' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
+                
+                IMPORTANT: Provide EITHER 'filedata' OR 'artifact_id', never both or neither.
+                Use artifact_id when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
+                The artifact_id can be found in previous file_modified events in the conversation history.""",
                 "args_schema": create_model(
                     "createFile", 
-                    filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="""Stringified content of the file.
-                    Example for .xlsx filedata format:
-                    {
-                        "Sheet1":[
-                            ["Name", "Age", "City"],
-                            ["Alice", 25, "New York"],
-                            ["Bob", 30, "San Francisco"],
-                            ["Charlie", 35, "Los Angeles"]
-                        ]
-                    }
-                    """)),
-                    bucket_name=bucket_name
+                    filename=(str, Field(description="Target filename in destination bucket")),
+                    bucket_name=bucket_name,
+                    filedata=(Optional[str], Field(
+                        description="""Content for creating new files. Use this for text, JSON, CSV, or structured data.
+                        Example for .xlsx filedata format:
+                        {
+                            "Sheet1":[
+                                ["Name", "Age", "City"],
+                                ["Alice", 25, "New York"],
+                                ["Bob", 30, "San Francisco"],
+                                ["Charlie", 35, "Los Angeles"]
+                            ]
+                        }
+                        Leave empty if using artifact_id to copy existing file.""",
+                        default=None
+                    )),
+                    artifact_id=(Optional[str], Field(
+                        description="""UUID of existing artifact to copy. Use this to copy images, PDFs, or any binary files while preserving format.
+                        Find artifact_id in previous messages (file_modified events, generate_image responses, etc.).
+                        Leave empty if using filedata to create new content.""",
+                        default=None
+                    ))
                 )
             },
             {
