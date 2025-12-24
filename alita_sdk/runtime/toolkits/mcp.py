@@ -615,7 +615,8 @@ class McpToolkit(BaseToolkit):
                 args_schema=McpServerTool.create_pydantic_model_from_schema(tool_metadata.input_schema),
                 client=client,
                 server=tool_metadata.server,
-                tool_timeout_sec=timeout
+                tool_timeout_sec=timeout,
+                metadata={"toolkit_name": toolkit_name, "toolkit_type": name}
             )
         except Exception as e:
             logger.error(f"Failed to create MCP tool '{tool_name}' from server '{tool_metadata.server}': {e}")
@@ -649,7 +650,8 @@ class McpToolkit(BaseToolkit):
                 ),
                 client=client,
                 server=toolkit_name,
-                tool_timeout_sec=timeout
+                tool_timeout_sec=timeout,
+                metadata={"toolkit_name": toolkit_name, "toolkit_type": name}
             )
         except Exception as e:
             logger.error(f"Failed to create MCP tool '{tool_name}' from toolkit '{toolkit_name}': {e}")
