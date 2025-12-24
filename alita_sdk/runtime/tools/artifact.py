@@ -62,26 +62,39 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         sanitized_filename, was_modified = self._sanitize_filename(filename)
         if was_modified:
             logging.warning(f"Filename sanitized: '{filename}' -> '{sanitized_filename}'")
-        
+
         if sanitized_filename.endswith(".xlsx"):
             data = json.loads(filedata)
             filedata = self.create_xlsx_filedata(data)
 
-        result = self.artifact.create(sanitized_filename, filedata, bucket_name)
+        create_response = self.artifact.create(sanitized_filename, filedata, bucket_name)
         
-        # Dispatch custom event for file creation
+        response_data = json.loads(create_response)
+        if "error" in response_data:
+            raise ToolException(f"Failed to create file '{sanitized_filename}': {response_data['error']}")
+        
+        artifact_id = response_data['artifact_id']
+
         dispatch_custom_event("file_modified", {
             "message": f"File '{filename}' created successfully",
+            "artifact_id": artifact_id,
             "filename": filename,
             "tool_name": "createFile",
             "toolkit": "artifact",
             "operation_type": "create",
             "meta": {
-                "bucket": bucket_name or self.bucket
+                "bucket": bucket_name or self.bucket,
+                "file_size": len(filedata) if isinstance(filedata, (str, bytes)) else 0,
+                "source": "generated"
             }
         })
 
-        return result
+        return json.dumps({
+            "artifact_id": artifact_id,
+            "filename": sanitized_filename,
+            "bucket": bucket_name or self.bucket,
+            "message": response_data.get('message', f"File '{filename}' created successfully")
+        })
     
     @staticmethod
     def _sanitize_filename(filename: str) -> tuple:
@@ -197,47 +210,43 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             Success message
         """
         try:
-            # Sanitize filename
             sanitized_filename, was_modified = self._sanitize_filename(file_path)
             if was_modified:
                 logging.warning(f"Filename sanitized: '{file_path}' -> '{sanitized_filename}'")
             
-            # Check if file exists
+            operation_type = "modify"
             try:
                 self.artifact.get(artifact_name=sanitized_filename, bucket_name=bucket_name, llm=self.llm)
-                # File exists, overwrite it
                 result = self.artifact.overwrite(sanitized_filename, content, bucket_name)
-                
-                # Dispatch custom event
-                dispatch_custom_event("file_modified", {
-                    "message": f"File '{sanitized_filename}' updated successfully",
-                    "filename": sanitized_filename,
-                    "tool_name": "edit_file",
-                    "toolkit": "artifact",
-                    "operation_type": "modify",
-                    "meta": {
-                        "bucket": bucket_name or self.bucket
-                    }
-                })
-                
-                return f"Updated file {sanitized_filename}"
+                message = f"File '{sanitized_filename}' updated successfully"
+                return_msg = f"Updated file {sanitized_filename}"
             except:
-                # File doesn't exist, create it
                 result = self.artifact.create(sanitized_filename, content, bucket_name)
-                
-                # Dispatch custom event
-                dispatch_custom_event("file_modified", {
-                    "message": f"File '{sanitized_filename}' created successfully",
-                    "filename": sanitized_filename,
-                    "tool_name": "edit_file",
-                    "toolkit": "artifact",
-                    "operation_type": "create",
-                    "meta": {
-                        "bucket": bucket_name or self.bucket
-                    }
-                })
-                
-                return f"Created file {sanitized_filename}"
+                operation_type = "create"
+                message = f"File '{sanitized_filename}' created successfully"
+                return_msg = f"Created file {sanitized_filename}"
+            
+            response_data = json.loads(result)
+            if "error" in response_data:
+                raise ToolException(f"Failed to write file '{sanitized_filename}': {response_data['error']}")
+            
+            artifact_id = response_data['artifact_id']
+            
+            dispatch_custom_event("file_modified", {
+                "message": message,
+                "artifact_id": artifact_id,
+                "filename": sanitized_filename,
+                "tool_name": "edit_file",
+                "toolkit": "artifact",
+                "operation_type": operation_type,
+                "meta": {
+                    "bucket": bucket_name or self.bucket,
+                    "file_size": len(content),
+                    "source": "generated"
+                }
+            })
+            
+            return return_msg
         except Exception as e:
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
@@ -245,41 +254,130 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         return self.artifact.delete(filename, bucket_name)
 
     def append_data(self, filename: str, filedata: str, bucket_name = None):
-        result = self.artifact.append(filename, filedata, bucket_name)
+        append_response = self.artifact.append(filename, filedata, bucket_name)
         
-        # Dispatch custom event for file append
+        response_data = json.loads(append_response)
+        if "error" in response_data:
+            raise ToolException(f"Failed to append to file '{filename}': {response_data['error']}")
+        
+        artifact_id = response_data['artifact_id']
+        
         dispatch_custom_event("file_modified", {
             "message": f"Data appended to file '{filename}' successfully",
+            "artifact_id": artifact_id,
             "filename": filename,
             "tool_name": "appendData",
             "toolkit": "artifact",
             "operation_type": "modify",
             "meta": {
-                "bucket": bucket_name or self.bucket
+                "bucket": bucket_name or self.bucket,
+                "file_size": response_data.get('size', 0),
+                "source": "generated"
             }
         })
         
-        return result
+        return json.dumps({
+            "artifact_id": artifact_id,
+            "filename": filename,
+            "bucket": bucket_name or self.bucket,
+            "message": response_data.get('message', "Data appended successfully")
+        })
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
         result = self.artifact.overwrite(filename, filedata, bucket_name)
         
-        # Dispatch custom event for file overwrite
+        response_data = json.loads(result)
+        if "error" in response_data:
+            raise ToolException(f"Failed to overwrite file '{filename}': {response_data['error']}")
+        
+        artifact_id = response_data['artifact_id']
+        
         dispatch_custom_event("file_modified", {
             "message": f"File '{filename}' overwritten successfully",
+            "artifact_id": artifact_id,
             "filename": filename,
             "tool_name": "overwriteData",
             "toolkit": "artifact",
             "operation_type": "modify",
             "meta": {
-                "bucket": bucket_name or self.bucket
+                "bucket": bucket_name or self.bucket,
+                "file_size": len(filedata) if isinstance(filedata, (str, bytes)) else 0,
+                "source": "generated"
             }
         })
         
-        return result
+        return json.dumps({
+            "artifact_id": artifact_id,
+            "filename": filename,
+            "bucket": bucket_name or self.bucket,
+            "message": response_data.get('message', f"File '{filename}' overwritten successfully")
+        })
+
+    def get_file_type(self, artifact_id: str) -> str:
+        """Detect file type of an artifact using file content analysis.
+        
+        Uses the `filetype` library to determine file type from magic bytes,
+        which is more reliable than extension-based detection.
+        
+        Args:
+            artifact_id: UUID of the artifact to analyze
+            
+        Returns:
+            JSON string with file type information:
+            {
+                "artifact_id": str,
+                "extension": str,      # e.g., "jpg", "png", "pdf"
+                "mime": str,          # e.g., "image/jpeg", "application/pdf"
+                "status": "success" | "error",
+                "message": str        # Error message if status is "error"
+            }
+        """
+        try:
+            import filetype
+        except ImportError:
+            return json.dumps({
+                "artifact_id": artifact_id,
+                "status": "error",
+                "message": "filetype library not installed. Install with: pip install filetype"
+            })
+        
+        try:
+            # Get raw file content using Artifact client's get_raw_content_by_artifact_id() method
+            file_content = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+            
+            if not file_content:
+                return json.dumps({
+                    "artifact_id": artifact_id,
+                    "status": "error",
+                    "message": "Artifact not found or empty"
+                })
+            
+            # Detect file type from content
+            kind = filetype.guess(file_content)
+            
+            if kind is None:
+                return json.dumps({
+                    "artifact_id": artifact_id,
+                    "status": "error",
+                    "message": "Cannot guess file type from content"
+                })
+            
+            return json.dumps({
+                "artifact_id": artifact_id,
+                "extension": kind.extension,
+                "mime": kind.mime,
+                "status": "success",
+                "message": f"File type detected: {kind.mime}"
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "artifact_id": artifact_id,
+                "status": "error",
+                "message": f"Error detecting file type: {str(e)}"
+            })
 
     def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
-        # Sanitize bucket name: replace underscores with hyphens and ensure lowercase
         sanitized_name = bucket_name.replace('_', '-').lower()
         if sanitized_name != bucket_name:
             logging.warning(f"Bucket name '{bucket_name}' was sanitized to '{sanitized_name}' (underscores replaced with hyphens, converted to lowercase)")
@@ -407,6 +505,15 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                     sheet_name=(Optional[str], Field(
                         description="Specifies which sheet to read. If it is None, then full document will be read.",
                         default=None))
+                )
+            },
+            {
+                "ref": self.get_file_type,
+                "name": "getFileType",
+                "description": "Detect the file type of an artifact using content analysis. More reliable than extension-based detection as it analyzes file magic bytes. Useful for verifying file types before processing or after generation.",
+                "args_schema": create_model(
+                    "getFileType",
+                    artifact_id=(str, Field(description="UUID of the artifact to analyze. This is the artifact_id returned when files are uploaded or generated."))
                 )
             },
             {

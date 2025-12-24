@@ -1,13 +1,14 @@
 """
 Image generation tool for Alita SDK.
 """
+import base64
 import json
 import logging
 import uuid
 from datetime import datetime
 from typing import Optional, Type, Any, List, Literal
 from langchain_core.callbacks import dispatch_custom_event
-from langchain_core.tools import BaseTool, BaseToolkit
+from langchain_core.tools import BaseTool, BaseToolkit, ToolException
 from pydantic import BaseModel, Field, create_model, ConfigDict
 
 logger = logging.getLogger(__name__)
@@ -112,41 +113,44 @@ class ImageGenerationTool(BaseTool):
                 style=style
             )
             
-            # Get conversation bucket and artifact interface
-            if not hasattr(self.alita_client, 'conversation_bucket'):
+            # Get image generation bucket and artifact interface
+            if not hasattr(self.alita_client, 'image_generation_bucket'):
                 return json.dumps({
                     "status": "error",
-                    "message": "Conversation bucket not configured in client"
+                    "message": "Image generation bucket not configured in client"
                 })
-            
-            bucket_name = self.alita_client.conversation_bucket
+
+            bucket_name = self.alita_client.image_generation_bucket
             artifact = self.alita_client.artifact(bucket_name)
-            
+
             # Save images to bucket instead of cache
             if 'data' in result:
                 images = result['data']
-                
+
                 # Process all images and save to bucket
                 images_list = []
                 for idx, image_data in enumerate(images, 1):
                     if not image_data.get('b64_json'):
                         continue
-                    
+
                     # Generate unique filename with timestamp to prevent conflicts between users
                     timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]  # millisecond precision
                     image_name = f"{filename}_{timestamp}.png"
-                    
-                    # Decode base64 to binary for storage
-                    import base64
                     binary_data = base64.b64decode(image_data['b64_json'])
-                    
-                    # Save to bucket
-                    artifact.create(image_name, binary_data, bucket_name)
+
+                    create_response = artifact.create(image_name, binary_data, bucket_name, prompt=prompt)
                     logger.debug(f"Saved generated image to bucket '{bucket_name}' as '{image_name}'")
-                    
-                    # Dispatch custom event for file creation
+
+                    response_data = json.loads(create_response)
+                    if "error" in response_data:
+                        raise ToolException(f"Failed to create artifact for '{image_name}': {response_data['error']}")
+
+                    artifact_id = response_data['artifact_id']
+                    logger.debug(f"Artifact created with ID: {artifact_id}")
+
                     dispatch_custom_event("file_modified", {
                         "message": f"Image '{image_name}' generated and saved successfully",
+                        "artifact_id": artifact_id,
                         "filename": image_name,
                         "tool_name": "generate_image",
                         "toolkit": "image_generation",
@@ -154,36 +158,38 @@ class ImageGenerationTool(BaseTool):
                         "meta": {
                             "bucket": bucket_name,
                             "image_number": idx,
-                            "prompt": prompt
+                            "prompt": prompt,
+                            "source": "generated"
                         }
                     })
-                    
+
                     images_list.append({
+                        "artifact_id": artifact_id,
+                        "image_name": image_name,
                         "image_number": idx,
                         "image_type": "png",
-                        "bucket_name": bucket_name,
-                        "image_name": image_name
+                        "bucket": bucket_name
                     })
-                
+
                 if not images_list:
                     return json.dumps({
                         "status": "error",
                         "message": "No base64 image data found"
                     })
-                
+
                 return json.dumps({
                     "status": "success",
                     "prompt": prompt,
                     "total_images": len(images_list),
                     "images": images_list
                 })
-            
+
             # Fallback to error response if no images in result
             return json.dumps({
                 "status": "error",
                 "message": f"Image generation completed but no images returned: {result}"
             })
-            
+
         except Exception as e:
             logger.error(f"Error generating image: {e}")
             return json.dumps({
