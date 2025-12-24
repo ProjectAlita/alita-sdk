@@ -9,6 +9,7 @@ from .api_wrapper import (
     GLOBAL_LIMIT,
     DEFAULT_FIGMA_IMAGES_PROMPT,
     DEFAULT_FIGMA_SUMMARY_PROMPT,
+    DEFAULT_NUMBER_OF_THREADS,
 )
 from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length
@@ -39,6 +40,7 @@ def get_tools(tool):
             images_prompt=tool["settings"].get("images_prompt"),
             apply_summary_prompt=tool["settings"].get("apply_summary_prompt"),
             summary_prompt=tool["settings"].get("summary_prompt"),
+            number_of_threads=tool["settings"].get("number_of_threads"),
         )
         .get_tools()
     )
@@ -77,6 +79,15 @@ class FigmaToolkit(BaseToolkit):
                     "Must contain a single 'prompt' key with the text."
                 ),
                 default=DEFAULT_FIGMA_SUMMARY_PROMPT,
+            )),
+            number_of_threads=(Optional[int], Field(
+                description=(
+                    "Number of worker threads to use when downloading and processing Figma images. "
+                    f"Valid values are from 1 to 5. Default is {DEFAULT_NUMBER_OF_THREADS}."
+                ),
+                default=DEFAULT_NUMBER_OF_THREADS,
+                ge=1,
+                le=5,
             )),
             global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT)),
             global_regexp=(Optional[str], Field(description="Global regex pattern", default=None)),

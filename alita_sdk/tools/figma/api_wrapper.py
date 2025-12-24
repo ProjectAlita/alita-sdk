@@ -22,7 +22,7 @@ GLOBAL_RETAIN = ['id', 'name', 'type', 'document', 'children']
 GLOBAL_REMOVE = []
 GLOBAL_DEPTH_START = 1
 GLOBAL_DEPTH_END = 6
-DEFAULT_NUMBER_OF_THREADS = 1  # valid range for number_of_threads is 1..5
+DEFAULT_NUMBER_OF_THREADS = 3  # valid range for number_of_threads is 1..5
 # Default prompts for image analysis and summarization reused across toolkit and wrapper
 DEFAULT_FIGMA_IMAGES_PROMPT: Dict[str, str] = {
     "prompt": (
@@ -223,27 +223,26 @@ class ArgsSchema(Enum):
                 examples=["Fp24FuzPwH0L74ODSrCnQo"],
             ),
         ),
-        node_ids=(
+        include_node_ids=(
             Optional[str],
             Field(
                 description=(
-                    "Optional comma-separated top-level node ids (pages) used only when URL has no node-id and URL is not set. "
+                    "Optional comma-separated top-level node ids (pages) to include when URL has no node-id and URL is not set. "
                     "Example: '8:6,1:7'."
                 ),
                 default=None,
                 examples=["8:6,1:7"],
             ),
         ),
-        number_of_threads=(
-            Optional[int],
+        exclude_node_ids=(
+            Optional[str],
             Field(
                 description=(
-                    "Optional override for the number of worker threads used to download and process images "
-                    f"when summarizing this file. Valid values are from 1 to 5. If not set, a default of {DEFAULT_NUMBER_OF_THREADS} threads will be used."
+                    "Optional comma-separated top-level node ids (pages) to exclude when URL has no node-id and URL is not set. "
+                    "Applied only when include_node_ids is not provided."
                 ),
-                default=DEFAULT_NUMBER_OF_THREADS,
-                ge=1,
-                le=5,
+                default=None,
+                examples=["8:6,1:7"],
             ),
         ),
     )
@@ -263,6 +262,8 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     images_prompt: Optional[Dict[str, str]] = Field(default=DEFAULT_FIGMA_IMAGES_PROMPT)
     apply_summary_prompt: Optional[bool] = Field(default=True)
     summary_prompt: Optional[Dict[str, str]] = Field(default=DEFAULT_FIGMA_SUMMARY_PROMPT)
+    # concurrency configuration, populated from toolkit config like images_prompt
+    number_of_threads: Optional[int] = Field(default=DEFAULT_NUMBER_OF_THREADS, ge=1, le=5)
     _client: Optional[AlitaFigmaPy] = PrivateAttr()
 
     def _parse_figma_url(self, url: str) -> tuple[str, Optional[List[str]]]:
@@ -321,7 +322,6 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
     def _base_loader(
             self,
             url: Optional[str] = None,
-            project_id: Optional[str] = None,
             file_keys_include: Optional[List[str]] = None,
             file_keys_exclude: Optional[List[str]] = None,
             node_ids_include: Optional[List[str]] = None,
@@ -330,12 +330,11 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_types_exclude: Optional[List[str]] = None,
             **kwargs
     ) -> Generator[Document, None, None]:
-        number_of_threads = kwargs.get("number_of_threads", DEFAULT_NUMBER_OF_THREADS)
         if url:
             file_key, node_ids_from_url = self._parse_figma_url(url)
             # Override include params based on URL
             file_keys_include = [file_key]
-            if node_ids_from_url:
+            if node_ids_from_url and not node_ids_include:
                 node_ids_include = node_ids_from_url
         
         # If both include and exclude are provided, use only include
@@ -355,30 +354,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     'figma_pages_exclude': node_ids_exclude or [],
                     'figma_nodes_include': node_types_include or [],
                     'figma_nodes_exclude': node_types_exclude or [],
-                    'number_of_threads': number_of_threads,
-                 }
+                }
                 yield Document(page_content=json.dumps(metadata), metadata=metadata)
-        elif project_id:
-            self._log_tool_event(f"Loading project files from project `{project_id}`")
-            files = json.loads(self.get_project_files(project_id)).get('files', [])
-            for file in files:
-                if file_keys_exclude and file.get('key', '') in file_keys_exclude:
-                    continue
-                yield Document(page_content=json.dumps(file), metadata={
-                    'id': file.get('key', ''),
-                    'file_key': file.get('key', ''),
-                    'name': file.get('name', ''),
-                    'updated_on': file.get('last_modified', ''),
-                    'figma_pages_include': node_ids_include or [],
-                    'figma_pages_exclude': node_ids_exclude or [],
-                    'figma_nodes_include': node_types_include or [],
-                    'figma_nodes_exclude': node_types_exclude or [],
-                    'number_of_threads': number_of_threads,
-                 })
         elif file_keys_exclude or node_ids_exclude:
-            raise ValueError("Excludes without parent (project_id or file_keys_include) do not make sense.")
+            raise ValueError("Excludes without parent (file_keys_include) do not make sense.")
         else:
-            raise ValueError("You must provide at least project_id or file_keys_include.")
+            raise ValueError("You must provide file_keys_include or a URL.")
 
     def has_image_representation(self, node):
         node_type = node.get('type', '').lower()
@@ -448,32 +429,20 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_id: str,
             image_url: str,
             prompt: str,
-            counted_nodes_ref: Dict[str, int],
-            total_nodes: int,
     ) -> Optional[Document]:
         """Download and process a single Figma image node.
-
         This helper is used by `_process_document` (optionally in parallel via threads).
         """
         if not image_url:
-            logging.warning(
-                f"Image URL not found for node_id {node_id} in file {file_key}. Skipping."
-            )
+            logging.warning(f"Image URL not found for node_id {node_id} in file {file_key}. Skipping.")
             return None
 
-        # Use a local snapshot for logging only; global progress is maintained in _process_document
-        current_index = counted_nodes_ref.get("value", 0) + 1
-        logging.info(
-            f"File {file_key}: downloading image node {node_id} "
-            f"({current_index}/{total_nodes})."
-        )
+        logging.info(f"File {file_key}: downloading image node {node_id}.")
 
         try:
             response = requests.get(image_url)
         except Exception as exc:
-            logging.warning(
-                f"Failed to download image for node {node_id} in file {file_key}: {exc}"
-            )
+            logging.warning(f"Failed to download image for node {node_id} in file {file_key}: {exc}")
             return None
 
         if response.status_code != 200:
@@ -485,18 +454,11 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
         content_type = response.headers.get('Content-Type', '')
         if 'text/html' in content_type.lower():
-            logging.warning(
-                f"Received HTML instead of image content for node {node_id} in file {file_key}."
-            )
+            logging.warning(f"Received HTML instead of image content for node {node_id} in file {file_key}.")
             return None
 
-        extension = (
-            f".{content_type.split('/')[-1]}" if content_type.startswith('image') else '.txt'
-        )
-        logging.info(
-            f"File {file_key}: processing image node {node_id} "
-            f"({current_index}/{total_nodes})."
-        )
+        extension = (f".{content_type.split('/')[-1]}" if content_type.startswith('image') else '.txt')
+        logging.info(f"File {file_key}: processing image node {node_id}.")
         page_content = _load_content_from_bytes_with_prompt(
             file_content=response.content,
             extension=extension,
@@ -504,11 +466,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             prompt=prompt,
         )
 
-        # counted_nodes_ref["value"] = current_index
-        logging.info(
-            f"File {file_key}: finished image node {node_id} "
-            f"({current_index}/{total_nodes})."
-        )
+        logging.info(f"File {file_key}: finished image node {node_id}.")
 
         return Document(
             page_content=page_content,
@@ -554,10 +512,10 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         # mutable counter so it can be updated from helper calls (even when used in threads)
         counted_nodes_ref: Dict[str, int] = {"value": 0}
 
-        # Resolve number_of_threads from document metadata, falling back to DEFAULT_NUMBER_OF_THREADS
-        meta_threads = document.metadata.get("number_of_threads", DEFAULT_NUMBER_OF_THREADS)
-        if isinstance(meta_threads, int) and 1 <= meta_threads <= 5:
-            number_of_threads = meta_threads
+        # Resolve number_of_threads from class field, falling back to DEFAULT_NUMBER_OF_THREADS
+        threads_cfg = getattr(self, "number_of_threads", DEFAULT_NUMBER_OF_THREADS)
+        if isinstance(threads_cfg, int) and 1 <= threads_cfg <= 5:
+            number_of_threads = threads_cfg
         else:
             number_of_threads = DEFAULT_NUMBER_OF_THREADS
 
@@ -586,13 +544,11 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                             node_id=node_id,
                             image_url=image_url,
                             prompt=prompt,
-                            counted_nodes_ref=counted_nodes_ref,
-                            total_nodes=total_nodes,
                         )
                         counted_nodes_ref["value"] += 1
                         if doc is not None:
                             self._log_tool_event(
-                                f"File {file_key}: finished image node {node_id} "
+                                f"File {file_key}: processing image node {node_id} "
                                 f"({counted_nodes_ref['value']}/{total_nodes} in {max_workers} threads)."
                             )
                             yield doc
@@ -610,8 +566,6 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                                 node_id,
                                 image_url,
                                 prompt,
-                                counted_nodes_ref,
-                                total_nodes,
                             ): node_id
                             for node_id, image_url in images.items()
                         }
@@ -631,7 +585,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
                             if doc is not None:
                                 self._log_tool_event(
-                                    f"File {file_key}: finished image node {node_id} "
+                                    f"File {file_key}: processing image node {node_id} "
                                     f"({counted_nodes_ref['value']}/{total_nodes} in {max_workers} threads)."
                                 )
                                 yield doc
@@ -661,47 +615,35 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     )
 
     def _index_tool_params(self):
-        """Return the parameters for indexing data."""
-        return {
-            "url": (Optional[str], Field(
-                description=(
-                    "Full Figma file or page URL to index. Must be in one of the following formats: "
-                    "'https://www.figma.com/file/<FILE_KEY>/...' or 'https://www.figma.com/design/<FILE_KEY>/...'. "
-                    "If present, the 'node-id' query parameter (e.g. '?node-id=<PAGE_ID>') will be used to limit "
-                    "indexing to that page or node. When this URL is provided, it overrides 'file_keys_include' ('node_ids_include')."
-                ),
-                default=None)),
-            "project_id": (Optional[str], Field(
-                description="ID of the project to list files from: i.e. 55391681",
-                default=None)),
-            'file_keys_include': (Optional[List[str]], Field(
-                description="List of file keys to include in index if project_id is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
-                default=None)),
-            'file_keys_exclude': (Optional[List[str]], Field(
-                description="List of file keys to exclude from index. It is applied only if project_id is provided and file_keys_include is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
-                default=None)),
-            'node_ids_include': (Optional[List[str]], Field(
-                description="List of top-level nodes (pages) in file to include in index. It is node-id from figma url: i.e. ['123-56', '7651-9230'].",
-                default=None)),
-            'node_ids_exclude': (Optional[List[str]], Field(
-                description="List of top-level nodes (pages) in file to exclude from index. It is applied only if node_ids_include is not provided. It is node-id from figma url: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
-                default=None)),
-            'node_types_include': (Optional[List[str]], Field(
-                description="List type of nodes to include in index: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...].",
-                default=None)),
-            'node_types_exclude': (Optional[List[str]], Field(
-                description="List type of nodes to exclude from index. It is applied only if node_types_include is not provided: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...]",
-                default=None)),
-            'number_of_threads': (Optional[int], Field(
-                description=(
-                    "Optional override for the number of worker threads used to download and process images "
-                    f"when indexing this file. Valid values are from 1 to 5. If not set, a default of {DEFAULT_NUMBER_OF_THREADS} threads will be used."
-                ),
-                default=DEFAULT_NUMBER_OF_THREADS,
-                ge=1,
-                le=5,
-            )),
-        }
+         """Return the parameters for indexing data."""
+         return {
+             "url": (Optional[str], Field(
+                 description=(
+                     "Full Figma file or page URL to index. Must be in one of the following formats: "
+                     "'https://www.figma.com/file/<FILE_KEY>/...' or 'https://www.figma.com/design/<FILE_KEY>/...'. "
+                     "If present, the 'node-id' query parameter (e.g. '?node-id=<PAGE_ID>') will be used to limit "
+                     "indexing to that page or node. When this URL is provided, it overrides 'file_keys_include' ('node_ids_include')."
+                 ),
+                 default=None)),
+              'file_keys_include': (Optional[List[str]], Field(
+                  description="List of file keys to include in index if project_id is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
+                  default=None)),
+             'file_keys_exclude': (Optional[List[str]], Field(
+                 description="List of file keys to exclude from index. It is applied only if project_id is provided and file_keys_include is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
+                 default=None)),
+             'node_ids_include': (Optional[List[str]], Field(
+                 description="List of top-level nodes (pages) in file to include in index. It is node-id from figma url: i.e. ['123-56', '7651-9230'].",
+                 default=None)),
+             'node_ids_exclude': (Optional[List[str]], Field(
+                 description="List of top-level nodes (pages) in file to exclude from index. It is applied only if node_ids_include is not provided. It is node-id from figma url: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
+                 default=None)),
+             'node_types_include': (Optional[List[str]], Field(
+                 description="List type of nodes to include in index: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...].",
+                 default=None)),
+             'node_types_exclude': (Optional[List[str]], Field(
+                 description="List type of nodes to exclude from index. It is applied only if node_types_include is not provided: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...]",
+                 default=None)),
+         }
 
     def _send_request(
         self,
@@ -935,9 +877,9 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             self,
             url: Optional[str] = None,
             file_key: Optional[str] = None,
-            node_ids: Optional[str] = None,
-            number_of_threads: Optional[int] = DEFAULT_NUMBER_OF_THREADS,
-            **kwargs,
+            include_node_ids: Optional[str] = None,
+            exclude_node_ids: Optional[str] = None,
+             **kwargs,
     ):
         """Summarizes a Figma file by loading pages and nodes via URL or file key.
 
@@ -952,32 +894,23 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
         Tool arguments mirror ArgsSchema.FileSummary and control only which file/pages are loaded.
         """
-        # Resolve file key and optional node ids similarly to index_data URL handling
-        effective_url = url
-        effective_file_keys_include: Optional[List[str]] = None
-        effective_node_ids_include: Optional[List[str]] = None
+        # Prepare params for _base_loader without evaluating any logic here
+        node_ids_include_list = None
+        node_ids_exclude_list = None
 
-        if effective_url:
-            # URL has the highest priority: parse URL and ignore file_key / node_ids args
-            file_key_from_url, node_ids_from_url = self._parse_figma_url(effective_url)
-            effective_file_keys_include = [file_key_from_url]
-            if node_ids_from_url:
-                effective_node_ids_include = [nid for nid in node_ids_from_url if nid]
-        else:
-            if not file_key:
-                raise ToolException("Either 'url' or 'file_key' must be provided.")
-            effective_file_keys_include = [file_key]
-            # Only when URL is absent, we use explicit node_ids argument
-            if node_ids:
-                effective_node_ids_include = [nid.strip() for nid in node_ids.split(',') if nid.strip()]
+        if include_node_ids:
+            node_ids_include_list = [nid.strip() for nid in include_node_ids.split(',') if nid.strip()]
 
-        # Use the same flow as index_data: base loader -> process_document
+        if exclude_node_ids:
+            node_ids_exclude_list = [nid.strip() for nid in exclude_node_ids.split(',') if nid.strip()]
+
+        # Delegate URL and file_key handling to _base_loader
         base_docs = self._base_loader(
-            url=effective_url if effective_url else None,
-            file_keys_include=effective_file_keys_include,
-            node_ids_include=effective_node_ids_include,
-            number_of_threads=number_of_threads,
-         )
+            url=url,
+            file_keys_include=[file_key] if file_key else None,
+            node_ids_include=node_ids_include_list,
+            node_ids_exclude=node_ids_exclude_list,
+        )
 
         # Read prompt-related configuration from toolkit instance (set via wrapper_payload)
         apply_images_prompt = getattr(self, "apply_images_prompt", False)
@@ -1001,7 +934,6 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             for dep in self._process_document(
                 base_doc,
                 images_prompt_str,
-                # number_of_threads=number_of_threads,
             ):
                  results.append({
                      "page_content": dep.page_content,
@@ -1016,6 +948,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         )
         if not apply_summary_prompt or not has_summary_prompt:
             # Return raw docs when summary is disabled or no prompt provided
+            self._log_tool_event("Summary prompt not provided: returning raw documents.")
             return results
 
         # If summary_prompt is enabled, generate an LLM-based summary over the loaded docs
@@ -1043,6 +976,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 blocks.append(block)
 
             full_content = "\n".join(blocks) if blocks else "(no content)"
+            self._log_tool_event("Invoking LLM for Figma file summary.")
 
             if not getattr(self, "llm", None):
                 raise RuntimeError("LLM is not configured for this toolkit; cannot apply summary_prompt.")
@@ -1057,9 +991,11 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             else:
                 summary_text = str(llm_response)
 
+            self._log_tool_event("Successfully generated LLM-based file summary.")
             return summary_text
         except Exception as e:
             logging.warning(f"Failed to apply summary_prompt in get_file_summary: {e}")
+            self._log_tool_event("Falling back to raw documents due to summary_prompt failure.")
             return results
 
     @process_output
