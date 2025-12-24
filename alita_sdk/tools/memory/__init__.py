@@ -118,7 +118,7 @@ class MemoryToolkit(BaseToolkit):
         # Add metadata to tools if toolkit_name is provided
         if toolkit_name:
             for tool in tools:
-                tool.metadata = {"toolkit_name": toolkit_name}
+                tool.metadata = {"toolkit_name": toolkit_name, "toolkit_type": name}
         
         return cls(tools=tools)
 

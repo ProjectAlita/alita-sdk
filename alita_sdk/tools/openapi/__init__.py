@@ -221,7 +221,7 @@ class AlitaOpenAPIToolkit(BaseToolkit):
                     name=tool_def['name'],
                     description=description,
                     args_schema=tool_def.get('args_schema'),
-                    metadata={"toolkit_name": toolkit_name} if toolkit_name else {},
+                    metadata={"toolkit_name": toolkit_name, "toolkit_type": name} if toolkit_name else {},
                 )
             )
 
