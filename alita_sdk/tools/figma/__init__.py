@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -56,16 +56,26 @@ class FigmaToolkit(BaseToolkit):
         return create_model(
             name,
             apply_images_prompt=(Optional[bool], Field(
-                description="Enable advanced image processing instructions for Figma image nodes.", default=True)),
-            images_prompt=(Optional[str], Field(
-                description="Instruction for how to analyze image-based nodes (screenshots, diagrams, etc.) during Figma file retrieving.",
+                description="Enable advanced image processing instructions for Figma image nodes.",
+                default=True,
+            )),
+            images_prompt=(Optional[Dict[str, str]], Field(
+                description=(
+                    "Instruction for how to analyze image-based nodes "
+                    "(screenshots, diagrams, etc.) during Figma file retrieving. "
+                    "Must contain a single 'prompt' key with the text."
+                ),
                 default=DEFAULT_FIGMA_IMAGES_PROMPT,
             )),
-            apply_summary_prompt=(Optional[bool],
-                                  Field(description="Enable LLM-based summarization over loaded Figma data.",
-                                        default=True)),
-            summary_prompt=(Optional[str], Field(
-                description="Instruction for the LLM on how to summarize loaded Figma data.",
+            apply_summary_prompt=(Optional[bool], Field(
+                description="Enable LLM-based summarization over loaded Figma data.",
+                default=True,
+            )),
+            summary_prompt=(Optional[Dict[str, str]], Field(
+                description=(
+                    "Instruction for the LLM on how to summarize loaded Figma data. "
+                    "Must contain a single 'prompt' key with the text."
+                ),
                 default=DEFAULT_FIGMA_SUMMARY_PROMPT,
             )),
             global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT)),
