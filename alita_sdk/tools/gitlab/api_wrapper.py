@@ -54,6 +54,11 @@ CreatePullRequestModel = create_model(
     pr_body=(str, Field(description="The body of the pull request")),
     branch=(str, Field(description="The branch to create the pull request from")),
 )
+CommentOnPRModel = create_model(
+    "CommentOnPRModel",
+    pr_number=(int, Field(description="The number of the pull request/merge request")),
+    comment=(str, Field(description="The comment text to add")),
+)
 
 CreateBranchModel = create_model(
     "CreateBranchModel",
@@ -323,6 +328,27 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             issue = self.repo_instance.issues.get(issue_number)
             issue.notes.create({"body": comment})
             return "Commented on issue " + str(issue_number)
+        except Exception as e:
+            return "Unable to make comment due to error:\n" + str(e)
+
+    def comment_on_pr(self, pr_number: int, comment: str) -> str:
+        """
+        Add a comment to a pull request (merge request) in GitLab.
+
+        This method adds a general comment to the entire merge request,
+        not tied to specific code lines or file changes.
+
+        Parameters:
+            pr_number: GitLab Merge Request (Pull Request) number
+            comment: Comment text to add
+
+        Returns:
+            Success message or error description
+        """
+        try:
+            mr = self.repo_instance.mergerequests.get(pr_number)
+            mr.notes.create({"body": comment})
+            return "Commented on merge request " + str(pr_number)
         except Exception as e:
             return "Unable to make comment due to error:\n" + str(e)
 
@@ -622,6 +648,12 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
                 "ref": self.comment_on_issue,
                 "description": self.comment_on_issue.__doc__ or "Comment on an issue in the repository.",
                 "args_schema": CommentOnIssueModel,
+            },
+            {
+                "name": "comment_on_pr",
+                "ref": self.comment_on_pr,
+                "description": self.comment_on_pr.__doc__ or "Comment on a pull request (merge request) in the repository.",
+                "args_schema": CommentOnPRModel,
             },
             {
                 "name": "create_file",

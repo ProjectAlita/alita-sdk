@@ -12,7 +12,6 @@ from .api_wrapper import (
     DEFAULT_NUMBER_OF_THREADS,
 )
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.figma import FigmaConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
 
