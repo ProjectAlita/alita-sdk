@@ -1647,11 +1647,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
                 # Fetch frame images for vision-based analysis (detailed mode only)
                 frame_images = {}
+                # Use max_frames parameter to limit LLM analysis (respects user setting)
+                frames_to_analyze = min(max_frames, len(all_frame_ids))
                 if llm_analysis == 'detailed' and all_frame_ids:
-                    self._log_tool_event(f"Fetching images for {len(all_frame_ids[:10])} frames (vision analysis)")
+                    self._log_tool_event(f"Fetching images for {frames_to_analyze} frames (vision analysis)")
                     try:
-                        # Limit to first 10 frames for performance
-                        frame_ids_to_fetch = all_frame_ids[:10]
+                        frame_ids_to_fetch = all_frame_ids[:frames_to_analyze]
                         images_response = self._client.get_file_images(
                             file_key=file_key,
                             ids=frame_ids_to_fetch,
@@ -1682,7 +1683,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     parallel_workers = DEFAULT_NUMBER_OF_THREADS
                 parallel_workers = max(1, min(parallel_workers, 5))
 
-                self._log_tool_event(f"Starting LLM analysis of {len(all_frame_ids[:10])} frames with {parallel_workers} parallel workers...")
+                self._log_tool_event(f"Starting LLM analysis of {frames_to_analyze} frames with {parallel_workers} parallel workers...")
                 toon_output = enrich_toon_with_llm_analysis(
                     toon_output=toon_output,
                     file_data=file_data_for_llm,
@@ -1692,6 +1693,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     status_callback=_status_callback,
                     include_design_insights=include_design_insights,
                     parallel_workers=parallel_workers,
+                    max_frames_to_analyze=frames_to_analyze,
                 )
                 self._log_tool_event("LLM analysis complete")
             except Exception as e:
