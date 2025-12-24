@@ -2208,6 +2208,7 @@ def enrich_toon_with_llm_analysis(
     status_callback: Optional[Callable[[str], None]] = None,
     include_design_insights: bool = True,
     parallel_workers: int = 5,
+    max_frames_to_analyze: int = 50,
 ) -> str:
     """
     Enrich TOON output with LLM-generated explanations.
@@ -2225,6 +2226,7 @@ def enrich_toon_with_llm_analysis(
         status_callback: Optional callback for progress updates
         include_design_insights: Whether to include DESIGN INSIGHTS section (default True)
         parallel_workers: Number of parallel LLM workers (default 5)
+        max_frames_to_analyze: Maximum frames to analyze with LLM (default 50)
 
     Returns:
         Enriched TOON output with LLM analysis
@@ -2238,6 +2240,7 @@ def enrich_toon_with_llm_analysis(
             file_data, llm, frame_images=frame_images, status_callback=status_callback,
             include_design_insights=include_design_insights,
             parallel_workers=parallel_workers,
+            max_frames_to_analyze=max_frames_to_analyze,
         )
 
     # For summary mode, just append file-level analysis
@@ -2257,7 +2260,7 @@ def serialize_file_with_llm_explanations(
     file_data: Dict,
     llm: Any,
     frame_images: Optional[Dict[str, str]] = None,
-    max_frames_to_analyze: int = 10,
+    max_frames_to_analyze: int = 50,
     status_callback: Optional[Callable[[str], None]] = None,
     parallel_workers: int = 5,
     include_design_insights: bool = True,
@@ -2273,7 +2276,7 @@ def serialize_file_with_llm_explanations(
         file_data: Processed file data dict
         llm: LangChain LLM instance
         frame_images: Optional dict mapping frame_id -> image_url for vision analysis
-        max_frames_to_analyze: Maximum frames to analyze with LLM (default 10)
+        max_frames_to_analyze: Maximum frames to analyze with LLM (default 50)
         status_callback: Optional callback function for progress updates
         parallel_workers: Number of parallel LLM workers (default 5)
         include_design_insights: Whether to include DESIGN INSIGHTS section (default True)
