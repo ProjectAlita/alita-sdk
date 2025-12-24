@@ -1951,17 +1951,15 @@ def analyze_frame_with_llm(
     if not llm:
         return None
 
-    try:
-        frame_name = frame_data.get('name', 'Unknown')
-        frame_id = frame_data.get('id', '')
+    frame_name = frame_data.get('name', 'Unknown')
+    frame_id = frame_data.get('id', '')
 
-        # Use structured output
-        structured_llm = llm.with_structured_output(ScreenExplanation)
-
-        if image_url:
-            # Vision-based analysis with image
+    # Try vision-based analysis first if image available
+    if image_url:
+        try:
             from langchain_core.messages import HumanMessage
 
+            structured_llm = llm.with_structured_output(ScreenExplanation)
             prompt_text = SCREEN_VISION_PROMPT.format(
                 frame_name=frame_name,
                 frame_id=frame_id,
@@ -1975,25 +1973,32 @@ def analyze_frame_with_llm(
                 ]
             )
             result = structured_llm.invoke([message])
-        else:
-            # Text-based analysis fallback
-            if toon_serializer is None:
-                toon_serializer = TOONSerializer()
+            if result:
+                return result
+        except Exception as e:
+            # Vision analysis failed - fall back to text-based
+            logging.warning(f"Vision analysis failed for {frame_name}, falling back to text: {type(e).__name__}: {e}")
 
-            toon_lines = toon_serializer.serialize_frame(frame_data, level=0)
-            toon_data = '\n'.join(toon_lines)
+    # Text-based analysis (fallback or primary if no image)
+    try:
+        if toon_serializer is None:
+            toon_serializer = TOONSerializer()
 
-            prompt = SCREEN_TEXT_PROMPT.format(
-                frame_name=frame_name,
-                frame_id=frame_id,
-                toon_data=toon_data,
-            )
-            result = structured_llm.invoke(prompt)
+        toon_lines = toon_serializer.serialize_frame(frame_data, level=0)
+        toon_data = '\n'.join(toon_lines)
 
+        prompt = SCREEN_TEXT_PROMPT.format(
+            frame_name=frame_name,
+            frame_id=frame_id,
+            toon_data=toon_data,
+        )
+
+        structured_llm = llm.with_structured_output(ScreenExplanation)
+        result = structured_llm.invoke(prompt)
         return result
 
     except Exception as e:
-        logging.warning(f"LLM frame analysis failed: {e}")
+        logging.warning(f"LLM frame analysis failed for {frame_name}: {type(e).__name__}: {e}")
         return None
 
 
@@ -2360,14 +2365,18 @@ def serialize_file_with_llm_explanations(
                     frame_id, explanation = future.result()
                     if explanation:
                         frame_explanations[frame_id] = explanation
+                        _log_status(f"Analyzed {completed + 1}/{len(frames_to_analyze)}: {frame_name} ✓")
+                    else:
+                        _log_status(f"Analyzed {completed + 1}/{len(frames_to_analyze)}: {frame_name} (no result)")
                     completed += 1
-                    _log_status(f"Analyzed {completed}/{len(frames_to_analyze)}: {frame_name}")
                 except Exception as e:
                     completed += 1
                     logging.warning(f"Frame analysis failed for {frame_name}: {e}")
-                    _log_status(f"Analyzed {completed}/{len(frames_to_analyze)}: {frame_name} (failed)")
+                    _log_status(f"Analyzed {completed}/{len(frames_to_analyze)}: {frame_name} (error: {type(e).__name__})")
 
-    _log_status("Frame analysis complete. Generating output...")
+    # Summary of LLM analysis results
+    success_count = len(frame_explanations)
+    _log_status(f"Frame analysis complete: {success_count}/{len(frames_to_analyze)} frames analyzed successfully")
 
     # Now generate output with pre-computed explanations
     for page in file_data.get('pages', []):
