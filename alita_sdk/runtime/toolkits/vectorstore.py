@@ -56,7 +56,7 @@ class VectorStoreToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                metadata={"toolkit_name": toolkit_name, "toolkit_type": "vectorstore"} if toolkit_name else {}
             ))
         return cls(tools=tools)
 
