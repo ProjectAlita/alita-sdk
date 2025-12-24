@@ -275,63 +275,62 @@ def _build_bulk_data_gen_prompt(parsed_test_cases: list) -> str:
 {'='*60}"""
 
 
-def _build_bulk_execution_prompt(parsed_test_cases: list) -> str:
-    """Build consolidated prompt for bulk test execution."""
-    parts = []
+def _build_single_test_execution_prompt(test_case_info: dict, test_number: int) -> str:
+    """Build execution prompt for a single test case."""
+    test_case = test_case_info['data']
+    test_file = test_case_info['file']
     
-    for idx, tc_info in enumerate(parsed_test_cases, 1):
-        test_case = tc_info['data']
-        test_file = tc_info['file']
-        
-        parts.append(f"\n{'='*80}\nTEST CASE #{idx}: {test_case['name']}\nFile: {test_file.name}\n{'='*80}")
-        
-        if test_case['steps']:
-            for step in test_case['steps']:
-                parts.append(f"\nStep {step['number']}: {step['title']}\n{step['instruction']}")
-                if step['expectation']:
-                    parts.append(f"Expected Result: {step['expectation']}")
-        else:
-            parts.append("\n(No steps defined)")
+    parts = [
+        f"\n{'='*80}",
+        f"TEST CASE #{test_number}: {test_case['name']}",
+        f"File: {test_file.name}",
+        f"{'='*80}",
+        "\nList all the tools you have in your environment. Execute the following steps in sequential order and report results:"
+    ]
+    
+    if test_case['steps']:
+        for step in test_case['steps']:
+            parts.append(f"\nStep {step['number']}: {step['title']}")
+            parts.append(step['instruction'])
+    else:
+        parts.append("\n(No steps defined)")
     
     return "\n".join(parts)
 
 
-def _build_validation_prompt(parsed_test_cases: list, execution_output: str) -> str:
-    """Build prompt for bulk validation of test results."""
-    parts = ["You are a test validator. Review the test execution results and validate each test case.\n\nTest Cases to Validate:\n"]
+def _build_single_test_validation_prompt(test_case_info: dict, test_number: int, execution_output: str) -> str:
+    """Build validation prompt for a single test case."""
+    test_case = test_case_info['data']
     
-    for idx, tc_info in enumerate(parsed_test_cases, 1):
-        test_case = tc_info['data']
-        parts.append(f"\nTest Case #{idx}: {test_case['name']}")
-        if test_case['steps']:
-            for step in test_case['steps']:
-                parts.append(f"  Step {step['number']}: {step['title']}")
-                if step['expectation']:
-                    parts.append(f"  Expected: {step['expectation']}")
+    parts = [
+        "Review the test execution results and validate this test case and provide the output in JSON format.\n",
+        f"\nTest Case #{test_number}: {test_case['name']}"
+    ]
+    
+    if test_case['steps']:
+        for step in test_case['steps']:
+            parts.append(f"  Step {step['number']}: {step['title']}")
+            if step['expectation']:
+                parts.append(f"    Expected: {step['expectation']}")
     
     parts.append(f"\n\nActual Execution Results:\n{execution_output}\n")
-    parts.append(f"""\nBased on the execution results above, validate each test case.
+    
+    # Escape quotes in test name for valid JSON in prompt
+    escaped_test_name = test_case['name'].replace('"', '\\"')
+    
+    parts.append(f"""\nBased on the execution results above, validate this test case.
 
-Respond with valid JSON in this EXACT format:
+Respond ONLY with valid JSON in this EXACT format (no additional text before or after):
 {{
-  "test_cases": [
-    {{
-      "test_number": 1,
-      "test_name": "<test case name>",
-      "steps": [
-        {{"step_number": 1, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}},
-        {{"step_number": 2, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}}
-      ]
-    }},
-    {{
-      "test_number": 2,
-      "test_name": "<test case name>",
-      "steps": [...]
-    }}
+  "test_number": {test_number},
+  "test_name": "{escaped_test_name}",
+  "steps": [
+    {{"step_number": 1, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}},
+    {{"step_number": 2, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}}
   ]
 }}
 
-Validate all {len(parsed_test_cases)} test cases and their steps.""")
+IMPORTANT: Return ONLY the JSON object. Do not include any explanatory text before or after the JSON.""")
     
     return "\n".join(parts)
 
@@ -359,17 +358,119 @@ def _extract_json_from_text(text: str) -> dict:
     return json.loads(text[start_idx:end_idx])
 
 
-def _create_fallback_results(parsed_test_cases: list) -> tuple[list, int, int, int]:
-    """Create fallback results when execution/validation fails."""
-    test_results = []
-    for tc_info in parsed_test_cases:
-        test_results.append({
-            'title': tc_info['data']['name'],
+def _create_fallback_result_for_test(test_case: dict, test_file: Path, reason: str = 'Validation failed') -> dict:
+    """Create a fallback result for a single test case with detailed step information.
+    
+    Args:
+        test_case: Parsed test case data
+        test_file: Path to test case file
+        reason: Reason for fallback
+        
+    Returns:
+        Fallback test result dict with step details
+    """
+    fallback_steps = []
+    for step_info in test_case.get('steps', []):
+        fallback_steps.append({
+            'step_number': step_info['number'],
+            'title': step_info['title'],
             'passed': False,
-            'file': tc_info['file'].name,
-            'step_results': []
+            'details': reason
         })
-    return test_results, len(parsed_test_cases), 0, len(parsed_test_cases)
+    
+    return {
+        'title': test_case['name'],
+        'passed': False,
+        'file': test_file.name,
+        'step_results': fallback_steps,
+        'validation_error': reason
+    }
+
+
+def _cleanup_executor_cache(cache: Dict[str, tuple], cache_name: str = "executor") -> None:
+    """Clean up executor cache resources.
+    
+    Args:
+        cache: Dictionary of cached executors
+        cache_name: Name of cache for logging
+    """
+    console.print(f"[dim]Cleaning up {cache_name} cache...[/dim]")
+    for cache_key, cached_items in cache.items():
+        try:
+            # Extract memory from tuple (second element)
+            memory = cached_items[1] if len(cached_items) > 1 else None
+            
+            # Close SQLite memory connection
+            if memory and hasattr(memory, 'conn') and memory.conn:
+                memory.conn.close()
+        except Exception as e:
+            logger.debug(f"Error cleaning up {cache_name} cache for {cache_key}: {e}")
+
+
+def _create_executor_from_cache(cache: Dict[str, tuple], cache_key: str, 
+                                client, agent_def: Dict, toolkit_config_path: Optional[str],
+                                config, model: Optional[str], temperature: Optional[float],
+                                max_tokens: Optional[int], work_dir: Optional[str]) -> tuple:
+    """Get or create executor from cache.
+    
+    Args:
+        cache: Executor cache dictionary
+        cache_key: Key for caching
+        client: API client
+        agent_def: Agent definition
+        toolkit_config_path: Path to toolkit config
+        config: CLI configuration
+        model: Model override
+        temperature: Temperature override
+        max_tokens: Max tokens override
+        work_dir: Working directory
+        
+    Returns:
+        Tuple of (agent_executor, memory, mcp_session_manager)
+    """
+    if cache_key in cache:
+        return cache[cache_key]
+    
+    # Create new executor
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    import sqlite3
+    
+    memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+    toolkit_config_tuple = (toolkit_config_path,) if toolkit_config_path else ()
+    
+    agent_executor, mcp_session_manager, _, _, _, _, _ = _setup_local_agent_executor(
+        client, agent_def, toolkit_config_tuple, config, model, temperature, 
+        max_tokens, memory, work_dir
+    )
+    
+    # Cache the executor
+    cached_tuple = (agent_executor, memory, mcp_session_manager)
+    cache[cache_key] = cached_tuple
+    return cached_tuple
+
+
+def _print_validation_diagnostics(validation_output: str) -> None:
+    """Print diagnostic information for validation output.
+    
+    Args:
+        validation_output: The validation output to diagnose
+    """
+    console.print(f"\n[bold red]🔍 Diagnostic Information:[/bold red]")
+    console.print(f"[dim]Output length: {len(validation_output)} characters[/dim]")
+    
+    # Check for key JSON elements
+    has_json = '{' in validation_output and '}' in validation_output
+    has_fields = 'test_number' in validation_output and 'steps' in validation_output
+    
+    console.print(f"[dim]Has JSON structure: {has_json}[/dim]")
+    console.print(f"[dim]Has required fields: {has_fields}[/dim]")
+    
+    # Show relevant excerpt
+    if len(validation_output) > 400:
+        console.print(f"\n[red]First 200 chars:[/red] [dim]{validation_output[:200]}[/dim]")
+        console.print(f"[red]Last 200 chars:[/red] [dim]{validation_output[-200:]}[/dim]")
+    else:
+        console.print(f"\n[red]Full output:[/red] [dim]{validation_output}[/dim]")
 
 
 def _get_alita_system_prompt(config) -> str:
@@ -3226,13 +3327,16 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
               help='Grant agent filesystem access to this directory')
 @click.option('--data-generator', type=click.Path(exists=True),
               help='Path to test data generator agent definition file')
+@click.option('--validator', type=click.Path(exists=True),
+              help='Path to test validator agent definition file (default: .alita/agents/test-validator.agent.md)')
 @click.option('--skip-data-generation', is_flag=True,
               help='Skip test data generation step')
 @click.pass_context
 def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir: str,
                       test_case_files: tuple, model: Optional[str], temperature: Optional[float], 
                       max_tokens: Optional[int], work_dir: Optional[str],
-                      data_generator: Optional[str], skip_data_generation: bool):
+                      data_generator: Optional[str], validator: Optional[str], 
+                      skip_data_generation: bool):
     """
     Execute test cases from a directory and save results.
     
@@ -3259,6 +3363,11 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
       alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
           --skip-data-generation --model gpt-4o
     """
+    # Import dependencies at function start
+    import sqlite3
+    import uuid
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    
     config = ctx.obj['config']
     client = get_client(ctx)
     
@@ -3317,11 +3426,30 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 console.print("[yellow]Continuing with test execution...[/yellow]\n")
                 logger.debug(f"Data generator setup error: {e}", exc_info=True)
         
-        # Track overall results
-        total_tests = 0
-        passed_tests = 0
-        failed_tests = 0
-        test_results = []  # Store structured results for final report
+        # Load validator agent definition
+        validator_def = None
+        validator_agent_name = "Default Validator"
+        
+        # Try to load validator from specified path or default location
+        validator_path = validator
+        if not validator_path:
+            # Default to .alita/agents/test-validator.agent.md
+            default_validator = Path.cwd() / '.alita' / 'agents' / 'test-validator.agent.md'
+            if default_validator.exists():
+                validator_path = str(default_validator)
+        
+        if validator_path and Path(validator_path).exists():
+            try:
+                validator_def = load_agent_definition(validator_path)
+                validator_agent_name = validator_def.get('name', Path(validator_path).stem)
+                console.print(f"Validator Agent: [bold]{validator_agent_name}[/bold]")
+                console.print(f"[dim]Using: {validator_path}[/dim]\n")
+            except Exception as e:
+                console.print(f"[yellow]⚠ Warning: Failed to load validator agent: {e}[/yellow]")
+                console.print(f"[yellow]Will use test runner agent for validation[/yellow]\n")
+                logger.debug(f"Validator load error: {e}", exc_info=True)
+        else:
+            console.print(f"[dim]No validator agent specified, using test runner agent for validation[/dim]\n")
         
         # Store bulk data generation chat history to pass to test executors
         bulk_gen_chat_history = []
@@ -3357,7 +3485,6 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
 
             try:
                 # Setup data generator agent
-                from langgraph.checkpoint.sqlite import SqliteSaver
                 bulk_memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
                 
                 # Use first test case's config or empty tuple
@@ -3398,138 +3525,204 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 console.print("[yellow]Continuing with test execution...[/yellow]\n")
                 logger.debug(f"Bulk data generation error: {e}", exc_info=True)
         
-        # Execute ALL test cases in one bulk operation
+        # Execute test cases sequentially with executor caching
         if not parsed_test_cases:
             console.print("[yellow]No test cases to execute[/yellow]")
             return
         
-        console.print(f"\n[bold yellow]📋 Executing ALL test cases in bulk...[/bold yellow]\n")
+        console.print(f"\n[bold yellow]📋 Executing test cases sequentially...[/bold yellow]\n")
         
-        # Use first test case's config for agent setup
-        first_tc = parsed_test_cases[0]
-        first_test_file = first_tc['file']
-        toolkit_config_path = resolve_toolkit_config_path(
-            first_tc['data'].get('config_path', ''),
-            first_test_file,
-            test_cases_path
-        )
-        toolkit_config_tuple = (toolkit_config_path,) if toolkit_config_path else ()
+        # Show data generation context availability
+        if bulk_gen_chat_history:
+            console.print(f"[dim]✓ Data generation history available ({len(bulk_gen_chat_history)} messages) - shared with all test cases[/dim]\n")
+        else:
+            console.print(f"[dim]ℹ No data generation history (skipped or disabled)[/dim]\n")
         
-        # Create memory for bulk execution
-        from langgraph.checkpoint.sqlite import SqliteSaver
-        memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+        # Executor cache: key = toolkit_config_path, value = (agent_executor, memory, mcp_session_manager)
+        executor_cache = {}
         
-        # Initialize chat history with bulk data generation context
-        chat_history = bulk_gen_chat_history.copy()
+        # Validation executor cache: separate isolated executors for validation
+        # key = toolkit_config_path, value = (agent_executor, memory, mcp_session_manager)
+        validation_executor_cache = {}
         
-        # Setup agent executor
-        agent_executor, _, _, _, _, _, _ = _setup_local_agent_executor(
-            client, agent_def, toolkit_config_tuple, config, model, temperature, max_tokens, memory, work_dir
-        )
-        
-        # Build bulk execution prompt
-        bulk_all_prompt = _build_bulk_execution_prompt(parsed_test_cases)
-
-        console.print(f"Executing the prompt: {bulk_all_prompt}\n")
-        
-        # Execute all test cases in bulk
+        # Execute each test case sequentially
         test_results = []
-        all_execution_output = ""
+        total_tests = len(parsed_test_cases)
         
-        try:
-            if agent_executor:
-                with console.status(f"[yellow]Executing {len(parsed_test_cases)} test cases in bulk...[/yellow]", spinner="dots"):
-                    bulk_result = agent_executor.invoke({
-                        "input": bulk_all_prompt,
-                        "chat_history": chat_history
+        for idx, tc_info in enumerate(parsed_test_cases, 1):
+            test_case = tc_info['data']
+            test_file = tc_info['file']
+            test_name = test_case['name']
+            
+            # Display progress
+            console.print(f"[bold cyan]Test Case {idx}/{total_tests} - {test_name}[/bold cyan]")
+            
+            try:
+                # Resolve toolkit config path for this test case
+                toolkit_config_path = resolve_toolkit_config_path(
+                    test_case.get('config_path', ''),
+                    test_file,
+                    test_cases_path
+                )
+                
+                # Use cache key (None if no config)
+                cache_key = toolkit_config_path if toolkit_config_path else '__no_config__'
+                thread_id = f"test_case_{idx}_{uuid.uuid4().hex[:8]}"
+                
+                # Get or create executor from cache
+                agent_executor, memory, mcp_session_manager = _create_executor_from_cache(
+                    executor_cache, cache_key, client, agent_def, toolkit_config_path,
+                    config, model, temperature, max_tokens, work_dir
+                )
+                
+                # Build execution prompt for single test case
+                execution_prompt = _build_single_test_execution_prompt(tc_info, idx)
+                console.print(f"[dim]Executing with {len(bulk_gen_chat_history)} history messages[/dim]")
+                
+                # Execute test case
+                execution_output = ""
+                if agent_executor:
+                    with console.status(f"[yellow]Executing test case...[/yellow]", spinner="dots"):
+                        exec_result = agent_executor.invoke({
+                            "input": execution_prompt,
+                            "chat_history": bulk_gen_chat_history  # ONLY data gen history, no accumulation
+                        }, config={"configurable": {"thread_id": thread_id}})
+                    execution_output = extract_output_from_result(exec_result)
+                    
+                    console.print(f"[green]✓ Test case executed[/green]")
+                    console.print(f"[dim]{execution_output}[/dim]\n")
+                    
+                    # No history accumulation - each test case is independent
+                else:
+                    console.print(f"[red]✗ No agent executor available[/red]")
+                    # Create fallback result for this test
+                    test_results.append({
+                        'title': test_name,
+                        'passed': False,
+                        'file': test_file.name,
+                        'step_results': []
                     })
-                all_execution_output = extract_output_from_result(bulk_result)
+                    continue
                 
-                console.print(f"[green]✓ All test cases executed[/green]")
-                console.print(f"[dim]{all_execution_output}...[/dim]\n")
+                # Validate test case using ISOLATED validation executor
+                validation_prompt = _build_single_test_validation_prompt(tc_info, idx, execution_output)
                 
-                # Update chat history
-                chat_history.append({"role": "user", "content": bulk_all_prompt})
-                chat_history.append({"role": "assistant", "content": all_execution_output})
+                console.print(f"[bold yellow]🔍 Validating test case (isolated context)...[/bold yellow]")
                 
-                # Now validate ALL test cases in bulk
-                console.print(f"[bold yellow]✅ Validating all test cases...[/bold yellow]\n")
+                # Create or retrieve isolated validation executor
+                validation_cache_key = f"{cache_key}_validation"
+                validation_agent_def = validator_def if validator_def else agent_def
                 
-                validation_prompt = _build_validation_prompt(parsed_test_cases, all_execution_output)
-
-                console.print(f"[dim]{validation_prompt}[/dim]\n")
+                validation_executor, validation_memory, validation_mcp_session = _create_executor_from_cache(
+                    validation_executor_cache, validation_cache_key, client, validation_agent_def,
+                    toolkit_config_path, config, model, temperature, max_tokens, work_dir
+                )
                 
-                with console.status("[yellow]Validating all results...[/yellow]", spinner="dots"):
-                    validation_result = agent_executor.invoke({
-                        "input": validation_prompt,
-                        "chat_history": chat_history
-                    })
-
-                validation_output = extract_output_from_result(validation_result)
+                if validation_cache_key not in validation_executor_cache:
+                    console.print(f"[dim]Created new isolated validation executor[/dim]")
+                else:
+                    console.print(f"[dim]Using cached validation executor[/dim]")
                 
-                console.print(f"[dim]Validation Response: {validation_output}...[/dim]\n")
+                # For validation, use a separate thread with NO chat history (isolated from data gen)
+                # This prevents the agent from using tools and encourages direct JSON output
+                validation_thread_id = f"validation_{idx}_{uuid.uuid4().hex[:8]}"
+                
+                validation_output = ""
+                if validation_executor:
+                    with console.status(f"[yellow]Validating test case...[/yellow]", spinner="dots"):
+                        validation_result = validation_executor.invoke({
+                            "input": validation_prompt,
+                            "chat_history": []  # ISOLATED: No data gen history for validation
+                        }, {"configurable": {"thread_id": validation_thread_id}})
+                    
+                    validation_output = extract_output_from_result(validation_result)
+                else:
+                    console.print(f"[red]✗ No validation executor available[/red]")
+                    validation_output = "{}"
+                
+                console.print(f"[bold cyan]Full LLM Validation Response:[/bold cyan]")
+                console.print(f"[dim]{validation_output}[/dim]\n")
+                
+                # No history update - validation is isolated from test execution
                 
                 # Parse validation JSON
                 try:
                     validation_json = _extract_json_from_text(validation_output)
-                    test_cases_results = validation_json.get('test_cases', [])
+                    step_results = validation_json.get('steps', [])
                     
-                    # Process results for each test case
-                    total_tests = 0
-                    passed_tests = 0
-                    failed_tests = 0
+                    # Determine if test passed (all steps must pass)
+                    test_passed = all(step.get('passed', False) for step in step_results) if step_results else False
                     
-                    for tc_result in test_cases_results:
-                        test_name = tc_result.get('test_name', f"Test #{tc_result.get('test_number', '?')}")
-                        step_results = tc_result.get('steps', [])
+                    if test_passed:
+                        console.print(f"[bold green]✅ Test PASSED: {test_name}[/bold green]")
+                    else:
+                        console.print(f"[bold red]❌ Test FAILED: {test_name}[/bold red]")
+                    
+                    # Display individual step results
+                    for step_result in step_results:
+                        step_num = step_result.get('step_number')
+                        step_title = step_result.get('title', '')
+                        passed = step_result.get('passed', False)
+                        details = step_result.get('details', '')
                         
-                        # Determine if test passed (all steps must pass)
-                        test_passed = all(step.get('passed', False) for step in step_results) if step_results else False
-                        
-                        total_tests += 1
-                        if test_passed:
-                            passed_tests += 1
-                            console.print(f"[bold green]✅ Test PASSED: {test_name}[/bold green]")
+                        if passed:
+                            console.print(f"  [green]✓ Step {step_num}: {step_title}[/green]")
+                            console.print(f"  [dim]{details}[/dim]")
                         else:
-                            failed_tests += 1
-                            console.print(f"[bold red]❌ Test FAILED: {test_name}[/bold red]")
-                        
-                        # Display individual step results
-                        for step_result in step_results:
-                            step_num = step_result.get('step_number')
-                            step_title = step_result.get('title', '')
-                            passed = step_result.get('passed', False)
-                            details = step_result.get('details', '')
-                            
-                            if passed:
-                                console.print(f"  [green]✓ Step {step_num}: {step_title}[/green]")
-                                console.print(f"  [dim]{details}[/dim]")
-                            else:
-                                console.print(f"  [red]✗ Step {step_num}: {step_title}[/red]")
-                                console.print(f"  [dim]{details}[/dim]")
-                        
-                        console.print()
-                        
-                        # Store result
-                        test_results.append({
-                            'title': test_name,
-                            'passed': test_passed,
-                            'file': parsed_test_cases[tc_result.get('test_number', 1) - 1]['file'].name if tc_result.get('test_number', 1) - 1 < len(parsed_test_cases) else 'unknown',
-                            'step_results': step_results
-                        })
+                            console.print(f"  [red]✗ Step {step_num}: {step_title}[/red]")
+                            console.print(f"  [dim]{details}[/dim]")
+                    
+                    console.print()
+                    
+                    # Store result
+                    test_results.append({
+                        'title': test_name,
+                        'passed': test_passed,
+                        'file': test_file.name,
+                        'step_results': step_results
+                    })
                     
                 except Exception as e:
-                    logger.debug(f"Validation parsing failed: {e}")
-                    console.print(f"[yellow]⚠ Warning: Could not parse validation results: {e}[/yellow]\n")
-                    test_results, total_tests, passed_tests, failed_tests = _create_fallback_results(parsed_test_cases)
-            else:
-                console.print(f"[red]✗ No agent executor available[/red]\n")
-                test_results, total_tests, passed_tests, failed_tests = _create_fallback_results(parsed_test_cases)
+                    logger.debug(f"Validation parsing failed for {test_name}: {e}", exc_info=True)
+                    console.print(f"[yellow]⚠ Warning: Could not parse validation results for {test_name}[/yellow]")
+                    console.print(f"[yellow]Error: {str(e)}[/yellow]")
                     
-        except Exception as e:
-            console.print(f"[red]✗ Bulk execution failed: {e}[/red]\n")
-            logger.debug(f"Bulk execution error: {e}", exc_info=True)
-            test_results, total_tests, passed_tests, failed_tests = _create_fallback_results(parsed_test_cases)
+                    # Enhanced diagnostic output
+                    _print_validation_diagnostics(validation_output)
+                    
+                    # Generate fallback result using helper function
+                    console.print(f"\n[yellow]🔄 Generating fallback validation result...[/yellow]")
+                    fallback_result = _create_fallback_result_for_test(
+                        test_case,
+                        test_file,
+                        f'Validation failed - could not parse validator output: {str(e)}'
+                    )
+                    console.print(f"[dim]Created {len(fallback_result['step_results'])} fallback step results[/dim]\n")
+                    
+                    test_results.append(fallback_result)
+                    console.print()
+                    
+            except Exception as e:
+                logger.debug(f"Test execution failed for {test_name}: {e}", exc_info=True)
+                console.print(f"[red]✗ Test execution failed: {e}[/red]")
+                
+                # Create fallback result using helper function
+                fallback_result = _create_fallback_result_for_test(
+                    test_case,
+                    test_file,
+                    f'Test execution failed: {str(e)}'
+                )
+                test_results.append(fallback_result)
+                console.print()
+        
+        # Cleanup: Close executor cache resources
+        _cleanup_executor_cache(executor_cache, "executor")
+        _cleanup_executor_cache(validation_executor_cache, "validation executor")
+        
+        # Calculate totals
+        total_tests = len(test_results)
+        passed_tests = sum(1 for r in test_results if r['passed'])
+        failed_tests = total_tests - passed_tests
                 
         # Generate summary report
         console.print(f"\n[bold]{'='*60}[/bold]")

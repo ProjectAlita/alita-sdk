@@ -2,7 +2,7 @@
 
 ## Objective
 
-Verify that the `get_issues` tool correctly retrieves a list of issues from a GitHub repository with proper filtering by state (open, closed, or all).
+Verify that the `get_issues` tool correctly retrieves a list of issues and pull requests from a GitHub repository with proper filtering by state (open, closed, or all).
 
 ## Test Data Configuration
 
@@ -21,7 +21,7 @@ Verify that the `get_issues` tool correctly retrieves a list of issues from a Gi
 - The target repository exists and is accessible
 - Valid GitHub access token with appropriate permissions for the target repository
 - The testing environment has network access to GitHub API
-- Repository has at least one issue created
+- Repository has at least one issue or pull request created
 
 ## Config
 
@@ -34,10 +34,10 @@ generateTestData: false
 
 Execute the `get_issues` tool with default parameters (state="open") against the target repository.
 
-**Expectation:** The tool runs without errors and returns a list of issue objects.
+**Expectation:** The tool runs without errors and returns a list containing issue and/or pull request objects.
 
 ### Step 2: Verify Output Structure
 
-Review the tool's output to ensure it contains proper issue information.
+Review the tool's output to ensure it contains proper issue/pull request information.
 
-**Expectation:** The output is a list of issue objects. Each issue object should contain the following fields: `number`, `title`, `state`, `created_at`, `updated_at`, `url`, `labels`, and `assignees`. All `state` fields should show "open" when filtered by open state.
+**Expectation:** The output is a list of objects (may include both issues and pull requests). Each object should contain the following fields: `number`, `title`, `state`, `created_at`, `updated_at`, `url`, `labels`, and `assignees`. All `state` fields should show "open" when filtered by open state. The list may contain fewer items than expected if the repository has limited open issues/PRs.
