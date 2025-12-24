@@ -188,7 +188,7 @@ Answer only with step name, no need to add descrip in case none of the steps are
                 decision_input = state.get('messages', [])[:]
             else:
                 if len(additional_info) == 0:
-                    additional_info = """### Additoinal info: """
+                    additional_info = """### Additional info: """
                 additional_info += "{field}: {value}\n".format(field=field, value=state.get(field, ""))
         decision_input.append(HumanMessage(
             self.prompt.format(steps=self.steps, description=safe_format(self.description, state), additional_info=additional_info)))
@@ -651,10 +651,13 @@ def create_graph(
                     ))
                 elif node_type == 'decision':
                     logger.info(f'Adding decision: {node["nodes"]}')
+                    # fallback to old-style decision node
+                    decisional_inputs = node.get('decisional_inputs')
+                    decisional_inputs = node.get('input', ['messages']) if not decisional_inputs else decisional_inputs
                     lg_builder.add_node(node_id, DecisionEdge(
                         client, node['nodes'],
                         node.get('description', ""),
-                        decisional_inputs=node.get('decisional_inputs', ['messages']),
+                        decisional_inputs=decisional_inputs,
                         default_output=node.get('default_output', 'END'),
                         is_node=True
                     ))
