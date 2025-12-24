@@ -12,17 +12,66 @@ from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
+
+# User-friendly error messages for common Figma API errors
+FIGMA_ERROR_MESSAGES = {
+    429: "Figma API rate limit exceeded. Please wait a moment and try again.",
+    403: "Access denied. Please check your Figma API token has access to this file.",
+    404: "File or node not found. Please verify the file key or node ID is correct.",
+    401: "Authentication failed. Please check your Figma API token is valid.",
+    500: "Figma server error. Please try again later.",
+    503: "Figma service temporarily unavailable. Please try again later.",
+}
+
+
+def _handle_figma_error(e: ToolException) -> str:
+    """
+    Convert a ToolException from Figma API into a user-friendly error message.
+    Returns a clean error string without technical details.
+    """
+    error_str = str(e)
+
+    # Extract status code from error message
+    for code, message in FIGMA_ERROR_MESSAGES.items():
+        if f"error {code}:" in error_str.lower() or f"status\": {code}" in error_str:
+            return message
+
+    # Handle other common patterns
+    if "rate limit" in error_str.lower():
+        return FIGMA_ERROR_MESSAGES[429]
+    if "not found" in error_str.lower():
+        return FIGMA_ERROR_MESSAGES[404]
+    if "forbidden" in error_str.lower() or "access denied" in error_str.lower():
+        return FIGMA_ERROR_MESSAGES[403]
+    if "unauthorized" in error_str.lower():
+        return FIGMA_ERROR_MESSAGES[401]
+
+    # Fallback: return a generic but clean message
+    return f"Figma API request failed. Please try again or check your file key and permissions."
+
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..utils.content_parser import _load_content_from_bytes_with_prompt
 from .figma_client import AlitaFigmaPy
+from .toon_tools import (
+    TOONSerializer,
+    process_page_to_toon_data,
+    process_frame_to_toon_data,
+    extract_text_by_role,
+    extract_components,
+    detect_sequences,
+    group_variants,
+    infer_cta_destination,
+    FrameDetailTOONSchema,
+    AnalyzeFileSchema,
+)
 
 GLOBAL_LIMIT = 1000000
 GLOBAL_RETAIN = ['id', 'name', 'type', 'document', 'children']
 GLOBAL_REMOVE = []
 GLOBAL_DEPTH_START = 1
 GLOBAL_DEPTH_END = 6
-DEFAULT_NUMBER_OF_THREADS = 3  # valid range for number_of_threads is 1..5
+DEFAULT_NUMBER_OF_THREADS = 5  # valid range for number_of_threads is 1..5
 # Default prompts for image analysis and summarization reused across toolkit and wrapper
 DEFAULT_FIGMA_IMAGES_PROMPT: Dict[str, str] = {
     "prompt": (
@@ -1053,6 +1102,606 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         """Retrieves all files for a specified project ID from Figma."""
         return self._client.get_project_files(project_id)
 
+    # -------------------------------------------------------------------------
+    # TOON Format Tools (Token-Optimized Output)
+    # -------------------------------------------------------------------------
+
+    def get_file_structure_toon(
+        self,
+        url: Optional[str] = None,
+        file_key: Optional[str] = None,
+        include_pages: Optional[str] = None,
+        exclude_pages: Optional[str] = None,
+        max_frames: int = 50,
+        **kwargs,
+    ) -> str:
+        """
+        Get file structure in TOON format - optimized for LLM token consumption.
+
+        Returns a compact, human-readable format with:
+        - Page and frame hierarchy
+        - Text content categorized (headings, labels, buttons, body, errors)
+        - Component usage
+        - Inferred screen types and states
+        - Flow analysis (sequences, variants, CTA destinations)
+
+        TOON format uses ~70% fewer tokens than JSON for the same data.
+
+        Use this tool when you need to:
+        - Understand overall file structure quickly
+        - Generate user journey documentation
+        - Analyze screen flows and navigation
+        - Identify UI patterns and components
+        """
+        self._log_tool_event("Getting file structure in TOON format")
+
+        # Parse URL or use file_key
+        if url:
+            file_key, node_ids_from_url = self._parse_figma_url(url)
+            if node_ids_from_url and not include_pages:
+                include_pages = ','.join(node_ids_from_url)
+
+        if not file_key:
+            raise ToolException("Either url or file_key must be provided")
+
+        # Parse include/exclude pages
+        include_ids = [p.strip() for p in include_pages.split(',')] if include_pages else None
+        exclude_ids = [p.strip() for p in exclude_pages.split(',')] if exclude_pages else None
+
+        # Get file structure (shallow fetch - only top-level pages, not full content)
+        # This avoids "Request too large" errors for big files
+        self._log_tool_event(f"Fetching file structure for {file_key}")
+        file_data = self._client.get_file(file_key, geometry='depth=1')
+
+        if not file_data:
+            raise ToolException(f"Failed to retrieve file {file_key}")
+
+        # Process pages
+        pages_data = []
+        all_pages = file_data.document.get('children', [])
+
+        for page_node in all_pages:
+            page_id = page_node.get('id', '')
+
+            # Apply page filters
+            if include_ids and page_id not in include_ids and page_id.replace(':', '-') not in include_ids:
+                continue
+            if exclude_ids and not include_ids:
+                if page_id in exclude_ids or page_id.replace(':', '-') in exclude_ids:
+                    continue
+
+            self._log_tool_event(f"Processing page: {page_node.get('name', 'Untitled')}")
+
+            # Fetch full page content individually (avoids large single request)
+            try:
+                page_full = self._get_file_nodes(file_key, page_id)
+                if page_full:
+                    page_content = page_full.get('nodes', {}).get(page_id, {}).get('document', page_node)
+                else:
+                    page_content = page_node
+            except Exception as e:
+                self._log_tool_event(f"Warning: Could not fetch full page content for {page_id}: {e}")
+                page_content = page_node
+
+            page_data = process_page_to_toon_data(page_content)
+
+            # Limit frames per page
+            if len(page_data['frames']) > max_frames:
+                page_data['frames'] = page_data['frames'][:max_frames]
+                page_data['truncated'] = True
+
+            pages_data.append(page_data)
+
+        # Build file data structure
+        toon_data = {
+            'name': file_data.name,
+            'key': file_key,
+            'pages': pages_data,
+        }
+
+        # Serialize to TOON format
+        serializer = TOONSerializer()
+        result = serializer.serialize_file(toon_data)
+
+        self._log_tool_event("File structure extracted in TOON format")
+        return result
+
+    def get_page_flows_toon(
+        self,
+        url: Optional[str] = None,
+        file_key: Optional[str] = None,
+        page_id: Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        """
+        Analyze a single page for user flows in TOON format.
+
+        Returns detailed flow analysis:
+        - Frame sequence detection (from naming: 01_, Step 1, etc.)
+        - Screen variant grouping (Login, Login_Error, Login_Loading)
+        - CTA/button destination mapping
+        - Spatial ordering hints
+
+        Use this for in-depth flow analysis of a specific page.
+        Requires a PAGE ID (not a frame ID). Use get_file_structure_toon to find page IDs.
+        """
+        self._log_tool_event("Analyzing page flows in TOON format")
+
+        # Parse URL
+        if url:
+            file_key, node_ids_from_url = self._parse_figma_url(url)
+            if node_ids_from_url:
+                page_id = node_ids_from_url[0]
+
+        if not file_key:
+            raise ToolException("Either url or file_key must be provided")
+        if not page_id:
+            raise ToolException("page_id must be provided (or include node-id in URL)")
+
+        # Fetch node content
+        self._log_tool_event(f"Fetching node {page_id} from file {file_key}")
+        node_full = self._get_file_nodes(file_key, page_id)
+
+        if not node_full:
+            raise ToolException(f"Failed to retrieve node {page_id}")
+
+        node_content = node_full.get('nodes', {}).get(page_id, {}).get('document', {})
+        if not node_content:
+            raise ToolException(f"Node {page_id} has no content")
+
+        # Check if this is a page (CANVAS) or a frame
+        node_type = node_content.get('type', '').upper()
+        if node_type != 'CANVAS':
+            # This is a frame, not a page - provide helpful error
+            raise ToolException(
+                f"Node {page_id} is a {node_type}, not a PAGE. "
+                f"This tool requires a page ID. Use get_file_structure_toon first to find page IDs "
+                f"(look for PAGE: ... #<page_id>)"
+            )
+
+        page_content = node_content
+
+        # Process page
+        page_data = process_page_to_toon_data(page_content)
+        frames = page_data.get('frames', [])
+
+        # Build detailed flow analysis
+        lines = []
+        lines.append(f"PAGE: {page_data.get('name', 'Untitled')} [id:{page_id}]")
+        lines.append(f"  frames: {len(frames)}")
+        lines.append("")
+
+        # Sequence analysis
+        sequences = detect_sequences(frames)
+        if sequences:
+            lines.append("SEQUENCES (by naming):")
+            for seq in sequences:
+                lines.append(f"  {' > '.join(seq)}")
+            lines.append("")
+
+        # Variant analysis
+        variants = group_variants(frames)
+        if variants:
+            lines.append("VARIANTS (grouped screens):")
+            for base, variant_list in variants.items():
+                lines.append(f"  {base}:")
+                for v in variant_list:
+                    v_name = v.get('name', '')
+                    v_id = v.get('id', '')
+                    state = next((f.get('state', 'default') for f in frames if f.get('name') == v_name), 'default')
+                    lines.append(f"    - {v_name} [{state}] #{v_id}")
+            lines.append("")
+
+        # CTA mapping
+        lines.append("CTA DESTINATIONS:")
+        cta_map = {}
+        for frame in frames:
+            frame_name = frame.get('name', '')
+            for btn in frame.get('buttons', []):
+                dest = infer_cta_destination(btn)
+                if dest not in cta_map:
+                    cta_map[dest] = []
+                cta_map[dest].append(f'"{btn}" in {frame_name}')
+
+        for dest, ctas in cta_map.items():
+            lines.append(f"  > {dest}:")
+            for cta in ctas[:5]:  # Limit per destination
+                lines.append(f"      {cta}")
+        lines.append("")
+
+        # Spatial ordering
+        lines.append("SPATIAL ORDER (canvas position):")
+        sorted_frames = sorted(frames, key=lambda f: (f['position']['y'], f['position']['x']))
+        for i, frame in enumerate(sorted_frames[:20], 1):
+            pos = frame.get('position', {})
+            lines.append(f"  {i}. {frame.get('name', '')} [{int(pos.get('x', 0))},{int(pos.get('y', 0))}]")
+
+        # Frame details
+        lines.append("")
+        lines.append("FRAME DETAILS:")
+
+        serializer = TOONSerializer()
+        for frame in frames[:30]:  # Limit frames
+            frame_lines = serializer.serialize_frame(frame, level=1)
+            lines.extend(frame_lines)
+
+        self._log_tool_event("Page flow analysis complete")
+        return '\n'.join(lines)
+
+    def get_frame_detail_toon(
+        self,
+        file_key: str,
+        frame_ids: str,
+        **kwargs,
+    ) -> str:
+        """
+        Get detailed information for specific frames in TOON format.
+
+        Returns per-frame:
+        - All text content (headings, labels, buttons, body, errors)
+        - Component hierarchy
+        - Inferred screen type and state
+        - Position and size
+
+        Use this to drill down into specific screens identified from file structure.
+        """
+        try:
+            return self._get_frame_detail_toon_internal(file_key=file_key, frame_ids=frame_ids, **kwargs)
+        except ToolException as e:
+            raise ToolException(_handle_figma_error(e))
+
+    def _get_frame_detail_toon_internal(
+        self,
+        file_key: str,
+        frame_ids: str,
+        **kwargs,
+    ) -> str:
+        """Internal implementation of get_frame_detail_toon without error handling wrapper."""
+        self._log_tool_event("Getting frame details in TOON format")
+
+        ids_list = [fid.strip() for fid in frame_ids.split(',') if fid.strip()]
+        if not ids_list:
+            raise ToolException("frame_ids must contain at least one frame ID")
+
+        # Fetch frames
+        self._log_tool_event(f"Fetching {len(ids_list)} frames from file {file_key}")
+        nodes_data = self._get_file_nodes(file_key, ','.join(ids_list))
+
+        if not nodes_data:
+            raise ToolException(f"Failed to retrieve frames from file {file_key}")
+
+        # Process each frame
+        lines = [f"FRAMES [{len(ids_list)} requested]", ""]
+
+        serializer = TOONSerializer()
+
+        for frame_id in ids_list:
+            node_data = nodes_data.get('nodes', {}).get(frame_id, {})
+            frame_node = node_data.get('document', {})
+
+            if not frame_node:
+                lines.append(f"FRAME: {frame_id} [NOT FOUND]")
+                lines.append("")
+                continue
+
+            frame_data = process_frame_to_toon_data(frame_node)
+            frame_lines = serializer.serialize_frame(frame_data, level=0)
+            lines.extend(frame_lines)
+
+            # Add extra details for individual frames
+            lines.append(f"  ID: {frame_id}")
+
+            # Component breakdown
+            components = frame_data.get('components', [])
+            if components:
+                # Count component usage
+                from collections import Counter
+                comp_counts = Counter(components)
+                lines.append(f"  COMPONENT_COUNTS:")
+                for comp, count in comp_counts.most_common(10):
+                    lines.append(f"    {comp}: {count}")
+
+            lines.append("")
+
+        self._log_tool_event("Frame details extracted")
+        return '\n'.join(lines)
+
+    def analyze_file(
+        self,
+        url: Optional[str] = None,
+        file_key: Optional[str] = None,
+        node_id: Optional[str] = None,
+        include_pages: Optional[str] = None,
+        exclude_pages: Optional[str] = None,
+        max_frames: int = 50,
+        **kwargs,
+    ) -> str:
+        """
+        Comprehensive Figma file analyzer with LLM-powered insights.
+
+        Returns detailed analysis including:
+        - File/page/frame structure with all content (text, buttons, components)
+        - LLM-powered screen explanations with visual insights (using frame images)
+        - LLM-powered user flow analysis identifying key user journeys
+        - Design insights (patterns, gaps, recommendations)
+
+        Drill-Down:
+          - No node_id: Analyzes entire file (respecting include/exclude pages)
+          - node_id=page_id: Focuses on specific page
+          - node_id=frame_id: Returns detailed frame analysis
+
+        For targeted analysis of specific frames (2-3 frames), use get_frame_detail_toon instead.
+        """
+        try:
+            return self._analyze_file_internal(
+                url=url,
+                file_key=file_key,
+                node_id=node_id,
+                include_pages=include_pages,
+                exclude_pages=exclude_pages,
+                max_frames=max_frames,
+                **kwargs,
+            )
+        except ToolException as e:
+            raise ToolException(_handle_figma_error(e))
+
+    def _analyze_file_internal(
+        self,
+        url: Optional[str] = None,
+        file_key: Optional[str] = None,
+        node_id: Optional[str] = None,
+        include_pages: Optional[str] = None,
+        exclude_pages: Optional[str] = None,
+        max_frames: int = 50,
+        **kwargs,
+    ) -> str:
+        """Internal implementation of analyze_file without error handling wrapper."""
+        # Always use maximum detail level and LLM analysis
+        detail_level = 3
+        llm_analysis = 'detailed' if self.llm else 'none'
+        self._log_tool_event(f"Getting file in TOON format (detail_level={detail_level}, llm_analysis={llm_analysis})")
+
+        # Parse URL if provided
+        if url:
+            file_key, node_ids_from_url = self._parse_figma_url(url)
+            if node_ids_from_url and not node_id:
+                node_id = node_ids_from_url[0]
+
+        if not file_key:
+            raise ToolException("Either url or file_key must be provided")
+
+        # Convert node_id from URL format (hyphen) to API format (colon)
+        if node_id:
+            node_id = node_id.replace('-', ':')
+
+        # Check if node_id is a frame or page (for drill-down)
+        node_id_is_page = False
+        if node_id:
+            try:
+                nodes_data = self._get_file_nodes(file_key, node_id)
+                if nodes_data:
+                    node_info = nodes_data.get('nodes', {}).get(node_id, {})
+                    node_doc = node_info.get('document', {})
+                    node_type = node_doc.get('type', '').upper()
+
+                    if node_type == 'FRAME':
+                        # It's a frame - use frame detail tool (internal to avoid double-wrapping)
+                        return self._get_frame_detail_toon_internal(file_key=file_key, frame_ids=node_id)
+                    elif node_type == 'CANVAS':
+                        # It's a page - we'll filter to this page
+                        node_id_is_page = True
+            except Exception:
+                pass  # Fall through to page/file analysis
+
+        # Get file structure
+        file_data = self._client.get_file(file_key, geometry='depth=1')
+        if not file_data:
+            raise ToolException(f"Failed to retrieve file {file_key}")
+
+        # Determine which pages to process
+        # Check if document exists and has the expected structure
+        if not hasattr(file_data, 'document') or file_data.document is None:
+            self._log_tool_event(f"Warning: file_data has no document attribute. Type: {type(file_data)}")
+            all_pages = []
+        else:
+            all_pages = file_data.document.get('children', [])
+        self._log_tool_event(f"File has {len(all_pages)} pages, node_id={node_id}, node_id_is_page={node_id_is_page}")
+
+        # Only filter by node_id if it's confirmed to be a page ID
+        if node_id and node_id_is_page:
+            include_pages = node_id
+
+        include_ids = [p.strip() for p in include_pages.split(',')] if include_pages else None
+        exclude_ids = [p.strip() for p in exclude_pages.split(',')] if exclude_pages else None
+
+        pages_to_process = []
+        for page_node in all_pages:
+            page_id = page_node.get('id', '')
+            if include_ids and page_id not in include_ids:
+                continue
+            if exclude_ids and page_id in exclude_ids:
+                continue
+            pages_to_process.append(page_node)
+
+        # Build output based on detail level
+        lines = [f"FILE: {file_data.name} [key:{file_key}]"]
+        serializer = TOONSerializer()
+
+        all_frames_for_flows = []  # Collect frames for flow analysis at Level 2+
+
+        if not pages_to_process:
+            if not all_pages:
+                lines.append("  [No pages found in file - file may be empty or access restricted]")
+            else:
+                lines.append(f"  [All {len(all_pages)} pages filtered out by include/exclude settings]")
+            self._log_tool_event(f"No pages to process. all_pages={len(all_pages)}, include_ids={include_ids}, exclude_ids={exclude_ids}")
+
+        self._log_tool_event(f"Processing {len(pages_to_process)} pages at detail_level={detail_level}")
+
+        for page_node in pages_to_process:
+            page_id = page_node.get('id', '')
+            page_name = page_node.get('name', 'Untitled')
+
+            if detail_level == 1:
+                # Level 1: Structure only - just hierarchy with IDs
+                lines.append(f"  PAGE: {page_name} #{page_id}")
+                frames = page_node.get('children', [])[:max_frames]
+                for frame in frames:
+                    if frame.get('type', '').upper() == 'FRAME':
+                        frame_id = frame.get('id', '')
+                        frame_name = frame.get('name', 'Untitled')
+                        lines.append(f"    FRAME: {frame_name} #{frame_id}")
+            else:
+                # Level 2+: Need full page content - fetch via nodes API
+                page_fetch_error = None
+                try:
+                    nodes_data = self._get_file_nodes(file_key, page_id)
+                    if nodes_data:
+                        full_page_node = nodes_data.get('nodes', {}).get(page_id, {}).get('document', {})
+                        if full_page_node:
+                            page_node = full_page_node
+                except ToolException as e:
+                    page_fetch_error = _handle_figma_error(e)
+                    self._log_tool_event(f"Error fetching page {page_id}: {page_fetch_error}")
+                except Exception as e:
+                    page_fetch_error = str(e)
+                    self._log_tool_event(f"Error fetching page {page_id}: {e}")
+
+                # Process whatever data we have (full or shallow)
+                page_data = process_page_to_toon_data(page_node, max_frames=max_frames)
+                frames = page_data.get('frames', [])
+
+                # If we had an error and got no frames, show the error
+                if page_fetch_error and not frames:
+                    lines.append(f"  PAGE: {page_name} #{page_id}")
+                    lines.append(f"    [Error: {page_fetch_error}]")
+                    continue
+
+                if detail_level == 2:
+                    # Level 2: Standard - content via serialize_page
+                    page_lines = serializer.serialize_page(page_data, level=0)
+                    lines.extend(page_lines)
+                else:
+                    # Level 3: Detailed - content + per-frame component counts
+                    lines.append(f"PAGE: {page_data.get('name', 'Untitled')} #{page_data.get('id', '')}")
+                    for frame_data in frames:
+                        frame_lines = serializer.serialize_frame(frame_data, level=1)
+                        lines.extend(frame_lines)
+
+                        # Add detailed component counts
+                        components = frame_data.get('components', [])
+                        if components:
+                            from collections import Counter
+                            comp_counts = Counter(components)
+                            lines.append(f"    COMPONENT_COUNTS:")
+                            for comp, count in comp_counts.most_common(10):
+                                lines.append(f"      {comp}: {count}")
+
+                # Collect frames for flow analysis
+                all_frames_for_flows.extend(frames)
+
+            lines.append("")
+
+        # Level 2+: Add global flow analysis at the end
+        if detail_level >= 2 and all_frames_for_flows:
+            flow_lines = serializer.serialize_flows(all_frames_for_flows, level=0)
+            if flow_lines:
+                lines.append("FLOWS:")
+                lines.extend(flow_lines)
+
+        toon_output = '\n'.join(lines)
+
+        # Add LLM analysis if requested
+        if llm_analysis and llm_analysis != 'none' and self.llm:
+            self._log_tool_event(f"Running LLM analysis (level={llm_analysis})")
+            try:
+                # Build file_data structure for LLM analysis
+                file_data_for_llm = {
+                    'name': file_data.name,
+                    'key': file_key,
+                    'pages': [],
+                }
+                # Collect frame IDs for image fetching (for detailed analysis)
+                all_frame_ids = []
+
+                # Re-use processed page data
+                for page_node in pages_to_process:
+                    page_id = page_node.get('id', '')
+                    try:
+                        # Fetch full page if needed
+                        nodes_data = self._get_file_nodes(file_key, page_id)
+                        if nodes_data:
+                            full_page_node = nodes_data.get('nodes', {}).get(page_id, {}).get('document', {})
+                            if full_page_node:
+                                page_node = full_page_node
+                    except Exception:
+                        pass  # Use shallow data
+                    page_data = process_page_to_toon_data(page_node, max_frames=max_frames)
+                    file_data_for_llm['pages'].append(page_data)
+
+                    # Collect frame IDs for vision analysis
+                    for frame in page_data.get('frames', []):
+                        frame_id = frame.get('id')
+                        if frame_id:
+                            all_frame_ids.append(frame_id)
+
+                # Fetch frame images for vision-based analysis (detailed mode only)
+                frame_images = {}
+                if llm_analysis == 'detailed' and all_frame_ids:
+                    self._log_tool_event(f"Fetching images for {len(all_frame_ids[:10])} frames (vision analysis)")
+                    try:
+                        # Limit to first 10 frames for performance
+                        frame_ids_to_fetch = all_frame_ids[:10]
+                        images_response = self._client.get_file_images(
+                            file_key=file_key,
+                            ids=frame_ids_to_fetch,
+                            scale=1,  # Scale 1 is sufficient for analysis
+                            format='png'
+                        )
+                        if images_response and hasattr(images_response, 'images'):
+                            frame_images = images_response.images or {}
+                            self._log_tool_event(f"Fetched {len(frame_images)} frame images")
+                            self._log_tool_event("Processing images and preparing for LLM analysis...")
+                    except Exception as img_err:
+                        self._log_tool_event(f"Frame image fetch failed (continuing without vision): {img_err}")
+                        # Continue without images - will fall back to text analysis
+
+                # Create status callback for progress updates
+                def _status_callback(msg: str):
+                    self._log_tool_event(msg)
+
+                # Import here to avoid circular imports
+                from .toon_tools import enrich_toon_with_llm_analysis
+
+                # Check if design insights should be included (default True)
+                include_design_insights = kwargs.get('include_design_insights', True)
+
+                # Get parallel workers from toolkit config (or default)
+                parallel_workers = getattr(self, "number_of_threads", DEFAULT_NUMBER_OF_THREADS)
+                if parallel_workers is None or not isinstance(parallel_workers, int):
+                    parallel_workers = DEFAULT_NUMBER_OF_THREADS
+                parallel_workers = max(1, min(parallel_workers, 5))
+
+                self._log_tool_event(f"Starting LLM analysis of {len(all_frame_ids[:10])} frames with {parallel_workers} parallel workers...")
+                toon_output = enrich_toon_with_llm_analysis(
+                    toon_output=toon_output,
+                    file_data=file_data_for_llm,
+                    llm=self.llm,
+                    analysis_level=llm_analysis,
+                    frame_images=frame_images,
+                    status_callback=_status_callback,
+                    include_design_insights=include_design_insights,
+                    parallel_workers=parallel_workers,
+                )
+                self._log_tool_event("LLM analysis complete")
+            except Exception as e:
+                self._log_tool_event(f"LLM analysis failed: {e}")
+                # Return TOON output without LLM analysis on error
+                toon_output += f"\n\n[LLM analysis failed: {e}]"
+
+        self._log_tool_event(f"File analysis complete (detail_level={detail_level})")
+        return toon_output
+
     @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
@@ -1109,5 +1758,20 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 "description": self.get_project_files.__doc__,
                 "args_schema": ArgsSchema.ProjectFiles.value,
                 "ref": self.get_project_files,
+            },
+            # TOON Format Tools (Token-Optimized)
+            # Primary unified tool with configurable detail levels
+            {
+                "name": "analyze_file",
+                "description": self.analyze_file.__doc__,
+                "args_schema": AnalyzeFileSchema,
+                "ref": self.analyze_file,
+            },
+            # Targeted drill-down for specific frames (more efficient than level 3 for 2-3 frames)
+            {
+                "name": "get_frame_detail_toon",
+                "description": self.get_frame_detail_toon.__doc__,
+                "args_schema": FrameDetailTOONSchema,
+                "ref": self.get_frame_detail_toon,
             },
         ]
