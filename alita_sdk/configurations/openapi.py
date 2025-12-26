@@ -1,6 +1,9 @@
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
+import base64
+import requests
+
 
 class OpenApiConfiguration(BaseModel):
     """
@@ -173,8 +176,6 @@ class OpenApiConfiguration(BaseModel):
             None: Configuration is valid (or cannot be validated for this auth type)
             str: Error message describing the validation failure
         """
-        import base64
-        import requests
         
         # =====================================================================
         # Determine authentication type from configured fields
