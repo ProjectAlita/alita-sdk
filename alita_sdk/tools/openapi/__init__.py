@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -105,7 +106,9 @@ def _obtain_oauth_token(
         if scope:
             data['scope'] = scope
         
-        logger.debug(f"OAuth token request to {token_url} using method '{method}'")
+        # Log only the domain to avoid exposing sensitive path parameters (e.g., tenant IDs)
+        token_domain = urlparse(token_url).netloc or 'unknown'
+        logger.debug(f"OAuth token request to {token_domain} using method '{method}'")
         
         response = requests.post(
             token_url,
