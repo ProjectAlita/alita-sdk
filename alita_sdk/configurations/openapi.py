@@ -300,12 +300,24 @@ class OpenApiConfiguration(BaseModel):
             return f"OAuth token request failed with status {response.status_code}"
             
         except requests.exceptions.SSLError as e:
-            return f"SSL certificate verification failed for OAuth endpoint: {e}"
-        except requests.exceptions.ConnectionError:
-            return f"Cannot connect to OAuth token endpoint: {token_url}"
+            error_str = str(e).lower()
+            if 'hostname mismatch' in error_str:
+                return "OAuth token_url hostname does not match SSL certificate - verify the URL is correct"
+            if 'certificate verify failed' in error_str:
+                return "SSL certificate verification failed for OAuth endpoint - the server may have an invalid or self-signed certificate"
+            if 'certificate has expired' in error_str:
+                return "SSL certificate has expired for OAuth endpoint"
+            return "SSL error connecting to OAuth endpoint - verify the token_url is correct"
+        except requests.exceptions.ConnectionError as e:
+            error_str = str(e).lower()
+            if 'name or service not known' in error_str or 'nodename nor servname provided' in error_str:
+                return "OAuth token_url hostname could not be resolved - verify the URL is correct"
+            if 'connection refused' in error_str:
+                return "Connection refused by OAuth endpoint - verify the token_url and port are correct"
+            return "Cannot connect to OAuth token endpoint - verify the token_url is correct"
         except requests.exceptions.Timeout:
-            return f"OAuth token request timed out: {token_url}"
-        except requests.exceptions.RequestException as e:
-            return f"OAuth request error: {e}"
-        except Exception as e:
-            return f"Unexpected error during OAuth token check: {e}"
+            return "OAuth token request timed out - the endpoint may be unreachable"
+        except requests.exceptions.RequestException:
+            return "OAuth request failed - verify the token_url is correct and accessible"
+        except Exception:
+            return "Unexpected error during OAuth configuration validation"
