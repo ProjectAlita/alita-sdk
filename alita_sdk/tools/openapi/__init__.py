@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 name = 'openapi'
 
 # Module-level token cache: {cache_key: (access_token, expires_at_timestamp)}
+# Protected by _oauth_token_cache_lock for thread-safe access
 _oauth_token_cache: Dict[str, Tuple[str, float]] = {}
+_oauth_token_cache_lock = threading.Lock()
 
 # Token expiry buffer in seconds (refresh 60 seconds before actual expiry)
 _TOKEN_EXPIRY_BUFFER = 60
@@ -33,23 +36,25 @@ def _get_oauth_cache_key(client_id: str, token_url: str, scope: Optional[str]) -
 
 
 def _get_cached_token(cache_key: str) -> Optional[str]:
-    """Get a cached token if it exists and is not expired."""
-    if cache_key not in _oauth_token_cache:
-        return None
-    token, expires_at = _oauth_token_cache[cache_key]
-    if time.time() >= expires_at - _TOKEN_EXPIRY_BUFFER:
-        # Token expired or about to expire
-        del _oauth_token_cache[cache_key]
-        return None
-    return token
+    """Get a cached token if it exists and is not expired. Thread-safe."""
+    with _oauth_token_cache_lock:
+        if cache_key not in _oauth_token_cache:
+            return None
+        token, expires_at = _oauth_token_cache[cache_key]
+        if time.time() >= expires_at - _TOKEN_EXPIRY_BUFFER:
+            # Token expired or about to expire
+            del _oauth_token_cache[cache_key]
+            return None
+        return token
 
 
 def _cache_token(cache_key: str, token: str, expires_in: Optional[int]) -> None:
-    """Cache a token with its expiry time."""
+    """Cache a token with its expiry time. Thread-safe."""
     # Default to 1 hour if expires_in not provided
     expires_in = expires_in or 3600
     expires_at = time.time() + expires_in
-    _oauth_token_cache[cache_key] = (token, expires_at)
+    with _oauth_token_cache_lock:
+        _oauth_token_cache[cache_key] = (token, expires_at)
 
 
 def _obtain_oauth_token(
