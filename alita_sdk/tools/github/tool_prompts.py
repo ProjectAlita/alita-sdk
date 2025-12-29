@@ -1,4 +1,10 @@
-CREATE_FILE_PROMPT = """Create new file in your github repository."""
+CREATE_FILE_PROMPT = """Create a new file in your GitHub repository. Supports two modes:
+1. Create from content: Use 'file_contents' parameter to create new files with text, code, JSON, or structured data
+2. Copy existing file: Use 'artifact_id' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
+
+IMPORTANT: Provide EITHER 'file_contents' OR 'artifact_id', never both or neither.
+Use artifact_id when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
+The artifact_id can be found in previous file_modified events in the conversation history."""
 
 UPDATE_FILE_PROMPT = """Updates the contents of a file in repository. Input MUST strictly follow these rules:
 Specify the file to modify by passing a full file path (the path must not start with a slash); Specify at lest 2 lines of the old contents which you would like to replace wrapped in OLD <<<< and >>>> OLD; Specify the new contents which you would like to replace the old contents with wrapped in NEW <<<< and >>>> NEW; NEW content may contain lines from OLD content in case you want to add content without removing the old content
