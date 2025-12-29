@@ -9,6 +9,7 @@ from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length, parse_list, check_connection_response
 from ...configurations.jira import JiraConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOLKIT_TYPE_META, TOOL_NAME_META
 
 name = "jira"
 
