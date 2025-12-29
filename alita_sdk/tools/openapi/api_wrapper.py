@@ -187,7 +187,6 @@ def _resolve_server_variables(url: str, variables: Optional[dict]) -> tuple[str,
     
     # Check for any remaining {variable} placeholders that weren't in the variables dict
     # This catches cases where the URL has placeholders but no variables definition
-    import re
     remaining_placeholders = re.findall(r'\{([^}]+)\}', result)
     for placeholder_name in remaining_placeholders:
         if placeholder_name not in missing_defaults:
