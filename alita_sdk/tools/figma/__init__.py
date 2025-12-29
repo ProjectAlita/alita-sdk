@@ -35,11 +35,12 @@ def get_tools(tool):
             embedding_model=tool['settings'].get('embedding_model'),
             vectorstore_type="PGVector",
             # figma summary/image prompt settings (toolkit-level)
-            apply_images_prompt=tool["settings"].get("apply_images_prompt"),
-            images_prompt=tool["settings"].get("images_prompt"),
-            apply_summary_prompt=tool["settings"].get("apply_summary_prompt"),
-            summary_prompt=tool["settings"].get("summary_prompt"),
-            number_of_threads=tool["settings"].get("number_of_threads"),
+            # TODO disabled until new requirements
+            # apply_images_prompt=tool["settings"].get("apply_images_prompt"),
+            # images_prompt=tool["settings"].get("images_prompt"),
+            # apply_summary_prompt=tool["settings"].get("apply_summary_prompt"),
+            # summary_prompt=tool["settings"].get("summary_prompt"),
+            # number_of_threads=tool["settings"].get("number_of_threads"),
         )
         .get_tools()
     )
@@ -56,29 +57,30 @@ class FigmaToolkit(BaseToolkit):
         }
         return create_model(
             name,
-            apply_images_prompt=(Optional[bool], Field(
-                description="Enable advanced image processing instructions for Figma image nodes.",
-                default=True,
-            )),
-            images_prompt=(Optional[Dict[str, str]], Field(
-                description=(
-                    "Instruction for how to analyze image-based nodes "
-                    "(screenshots, diagrams, etc.) during Figma file retrieving. "
-                    "Must contain a single 'prompt' key with the text."
-                ),
-                default=DEFAULT_FIGMA_IMAGES_PROMPT,
-            )),
-            apply_summary_prompt=(Optional[bool], Field(
-                description="Enable LLM-based summarization over loaded Figma data.",
-                default=True,
-            )),
-            summary_prompt=(Optional[Dict[str, str]], Field(
-                description=(
-                    "Instruction for the LLM on how to summarize loaded Figma data. "
-                    "Must contain a single 'prompt' key with the text."
-                ),
-                default=DEFAULT_FIGMA_SUMMARY_PROMPT,
-            )),
+            # TODO disabled until new requirements
+            # apply_images_prompt=(Optional[bool], Field(
+            #     description="Enable advanced image processing instructions for Figma image nodes.",
+            #     default=True,
+            # )),
+            # images_prompt=(Optional[Dict[str, str]], Field(
+            #     description=(
+            #         "Instruction for how to analyze image-based nodes "
+            #         "(screenshots, diagrams, etc.) during Figma file retrieving. "
+            #         "Must contain a single 'prompt' key with the text."
+            #     ),
+            #     default=DEFAULT_FIGMA_IMAGES_PROMPT,
+            # )),
+            # apply_summary_prompt=(Optional[bool], Field(
+            #     description="Enable LLM-based summarization over loaded Figma data.",
+            #     default=True,
+            # )),
+            # summary_prompt=(Optional[Dict[str, str]], Field(
+            #     description=(
+            #         "Instruction for the LLM on how to summarize loaded Figma data. "
+            #         "Must contain a single 'prompt' key with the text."
+            #     ),
+            #     default=DEFAULT_FIGMA_SUMMARY_PROMPT,
+            # )),
             number_of_threads=(Optional[int], Field(
                 description=(
                     "Number of worker threads to use when downloading and processing Figma images. "
