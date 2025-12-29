@@ -7,6 +7,7 @@ from langchain_core.tools import BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 from ..tools.artifact import ArtifactWrapper
+from ..utils.constants import TOOLKIT_NAME_META, TOOLKIT_TYPE_META, TOOL_NAME_META
 from ...tools.base.tool import BaseAction
 from ...configurations.pgvector import PgVectorConfiguration
 
@@ -68,7 +69,7 @@ class ArtifactToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name, "toolkit_type": "artifact"} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: "artifact", TOOL_NAME_META: tool['name']} if toolkit_name else {}
             ))
         return cls(tools=tools)
     

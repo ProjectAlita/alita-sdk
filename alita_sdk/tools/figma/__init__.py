@@ -14,6 +14,7 @@ from .api_wrapper import (
 from ..elitea_base import filter_missconfigured_index_tools
 from ...configurations.figma import FigmaConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "figma"
 
@@ -143,7 +144,7 @@ class FigmaToolkit(BaseToolkit):
                     name=tool["name"],
                     description=description,
                     args_schema=tool["args_schema"],
-                    metadata={"toolkit_name": toolkit_name, "toolkit_type": name} if toolkit_name else {}
+                    metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
                 )
             )
         return cls(tools=tools)

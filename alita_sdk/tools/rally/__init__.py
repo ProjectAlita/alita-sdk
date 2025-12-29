@@ -7,6 +7,7 @@ from ..base.tool import BaseAction
 from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.rally import RallyConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "rally"
 
@@ -66,7 +67,7 @@ class RallyToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name, "toolkit_type": name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 
