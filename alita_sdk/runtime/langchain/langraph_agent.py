@@ -753,7 +753,7 @@ def create_graph(
         )
     except ValueError as e:
         raise ValueError(
-            f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n{lg_builder.nodes}\n\n**Schema Enges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{tools}")
+            f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n*{'\n*'.join(lg_builder.nodes.keys())}\n\n**Schema Edges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{format_tools(tools)}")
     # If building a nested subgraph, return the raw CompiledStateGraph
     if for_subgraph:
         return graph
@@ -766,6 +766,14 @@ def create_graph(
         output_variables=node.get('output', [])
     )
     return compiled.validate()
+
+def format_tools(tools_list: list) -> str:
+    """Format a list of tool names into a comma-separated string."""
+    try:
+        return '\n* '.join([tool.name for tool in tools_list])
+    except Exception as e:
+        logger.warning(f"Failed to format tools list: {e}")
+        return str(tools_list)
 
 def set_defaults(d):
     """Set default values for dictionary entries based on their type."""
