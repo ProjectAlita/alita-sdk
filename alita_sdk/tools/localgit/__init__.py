@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, create_model, Field
 
 from .local_git import LocalGit
 from .tool import LocalGitAction
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "localgit"
 
@@ -55,7 +56,7 @@ class AlitaLocalGitToolkit(BaseToolkit):
                 mode=tool["mode"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name, "toolkit_type": name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 

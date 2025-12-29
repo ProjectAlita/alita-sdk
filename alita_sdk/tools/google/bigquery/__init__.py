@@ -8,6 +8,7 @@ from ....configurations.bigquery import BigQueryConfiguration
 from ...utils import clean_string, get_max_toolkit_length
 from .api_wrapper import BigQueryApiWrapper
 from .tool import BigQueryAction
+from ....runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "bigquery"
 
@@ -129,7 +130,7 @@ class BigQueryToolkit(BaseToolkit):
                             name=t["name"],
                             description=description,
                             args_schema=t["args_schema"],
-                            metadata={"toolkit_name": toolkit_name, "toolkit_type": name} if toolkit_name else {}
+                            metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: t["name"]} if toolkit_name else {TOOL_NAME_META: t["name"]}
                         )
                     )
         return instance

@@ -23,6 +23,7 @@ from langgraph.store.base import BaseStore
 from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping, safe_format
+from ..utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META
 from ..tools.function import FunctionTool
 from ..tools.indexer_tool import IndexerNode
 from ..tools.llm import LLMNode
@@ -447,6 +448,50 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
     return compiled
 
 
+def find_tool_by_name_or_metadata(tools: list, tool_name: str, toolkit_name: Optional[str] = None) -> Optional[BaseTool]:
+    """
+    Find a tool by name or by matching metadata (toolkit_name + tool_name).
+
+    For toolkit nodes with toolkit_name specified, this function checks:
+    1. Metadata match first (toolkit_name + tool_name) - PRIORITY when toolkit_name is provided
+    2. Direct tool name match (backward compatibility fallback)
+
+    For toolkit nodes without toolkit_name, or other node types:
+    1. Direct tool name match
+
+    Args:
+        tools: List of available tools
+        tool_name: The tool name to search for
+        toolkit_name: Optional toolkit name for metadata matching
+
+    Returns:
+        The matching tool or None if not found
+    """
+    # When toolkit_name is specified, prioritize metadata matching
+    if toolkit_name:
+        for tool in tools:
+            # Check metadata match first
+            if hasattr(tool, 'metadata') and tool.metadata:
+                metadata_toolkit_name = tool.metadata.get(TOOLKIT_NAME_META)
+                metadata_tool_name = tool.metadata.get(TOOL_NAME_META)
+
+                # Match if both toolkit_name and tool_name in metadata match
+                if metadata_toolkit_name == toolkit_name and metadata_tool_name == tool_name:
+                    return tool
+
+        # Fallback to direct name match for backward compatibility
+        for tool in tools:
+            if tool.name == tool_name:
+                return tool
+    else:
+        # No toolkit_name specified, use direct name match only
+        for tool in tools:
+            if tool.name == tool_name:
+                return tool
+
+    return None
+
+
 def create_graph(
         client: Any,
         yaml_schema: str,
@@ -482,19 +527,37 @@ def create_graph(
             node_type = node.get('type', 'function')
             node_id = clean_string(node['id'])
             toolkit_name = node.get('toolkit_name')
-            tool_name = clean_string(node.get('tool', node_id))
+            tool_name = clean_string(node.get('tool', ''))
             # Tool names are now clean (no prefix needed)
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
             if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
-                if node_type == 'mcp' and tool_name not in [tool.name for tool in tools]:
-                    # MCP is not connected and node cannot be added
-                    raise ToolException(f"MCP tool '{tool_name}' not found in the provided tools. "
-                                        f"Make sure it is connected properly. Available tools: {[tool.name for tool in tools]}")
-                for tool in tools:
-                    if tool.name == tool_name:
+                if node_type in ['mcp', 'toolkit', 'agent'] and not tool_name:
+                    # tool is not specified
+                    raise ToolException(f"Tool name is required for {node_type} node with id '{node_id}'")
+
+                # Unified validation and tool finding for toolkit, mcp, and agent node types
+                matching_tool = None
+                if node_type in ['toolkit', 'mcp', 'agent']:
+                    # Use enhanced validation that checks both direct name and metadata
+                    matching_tool = find_tool_by_name_or_metadata(tools, tool_name, toolkit_name)
+                    if not matching_tool:
+                        # tool is not found in the provided tools
+                        error_msg = f"Node `{node_id}` with type `{node_type}` has tool '{tool_name}'"
+                        if toolkit_name:
+                            error_msg += f" (toolkit: '{toolkit_name}')"
+                        error_msg += f" which is not found in the provided tools. Make sure it is connected properly. Available tools: {format_tools(tools)}"
+                        raise ToolException(error_msg)
+                else:
+                    # For other node types, find tool by direct name match
+                    for tool in tools:
+                        if tool.name == tool_name:
+                            matching_tool = tool
+                            break
+
+                if matching_tool:
                         if node_type in ['function', 'toolkit', 'mcp']:
                             lg_builder.add_node(node_id, FunctionTool(
-                                tool=tool, name=node_id, return_type='dict',
+                                tool=matching_tool, name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_mapping=node.get('input_mapping',
                                                        {'messages': {'type': 'variable', 'value': 'messages'}}),
@@ -505,7 +568,7 @@ def create_graph(
                                                      {'messages': {'type': 'variable', 'value': 'messages'}})
                             output_vars = node.get('output', [])
                             lg_builder.add_node(node_id, FunctionTool(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 name=node_id, return_type='str',
                                 output_variables=output_vars + ['messages'] if 'messages' not in output_vars else output_vars,
                                 input_variables=input_params,
@@ -513,15 +576,15 @@ def create_graph(
                             ))
                         elif node_type == 'subgraph' or node_type == 'pipeline':
                             # assign parent memory/store
-                            # tool.checkpointer = memory
-                            # tool.store = store
+                            # matching_tool.checkpointer = memory
+                            # matching_tool.store = store
                             # wrap with mappings
                             pipeline_name = node.get('tool', None)
                             if not pipeline_name:
                                 raise ValueError(
                                     "Subgraph must have a 'tool' node: add required tool to the subgraph node")
                             node_fn = SubgraphRunnable(
-                                inner=tool.graph,
+                                inner=matching_tool.graph,
                                 name=pipeline_name,
                                 input_mapping=node.get('input_mapping', {}),
                                 output_mapping=node.get('output_mapping', {}),
@@ -530,7 +593,7 @@ def create_graph(
                             break  # skip legacy handling
                         elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
@@ -539,7 +602,7 @@ def create_graph(
                             ))
                         elif node_type == 'loop':
                             lg_builder.add_node(node_id, LoopNode(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
@@ -557,7 +620,7 @@ def create_graph(
                                         lg_builder.add_node(node_id, LoopToolNode(
                                             client=client,
                                             name=node_id, return_type='dict',
-                                            tool=tool, loop_tool=t,
+                                            tool=matching_tool, loop_tool=t,
                                             variables_mapping=node.get('variables_mapping', {}),
                                             output_variables=node.get('output', []),
                                             input_variables=node.get('input', ['messages']),
@@ -573,7 +636,7 @@ def create_graph(
                                     indexer_tool = t
                             logger.info(f"Indexer tool: {indexer_tool}")
                             lg_builder.add_node(node_id, IndexerNode(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 index_tool=indexer_tool,
                                 input_mapping=node.get('input_mapping', {}),
                                 name=node_id, return_type='dict',
@@ -770,7 +833,7 @@ def create_graph(
 def format_tools(tools_list: list) -> str:
     """Format a list of tool names into a comma-separated string."""
     try:
-        return '\n* '.join([tool.name for tool in tools_list])
+        return ', '.join([tool.name for tool in tools_list])
     except Exception as e:
         logger.warning(f"Failed to format tools list: {e}")
         return str(tools_list)

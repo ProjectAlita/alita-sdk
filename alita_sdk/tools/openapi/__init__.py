@@ -17,6 +17,7 @@ from .api_wrapper import _get_base_url_from_spec, build_wrapper
 from .tool import OpenApiAction
 from ..elitea_base import filter_missconfigured_index_tools
 from ...configurations.openapi import OpenApiConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 logger = logging.getLogger(__name__)
 
@@ -419,7 +420,7 @@ class AlitaOpenAPIToolkit(BaseToolkit):
                     name=tool_def['name'],
                     description=description,
                     args_schema=tool_def.get('args_schema'),
-                    metadata={"toolkit_name": toolkit_name, "toolkit_type": name} if toolkit_name else {},
+                    metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool_def["name"]} if toolkit_name else {TOOL_NAME_META: tool_def["name"]},
                 )
             )
 
