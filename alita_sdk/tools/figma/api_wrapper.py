@@ -377,6 +377,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             node_ids_exclude: Optional[List[str]] = None,
             node_types_include: Optional[List[str]] = None,
             node_types_exclude: Optional[List[str]] = None,
+            number_of_threads: Optional[int] = None,
             **kwargs
     ) -> Generator[Document, None, None]:
         if url:
@@ -394,6 +395,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 file = self._client.get_file(file_key, geometry='depth=1') # fetch only top-level structure (only pages without inner components)
                 if not file:
                     raise ToolException(f"Unexpected error while retrieving file {file_key}. Please try specifying the node-id of an inner page.")
+                # propagate per-call number_of_threads override via metadata so _process_document can respect it
                 metadata = {
                     'id': file_key,
                     'file_key': file_key,
@@ -404,6 +406,8 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     'figma_nodes_include': node_types_include or [],
                     'figma_nodes_exclude': node_types_exclude or [],
                 }
+                if isinstance(number_of_threads, int) and 1 <= number_of_threads <= 5:
+                    metadata['number_of_threads_override'] = number_of_threads
                 yield Document(page_content=json.dumps(metadata), metadata=metadata)
         elif file_keys_exclude or node_ids_exclude:
             raise ValueError("Excludes without parent (file_keys_include) do not make sense.")
@@ -561,12 +565,16 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
         # mutable counter so it can be updated from helper calls (even when used in threads)
         counted_nodes_ref: Dict[str, int] = {"value": 0}
 
-        # Resolve number_of_threads from class field, falling back to DEFAULT_NUMBER_OF_THREADS
-        threads_cfg = getattr(self, "number_of_threads", DEFAULT_NUMBER_OF_THREADS)
-        if isinstance(threads_cfg, int) and 1 <= threads_cfg <= 5:
-            number_of_threads = threads_cfg
+        # Resolve number_of_threads override from document metadata, falling back to class field
+        override_threads = document.metadata.get('number_of_threads_override')
+        if isinstance(override_threads, int) and 1 <= override_threads <= 5:
+            number_of_threads = override_threads
         else:
-            number_of_threads = DEFAULT_NUMBER_OF_THREADS
+            threads_cfg = getattr(self, "number_of_threads", DEFAULT_NUMBER_OF_THREADS)
+            if isinstance(threads_cfg, int) and 1 <= threads_cfg <= 5:
+                number_of_threads = threads_cfg
+            else:
+                number_of_threads = DEFAULT_NUMBER_OF_THREADS
 
         # --- Process image nodes (potential bottleneck) with optional threading ---
         if image_nodes:
@@ -674,6 +682,15 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                      "indexing to that page or node. When this URL is provided, it overrides 'file_keys_include' ('node_ids_include')."
                  ),
                  default=None)),
+             'number_of_threads': (Optional[int], Field(
+                 description=(
+                     "Optional override for the number of worker threads used when indexing Figma images. "
+                     f"Valid values are from 1 to 5. Default is {DEFAULT_NUMBER_OF_THREADS}."
+                 ),
+                 default=DEFAULT_NUMBER_OF_THREADS,
+                 ge=1,
+                 le=5,
+             )),
               'file_keys_include': (Optional[List[str]], Field(
                   description="List of file keys to include in index if project_id is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
                   default=None)),
@@ -1719,12 +1736,13 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 "args_schema": ArgsSchema.File.value,
                 "ref": self.get_file,
             },
-            {
-                "name": "get_file_summary",
-                "description": self.get_file_summary.__doc__,
-                "args_schema": ArgsSchema.FileSummary.value,
-                "ref": self.get_file_summary,
-            },
+            # TODO disabled until new requirements
+            # {
+            #     "name": "get_file_summary",
+            #     "description": self.get_file_summary.__doc__,
+            #     "args_schema": ArgsSchema.FileSummary.value,
+            #     "ref": self.get_file_summary,
+            # },
             {
                 "name": "get_file_versions",
                 "description": self.get_file_versions.__doc__,
