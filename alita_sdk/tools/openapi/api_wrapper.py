@@ -142,7 +142,7 @@ def _is_retryable_http_status(status_code: Optional[int]) -> bool:
     return int(status_code) in (408, 425, 429, 500, 502, 503, 504)
 
 
-def _resolve_server_variables(url: str, variables: Optional[dict]) -> str:
+def _resolve_server_variables(url: str, variables: Optional[dict]) -> tuple[str, list[str]]:
     """
     Substitute server variables in URL with their default values.
     
@@ -160,21 +160,40 @@ def _resolve_server_variables(url: str, variables: Optional[dict]) -> str:
         variables: Dict of variable definitions with 'default' values
     
     Returns:
-        URL with variables substituted with their default values
+        Tuple of (resolved_url, list of variable names that could not be resolved)
     """
-    if not url or not variables or not isinstance(variables, dict):
-        return url
+    if not url:
+        return url, []
     
     result = url
-    for var_name, var_def in variables.items():
-        if not isinstance(var_def, dict):
-            continue
-        default_value = var_def.get('default')
-        if default_value is not None:
-            placeholder = '{' + str(var_name) + '}'
-            result = result.replace(placeholder, str(default_value))
+    missing_defaults: list[str] = []
     
-    return result
+    if variables and isinstance(variables, dict):
+        for var_name, var_def in variables.items():
+            placeholder = '{' + str(var_name) + '}'
+            if placeholder not in result:
+                continue  # Variable not used in URL
+            
+            if not isinstance(var_def, dict):
+                missing_defaults.append(var_name)
+                continue
+            
+            default_value = var_def.get('default')
+            if default_value is not None:
+                result = result.replace(placeholder, str(default_value))
+            else:
+                # Variable defined but no default provided
+                missing_defaults.append(var_name)
+    
+    # Check for any remaining {variable} placeholders that weren't in the variables dict
+    # This catches cases where the URL has placeholders but no variables definition
+    import re
+    remaining_placeholders = re.findall(r'\{([^}]+)\}', result)
+    for placeholder_name in remaining_placeholders:
+        if placeholder_name not in missing_defaults:
+            missing_defaults.append(placeholder_name)
+    
+    return result, missing_defaults
 
 
 def _get_base_url_from_spec(spec: dict) -> str:
@@ -189,6 +208,10 @@ def _get_base_url_from_spec(spec: dict) -> str:
             project: {default: "MyProject"}
     
     Returns: "https://dev.azure.com/MyOrg/MyProject"
+    
+    Note: Unresolved variables are logged but not raised here - this function
+    is used for display/debugging purposes. The main validation happens in
+    _resolve_server_variables_in_spec() during initialization.
     """
     servers = spec.get("servers") if isinstance(spec, dict) else None
     if isinstance(servers, list) and servers:
@@ -196,7 +219,8 @@ def _get_base_url_from_spec(spec: dict) -> str:
         if isinstance(first, dict) and isinstance(first.get("url"), str):
             url = first["url"].strip()
             variables = first.get("variables")
-            return _resolve_server_variables(url, variables)
+            resolved_url, _ = _resolve_server_variables(url, variables)
+            return resolved_url
     return ""
 
 
@@ -226,6 +250,11 @@ def _resolve_server_variables_in_spec(spec: dict) -> dict:
     
     Returns:
         The same spec dict with server URLs resolved (modified in place)
+    
+    Raises:
+        ToolException: If server URL contains variables without default values.
+            Per OpenAPI spec, variables without defaults must be provided by the client,
+            but this toolkit doesn't support runtime server variable input.
     """
     if not isinstance(spec, dict):
         return spec
@@ -234,19 +263,53 @@ def _resolve_server_variables_in_spec(spec: dict) -> dict:
     if not isinstance(servers, list):
         return spec
     
-    for server in servers:
+    for i, server in enumerate(servers):
         if not isinstance(server, dict):
             continue
         url = server.get("url")
         if not isinstance(url, str):
             continue
         variables = server.get("variables")
-        if not variables or not isinstance(variables, dict):
-            continue
         
-        resolved_url = _resolve_server_variables(url, variables)
+        resolved_url, missing_vars = _resolve_server_variables(url, variables)
+        
+        if missing_vars:
+            # Build example snippets showing how to fix the spec
+            # Generate variable examples based on actual missing variable names
+            yaml_vars = '\n'.join(f'      {v}:\n        default: "your_{v}_value"' for v in missing_vars)
+            json_vars = ', '.join(f'"{v}": {{"default": "your_{v}_value"}}' for v in missing_vars)
+            
+            var_list = ', '.join(f'"{v}"' for v in missing_vars)
+            _raise_openapi_tool_exception(
+                code="unresolved_server_variables",
+                message=(
+                    f"Server URL contains variables without default values: {var_list}.\n\n"
+                    f"The OpenAPI spec defines server URL:\n"
+                    f"  {url}\n\n"
+                    f"These variables must have default values. Update your OpenAPI spec as follows:\n\n"
+                    f"YAML format:\n"
+                    f"  servers:\n"
+                    f"    - url: \"{url}\"\n"
+                    f"      variables:\n"
+                    f"{yaml_vars}\n\n"
+                    f"JSON format:\n"
+                    f"  {{\n"
+                    f"    \"servers\": [{{\n"
+                    f"      \"url\": \"{url}\",\n"
+                    f"      \"variables\": {{ {json_vars} }}\n"
+                    f"    }}]\n"
+                    f"  }}"
+                ),
+                details={
+                    "server_url": url,
+                    "missing_variables": missing_vars,
+                    "server_index": i,
+                },
+            )
+        
         if resolved_url != url:
             server["url"] = resolved_url
+            logger.debug(f"Resolved server URL: '{url}' -> '{resolved_url}'")
     
     return spec
 
