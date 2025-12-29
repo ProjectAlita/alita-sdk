@@ -142,17 +142,113 @@ def _is_retryable_http_status(status_code: Optional[int]) -> bool:
     return int(status_code) in (408, 425, 429, 500, 502, 503, 504)
 
 
+def _resolve_server_variables(url: str, variables: Optional[dict]) -> str:
+    """
+    Substitute server variables in URL with their default values.
+    
+    Per OpenAPI 3.x spec, server URLs can contain variables like:
+    https://dev.azure.com/{organization}/{project}
+    
+    The variables object provides default values:
+    {
+        "organization": {"default": "MyOrg"},
+        "project": {"default": "MyProject"}
+    }
+    
+    Args:
+        url: Server URL potentially containing {variable} placeholders
+        variables: Dict of variable definitions with 'default' values
+    
+    Returns:
+        URL with variables substituted with their default values
+    """
+    if not url or not variables or not isinstance(variables, dict):
+        return url
+    
+    result = url
+    for var_name, var_def in variables.items():
+        if not isinstance(var_def, dict):
+            continue
+        default_value = var_def.get('default')
+        if default_value is not None:
+            placeholder = '{' + str(var_name) + '}'
+            result = result.replace(placeholder, str(default_value))
+    
+    return result
+
+
 def _get_base_url_from_spec(spec: dict) -> str:
+    """
+    Extract base URL from OpenAPI spec's servers array.
+    
+    Handles server variables by substituting their default values.
+    For example:
+        url: "https://dev.azure.com/{organization}/{project}"
+        variables:
+            organization: {default: "MyOrg"}
+            project: {default: "MyProject"}
+    
+    Returns: "https://dev.azure.com/MyOrg/MyProject"
+    """
     servers = spec.get("servers") if isinstance(spec, dict) else None
     if isinstance(servers, list) and servers:
         first = servers[0]
         if isinstance(first, dict) and isinstance(first.get("url"), str):
-            return first["url"].strip()
+            url = first["url"].strip()
+            variables = first.get("variables")
+            return _resolve_server_variables(url, variables)
     return ""
 
 
 def _is_absolute_url(url: str) -> bool:
     return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
+
+
+def _resolve_server_variables_in_spec(spec: dict) -> dict:
+    """
+    Resolve server variables in the OpenAPI spec by substituting their default values.
+    
+    This modifies the spec's servers[].url to replace {variable} placeholders with
+    the default values from servers[].variables. This is necessary because the
+    requests_openapi library doesn't handle server variables - it uses the raw URL.
+    
+    Example transformation:
+        url: "https://dev.azure.com/{organization}/{project}"
+        variables:
+            organization: {default: "MyOrg"}
+            project: {default: "MyProject"}
+    
+    Becomes:
+        url: "https://dev.azure.com/MyOrg/MyProject"
+    
+    Args:
+        spec: OpenAPI specification dict
+    
+    Returns:
+        The same spec dict with server URLs resolved (modified in place)
+    """
+    if not isinstance(spec, dict):
+        return spec
+    
+    servers = spec.get("servers")
+    if not isinstance(servers, list):
+        return spec
+    
+    for server in servers:
+        if not isinstance(server, dict):
+            continue
+        url = server.get("url")
+        if not isinstance(url, str):
+            continue
+        variables = server.get("variables")
+        if not variables or not isinstance(variables, dict):
+            continue
+        
+        resolved_url = _resolve_server_variables(url, variables)
+        if resolved_url != url:
+            server["url"] = resolved_url
+    
+    return spec
 
 
 def _apply_base_url_override(spec: dict, base_url_override: str) -> dict:
@@ -651,6 +747,10 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
     _param_name_mapping: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:
+        # Resolve server variables in spec URLs before loading
+        # This handles specs like Azure DevOps that use {organization}/{project} placeholders
+        _resolve_server_variables_in_spec(self.spec)
+        
         # Build meta from raw spec (method/path/examples)
         op_meta: dict[str, dict] = {}
         paths = self.spec.get("paths") or {}
