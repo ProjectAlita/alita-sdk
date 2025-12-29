@@ -203,6 +203,163 @@ def _join_base_and_path(base_url: str, path: str) -> str:
     return base + p
 
 
+# Maximum length for generated operationIds (tool names)
+_MAX_OPERATION_ID_LENGTH = 64
+
+# Map HTTP methods to semantic action names for better readability
+_METHOD_TO_ACTION = {
+    'get': 'get',
+    'post': 'create',
+    'put': 'update',
+    'patch': 'update',
+    'delete': 'delete',
+    'head': 'head',
+    'options': 'options',
+    'trace': 'trace',
+}
+
+
+def _generate_operation_id(method: str, path: str) -> str:
+    """
+    Generate an operationId from HTTP method and path when not provided in spec.
+    
+    Follows a pattern that produces readable, unique identifiers:
+    - Format: {action}_{path_segments}
+    - HTTP methods are mapped to semantic actions (POST→create, PUT/PATCH→update)
+    - Path parameters ({id}) become "by_{param}"
+    - Segments are joined with underscores
+    - Result is snake_case
+    - Truncated to _MAX_OPERATION_ID_LENGTH characters
+    
+    Examples:
+        GET /users -> get_users
+        GET /users/{id} -> get_users_by_id
+        POST /users -> create_users
+        PUT /users/{id} -> update_users_by_id
+        PATCH /users/{id} -> update_users_by_id
+        DELETE /api/v1/items/{itemId} -> delete_api_v1_items_by_itemId
+    
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        path: URL path (e.g., /users/{id})
+    
+    Returns:
+        Generated operationId string
+    """
+    # Map HTTP method to semantic action
+    action = _METHOD_TO_ACTION.get(method.lower(), method.lower())
+    
+    # Split path and process segments
+    segments = [s for s in path.split('/') if s]
+    processed_segments = []
+    
+    for segment in segments:
+        # Check if it's a path parameter like {id} or {userId}
+        if segment.startswith('{') and segment.endswith('}'):
+            param_name = segment[1:-1]  # Remove braces
+            processed_segments.append(f'by_{param_name}')
+        else:
+            # Regular segment - keep as is (already suitable for identifier)
+            # Replace any non-alphanumeric chars with underscore
+            clean_segment = re.sub(r'[^a-zA-Z0-9]', '_', segment)
+            if clean_segment:
+                processed_segments.append(clean_segment)
+    
+    # Join: action_segment1_segment2_...
+    if processed_segments:
+        operation_id = f"{action}_{'_'.join(processed_segments)}"
+    else:
+        # Edge case: root path "/"
+        operation_id = f"{action}_root"
+    
+    # Ensure valid Python identifier (no leading digits)
+    if operation_id[0].isdigit():
+        operation_id = '_' + operation_id
+    
+    # Truncate if too long
+    if len(operation_id) > _MAX_OPERATION_ID_LENGTH:
+        # Start with a hard cut at the max length
+        truncated = operation_id[:_MAX_OPERATION_ID_LENGTH]
+        # Prefer truncating at a word boundary (underscore) if possible
+        last_underscore = truncated.rfind('_')
+        if last_underscore > 0:
+            truncated = truncated[:last_underscore]
+        # Ensure we don't end with an underscore after truncation
+        truncated = truncated.rstrip('_')
+        operation_id = truncated
+    
+    return operation_id
+
+
+def _ensure_operation_ids(spec: dict) -> dict:
+    """
+    Ensure all operations in the spec have operationIds.
+    
+    For operations missing operationId, generates one from method+path.
+    Handles deduplication by appending _2, _3, etc. for collisions.
+    
+    Args:
+        spec: Parsed OpenAPI specification dict
+    
+    Returns:
+        The same spec dict with operationIds injected where missing
+    """
+    paths = spec.get('paths')
+    if not isinstance(paths, dict):
+        return spec
+    
+    # Track all operationIds (existing + generated) to handle collisions
+    used_operation_ids: set[str] = set()
+    
+    # First pass: collect existing operationIds
+    for path, path_item in paths.items():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if not isinstance(operation, dict):
+                continue
+            # Skip non-operation keys like 'parameters', 'summary', etc.
+            if method.lower() not in ('get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'):
+                continue
+            existing_id = operation.get('operationId')
+            if existing_id:
+                used_operation_ids.add(str(existing_id))
+    
+    # Second pass: generate missing operationIds
+    for path, path_item in paths.items():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if not isinstance(operation, dict):
+                continue
+            # Skip non-operation keys
+            if method.lower() not in ('get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'):
+                continue
+            
+            if operation.get('operationId'):
+                continue  # Already has operationId
+            
+            # Generate operationId
+            base_id = _generate_operation_id(method, path)
+            
+            # Handle collisions by appending suffix
+            final_id = base_id
+            counter = 2
+            while final_id in used_operation_ids:
+                suffix = f'_{counter}'
+                # Ensure we don't exceed max length with suffix
+                max_base_len = _MAX_OPERATION_ID_LENGTH - len(suffix)
+                truncated_base = base_id[:max_base_len]
+                final_id = f'{truncated_base}{suffix}'
+                counter += 1
+            
+            operation['operationId'] = final_id
+            used_operation_ids.add(final_id)
+            logger.debug(f"Generated operationId '{final_id}' for {method.upper()} {path}")
+    
+    return spec
+
+
 def _parse_openapi_spec(spec: str | dict) -> dict:
     if isinstance(spec, dict):
         return spec
@@ -1001,4 +1158,6 @@ def build_wrapper(
     spec = copy.deepcopy(parsed)
     if base_url_override:
         spec = _apply_base_url_override(spec, base_url_override)
+    # Ensure all operations have operationIds (generate from method+path if missing)
+    spec = _ensure_operation_ids(spec)
     return OpenApiApiWrapper(spec=spec, base_headers=base_headers or {})
