@@ -1,10 +1,16 @@
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..base.tool import BaseAction
-from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
+from .api_wrapper import (
+    FigmaApiWrapper,
+    GLOBAL_LIMIT,
+    DEFAULT_FIGMA_IMAGES_PROMPT,
+    DEFAULT_FIGMA_SUMMARY_PROMPT,
+    DEFAULT_NUMBER_OF_THREADS,
+)
 from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, TOOLKIT_SPLITTER, get_max_toolkit_length
 from ...configurations.figma import FigmaConfiguration
@@ -28,7 +34,14 @@ def get_tools(tool):
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
             embedding_model=tool['settings'].get('embedding_model'),
-            vectorstore_type="PGVector"
+            vectorstore_type="PGVector",
+            # figma summary/image prompt settings (toolkit-level)
+            # TODO disabled until new requirements
+            # apply_images_prompt=tool["settings"].get("apply_images_prompt"),
+            # images_prompt=tool["settings"].get("images_prompt"),
+            # apply_summary_prompt=tool["settings"].get("apply_summary_prompt"),
+            # summary_prompt=tool["settings"].get("summary_prompt"),
+            # number_of_threads=tool["settings"].get("number_of_threads"),
         )
         .get_tools()
     )
@@ -47,6 +60,39 @@ class FigmaToolkit(BaseToolkit):
         FigmaToolkit.toolkit_max_length = get_max_toolkit_length(selected_tools)
         return create_model(
             name,
+            # TODO disabled until new requirements
+            # apply_images_prompt=(Optional[bool], Field(
+            #     description="Enable advanced image processing instructions for Figma image nodes.",
+            #     default=True,
+            # )),
+            # images_prompt=(Optional[Dict[str, str]], Field(
+            #     description=(
+            #         "Instruction for how to analyze image-based nodes "
+            #         "(screenshots, diagrams, etc.) during Figma file retrieving. "
+            #         "Must contain a single 'prompt' key with the text."
+            #     ),
+            #     default=DEFAULT_FIGMA_IMAGES_PROMPT,
+            # )),
+            # apply_summary_prompt=(Optional[bool], Field(
+            #     description="Enable LLM-based summarization over loaded Figma data.",
+            #     default=True,
+            # )),
+            # summary_prompt=(Optional[Dict[str, str]], Field(
+            #     description=(
+            #         "Instruction for the LLM on how to summarize loaded Figma data. "
+            #         "Must contain a single 'prompt' key with the text."
+            #     ),
+            #     default=DEFAULT_FIGMA_SUMMARY_PROMPT,
+            # )),
+            number_of_threads=(Optional[int], Field(
+                description=(
+                    "Number of worker threads to use when downloading and processing Figma images. "
+                    f"Valid values are from 1 to 5. Default is {DEFAULT_NUMBER_OF_THREADS}."
+                ),
+                default=DEFAULT_NUMBER_OF_THREADS,
+                ge=1,
+                le=5,
+            )),
             global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT)),
             global_regexp=(Optional[str], Field(description="Global regex pattern", default=None)),
             selected_tools=(
