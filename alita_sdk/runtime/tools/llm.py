@@ -81,22 +81,41 @@ class LLMNode(BaseTool):
         """
         Prepare structured output parameters from structured_output_dict.
 
+        Expected self.structured_output_dict formats:
+          - {"field": "str"} / {"field": "list"} / {"field": "list[str]"} / {"field": "any"} ...
+          - OR {"field": {"type": "...", "description": "...", "default": ...}}  (optional)
+
         Returns:
-            Dictionary with parameter definitions for creating Pydantic model
+            Dict[str, Dict] suitable for create_pydantic_model(...)
         """
-        struct_params = {
-            key: {
-                "type": 'list[str]' if 'list' in value else value,
-                "description": ""
-            }
-            for key, value in (self.structured_output_dict or {}).items()
-        }
+        struct_params: dict[str, dict] = {}
+
+        for key, value in (self.structured_output_dict or {}).items():
+            # Allow either a plain type string or a dict with details
+            if isinstance(value, dict):
+                type_str = (value.get("type") or "any")
+                desc = value.get("description", "") or ""
+                entry: dict = {"type": type_str, "description": desc}
+                if "default" in value:
+                    entry["default"] = value["default"]
+            else:
+                type_str = (value or "any") if isinstance(value, str) else "any"
+                entry = {"type": type_str, "description": ""}
+
+            # Normalize: only convert the *exact* "list" into "list[str]"
+            # (avoid the old bug where "if 'list' in value" also hits "blacklist", etc.)
+            if isinstance(entry.get("type"), str) and entry["type"].strip().lower() == "list":
+                entry["type"] = "list[str]"
+
+            struct_params[key] = entry
+
         # Add default output field for proper response to user
         struct_params[ELITEA_RS] = {
-            'description': 'final output to user (summarized output from LLM)',
-            'type': 'str',
-            "default": None
+            "description": "final output to user (summarized output from LLM)",
+            "type": "str",
+            "default": None,
         }
+
         return struct_params
 
     def _invoke_with_structured_output(self, llm_client: Any, messages: List, struct_model: Any, config: RunnableConfig):

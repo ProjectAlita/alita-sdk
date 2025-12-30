@@ -2,7 +2,7 @@ import builtins
 import json
 import logging
 import re
-from pydantic import create_model, Field, Json
+from pydantic import create_model, Field, JsonValue
 from typing import Tuple, TypedDict, Any, Optional, Annotated
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
@@ -263,17 +263,33 @@ def create_pydantic_model(model_name: str, variables: dict[str, dict]):
     return create_model(model_name, **fields)
 
 def parse_pydantic_type(type_name: str):
-    """
-    Helper function to parse type names into Python types.
-    Extend this function to handle custom types like 'dict' -> Json[Any].
-    """
-    type_mapping = {
-        'str': str,
-        'int': int,
-        'float': float,
-        'bool': bool,
-        'dict': Json[Any],  # Map 'dict' to Pydantic's Json type
-        'list': list,
-        'any': Any
+    t = (type_name or "any").strip().lower()
+
+    base = {
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        # "dict" means JSON object
+        "dict": dict[str, JsonValue],
+        # "list" means array of JSON values (or pick str if you want)
+        "list": list[JsonValue],
+        # IMPORTANT: don't return bare Any -> it produces {} schema
+        "any": JsonValue,
     }
-    return type_mapping.get(type_name, Any)
+    if t in base:
+        return base[t]
+
+    m = re.fullmatch(r"list\[(.+)\]", t)
+    if m:
+        return list[parse_pydantic_type(m.group(1))]
+
+    m = re.fullmatch(r"dict\[(.+?),(.+)\]", t)
+    if m:
+        k = parse_pydantic_type(m.group(1))
+        v = parse_pydantic_type(m.group(2))
+        # restrict keys to str for JSON objects
+        return dict[str, v] if k is not str else dict[str, v]
+
+    # fallback: avoid Any
+    return JsonValue
