@@ -264,6 +264,8 @@ def _resolve_server_variables_in_spec(spec: dict) -> tuple[dict, Optional[dict]]
     if not isinstance(servers, list):
         return spec, None
     
+    unresolved_info = None
+    
     for i, server in enumerate(servers):
         if not isinstance(server, dict):
             continue
@@ -275,23 +277,32 @@ def _resolve_server_variables_in_spec(spec: dict) -> tuple[dict, Optional[dict]]
         resolved_url, missing_vars = _resolve_server_variables(url, variables)
         
         if missing_vars:
-            # Don't raise here - return the info so it can be raised at execution time
-            # This allows toolkit creation to succeed and tools to be listed
-            logger.warning(
-                f"Server URL '{url}' has variables without defaults: {missing_vars}. "
-                f"Tool execution will fail until defaults are provided in the spec."
-            )
-            return spec, {
-                "url": url,
-                "missing_vars": missing_vars,
-                "server_index": i,
-            }
+            # Track unresolved variables for deferred error at execution time
+            # Store only the first server with issues (usually there's only one)
+            if unresolved_info is None:
+                logger.warning(
+                    f"Server URL '{url}' has variables without defaults: {missing_vars}. "
+                    f"Tool execution will fail until defaults are provided in the spec."
+                )
+                unresolved_info = {
+                    "url": url,
+                    "missing_vars": missing_vars,
+                    "server_index": i,
+                }
+            
+            # Add placeholder defaults so openapi_pydantic validation passes
+            # The URL will still have {placeholders} but at least the spec parses
+            if variables and isinstance(variables, dict):
+                for var_name in missing_vars:
+                    if var_name in variables and isinstance(variables[var_name], dict):
+                        # Add a placeholder default - the URL won't work but spec will parse
+                        variables[var_name]["default"] = f"MISSING_{var_name}"
         
         if resolved_url != url:
             server["url"] = resolved_url
             logger.debug(f"Resolved server URL: '{url}' -> '{resolved_url}'")
     
-    return spec, None
+    return spec, unresolved_info
 
 
 def _apply_base_url_override(spec: dict, base_url_override: str) -> dict:
