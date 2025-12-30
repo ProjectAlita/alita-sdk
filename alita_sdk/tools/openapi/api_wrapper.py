@@ -1309,7 +1309,7 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
         server_index = info.get("server_index", 0)
         
         # Build example snippets showing how to fix the spec
-        yaml_vars = '\n'.join(f'      {v}:\n        default: "your_{v}_value"' for v in missing_vars)
+        yaml_vars = '\n'.join(f'        {v}:\n          default: "your_{v}_value"' for v in missing_vars)
         json_vars = ', '.join(f'"{v}": {{"default": "your_{v}_value"}}' for v in missing_vars)
         var_list = ', '.join(f'"{v}"' for v in missing_vars)
         
