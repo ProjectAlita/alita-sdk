@@ -645,7 +645,6 @@ def create_graph(
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 structured_output=node.get('structured_output', False)))
-                        break
             elif node_type == 'code':
                 from ..tools.sandbox import create_sandbox_tool
                 sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
