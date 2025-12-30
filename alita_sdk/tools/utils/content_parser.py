@@ -130,7 +130,38 @@ def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = F
 
 def get_loader_kwargs(loader_object, file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                     sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False, prompt=None):
-    loader_kwargs = deepcopy(loader_object['kwargs'])
+    """Build loader kwargs safely without deepcopying non-picklable objects like LLMs.
+
+    We avoid copying keys that are going to be overridden by this function anyway
+    (file_path, file_content, file_name, extract_images, llm, page_number,
+    sheet_name, excel_by_sheets, prompt, row_content, json_documents) to
+    prevent errors such as `cannot pickle '_thread.RLock' object` when an LLM
+    or client with internal locks is stored in the original kwargs.
+    """
+    if not loader_object:
+        raise ToolException("Loader configuration is missing.")
+
+    original_kwargs = loader_object.get("kwargs", {}) or {}
+
+    # Keys that will be overwritten below – skip them when copying
+    overridden_keys = {
+        "file_path",
+        "file_content",
+        "file_name",
+        "extract_images",
+        "llm",
+        "page_number",
+        "sheet_name",
+        "excel_by_sheets",
+        "prompt",
+        "row_content",
+        "json_documents",
+    }
+
+    # Build a safe shallow copy without overridden keys to avoid deepcopy
+    # of potentially non-picklable objects (e.g., llm with internal RLock).
+    loader_kwargs = {k: v for k, v in original_kwargs.items() if k not in overridden_keys}
+
     loader_kwargs.update({
         "file_path": file_path,
         "file_content": file_content,
