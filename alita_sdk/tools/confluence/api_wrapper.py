@@ -3,7 +3,9 @@ import json
 import logging
 import re
 import traceback
+from io import BytesIO
 from json import JSONDecodeError
+from traceback import format_exc
 from typing import Optional, List, Any, Dict, Callable, Generator, Literal
 
 import requests
@@ -163,6 +165,15 @@ GetPageAttachmentsInput = create_model(
     name_pattern=(Optional[str], Field(default=None, description="Regex pattern to filter attachment names (e.g. '^report_.*\\.pdf$'). If None, all names are included.", examples=["^report_.*\\.pdf$"])),
 )
 
+AddFileToPage = create_model(
+    "AddFileToPage",
+    page_id=(str, Field(description="Confluence page ID to add file to")),
+    artifact_id=(str, Field(description="Artifact ID containing the file to upload")),
+    filename=(str, Field(description="Filename in the artifact")),
+    alt_text=(Optional[str], Field(description="Alternative text for images (optional)", default=None)),
+    position=(Optional[str], Field(description="Position to add file reference: 'append' or 'prepend'", default="append")),
+)
+
 
 def parse_payload_params(params: Optional[str]) -> Dict[str, Any]:
     if params:
@@ -271,13 +282,13 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         created_page = self.temp_create_page(space=user_space, title=title, body=body, status=status,
                                              parent_id=parent_id_filled, representation=representation)
 
+        webui_path = created_page['_links']['edit'] if status == 'draft' else created_page['_links']['webui']
         page_details = {
             'title': created_page['title'],
             'id': created_page['id'],
             'space key': created_page['space']['key'],
             'author': created_page['version']['by']['displayName'],
-            'link': created_page['_links']['base'] + (
-                created_page['_links']['edit'] if status == 'draft' else created_page['_links']['webui'])
+            'link': self._build_page_url(webui_path)
         }
 
         logger.info(f"Page created: {page_details['link']}")
@@ -362,7 +373,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
         updated_page = self.client.update_page(page_id=page_id, title=title_to_use, body=body_to_use,
                                                representation=representation_to_use)
-        webui_link = updated_page['_links']['base'] + updated_page['_links']['webui']
+        webui_link = self._build_page_url(updated_page['_links']['webui'])
         logger.info(f"Page updated: {webui_link}")
 
         next_version = updated_page['version']['number']
@@ -374,7 +385,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             'id': updated_page['id'],
             'space key': updated_page['space']['key'],
             'author': updated_page['version']['by']['displayName'],
-            'link': updated_page['_links']['base'] + updated_page['_links']['webui'],
+            'link': webui_link,
             'version': next_version,
             'diff': diff_link
         }
@@ -735,7 +746,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         metadata = {
             "title": page["title"],
             "id": page["id"],
-            "source": self.base_url.strip("/") + page["_links"]["webui"],
+            "source": self._build_page_url(page["_links"]["webui"]),
         }
 
         if "version" in page and "when" in page["version"]:
@@ -1723,6 +1734,144 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error retrieving attachments for page {page_id}: {str(e)}")
             return f"Error retrieving attachments: {str(e)}"
 
+    def _upload_file_from_artifact(self, page_id: str, artifact_id: str, filename: str) -> Dict[str, Any]:
+        """Download file from artifact storage and upload to Confluence page."""
+        try:
+            # Download file from artifact storage using artifact_id
+            if not self.alita:
+                raise ToolException("Alita client is not initialized. Cannot download artifact.")
+
+            artifact_client = self.alita.artifact('__temp__')
+            file_bytes = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+
+            if not file_bytes:
+                raise ToolException(f"Failed to download artifact {artifact_id}")
+
+            # Detect MIME type
+            try:
+                import filetype
+                kind = filetype.guess(file_bytes)
+                mime_type = kind.mime if kind else 'application/octet-stream'
+            except Exception:
+                # Fallback to basic detection from extension
+                mime_type = 'application/octet-stream'
+                if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    mime_type = 'image/jpeg' if filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
+                elif filename.lower().endswith('.gif'):
+                    mime_type = 'image/gif'
+                elif filename.lower().endswith('.pdf'):
+                    mime_type = 'application/pdf'
+            
+            # Upload to Confluence as attachment
+            file_io = BytesIO(file_bytes)
+            file_io.name = filename
+            
+            try:
+                # Use attach_content for BytesIO upload
+                attachment_response = self.client.attach_content(
+                    content=file_io,
+                    name=filename,
+                    content_type=mime_type,
+                    page_id=page_id
+                )
+            except Exception as e:
+                raise ToolException(f"Failed to upload attachment to page {page_id}: {str(e)}")
+            
+            # Extract attachment info from response
+            # The attach_content response contains all necessary attachment metadata
+            uploaded_filename = attachment_response.get('title', filename)
+            download_link = attachment_response.get('_links', {}).get('download', '')
+            download_url = self.base_url.rstrip('/') + download_link if download_link else ''
+            
+            return {
+                'filename': uploaded_filename,
+                'mime_type': mime_type,
+                'size': len(file_bytes),
+                'download_url': download_url
+            }
+        except ToolException:
+            raise
+        except Exception as e:
+            stacktrace = format_exc()
+            logger.error(f"Error uploading file from artifact: {stacktrace}")
+            raise ToolException(f"Failed to upload file from artifact: {str(e)}")
+
+    def _build_page_url(self, webui_path: str) -> str:
+        """Build correct page URL for both cloud and self-hosted Confluence instances."""
+        # Add /wiki prefix for Atlassian Cloud URLs
+        if self.cloud and not webui_path.startswith('/wiki/'):
+            webui_path = '/wiki' + webui_path
+        return self.base_url.rstrip('/') + webui_path
+
+    def _get_confluence_image_markup(self, filename: str) -> str:
+        """Generate Confluence storage format for inline image."""
+        return f'<ac:image><ri:attachment ri:filename="{filename}"/></ac:image>'
+
+    def _get_confluence_file_link(self, filename: str, alt_text: Optional[str] = None) -> str:
+        """Generate Confluence storage format for file attachment link."""
+        display = alt_text or filename
+        return f'<ac:link><ri:attachment ri:filename="{filename}"/><ac:plain-text-link-body><![CDATA[{display}]]></ac:plain-text-link-body></ac:link>'
+
+    def add_file_to_page(
+        self,
+        page_id: str,
+        artifact_id: str,
+        filename: str,
+        alt_text: Optional[str] = None,
+        position: Literal["append", "prepend"] = "append"
+    ) -> str:
+        """Upload file from artifact and add to Confluence page content. Images display inline, other files as links."""
+        try:
+            # Upload file to Confluence
+            upload_info = self._upload_file_from_artifact(page_id, artifact_id, filename)
+            uploaded_filename = upload_info['filename']
+            mime_type = upload_info['mime_type']
+            
+            # Get current page content
+            page = self.client.get_page_by_id(page_id, expand='body.storage,version')
+            current_body = page.get('body', {}).get('storage', {}).get('value', '')
+            current_version = page.get('version', {}).get('number', 1)
+            
+            # Create appropriate markup based on file type
+            if mime_type.startswith('image/') or mime_type.startswith('video/'):
+                file_markup = self._get_confluence_image_markup(uploaded_filename)
+            else:
+                file_markup = self._get_confluence_file_link(uploaded_filename, alt_text)
+            
+            # Add the file markup to page content
+            if position == "prepend":
+                new_body = f"{file_markup}<p></p>{current_body}"
+            else:
+                new_body = f"{current_body}<p></p>{file_markup}"
+            
+            # Update the page
+            self.client.update_page(
+                page_id=page_id,
+                title=page['title'],
+                body=new_body,
+                parent_id=None,
+                type='page',
+                representation='storage',
+                minor_edit=False,
+                version_comment=f"Added file: {uploaded_filename}",
+                full_width=False
+            )
+            
+            # Return success message
+            page_url = self._build_page_url(page['_links']['webui'])
+            file_type = "image" if mime_type.startswith('image/') else "video" if mime_type.startswith('video/') else "file"
+            return (
+                f"File '{filename}' uploaded and added to page {page_id} as {file_type}. "
+                f"View at: {page_url}"
+            )
+            
+        except ToolException:
+            raise
+        except Exception as e:
+            stacktrace = format_exc()
+            logger.error(f"Error adding file to page: {stacktrace}")
+            raise ToolException(f"Failed to add file to page: {str(e)}")
+
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
         return {
@@ -1867,6 +2016,12 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 "ref": self.get_page_attachments,
                 "description": self.get_page_attachments.__doc__,
                 "args_schema": GetPageAttachmentsInput,
+            },
+            {
+                "name": "add_file_to_page",
+                "ref": self.add_file_to_page,
+                "description": self.add_file_to_page.__doc__,
+                "args_schema": AddFileToPage,
             }
         ]
 
