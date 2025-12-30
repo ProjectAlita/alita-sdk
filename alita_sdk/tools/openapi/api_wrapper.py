@@ -227,7 +227,7 @@ def _is_absolute_url(url: str) -> bool:
     return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
 
 
-def _resolve_server_variables_in_spec(spec: dict) -> dict:
+def _resolve_server_variables_in_spec(spec: dict) -> tuple[dict, Optional[dict]]:
     """
     Resolve server variables in the OpenAPI spec by substituting their default values.
     
@@ -248,19 +248,21 @@ def _resolve_server_variables_in_spec(spec: dict) -> dict:
         spec: OpenAPI specification dict
     
     Returns:
-        The same spec dict with server URLs resolved (modified in place)
-    
-    Raises:
-        ToolException: If server URL contains variables without default values.
-            Per OpenAPI spec, variables without defaults must be provided by the client,
-            but this toolkit doesn't support runtime server variable input.
+        Tuple of (spec, unresolved_info) where:
+        - spec: The same spec dict with server URLs resolved (modified in place)
+        - unresolved_info: None if all variables resolved, or dict with error details:
+            {
+                "url": original URL with placeholders,
+                "missing_vars": list of variable names without defaults,
+                "server_index": index of problematic server
+            }
     """
     if not isinstance(spec, dict):
-        return spec
+        return spec, None
     
     servers = spec.get("servers")
     if not isinstance(servers, list):
-        return spec
+        return spec, None
     
     for i, server in enumerate(servers):
         if not isinstance(server, dict):
@@ -273,44 +275,23 @@ def _resolve_server_variables_in_spec(spec: dict) -> dict:
         resolved_url, missing_vars = _resolve_server_variables(url, variables)
         
         if missing_vars:
-            # Build example snippets showing how to fix the spec
-            # Generate variable examples based on actual missing variable names
-            yaml_vars = '\n'.join(f'      {v}:\n        default: "your_{v}_value"' for v in missing_vars)
-            json_vars = ', '.join(f'"{v}": {{"default": "your_{v}_value"}}' for v in missing_vars)
-            
-            var_list = ', '.join(f'"{v}"' for v in missing_vars)
-            _raise_openapi_tool_exception(
-                code="unresolved_server_variables",
-                message=(
-                    f"Server URL contains variables without default values: {var_list}.\n\n"
-                    f"The OpenAPI spec defines server URL:\n"
-                    f"  {url}\n\n"
-                    f"These variables must have default values. Update your OpenAPI spec as follows:\n\n"
-                    f"YAML format:\n"
-                    f"  servers:\n"
-                    f"    - url: \"{url}\"\n"
-                    f"      variables:\n"
-                    f"{yaml_vars}\n\n"
-                    f"JSON format:\n"
-                    f"  {{\n"
-                    f"    \"servers\": [{{\n"
-                    f"      \"url\": \"{url}\",\n"
-                    f"      \"variables\": {{ {json_vars} }}\n"
-                    f"    }}]\n"
-                    f"  }}"
-                ),
-                details={
-                    "server_url": url,
-                    "missing_variables": missing_vars,
-                    "server_index": i,
-                },
+            # Don't raise here - return the info so it can be raised at execution time
+            # This allows toolkit creation to succeed and tools to be listed
+            logger.warning(
+                f"Server URL '{url}' has variables without defaults: {missing_vars}. "
+                f"Tool execution will fail until defaults are provided in the spec."
             )
+            return spec, {
+                "url": url,
+                "missing_vars": missing_vars,
+                "server_index": i,
+            }
         
         if resolved_url != url:
             server["url"] = resolved_url
             logger.debug(f"Resolved server URL: '{url}' -> '{resolved_url}'")
     
-    return spec
+    return spec, None
 
 
 def _apply_base_url_override(spec: dict, base_url_override: str) -> dict:
@@ -807,11 +788,15 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
     # Needed because LangChain passes kwargs using Pydantic field names (sanitized),
     # but the API expects original parameter names
     _param_name_mapping: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
+    # Stores unresolved server variable info for deferred error reporting
+    # If set, any tool execution will fail with a helpful error message
+    _unresolved_server_vars: Optional[dict] = PrivateAttr(default=None)
 
     def model_post_init(self, __context: Any) -> None:
         # Resolve server variables in spec URLs before loading
         # This handles specs like Azure DevOps that use {organization}/{project} placeholders
-        _resolve_server_variables_in_spec(self.spec)
+        # If variables can't be resolved, we store the info and defer the error to execution time
+        _, self._unresolved_server_vars = _resolve_server_variables_in_spec(self.spec)
         
         # Build meta from raw spec (method/path/examples)
         op_meta: dict[str, dict] = {}
@@ -1105,6 +1090,10 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
         return url
 
     def _execute(self, operation_id: str, *args: Any, **kwargs: Any) -> str:
+        # Check for unresolved server variables - fail early with helpful error
+        if self._unresolved_server_vars:
+            self._raise_unresolved_server_vars_error(operation_id)
+        
         # Extract special fields (already coerced by BeforeValidator at validation time)
         regexp = kwargs.pop("regexp", None)
         extra_headers = kwargs.pop("headers", None)
@@ -1308,6 +1297,49 @@ class OpenApiApiWrapper(BaseToolApiWrapper):
                 logger.debug(f"Failed to apply regexp filter: {e}")
 
         return output_str
+
+    def _raise_unresolved_server_vars_error(self, operation_id: str) -> None:
+        """Raise a detailed error for unresolved server variables with YAML/JSON examples."""
+        info = self._unresolved_server_vars
+        if not info:
+            return
+        
+        url = info.get("url", "")
+        missing_vars = info.get("missing_vars", [])
+        server_index = info.get("server_index", 0)
+        
+        # Build example snippets showing how to fix the spec
+        yaml_vars = '\n'.join(f'      {v}:\n        default: "your_{v}_value"' for v in missing_vars)
+        json_vars = ', '.join(f'"{v}": {{"default": "your_{v}_value"}}' for v in missing_vars)
+        var_list = ', '.join(f'"{v}"' for v in missing_vars)
+        
+        _raise_openapi_tool_exception(
+            code="unresolved_server_variables",
+            message=(
+                f"Server URL contains variables without default values: {var_list}.\n\n"
+                f"The OpenAPI spec defines server URL:\n"
+                f"  {url}\n\n"
+                f"These variables must have default values. Update your OpenAPI spec as follows:\n\n"
+                f"YAML format:\n"
+                f"  servers:\n"
+                f"    - url: \"{url}\"\n"
+                f"      variables:\n"
+                f"{yaml_vars}\n\n"
+                f"JSON format:\n"
+                f"  {{\n"
+                f"    \"servers\": [{{\n"
+                f"      \"url\": \"{url}\",\n"
+                f"      \"variables\": {{ {json_vars} }}\n"
+                f"    }}]\n"
+                f"  }}"
+            ),
+            operation_id=str(operation_id),
+            details={
+                "server_url": url,
+                "missing_variables": missing_vars,
+                "server_index": server_index,
+            },
+        )
 
 
 def build_wrapper(
