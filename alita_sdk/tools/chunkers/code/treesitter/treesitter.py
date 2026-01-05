@@ -40,25 +40,49 @@ class Treesitter(ABC):
         return TreesitterRegistry.create_treesitter(language)
 
     def parse(self, file_bytes: bytes) -> list[TreesitterMethodNode]:
-        """
-        Parses the given file bytes and extracts method nodes.
+        """Parses the given file bytes and extracts method nodes.
+
+        If no nodes matching the configured ``method_declaration_identifier`` are
+        found, a single fallback node spanning the entire file is returned so
+        that callers always receive at least one ``TreesitterMethodNode``.
 
         Args:
             file_bytes (bytes): The content of the file to be parsed.
 
         Returns:
-            list[TreesitterMethodNode]: A list of TreesitterMethodNode objects representing the methods in the file.
+            list[TreesitterMethodNode]: A list of TreesitterMethodNode objects
+            representing the methods in the file, or a single fallback node
+            covering the whole file when no methods are detected.
         """
         self.tree = self.parser.parse(file_bytes)
-        result = []
         methods = self._query_all_methods(self.tree.root_node)
-        for method in methods:
-            method_name = self._query_method_name(method["method"])
-            doc_comment = method["doc_comment"]
-            result.append(
-                TreesitterMethodNode(method_name, doc_comment, None, method["method"])
+
+        # Normal path: at least one method node was found.
+        if methods:
+            result: list[TreesitterMethodNode] = []
+            for method in methods:
+                method_name = self._query_method_name(method["method"])
+                doc_comment = method["doc_comment"]
+                result.append(
+                    TreesitterMethodNode(
+                        method_name, doc_comment, None, method["method"]
+                    )
+                )
+            return result
+
+        # Fallback path: no method nodes were found. Return a single node that
+        # spans the entire file so that callers can still index/summarize the
+        # content even when the language-specific patterns do not match.
+        full_source = file_bytes.decode(errors="replace")
+        fallback_node = self.tree.root_node
+        return [
+            TreesitterMethodNode(
+                name=None,
+                doc_comment=None,
+                method_source_code=full_source,
+                node=fallback_node,
             )
-        return result
+        ]
 
     def _query_all_methods(
         self,
@@ -71,7 +95,8 @@ class Treesitter(ABC):
             node (tree_sitter.Node): The root node to start the query from.
 
         Returns:
-            list: A list of dictionaries, each containing a method node and its associated doc comment (if any).
+            list: A list of dictionaries, each containing a method node and its
+            associated doc comment (if any).
         """
         methods = []
         if node.type == self.method_declaration_identifier:
@@ -88,8 +113,7 @@ class Treesitter(ABC):
         return methods
 
     def _query_method_name(self, node: tree_sitter.Node):
-        """
-        Queries the method name from the given syntax tree node.
+        """Queries the method name from the given syntax tree node.
 
         Args:
             node (tree_sitter.Node): The syntax tree node to query.
