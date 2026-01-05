@@ -814,8 +814,9 @@ def create_graph(
             debug=debug,
         )
     except ValueError as e:
+        nodes = "\n*".join(str(k) for k in lg_builder.nodes.keys())
         raise ValueError(
-            f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n*{'\n*'.join(lg_builder.nodes.keys())}\n\n**Schema Edges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{format_tools(tools)}")
+            f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n*{nodes}\n\n**Schema Edges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{format_tools(tools)}")
     # If building a nested subgraph, return the raw CompiledStateGraph
     if for_subgraph:
         return graph
