@@ -2386,7 +2386,6 @@ Examples:
 
     def _create_test_case_document(self, item: dict) -> Document:
         """Create a Document from a test case item with basic metadata for duplicate detection."""
-        import html
         
         # Extract basic identifiers
         test_case_id = item.get('pid', '')
