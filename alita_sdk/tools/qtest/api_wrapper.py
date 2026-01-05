@@ -950,6 +950,11 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
             parsed_data.append(parsed_data_row)
 
     def _process_image(self, content: str, extract: bool=False, prompt: str=None):
+        """Extract and process base64 images from HTML img tags.
+        
+        IMPORTANT: This method must be called BEFORE strip_tags() because it needs
+        the HTML <img> tags to extract base64-encoded images.
+        """
         #extract image by regex
         img_regex = r'<img\s+src="data:image\/[^;]+;base64,([^"]+)"\s+[^>]*data-filename="([^"]+)"[^>]*>'
 
@@ -967,6 +972,33 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
             return description
         #replace image tag by description
         content = re.sub(img_regex, replace_image, content)
+        return content
+
+    def _clean_html_content(self, content: str, extract_images: bool = False, image_prompt: str = None) -> str:
+        """Clean HTML content with proper order of operations.
+        
+        The correct order is:
+        1. Process images first (extracts from <img> tags - needs HTML intact)
+        2. Strip remaining HTML tags
+        3. Unescape HTML entities
+        
+        Args:
+            content: Raw HTML content from QTest
+            extract_images: Whether to extract and describe images using LLM
+            image_prompt: Custom prompt for image analysis
+            
+        Returns:
+            Cleaned text content with optional image descriptions
+        """
+        import html
+        if not content:
+            return ''
+        # Step 1: Process images FIRST (needs HTML <img> tags intact)
+        content = self._process_image(content, extract_images, image_prompt)
+        # Step 2: Strip remaining HTML tags
+        content = strip_tags(content)
+        # Step 3: Unescape HTML entities
+        content = html.unescape(content)
         return content
 
     def __perform_search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None) -> list:
@@ -2455,8 +2487,8 @@ Examples:
         # Description
         description = item.get('description', '')
         if description:
-            description = self._process_image(
-                html.unescape(strip_tags(description)),
+            description = self._clean_html_content(
+                description,
                 self._extract_images,
                 self._image_prompt
             )
@@ -2467,8 +2499,8 @@ Examples:
         # Precondition
         precondition = item.get('precondition', '')
         if precondition:
-            precondition = self._process_image(
-                html.unescape(strip_tags(precondition)),
+            precondition = self._clean_html_content(
+                precondition,
                 self._extract_images,
                 self._image_prompt
             )
@@ -2499,14 +2531,14 @@ Examples:
                 step_desc = step.get('description', '')
                 step_expected = step.get('expected', '')
                 
-                # Process images in steps
-                step_desc = self._process_image(
-                    html.unescape(strip_tags(step_desc)),
+                # Clean HTML content (processes images first, then strips tags)
+                step_desc = self._clean_html_content(
+                    step_desc,
                     self._extract_images,
                     self._image_prompt
                 )
-                step_expected = self._process_image(
-                    html.unescape(strip_tags(step_expected)),
+                step_expected = self._clean_html_content(
+                    step_expected,
                     self._extract_images,
                     self._image_prompt
                 )
