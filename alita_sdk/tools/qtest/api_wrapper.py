@@ -2435,7 +2435,6 @@ Examples:
         Extend base documents with full content formatted as markdown.
         This is called after duplicate detection, so we only process documents that need indexing.
         """
-        import html
         
         for document in documents:
             try:
@@ -2464,7 +2463,6 @@ Examples:
 
     def _format_test_case_as_markdown(self, item: dict) -> str:
         """Format a test case as markdown for better semantic search."""
-        import html
         
         lines = []
         
