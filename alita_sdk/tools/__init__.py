@@ -14,6 +14,29 @@ AVAILABLE_TOOLKITS = {}
 FAILED_IMPORTS = {}
 
 
+def _parse_configuration_strings(settings: dict, tool_type: str) -> None:
+    """Parse all *_configuration fields from JSON strings to dicts.
+    
+    When configurations come from UI (e.g., Streamlit), they are often 
+    serialized as JSON strings. This function automatically detects and 
+    parses all fields ending with '_configuration'.
+    
+    Args:
+        settings: Tool settings dict that may contain string configurations.
+        tool_type: Tool type for logging purposes.
+    """
+    import json
+    
+    for key, value in list(settings.items()):
+        if key.endswith('_configuration') and isinstance(value, str):
+            try:
+                parsed_value = json.loads(value)
+                settings[key] = parsed_value
+                logger.debug(f"Parsed {key} from JSON string for tool '{tool_type}'")
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse {key} as JSON for tool '{tool_type}', keeping as string")
+
+
 def _inject_toolkit_id(tool_conf: dict, toolkit_tools) -> None:
     """Inject `toolkit_id` into tools that expose `api_wrapper.toolkit_id`.
 
@@ -134,12 +157,15 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
 
     for tool in tools_list:
         toolkit_tools = []
-        settings = tool.get('settings')
+        original_settings = tool.get('settings')
 
         # Skip tools without settings early
-        if not settings:
+        if not original_settings:
             logger.warning(f"Tool '{tool.get('type', '')}' has no settings, skipping...")
             continue
+
+        # Work with a deep copy to avoid polluting original config with unpicklable objects
+        settings = deepcopy(original_settings)
 
         # Validate tool names once
         selected_tools = settings.get('selected_tools', [])
@@ -147,24 +173,33 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
         if invalid_tools:
             raise ValueError(f"Tool names {invalid_tools} from toolkit '{tool.get('type', '')}' cannot start with '_'")
 
-        # Cache tool type and add common settings
+        # Cache tool type and add common settings (only to our working copy)
         tool_type = tool['type']
         settings['alita'] = alita
         settings['llm'] = llm
         settings['store'] = store
 
+        # Parse all *_configuration fields from JSON strings (from UI) to dicts
+        _parse_configuration_strings(settings, tool_type)
+
         # Set pgvector collection schema if present
         if settings.get('pgvector_configuration'):
             # Use tool id if available, otherwise use toolkit_name or type as fallback
             collection_id = tool.get('id') or tool.get('toolkit_name') or tool_type
-            settings['pgvector_configuration']['collection_schema'] = str(collection_id)
+            pgvector_config = settings['pgvector_configuration']
+            
+            if isinstance(pgvector_config, dict):
+                pgvector_config['collection_schema'] = str(collection_id)
+
+        # Create a working copy of tool dict with parsed settings for get_tools calls
+        tool_with_parsed_settings = {**tool, 'settings': settings}
 
         # Handle ADO special cases
         if tool_type in ['ado_boards', 'ado_wiki', 'ado_plans']:
-            toolkit_tools.extend(AVAILABLE_TOOLS['ado']['get_tools'](tool_type, tool))
+            toolkit_tools.extend(AVAILABLE_TOOLS['ado']['get_tools'](tool_type, tool_with_parsed_settings))
         elif tool_type in ['ado_repos', 'azure_devops_repos'] and 'ado_repos' in AVAILABLE_TOOLS:
             try:
-                toolkit_tools.extend(AVAILABLE_TOOLS['ado_repos']['get_tools'](tool))
+                toolkit_tools.extend(AVAILABLE_TOOLS['ado_repos']['get_tools'](tool_with_parsed_settings))
             except Exception as e:
                 logger.error(f"Error getting ADO repos tools: {e}")
         elif tool_type == 'mcp':
@@ -173,7 +208,7 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
             logger.debug(f"Skipping planning toolkit '{tool.get('toolkit_name')}' - handled by runtime toolkit system")
         elif tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
             try:
-                toolkit_tools.extend(AVAILABLE_TOOLS[tool_type]['get_tools'](tool))
+                toolkit_tools.extend(AVAILABLE_TOOLS[tool_type]['get_tools'](tool_with_parsed_settings))
             except Exception as e:
                 logger.error(f"Error getting tools for {tool_type}: {e}")
                 raise ToolException(f"Error getting tools for {tool_type}: {e}")
