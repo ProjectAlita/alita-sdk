@@ -268,7 +268,6 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
     _modules_cache: Optional[list] = PrivateAttr(default=None)
     _chunking_tool: Optional[str] = PrivateAttr(default=None)
     _extract_images: bool = PrivateAttr(default=False)
-    llm: Any
 
     @model_validator(mode='before')
     @classmethod
