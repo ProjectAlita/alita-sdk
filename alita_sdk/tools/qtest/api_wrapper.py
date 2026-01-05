@@ -3,18 +3,21 @@ import json
 import logging
 import re
 from traceback import format_exc
-from typing import Any, Optional
+from typing import Any, Optional, Generator, Literal
 
 import requests
 import swagger_client
+from langchain_core.documents import Document
 from langchain_core.tools import ToolException
 from pydantic import Field, PrivateAttr, model_validator, create_model, SecretStr
 from sklearn.feature_extraction.text import strip_tags
 from swagger_client import TestCaseApi, SearchApi, PropertyResource, ModuleApi, ProjectApi, FieldApi
 from swagger_client.rest import ApiException
 
-from ..elitea_base import BaseToolApiWrapper
-from ..utils.content_parser import parse_file_content
+from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils.available_tools_decorator import extend_with_parent_available_tools
+from ..utils.content_parser import parse_file_content, file_extension_by_chunker
+from ...runtime.utils.utils import IndexerKeywords
 
 QTEST_ID = "QTest Id"
 
@@ -253,7 +256,7 @@ NoInput = create_model(
     "NoInput"
 )
 
-class QtestApiWrapper(BaseToolApiWrapper):
+class QtestApiWrapper(NonCodeIndexerToolkit):
     base_url: str
     qtest_project_id: int
     qtest_api_token: SecretStr
@@ -263,17 +266,17 @@ class QtestApiWrapper(BaseToolApiWrapper):
     _client: Any = PrivateAttr()
     _field_definitions_cache: Optional[dict] = PrivateAttr(default=None)
     _modules_cache: Optional[list] = PrivateAttr(default=None)
-    llm: Any
+    _chunking_tool: Optional[str] = PrivateAttr(default=None)
+    _extract_images: bool = PrivateAttr(default=False)
+    _image_prompt: Optional[str] = PrivateAttr(default=None)
 
     @model_validator(mode='before')
     @classmethod
-    def project_id_alias(cls, values):
+    def validate_toolkit(cls, values):
+        # Handle project_id alias
         if 'project_id' in values:
             values['qtest_project_id'] = values.pop('project_id')
-        return values
-
-    @model_validator(mode='after')
-    def validate_toolkit(self):
+        
         try:
             import swagger_client  # noqa: F401
         except ImportError:
@@ -282,6 +285,15 @@ class QtestApiWrapper(BaseToolApiWrapper):
                 "`pip install git+https://github.com/Roman-Mitusov/qtest-api.git`"
             )
 
+        cls.llm = values.get('llm')
+        # Call parent validator to set up embeddings and vectorstore params
+        return super().validate_toolkit(values)
+
+    @model_validator(mode='after')
+    def setup_qtest_client(self):
+        """Initialize QTest swagger client after model validation."""
+        import swagger_client
+        
         if self.qtest_api_token:
             configuration = swagger_client.Configuration()
             configuration.host = self.base_url
@@ -938,6 +950,11 @@ class QtestApiWrapper(BaseToolApiWrapper):
             parsed_data.append(parsed_data_row)
 
     def _process_image(self, content: str, extract: bool=False, prompt: str=None):
+        """Extract and process base64 images from HTML img tags.
+        
+        IMPORTANT: This method must be called BEFORE strip_tags() because it needs
+        the HTML <img> tags to extract base64-encoded images.
+        """
         #extract image by regex
         img_regex = r'<img\s+src="data:image\/[^;]+;base64,([^"]+)"\s+[^>]*data-filename="([^"]+)"[^>]*>'
 
@@ -955,6 +972,33 @@ class QtestApiWrapper(BaseToolApiWrapper):
             return description
         #replace image tag by description
         content = re.sub(img_regex, replace_image, content)
+        return content
+
+    def _clean_html_content(self, content: str, extract_images: bool = False, image_prompt: str = None) -> str:
+        """Clean HTML content with proper order of operations.
+        
+        The correct order is:
+        1. Process images first (extracts from <img> tags - needs HTML intact)
+        2. Strip remaining HTML tags
+        3. Unescape HTML entities
+        
+        Args:
+            content: Raw HTML content from QTest
+            extract_images: Whether to extract and describe images using LLM
+            image_prompt: Custom prompt for image analysis
+            
+        Returns:
+            Cleaned text content with optional image descriptions
+        """
+        import html
+        if not content:
+            return ''
+        # Step 1: Process images FIRST (needs HTML <img> tags intact)
+        content = self._process_image(content, extract_images, image_prompt)
+        # Step 2: Strip remaining HTML tags
+        content = strip_tags(content)
+        # Step 3: Unescape HTML entities
+        content = html.unescape(content)
         return content
 
     def __perform_search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None) -> list:
@@ -1891,6 +1935,7 @@ class QtestApiWrapper(BaseToolApiWrapper):
             kwargs["search"] = search
         return module_api.get_sub_modules_of(project_id=self.qtest_project_id, **kwargs)
 
+    @extend_with_parent_available_tools
     def get_available_tools(self):
         return [
             {
@@ -2142,3 +2187,374 @@ Examples:
                 "ref": self.find_entity_by_id,
             }
         ]
+
+    # ==================== INDEXER METHODS ====================
+
+    def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
+        """
+        Returns a list of fields for index_data args schema.
+        Defines three indexing modes: DQL query, module-based, and full project traversal.
+        """
+        return {
+            "chunking_tool": (Literal['markdown', ''], Field(
+                description="Name of chunking tool for test case content", 
+                default='markdown')),
+            "indexing_mode": (Literal['dql', 'module', 'full'], Field(
+                description="Indexing mode: 'dql' - use DQL query (may have API limitations), "
+                           "'module' - index specific module/folder (most deterministic), "
+                           "'full' - traverse entire project with pagination",
+                default='full')),
+            "dql": (Optional[str], Field(
+                description="DQL query for 'dql' mode. Example: \"Status = 'New' and Priority = 'High'\". "
+                           "Can also filter by module: \"Module in 'MD-7 Master Test Suite'\". "
+                           "Note: DQL via API may return incomplete results for complex queries.",
+                default=None,
+                json_schema_extra={'visible_when': {'field': 'indexing_mode', 'value': 'dql'}})),
+            "module_name": (Optional[str], Field(
+                description="Module/folder name for 'module' mode. Use the visible name from UI "
+                           "e.g., 'MD-7 Master Test Suite'. Most deterministic way to index a specific folder.",
+                default=None,
+                json_schema_extra={'visible_when': {'field': 'indexing_mode', 'value': 'module'}})),
+            "extract_images": (Optional[bool], Field(
+                description="Whether to extract and process images from test steps using LLM",
+                default=False)),
+            "image_prompt": (Optional[str], Field(
+                description="Custom prompt for image analysis (only used if extract_images=True)",
+                default="Analyze this image from a test case step. Describe what the image shows, including any UI elements, text, buttons, or visual indicators. Focus on elements relevant to testing.",
+                json_schema_extra={'visible_when': {'field': 'extract_images', 'value': True}})),
+        }
+
+    def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
+        """
+        Base loader for QTest test cases. Supports three indexing modes:
+        - dql: Use DQL query (may have API limitations for complex queries)
+        - module: Index specific module/folder by name (most deterministic)
+        - full: Full project traversal with pagination
+        """
+        self._chunking_tool = kwargs.get('chunking_tool', 'markdown')
+        self._extract_images = kwargs.get('extract_images', False)
+        self._image_prompt = kwargs.get('image_prompt', None)
+        
+        indexing_mode = kwargs.get('indexing_mode', 'full')
+        dql = kwargs.get('dql')
+        module_name = kwargs.get('module_name')
+
+        logger.info(f"Starting QTest indexing in '{indexing_mode}' mode for project {self.qtest_project_id}")
+
+        if indexing_mode == 'dql':
+            if not dql:
+                raise ToolException("DQL query is required for 'dql' indexing mode")
+            yield from self._load_test_cases_by_dql(dql)
+        elif indexing_mode == 'module':
+            if not module_name:
+                raise ToolException("module_name is required for 'module' indexing mode")
+            # Resolve module name to internal ID
+            module_id = self._resolve_module_name_to_id(module_name)
+            if not module_id:
+                raise ToolException(
+                    f"Module '{module_name}' not found in project {self.qtest_project_id}. "
+                    f"Use get_modules tool to see available modules."
+                )
+            yield from self._load_test_cases_by_module(module_id)
+        else:  # full mode
+            yield from self._load_test_cases_full_project()
+
+    def _resolve_module_name_to_id(self, module_name: str) -> Optional[int]:
+        """
+        Resolve a module name (e.g., 'MD-7 Master Test Suite') to its internal ID.
+        Uses the same approach as __build_body_for_create_test_case.
+        """
+        modules = self._parse_modules()
+        for module in modules:
+            if module.get('full_module_name') == module_name:
+                return module.get('module_id')
+        return None
+
+    def _load_test_cases_by_dql(self, dql: str) -> Generator[Document, None, None]:
+        """Load test cases using DQL query."""
+        logger.info(f"Loading test cases by DQL: {dql}")
+        search_instance: SearchApi = swagger_client.SearchApi(self._client)
+        body = swagger_client.ArtifactSearchParams(
+            object_type='test-cases', 
+            fields=['*'],
+            query=dql
+        )
+        
+        page = 1
+        while True:
+            try:
+                response = search_instance.search_artifact(
+                    self.qtest_project_id, 
+                    body,
+                    append_test_steps='true',
+                    include_external_properties='true',
+                    page_size=self.no_of_items_per_page,
+                    page=page
+                )
+                
+                items = response.get('items', [])
+                if not items:
+                    break
+                    
+                for item in items:
+                    yield self._create_test_case_document(item)
+                
+                # Check for next page
+                links = response.get('links', [])
+                has_next = any(link.get('rel') == 'next' for link in links)
+                if not has_next:
+                    break
+                page += 1
+                
+            except ApiException as e:
+                stacktrace = format_exc()
+                logger.error(f"Error loading test cases by DQL: {stacktrace}")
+                raise ToolException(f"Failed to load test cases by DQL: {stacktrace}") from e
+
+    def _load_test_cases_by_module(self, module_id: int) -> Generator[Document, None, None]:
+        """Load test cases from a specific module/folder."""
+        logger.info(f"Loading test cases from module {module_id}")
+        test_case_api: TestCaseApi = self.__instantiate_test_api_instance()
+        
+        page = 1
+        while True:
+            try:
+                response = test_case_api.get_test_cases(
+                    self.qtest_project_id,
+                    parent_id=module_id,
+                    page=page,
+                    size=self.no_of_items_per_page,
+                    expand_steps='true'
+                )
+                
+                if not response:
+                    break
+                
+                # Convert response objects to dicts if needed
+                items = [item.to_dict() if hasattr(item, 'to_dict') else item for item in response]
+                
+                if not items:
+                    break
+                    
+                for item in items:
+                    yield self._create_test_case_document(item)
+                
+                if len(items) < self.no_of_items_per_page:
+                    break
+                page += 1
+                
+            except ApiException as e:
+                stacktrace = format_exc()
+                logger.error(f"Error loading test cases from module: {stacktrace}")
+                raise ToolException(f"Failed to load test cases from module {module_id}: {stacktrace}") from e
+
+    def _load_test_cases_full_project(self) -> Generator[Document, None, None]:
+        """Load all test cases from the project using pagination."""
+        logger.info(f"Loading all test cases from project {self.qtest_project_id}")
+        test_case_api: TestCaseApi = self.__instantiate_test_api_instance()
+        
+        page = 1
+        while True:
+            try:
+                response = test_case_api.get_test_cases(
+                    self.qtest_project_id,
+                    page=page,
+                    size=self.no_of_items_per_page,
+                    expand_steps='true'
+                )
+                
+                if not response:
+                    break
+                
+                # Convert response objects to dicts if needed
+                items = [item.to_dict() if hasattr(item, 'to_dict') else item for item in response]
+                
+                if not items:
+                    break
+                    
+                for item in items:
+                    yield self._create_test_case_document(item)
+                
+                if len(items) < self.no_of_items_per_page:
+                    break
+                page += 1
+                
+            except ApiException as e:
+                stacktrace = format_exc()
+                logger.error(f"Error loading test cases: {stacktrace}")
+                raise ToolException(f"Failed to load test cases from project: {stacktrace}") from e
+
+    def _create_test_case_document(self, item: dict) -> Document:
+        """Create a Document from a test case item with basic metadata for duplicate detection."""
+        
+        # Extract basic identifiers
+        test_case_id = item.get('pid', '')
+        qtest_id = item.get('id', '')
+        
+        # Get updated timestamp for duplicate detection
+        # Try different timestamp fields
+        updated_on = (
+            item.get('last_modified_date') or 
+            item.get('updated_date') or 
+            item.get('created_date') or
+            ''
+        )
+        
+        # Get module/folder info
+        parent_id = item.get('parent_id')
+        module_name = self._get_module_name(parent_id) if parent_id else ''
+        
+        # Build basic metadata for the document
+        metadata = {
+            'id': test_case_id,
+            'qtest_id': qtest_id,
+            'updated_on': updated_on,
+            'name': item.get('name', ''),
+            'parent_id': parent_id,
+            'module_name': module_name,
+            'project_id': self.qtest_project_id,
+            'type': 'test_case',
+            # Store full item for later processing in _extend_data
+            '_raw_item': item,
+        }
+        
+        return Document(page_content="", metadata=metadata)
+
+    def _get_module_name(self, module_id: int) -> str:
+        """Get module name by ID from cached modules."""
+        if self._modules_cache is None:
+            self._parse_modules()
+        
+        for module in self._modules_cache or []:
+            if module.get('module_id') == module_id:
+                return module.get('full_module_name', module.get('module_name', ''))
+        return ''
+
+    def _extend_data(self, documents: Generator[Document, None, None]) -> Generator[Document, None, None]:
+        """
+        Extend base documents with full content formatted as markdown.
+        This is called after duplicate detection, so we only process documents that need indexing.
+        """
+        
+        for document in documents:
+            try:
+                raw_item = document.metadata.pop('_raw_item', None)
+                if not raw_item:
+                    yield document
+                    continue
+                
+                # Build markdown content for the test case
+                content = self._format_test_case_as_markdown(raw_item)
+                
+                # Store content for chunking
+                document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = content.encode('utf-8')
+                document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = f"test_case{file_extension_by_chunker(self._chunking_tool)}"
+                
+                # Add additional metadata from properties
+                for prop in raw_item.get('properties', []):
+                    field_name = prop.get('field_name')
+                    if field_name and field_name not in document.metadata:
+                        document.metadata[field_name.lower().replace(' ', '_')] = self.__format_property_value(prop)
+                
+            except Exception as e:
+                logger.error(f"Failed to extend document {document.metadata.get('id')}: {e}")
+            
+            yield document
+
+    def _format_test_case_as_markdown(self, item: dict) -> str:
+        """Format a test case as markdown for better semantic search."""
+        
+        lines = []
+        
+        # Header
+        test_id = item.get('pid', 'Unknown')
+        name = item.get('name', 'Untitled')
+        lines.append(f"# Test Case: {test_id} - {name}")
+        lines.append("")
+        
+        # Module/Folder
+        parent_id = item.get('parent_id')
+        if parent_id:
+            module_name = self._get_module_name(parent_id)
+            if module_name:
+                lines.append(f"## Module")
+                lines.append(module_name)
+                lines.append("")
+        
+        # Description
+        description = item.get('description', '')
+        if description:
+            description = self._clean_html_content(
+                description,
+                self._extract_images,
+                self._image_prompt
+            )
+            lines.append("## Description")
+            lines.append(description)
+            lines.append("")
+        
+        # Precondition
+        precondition = item.get('precondition', '')
+        if precondition:
+            precondition = self._clean_html_content(
+                precondition,
+                self._extract_images,
+                self._image_prompt
+            )
+            lines.append("## Precondition")
+            lines.append(precondition)
+            lines.append("")
+        
+        # Properties (Status, Type, Priority, etc.)
+        properties = item.get('properties', [])
+        if properties:
+            lines.append("## Properties")
+            for prop in properties:
+                field_name = prop.get('field_name', '')
+                field_value = self.__format_property_value(prop)
+                if field_name and field_value:
+                    if isinstance(field_value, list):
+                        field_value = ', '.join(str(v) for v in field_value)
+                    lines.append(f"- **{field_name}**: {field_value}")
+            lines.append("")
+        
+        # Test Steps
+        test_steps = item.get('test_steps', [])
+        if test_steps:
+            lines.append("## Test Steps")
+            lines.append("")
+            
+            for idx, step in enumerate(test_steps, 1):
+                step_desc = step.get('description', '')
+                step_expected = step.get('expected', '')
+                
+                # Clean HTML content (processes images first, then strips tags)
+                step_desc = self._clean_html_content(
+                    step_desc,
+                    self._extract_images,
+                    self._image_prompt
+                )
+                step_expected = self._clean_html_content(
+                    step_expected,
+                    self._extract_images,
+                    self._image_prompt
+                )
+                
+                lines.append(f"### Step {idx}")
+                if step_desc:
+                    lines.append(f"**Action:** {step_desc}")
+                if step_expected:
+                    lines.append(f"**Expected Result:** {step_expected}")
+                lines.append("")
+        
+        return '\n'.join(lines)
+
+    def _process_document(self, base_document: Document) -> Generator[Document, None, None]:
+        """
+        Process a base document to extract dependent documents (images).
+        Currently yields nothing as image content is inline in the markdown.
+        Can be extended to yield separate image documents if needed.
+        """
+        # For now, images are processed inline in the markdown content.
+        # If separate image documents are needed in the future, they can be yielded here.
+        yield from ()
