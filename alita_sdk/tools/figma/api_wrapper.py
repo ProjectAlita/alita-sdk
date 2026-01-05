@@ -1787,11 +1787,12 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                 "args_schema": AnalyzeFileSchema,
                 "ref": self.analyze_file,
             },
-            # Targeted drill-down for specific frames (more efficient than level 3 for 2-3 frames)
-            {
-                "name": "get_frame_detail_toon",
-                "description": self.get_frame_detail_toon.__doc__,
-                "args_schema": FrameDetailTOONSchema,
-                "ref": self.get_frame_detail_toon,
-            },
+            # TODO disabled until new requirements
+            # # Targeted drill-down for specific frames (more efficient than level 3 for 2-3 frames)
+            # {
+            #     "name": "get_frame_detail_toon",
+            #     "description": self.get_frame_detail_toon.__doc__,
+            #     "args_schema": FrameDetailTOONSchema,
+            #     "ref": self.get_frame_detail_toon,
+            # },
         ]
