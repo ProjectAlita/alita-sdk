@@ -274,8 +274,9 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
     @classmethod
     def validate_toolkit(cls, values):
         # Handle project_id alias
-        if 'project_id' in values:
-            values['qtest_project_id'] = values.pop('project_id')
+        # There is no such alias and this alias is breaking the scheduled indexing setting to qtest project id the value of the elitea project id.
+        # if 'project_id' in values:
+        #     values['qtest_project_id'] = values.pop('project_id')
         
         try:
             import swagger_client  # noqa: F401
