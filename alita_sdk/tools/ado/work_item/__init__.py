@@ -38,7 +38,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
         m = create_model(
             name,
             ado_configuration=(AdoConfiguration, Field(description="Ado Work Item configuration", json_schema_extra={'configuration_types': ['ado']})),
-            limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
+            limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5, gt=0)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,

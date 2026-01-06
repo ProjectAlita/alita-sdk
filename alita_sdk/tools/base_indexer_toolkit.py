@@ -46,7 +46,7 @@ BaseSearchParams = create_model(
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
     cut_off=(Optional[float], Field(description="Cut-off score for search results", default=DEFAULT_CUT_OFF, ge=0, le=1)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
+    search_top=(Optional[int], Field(description="Number of top results to return", default=10, gt=0)),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
         default=None
@@ -76,7 +76,7 @@ BaseStepbackSearchParams = create_model(
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
     cut_off=(Optional[float], Field(description="Cut-off score for search results", default=DEFAULT_CUT_OFF, ge=0, le=1)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
+    search_top=(Optional[int], Field(description="Number of top results to return", default=10, gt=0)),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
         default=None

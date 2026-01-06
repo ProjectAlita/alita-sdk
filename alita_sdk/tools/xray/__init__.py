@@ -41,7 +41,7 @@ class XrayToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in XrayApiWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
-            limit=(Optional[int], Field(description="Limit", default=100)),
+            limit=(Optional[int], Field(description="Limit", default=100, gt=0)),
             xray_configuration=(XrayConfiguration, Field(description="Xray Configuration", json_schema_extra={'configuration_types': ['xray']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",

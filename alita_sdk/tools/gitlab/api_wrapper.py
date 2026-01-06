@@ -66,7 +66,7 @@ CreateBranchModel = create_model(
 )
 ListBranchesInRepoModel = create_model(
     "ListBranchesInRepoModel",
-    limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.")),
+    limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.", gt=0)),
     branch_wildcard=(Optional[str], Field(default=None, description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned."))
 
 )

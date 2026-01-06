@@ -17,8 +17,8 @@ SendMessageModel = create_model(
 
 ReadMessagesModel = create_model(
                     "ReadMessagesModel",
-                    channel_id=(Optional[str], Field(default=None,description="Channel ID, user ID, or conversation ID to read messages from. (like C12345678 for public channels, D12345678 for DMs)")),                    
-                    limit=(int, Field(default=10, description="The number of messages to fetch (default is 10)."))
+                    channel_id=(Optional[str], Field(default=None,description="Channel ID, user ID, or conversation ID to read messages from. (like C12345678 for public channels, D12345678 for DMs)")),
+                    limit=(int, Field(default=10, description="The number of messages to fetch (default is 10).", gt=0))
                     )
 
 CreateChannelModel = create_model(

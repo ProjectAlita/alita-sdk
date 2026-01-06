@@ -92,7 +92,7 @@ SearchIssues = create_model(
     "SearchIssues",
     search_query=(str, Field(description="Keywords or query for searching issues and PRs in Github")),
     repo_name=(Optional[str], Field(description="Name of the repository to search issues in", default=None)),
-    max_count=(Optional[int], Field(description="Maximum number of issues to return", default=30))
+    max_count=(Optional[int], Field(description="Maximum number of issues to return", default=30, gt=0))
 )
 
 CreateIssue = create_model(
@@ -152,7 +152,7 @@ GetCommits = create_model(
     since=(Optional[str], Field(description="Only commits after this date will be returned (ISO format)", default=None)),
     until=(Optional[str], Field(description="Only commits before this date will be returned (ISO format)", default=None)),
     author=(Optional[str], Field(description="The author of the commits", default=None)),
-    max_count=(Optional[int], Field(description="Maximum number of commits to return (default: 30)", default=30))
+    max_count=(Optional[int], Field(description="Maximum number of commits to return (default: 30)", default=30, gt=0))
 )
 
 GetCommitChanges = create_model(
@@ -213,7 +213,7 @@ ListProjectIssues = create_model(
     "ListProjectIssues",
     board_repo=(str, Field(description="The organization and repository for the board (project). Example: 'org-name/repo-name'")),
     project_number=(int, Field(description="The project number as shown in the project URL")),
-    items_count=(Optional[int], Field(description="Maximum number of items to retrieve", default=100))
+    items_count=(Optional[int], Field(description="Maximum number of items to retrieve", default=100, gt=0))
 )
 
 SearchProjectIssues = create_model(
@@ -221,7 +221,7 @@ SearchProjectIssues = create_model(
     board_repo=(str, Field(description="The organization and repository for the board (project). Example: 'org-name/repo-name'")),
     project_number=(int, Field(description="The project number as shown in the project URL")),
     search_query=(str, Field(description="Search query for filtering issues. Examples: 'status:In Progress', 'release:v1.0'")),
-    items_count=(Optional[int], Field(description="Maximum number of items to retrieve", default=100))
+    items_count=(Optional[int], Field(description="Maximum number of items to retrieve", default=100, gt=0))
 )
 
 ListProjectViews = create_model(
