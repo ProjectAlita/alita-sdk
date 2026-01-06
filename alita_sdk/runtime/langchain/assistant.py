@@ -295,7 +295,7 @@ class Assistant:
                 chat_history_messages.append(message)
         
         # Only use prompt_instructions if explicitly specified (for predict app_type)
-        if self.app_type == "predict" and isinstance(self.prompt, str):
+        if self.app_type in ["predict", "react"] and isinstance(self.prompt, str):
             prompt_instructions = self.prompt
         
         # Add tool binding only if tools are present

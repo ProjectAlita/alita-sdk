@@ -40,4 +40,4 @@ Execute the `get_pull_request` tool with PR number `14` against the target repos
 
 Review the tool's output to ensure it contains the expected pull request details.
 
-**Expectation:** The output contains PR number `14`, title `AI Tetsing pull request`.
+**Expectation:** The output contains PR number `14`, title `AI Testing pull request`.

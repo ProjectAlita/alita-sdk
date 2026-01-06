@@ -58,7 +58,8 @@ def _create_assistant(client, agent_data: Dict[str, Any], llm, memory, tools: Li
         memory=memory,
         store=None,
         debug_mode=False,
-        mcp_tokens=None
+        mcp_tokens=None,
+        persona=agent_data.get('persona', 'quirky'),
     )
 
 

@@ -284,8 +284,7 @@ def _build_single_test_execution_prompt(test_case_info: dict, test_number: int) 
         f"\n{'='*80}",
         f"TEST CASE #{test_number}: {test_case['name']}",
         f"File: {test_file.name}",
-        f"{'='*80}",
-        "\nList all the tools you have in your environment. Execute the following steps in sequential order and report results:"
+        f"{'='*80}"
     ]
     
     if test_case['steps']:
@@ -303,7 +302,6 @@ def _build_single_test_validation_prompt(test_case_info: dict, test_number: int,
     test_case = test_case_info['data']
     
     parts = [
-        "Review the test execution results and validate this test case and provide the output in JSON format.\n",
         f"\nTest Case #{test_number}: {test_case['name']}"
     ]
     
@@ -319,18 +317,11 @@ def _build_single_test_validation_prompt(test_case_info: dict, test_number: int,
     escaped_test_name = test_case['name'].replace('"', '\\"')
     
     parts.append(f"""\nBased on the execution results above, validate this test case.
-
-Respond ONLY with valid JSON in this EXACT format (no additional text before or after):
-{{
-  "test_number": {test_number},
-  "test_name": "{escaped_test_name}",
-  "steps": [
-    {{"step_number": 1, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}},
-    {{"step_number": 2, "title": "<step title>", "passed": true/false, "details": "<brief explanation>"}}
-  ]
-}}
-
-IMPORTANT: Return ONLY the JSON object. Do not include any explanatory text before or after the JSON.""")
+        {{
+          "test_number": {test_number},
+          "test_name": "{escaped_test_name}"
+        }}
+    """)
     
     return "\n".join(parts)
 
@@ -1363,6 +1354,10 @@ def agent_show(ctx, agent_source: str, version: Optional[str]):
                 if agent_def.get('temperature') is not None:
                     details.append("Temperature: ", style="bold")
                     details.append(f"{agent_def['temperature']}\n", style="cyan")
+                
+                if agent_def.get('persona'):
+                    details.append("Persona: ", style="bold")
+                    details.append(f"{agent_def['persona']}\n", style="cyan")
                 
                 panel = Panel(
                     details,
@@ -3313,19 +3308,31 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
 
 
 @agent.command('execute-test-cases')
-@click.argument('agent_source')
+@click.option(
+    '--agent_source',
+    '--agent-source',
+    'agent_source',
+    required=False,
+    default=str(Path('.alita') / 'agents' / 'test-runner.agent.md'),
+    show_default=True,
+    type=click.Path(exists=False, file_okay=True, dir_okay=False),
+    help='Path to test runner agent definition file'
+)
 @click.option('--test-cases-dir', required=True, type=click.Path(exists=True, file_okay=False, dir_okay=True),
               help='Directory containing test case files')
-@click.option('--results-dir', required=True, type=click.Path(file_okay=False, dir_okay=True),
+@click.option('--results-dir', required=False, default=str(Path('.alita') / 'tests' / 'results'),
+              type=click.Path(file_okay=False, dir_okay=True),
               help='Directory where test results will be saved')
 @click.option('--test-case', 'test_case_files', multiple=True,
               help='Specific test case file(s) to execute (e.g., TC-001.md). Can specify multiple times. If not specified, executes all test cases.')
 @click.option('--model', help='Override LLM model')
 @click.option('--temperature', type=float, help='Override temperature')
 @click.option('--max-tokens', type=int, help='Override max tokens')
-@click.option('--dir', 'work_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True),
+@click.option('--dir', 'work_dir', required=False, default=str(Path('.alita')),
+              type=click.Path(exists=True, file_okay=False, dir_okay=True),
               help='Grant agent filesystem access to this directory')
-@click.option('--data-generator', type=click.Path(exists=True),
+@click.option('--data-generator', required=False, default=str(Path('.alita') / 'agents' / 'test-data-generator.agent.md'),
+              type=click.Path(exists=True),
               help='Path to test data generator agent definition file')
 @click.option('--validator', type=click.Path(exists=True),
               help='Path to test validator agent definition file (default: .alita/agents/test-validator.agent.md)')
@@ -3334,8 +3341,8 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
 @click.pass_context
 def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir: str,
                       test_case_files: tuple, model: Optional[str], temperature: Optional[float], 
-                      max_tokens: Optional[int], work_dir: Optional[str],
-                      data_generator: Optional[str], validator: Optional[str], 
+                      max_tokens: Optional[int], work_dir: str,
+                      data_generator: str, validator: Optional[str], 
                       skip_data_generation: bool):
     """
     Execute test cases from a directory and save results.
@@ -3351,16 +3358,16 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
        - Generates a test result file
     4. Saves all results to RESULTS_DIR
     
-    AGENT_SOURCE: Path to agent definition file (e.g., .github/agents/test-runner.agent.md)
+    --agent_source: Path to test runner agent definition file
     
     \b
     Examples:
-      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results
-      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
+      alita agent execute-test-cases --test-cases-dir ./tests --results-dir ./results
+      alita agent execute-test-cases --agent_source ./agent.json --test-cases-dir ./tests --results-dir ./results \
           --data-generator ./data-gen.json
-      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
+      alita agent execute-test-cases --agent_source ./agent.json --test-cases-dir ./tests --results-dir ./results \
           --test-case TC-001.md --test-case TC-002.md
-      alita execute-test-cases ./agent.json --test-cases-dir ./tests --results-dir ./results \
+      alita agent execute-test-cases --agent_source ./agent.json --test-cases-dir ./tests --results-dir ./results \
           --skip-data-generation --model gpt-4o
     """
     # Import dependencies at function start
@@ -3370,10 +3377,25 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
     
     config = ctx.obj['config']
     client = get_client(ctx)
+
+    # Sanity-check committed defaults (should exist; fail early with a clear message if not)
+    if results_dir and not Path(results_dir).exists():
+        raise click.ClickException(
+            f"Results directory not found: {results_dir}. "
+            f"If you are running outside the repo root, pass --results-dir explicitly."
+        )
     
     try:        
         # Load agent definition
-        if not Path(agent_source).exists():
+        agent_source_path = Path(agent_source)
+        if not agent_source_path.exists():
+            default_path = Path('.alita') / 'agents' / 'test-runner.agent.md'
+            if agent_source_path == default_path:
+                raise click.ClickException(
+                    f"Default agent definition not found: {agent_source}. "
+                    f"Run this command from the repo root (so {default_path} resolves correctly) "
+                    f"or pass --agent_source explicitly."
+                )
             raise click.ClickException(f"Agent definition not found: {agent_source}")
         
         agent_def = load_agent_definition(agent_source)
@@ -3578,6 +3600,7 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 # Build execution prompt for single test case
                 execution_prompt = _build_single_test_execution_prompt(tc_info, idx)
                 console.print(f"[dim]Executing with {len(bulk_gen_chat_history)} history messages[/dim]")
+                console.print(f"[dim]Executing test case with the prompt {execution_prompt}[/dim]")
                 
                 # Execute test case
                 execution_output = ""
@@ -3592,6 +3615,13 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                     console.print(f"[green]✓ Test case executed[/green]")
                     console.print(f"[dim]{execution_output}[/dim]\n")
                     
+                    # Append execution to bulk gen chat history for validation
+                    test_case_history_start = len(bulk_gen_chat_history)
+                    bulk_gen_chat_history.extend([
+                        {"role": "user", "content": execution_prompt},
+                        {"role": "assistant", "content": execution_output}
+                    ])
+                    
                     # No history accumulation - each test case is independent
                 else:
                     console.print(f"[red]✗ No agent executor available[/red]")
@@ -3604,10 +3634,10 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                     })
                     continue
                 
-                # Validate test case using ISOLATED validation executor
+                # Validate test case using validation executor with accumulated history
                 validation_prompt = _build_single_test_validation_prompt(tc_info, idx, execution_output)
                 
-                console.print(f"[bold yellow]🔍 Validating test case (isolated context)...[/bold yellow]")
+                console.print(f"[bold yellow]🔍 Validating test case (with execution history)...[/bold yellow]")
                 
                 # Create or retrieve isolated validation executor
                 validation_cache_key = f"{cache_key}_validation"
@@ -3623,8 +3653,8 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 else:
                     console.print(f"[dim]Using cached validation executor[/dim]")
                 
-                # For validation, use a separate thread with NO chat history (isolated from data gen)
-                # This prevents the agent from using tools and encourages direct JSON output
+                # For validation, use a separate thread with accumulated chat history (data gen + execution)
+                # This provides context to the validator about the test execution
                 validation_thread_id = f"validation_{idx}_{uuid.uuid4().hex[:8]}"
                 
                 validation_output = ""
@@ -3632,18 +3662,15 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                     with console.status(f"[yellow]Validating test case...[/yellow]", spinner="dots"):
                         validation_result = validation_executor.invoke({
                             "input": validation_prompt,
-                            "chat_history": []  # ISOLATED: No data gen history for validation
+                            "chat_history": bulk_gen_chat_history  # Includes data gen and execution history
                         }, {"configurable": {"thread_id": validation_thread_id}})
                     
                     validation_output = extract_output_from_result(validation_result)
                 else:
                     console.print(f"[red]✗ No validation executor available[/red]")
                     validation_output = "{}"
-                
-                console.print(f"[bold cyan]Full LLM Validation Response:[/bold cyan]")
-                console.print(f"[dim]{validation_output}[/dim]\n")
-                
-                # No history update - validation is isolated from test execution
+                    
+                # No further history update - validation completes the cycle
                 
                 # Parse validation JSON
                 try:
@@ -3701,6 +3728,10 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                     
                     test_results.append(fallback_result)
                     console.print()
+                
+                # After validation, remove the test case execution from history to prevent accumulation
+                # Remove the entries added for this test case
+                del bulk_gen_chat_history[test_case_history_start:]
                     
             except Exception as e:
                 logger.debug(f"Test execution failed for {test_name}: {e}", exc_info=True)

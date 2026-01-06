@@ -42,4 +42,4 @@ Execute the `list_open_pull_requests` tool against the target repository.
 
 Review the tool's output to ensure it contains the expected pull request.
 
-**Expectation:** The output contains pull request number `14` The output contains title `AI Tetsing pull request` Exactly all expectations must match
+**Expectation:** The output contains pull request number `14` The output contains title `AI Testing pull request` Exactly all expectations must match

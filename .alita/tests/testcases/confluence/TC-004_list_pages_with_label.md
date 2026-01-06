@@ -40,4 +40,4 @@ Execute the `list_pages_with_label` tool with the label parameter set to `test-l
 
 Verify that the output contains a list of dictionaries with 'id' and 'title' keys.
 
-**Expectation:** The output is exactly this content `[{"id": "104300545","title": "Test Label Page"}]`
+**Expectation:** The output is exactly this content `[{'id': '104300545', 'title': 'Test Label Page'}]`
