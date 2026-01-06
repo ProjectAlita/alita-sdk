@@ -20,7 +20,7 @@ NoInput = create_model(
 ReadList = create_model(
     "ReadList",
     list_title=(str, Field(description="Name of a Sharepoint list to be read.")),
-    limit=(Optional[int], Field(description="Limit (maximum number) of list items to be returned", default=1000))
+    limit=(Optional[int], Field(description="Limit (maximum number) of list items to be returned", default=1000, gt=0))
 )
 
 GetFiles = create_model(
@@ -30,7 +30,7 @@ GetFiles = create_model(
                                                   "Can be called with synonyms, such as First, Top, etc., "
                                                   "or can be reflected just by a number for example 'Top 10 files'. "
                                                   "Use default value if not specified in a query WITH NO EXTRA "
-                                                  "CONFIRMATION FROM A USER", default=100)),
+                                                  "CONFIRMATION FROM A USER", default=100, gt=0)),
 )
 
 ReadDocument = create_model(

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class AzureSearchInput(BaseModel):
     search_text: str = Field(..., description="The text to search for in the Azure Search index.")
-    limit: int = Field(10, description="The number of results to return.")
+    limit: int = Field(10, description="The number of results to return.", gt=0)
     selected_fields: Optional[List[str]] = Field(None, description="The fields to retrieve from the document.")
 
 class AzureDocumentInput(BaseModel):

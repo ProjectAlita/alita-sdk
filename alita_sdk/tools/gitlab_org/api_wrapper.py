@@ -24,7 +24,7 @@ GitLabCreateBranch = create_model(
 GitLabListBranches = create_model(
     "GitLabListBranchesModel",
     repository=(Optional[str], Field(description="Name of the repository", default=None)),
-    limit=(Optional[int], Field(description="Maximum number of branches to return. If not provided, all branches will be returned.", default=20)),
+    limit=(Optional[int], Field(description="Maximum number of branches to return. If not provided, all branches will be returned.", default=20, gt=0)),
     branch_wildcard=(Optional[str], Field(description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned.", default=None))
 )
 

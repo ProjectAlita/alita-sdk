@@ -39,7 +39,7 @@ class ZephyrScaleToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in ZephyrScaleApiWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
-            max_results=(int, Field(default=100, description="Results count to show")),
+            max_results=(int, Field(default=100, description="Results count to show", gt=0)),
             zephyr_configuration=(ZephyrConfiguration, Field(description="Zephyr Configuration",
                                                                        json_schema_extra={'configuration_types': ['zephyr']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None, description="PgVector Configuration",

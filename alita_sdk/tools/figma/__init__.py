@@ -91,7 +91,7 @@ class FigmaToolkit(BaseToolkit):
                 ge=1,
                 le=5,
             )),
-            global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT)),
+            global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT, gt=0)),
             global_regexp=(Optional[str], Field(description="Global regex pattern", default=None)),
             selected_tools=(
                 List[Literal[tuple(selected_tools)]],
