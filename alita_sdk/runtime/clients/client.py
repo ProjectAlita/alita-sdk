@@ -18,6 +18,44 @@ from langchain_anthropic import ChatAnthropic
 from ..langchain.assistant import Assistant as LangChainAssistant
 # from ..llamaindex.assistant import Assistant as LLamaAssistant
 from .prompt import AlitaPrompt
+
+
+def _sanitize_tool_params(params: dict) -> dict:
+    """Sanitize tool parameters from UI by removing empty string parameters.
+    
+    When parameters come from UI forms, empty optional fields are often sent as empty strings
+    instead of being omitted. This causes validation errors when tools expect specific types
+    like dict or list. By removing empty string parameters, we let the tool's default values
+    handle them properly.
+    
+    Args:
+        params: Raw parameters dict from UI
+        
+    Returns:
+        Sanitized parameters dict with empty strings removed
+    """
+    import json
+    
+    if not isinstance(params, dict):
+        return params
+        
+    sanitized = {}
+    for key, value in params.items():
+        if value == '':
+            # Empty string means "not provided" - skip to let defaults handle it
+            continue
+        elif isinstance(value, str):
+            # Try to parse JSON strings (for complex types from UI)
+            try:
+                parsed = json.loads(value)
+                sanitized[key] = parsed
+            except (json.JSONDecodeError, ValueError):
+                # Not JSON, keep as string
+                sanitized[key] = value
+        else:
+            sanitized[key] = value
+            
+    return sanitized
 from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
@@ -1065,7 +1103,10 @@ class AlitaClient:
                 else:
                     logger.info(f"Found tool '{tool_name}' using fallback matching ('{actual_tool_name}')")
 
-                logger.info(f"Executing tool '{tool_name}' (internal name: '{actual_tool_name}') with parameters: {tool_params}")
+                # Sanitize tool parameters (convert empty strings to None for optional complex types)
+                sanitized_params = _sanitize_tool_params(tool_params)
+                
+                logger.info(f"Executing tool '{tool_name}' (internal name: '{actual_tool_name}') with parameters: {sanitized_params}")
 
                 # Start timing the tool execution
                 start_time = time.time()
@@ -1074,13 +1115,13 @@ class AlitaClient:
                 if hasattr(target_tool, 'invoke'):
                     # Use config for tools that support RunnableConfig
                     if config is not None:
-                        result = target_tool.invoke(tool_params, config=config)
+                        result = target_tool.invoke(sanitized_params, config=config)
                     else:
-                        result = target_tool.invoke(tool_params)
+                        result = target_tool.invoke(sanitized_params)
                 elif hasattr(target_tool, 'run'):
-                    result = target_tool.run(tool_params)
+                    result = target_tool.run(sanitized_params)
                 elif callable(target_tool):
-                    result = target_tool(**tool_params)
+                    result = target_tool(**sanitized_params)
                 else:
                     execution_time = time.time() - start_time
                     return {
