@@ -415,26 +415,53 @@ class GitHubClient(BaseModel):
         Returns:
             str: A detailed diff comparison between the two commits or an error message.
         """
+        def safe_author_info(commit_obj):
+            """Safely extract author info from a commit object, handling None values."""
+            author = commit_obj.commit.author
+            if author:
+                return {
+                    "name": author.name or "Unknown",
+                    "date": author.date.isoformat() if author.date else None
+                }
+            # Fallback to GitHub user info if git author is not available
+            elif commit_obj.author:
+                return {
+                    "name": commit_obj.author.login,
+                    "date": None
+                }
+            return {"name": "Unknown", "date": None}
+
         try:
             # Get the repository
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
-            
+
             # Get the comparison between the two commits
             comparison = repo.compare(base_sha, head_sha)
-            
+
+            # Get head commit - the GitHub Compare API doesn't return head_commit,
+            # so we get it from the commits list or fetch it directly
+            if comparison.commits:
+                head_commit_obj = comparison.commits[-1]
+            else:
+                # For identical commits or edge cases, fetch head commit directly
+                head_commit_obj = repo.get_commit(head_sha)
+
+            base_author = safe_author_info(comparison.base_commit)
+            head_author = safe_author_info(head_commit_obj)
+
             # Extract comparison information
             diff_info = {
                 "base_commit": {
                     "sha": comparison.base_commit.sha,
                     "message": comparison.base_commit.commit.message,
-                    "author": comparison.base_commit.commit.author.name,
-                    "date": comparison.base_commit.commit.author.date.isoformat()
+                    "author": base_author["name"],
+                    "date": base_author["date"]
                 },
                 "head_commit": {
-                    "sha": comparison.head_commit.sha,
-                    "message": comparison.head_commit.commit.message,
-                    "author": comparison.head_commit.commit.author.name,
-                    "date": comparison.head_commit.commit.author.date.isoformat()
+                    "sha": head_commit_obj.sha,
+                    "message": head_commit_obj.commit.message,
+                    "author": head_author["name"],
+                    "date": head_author["date"]
                 },
                 "status": comparison.status,  # ahead, behind, identical, or diverged
                 "ahead_by": comparison.ahead_by,
@@ -443,14 +470,15 @@ class GitHubClient(BaseModel):
                 "commits": [],
                 "files": []
             }
-            
+
             # Get commits in the comparison
             for commit in comparison.commits:
+                author_info = safe_author_info(commit)
                 commit_info = {
                     "sha": commit.sha,
                     "message": commit.commit.message,
-                    "author": commit.commit.author.name,
-                    "date": commit.commit.author.date.isoformat(),
+                    "author": author_info["name"],
+                    "date": author_info["date"],
                     "url": commit.html_url
                 }
                 diff_info["commits"].append(commit_info)
