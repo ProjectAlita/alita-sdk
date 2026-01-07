@@ -27,10 +27,8 @@ class RouterNode(BaseTool):
         if result in [clean_string(formatted_result) for formatted_result in self.routes]:
             # If the result is one of the routes, return it
             return {"router_output": result}
-        elif result == self.default_output:
-            # If the result is the default output, return it
-            return {"router_output": clean_string(self.default_output)}
-        return {"router_output": 'END'}
+        # For any unmatched condition (including empty string), use the configured default_output
+        return {"router_output": clean_string(self.default_output)}
 
     def _run(self, *args, **kwargs):
         return self.invoke(**kwargs)
