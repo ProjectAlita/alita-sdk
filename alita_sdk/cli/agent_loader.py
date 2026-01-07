@@ -5,12 +5,40 @@ Handles loading agent definitions from various file formats (YAML, JSON, Markdow
 """
 
 import json
+import locale
 import yaml
 from pathlib import Path
 from typing import Dict, Any
 from pydantic import SecretStr
 
 from .config import substitute_env_vars
+
+
+def _read_text_with_fallbacks(path: Path) -> str:
+    """Read a text file using robust, cross-platform defaults.
+
+    Why this exists:
+    - On Windows, `Path.read_text()` defaults to the system code page (often cp1252).
+      Agent definition files are commonly authored as UTF-8 and may include smart quotes
+      (e.g. ”) whose UTF-8 byte sequence contains 0x9D, which is *undefined* in cp1252.
+      That combination triggers: UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d.
+    """
+
+    # 1) Prefer UTF-8 (most common for repo files)
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    # 2) UTF-8 with BOM (common on Windows)
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+
+    # 3) Fall back to the platform preferred encoding, but never crash.
+    #    This keeps the CLI usable even if a file was authored in a legacy encoding.
+    return path.read_text(encoding=locale.getpreferredencoding(False), errors="replace")
 
 
 def load_agent_definition(file_path: str) -> Dict[str, Any]:
@@ -32,8 +60,8 @@ def load_agent_definition(file_path: str) -> Dict[str, Any]:
     
     if not path.exists():
         raise FileNotFoundError(f"Agent definition not found: {file_path}")
-    
-    content = path.read_text()
+
+    content = _read_text_with_fallbacks(path)
     
     # Handle markdown with YAML frontmatter
     if path.suffix == '.md':
@@ -58,7 +86,8 @@ def load_agent_definition(file_path: str) -> Dict[str, Any]:
                     'filesystem_tools_preset': frontmatter.get('filesystem_tools_preset'),
                     'filesystem_tools_include': frontmatter.get('filesystem_tools_include'),
                     'filesystem_tools_exclude': frontmatter.get('filesystem_tools_exclude'),
-                    'mcps': frontmatter.get('mcps', [])
+                    'mcps': frontmatter.get('mcps', []),
+                    'persona': frontmatter.get('persona')
                 }
         
         # Plain markdown - use content as system prompt
@@ -211,5 +240,6 @@ def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: list,
                 }
             }
         },
-        'agent_type': agent_def.get('agent_type', 'react')
+        'agent_type': agent_def.get('agent_type', 'react'),
+        'persona': agent_def.get('persona', 'quirky')
     }

@@ -2,7 +2,9 @@
 name: "test-data-generator"
 description: "Concise data-generator: prepare test data; supports parallel tool calls"
 model: "gpt-5"
+max_tokens: 50000
 tools: []
+persona: "cynical"
 ---
 
 # Test Data Generator (Concise)

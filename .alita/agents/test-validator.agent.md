@@ -6,6 +6,7 @@ temperature: 0.0
 max_tokens: 30000
 step_limit: 10
 tools: []
+persona: "cynical"
 ---
 
 # Test Validator Agent

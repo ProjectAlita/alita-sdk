@@ -18,17 +18,13 @@ services:
       - ADO_PROJECT=${ADO_PROJECT}
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
+      - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
     volumes:
-      - ./.github:/app/.github
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk
     command: >
       sh -c "alita agent execute-test-cases
-      .alita/agents/test-runner.agent.md
-      --test-cases-dir .alita/tests/testcases/$${TEST_CASES_DIR}
-      --results-dir .alita/tests/results
-      --data-generator .alita/agents/test-data-generator.agent.md
-      --dir .alita"
+      --test-cases-dir .alita/tests/testcases/$${TEST_CASES_DIR}"
 
   pgvector-db:
     image: ankane/pgvector

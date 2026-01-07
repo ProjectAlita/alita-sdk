@@ -37,13 +37,13 @@ Execute the `get_pages_with_label` tool with the label parameter set to `test-la
 
 ### Step 2: Verify the Output
 
-Verify that the output contains page details including page_id, page_title, page_url, content.
+Verify that the output contains page details including page_id, page_title, page_url, content field must be not blank.
 
 **Expectation:** The output contains `[
   {
     "page_id": "104300545",
     "page_title": "Test Label Page",
     "page_url": "https://epamelitea.atlassian.net/spaces/AT/pages/104300545/Test+Label+Page",
-    "content": ""
+    "content": "ANY NON-BLANK CONTENT"
   }
 ]` .
