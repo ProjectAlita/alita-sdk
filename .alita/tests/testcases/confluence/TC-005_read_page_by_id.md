@@ -11,8 +11,6 @@ Verify that the `read_page_by_id` tool correctly retrieves the content of a Conf
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://variushkin.atlassian.net` | Confluence instance URL |
 | **Tool** | `read_page_by_id` | Confluence tool to execute for reading page content |
 | **Page ID** | `104038676` | ID of the page to read |

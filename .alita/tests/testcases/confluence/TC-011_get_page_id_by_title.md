@@ -11,8 +11,6 @@ Verify that the `get_page_id_by_title` tool correctly retrieves the page ID for 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `get_page_id_by_title` | Confluence tool to execute for getting page ID |
 | **Title** | `Template - Project plan` | Title of the page to find |

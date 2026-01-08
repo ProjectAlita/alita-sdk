@@ -16,7 +16,7 @@ Ensure updating content and labels using page title returns a success message vi
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `update_page_by_title` | Exact Python tool name |
-| **Primary Input(s)** | `{{PAGE_TITLE_OF_PAGE_TO_UPDATE}}, {{NEW_BODY_OF_THE_PAGE}}, {{NEW_LABEL}}` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `{{TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE}}, {{TC_020_NEW_BODY_OF_THE_PAGE}}, {{TC_020_NEW_LABEL}}` | Required and optional inputs derived from args_schema |
 
 ## Config
 
@@ -27,13 +27,13 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Required credentials available via env vars referenced by config
-- Target page with `{{PAGE_TITLE_OF_PAGE_TO_UPDATE}}` exists and is accessible
+- Target page with `{{TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE}}` exists and is accessible
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute `update_page_by_title` with `page_title={{PAGE_TITLE_OF_PAGE_TO_UPDATE}}`, `new_body={{NEW_BODY_OF_THE_PAGE}}`, `new_labels={{NEW_LABEL}}`, `representation=storage`.
+Execute `update_page_by_title` with `page_title={{TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE}}`, `new_body={{TC_020_NEW_BODY_OF_THE_PAGE}}`, `new_labels={{TC_020_NEW_LABEL}}`, `representation=storage`.
 
 **Expectation:** runs without errors and returns output.
 
@@ -43,6 +43,6 @@ Validate output contains "was updated successfully" and includes a web UI link. 
 
 ### Step 3: Delete created pages
 
-Execute `delete_page` with title `{{PAGE_TITLE_OF_PAGE_TO_UPDATE}}`.
+Execute `delete_page` with title `{{TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE}}`.
 
 **Expectation:** returns confirmation that the pages have been successfully deleted.

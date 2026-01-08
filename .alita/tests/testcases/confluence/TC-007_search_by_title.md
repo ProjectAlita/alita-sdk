@@ -11,8 +11,6 @@ Verify that the `search_by_title` tool correctly searches for Confluence pages b
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `search_by_title` | Confluence tool to execute for title-based search |
 | **Query** | `Test Label Page` | Search query text for title |

@@ -16,7 +16,7 @@ Validate that create_page publishes a new page with HTML body in the specified s
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `create_page` | Exact Python tool name |
-| **Primary Input(s)** | `{{SPACE}}=AT`, `{{PAGE_TITLE}}=AI Test page {{RANDOM_STRING}}`, `{{PAGE_BODY_TEXT}}={{RANDOM_STRING}}`, `{{STATUS}}=current`, `{{REPRESENTATION}}=storage`, `{{LABEL}}=automation` | Inputs derived from args_schema: space, title, body, status, parent_id, representation, label |
+| **Primary Input(s)** | `{{SPACE}}=AT`, `{{TC_13_PAGE_TITLE}}=TC_13 page {{RANDOM_STRING}}`, `{{PAGE_BODY_TEXT}}={{RANDOM_STRING}}`, `{{STATUS}}=current`, `{{REPRESENTATION}}=storage`, `{{LABEL}}=automation` | Inputs derived from args_schema: space, title, body, status, parent_id, representation, label |
 
 ## Config
 
@@ -27,7 +27,7 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Space `{{SPACE}}` exists and is accessible
-- Title `{{PAGE_TITLE}}` does not already exist in the space. Do not create any pages beforehand.
+- Title `{{TC_13_PAGE_TITLE}}` does not already exist in the space. Do not create any pages beforehand.
 
 ## Test Steps & Expectations
 
@@ -35,7 +35,7 @@ generateTestData: true
 
 Execute `create_page` with:
 - space=`{{SPACE}}`
-- title=`{{PAGE_TITLE}}`
+- title=`{{TC_13_PAGE_TITLE}}`
 - body=`{{PAGE_BODY_TEXT}}`
 - status=`{{STATUS}}`
 - representation=`{{REPRESENTATION}}`
@@ -46,12 +46,12 @@ Execute `create_page` with:
 ### Step 2: Verify Core Output Contract
 
 Validate returned text includes:
-- "The page '{{PAGE_TITLE}}' was created under the parent page"
+- "The page '{{TC_13_PAGE_TITLE}}' was created under the parent page"
 - "Details: {'title': ..., 'id': ..., 'space key': ..., 'author': ..., 'link': ...}"
 - If label provided, ensure label name is present in details.
 
 ### Step 3: Delete created page
 
-Execute `delete_page` with only `page_title` set: `{{PAGE_TITLE}}`.
+Execute `delete_page` with only `page_title` set: `{{TC_13_PAGE_TITLE}}`.
 
 **Expectation:** returns confirmation that the page has been successfully deleted.

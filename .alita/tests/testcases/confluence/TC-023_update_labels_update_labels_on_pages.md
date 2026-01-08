@@ -16,8 +16,7 @@ Ensure updating labels for multiple pages returns aggregated success statuses an
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `update_labels` | Exact Python tool name |
-| **Primary Input(s)** | `{{PAGE_IDS_TO_UPDATE_LABELS}}, {{NEW_LABELS}}` | Inputs derived from args_schema |
-| **Expected Result** | `{{EXPECTED_STATUS_LIST_SNIPPET}}` | Stringified list where each entry contains "was updated successfully" |
+| **Primary Input(s)** | `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}, {{TC_023_NEW_LABELS}}` | Inputs derived from args_schema |
 
 ## Config
 
@@ -28,14 +27,14 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Required credentials available via env vars referenced by config
-- Target pages with `{{PAGE_IDS_TO_UPDATE_LABELS}}` exist and are accessible
-- `{{NEW_LABELS}}` is a list of label strings
+- Target pages with `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}` exist and are accessible
+- `{{TC_023_NEW_LABELS}}` is a list of label strings
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute `update_labels` with `page_ids={{PAGE_IDS_TO_UPDATE_LABELS}}`, `new_labels={{NEW_LABELS}}`.
+Execute `update_labels` with `page_ids={{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`, `new_labels={{TC_023_NEW_LABELS}}`.
 
 **Expectation:** runs without errors and returns output.
 
@@ -45,11 +44,15 @@ Validate returned string represents a list where each per-page status contains "
 
 ### Step 3: Verify Individual Page Updates
 
-Execute the `list_pages_with_label` tool for any label from `{{NEW_LABELS}}`.
-Verify that the output contains pages `{{PAGE_IDS_TO_UPDATE_LABELS}}`.
+Execute the `list_pages_with_label` tool for any label from `{{TC_023_NEW_LABELS}}`.
+If id's are ints convert them to strings.
+If the pages are returned with retries, that should be considered as success.
+Verify that the output contains pages `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`.
 
 ### Step 4: Delete created pages
 
-Execute `delete_page` for each page from `{{PAGE_IDS_TO_UPDATE_LABELS}}`.
+Execute `delete_page` for each page from `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`.
+If id's are ints convert them to strings.
+If the pages are deleted with retries, that should be considered as success
 
 **Expectation:** returns confirmation that the pages have been successfully deleted.

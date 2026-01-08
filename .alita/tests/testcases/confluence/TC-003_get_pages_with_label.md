@@ -11,8 +11,6 @@ Verify that the `get_pages_with_label` tool correctly retrieves pages tagged wit
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Tool** | `get_pages_with_label` | Confluence tool to execute for retrieving labeled pages |
 | **Label** | `test-label` | Label to filter pages |
 

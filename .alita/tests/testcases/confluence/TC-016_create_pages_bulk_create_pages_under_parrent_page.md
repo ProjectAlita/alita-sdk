@@ -16,7 +16,7 @@ Validate that create_pages works when underlying create_page handles different r
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `create_pages` | Exact Python tool name |
-| **Primary Input(s)** | `{{SPACE}}=AT`, `{{PAGES_INFO_JSON_VARIANT}}`, `{{STATUS}}=current`. `{{PARENT_ID}}` | Inputs derived from args_schema: space, pages_info, status, parent_id |
+| **Primary Input(s)** | `{{SPACE}}=AT`, `{{TC_16_PAGES_INFO_JSON}}`, `{{STATUS}}=current`. `{{TC_16_PARENT_ID}}` | Inputs derived from args_schema: space, pages_info, status, parent_id |
 
 ## Config
 
@@ -28,6 +28,7 @@ generateTestData: true
 - Valid toolkit config for `confluence`
 - Confluence credentials via env vars
 - Space `{{SPACE}}` exists and accessible
+- Parent page with ID `{{TC_16_PARENT_ID}}` exists in the space
 - All titles are unique in the space
 
 ## Test Steps & Expectations
@@ -36,9 +37,9 @@ generateTestData: true
 
 Execute `create_pages` with:
 - space=`{{SPACE}}`
-- pages_info=`{{PAGES_INFO_JSON_VARIANT}}` (e.g., `[{"Page A": "<h1>A</h1>"}, {"Page B": "<p>B</p>"}]`)
+- pages_info=`{{TC_16_PAGES_INFO_JSON}}` (e.g., `[{"Page A": "<h1>A</h1>"}, {"Page B": "<p>B</p>"}]`)
 - status=`current`
-- parent_id=`{{PARENT_ID}}`
+- parent_id=`{{TC_16_PARENT_ID}}`
 
 **Expectation:** runs without errors and returns a list string of confirmations.
 
@@ -50,6 +51,8 @@ For each created page message, validate it includes:
 
 ### Step 3: Delete created pages
 
-Execute `delete_page` for each page from `{{PAGES_INFO_JSON_VARIANT}}`.
+Execute `delete_page` for each page from `{{TC_16_PAGES_INFO_JSON}}`.
+If id's are ints convert them to strings.
+If the pages are deleted with retries, that should be considered as success
 
 **Expectation:** returns confirmation that the pages have been successfully deleted.

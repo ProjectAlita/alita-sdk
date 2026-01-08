@@ -11,8 +11,6 @@ Verify that the `get_page_attachments` tool correctly retrieves all attachments 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `get_page_attachments` | Confluence tool to execute for retrieving attachments |
 | **Page ID** | 104693762 | ID of the page with attachments |

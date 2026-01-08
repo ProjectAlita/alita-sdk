@@ -16,7 +16,7 @@ Validate delete_page resolves `page_id` via `page_title` when `page_id` is not p
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `delete_page` | Exact Python tool name |
-| **Primary Input(s)** | `{{PAGE_TITLE_VARIANT}}`, `{{PAGE_ID_VARIANT}}` | args_schema: page_title only |
+| **Primary Input(s)** | `{{TC_018_PAGE_TITLE_VARIANT}}`, `{{TC_018_PAGE_ID_VARIANT}}` | args_schema: page_title only |
 
 ## Config
 
@@ -27,25 +27,24 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Confluence credentials via env vars
-- A page with title `{{PAGE_TITLE_VARIANT}}` exists in configured space
-- `{{PAGE_ID_VARIANT}}` is the ID of the page with title `{{PAGE_TITLE_VARIANT}}`
+- A page with title `{{TC_018_PAGE_TITLE_VARIANT}}` exists in configured space
+- `{{TC_018_PAGE_ID_VARIANT}}` is the ID of the page with title `{{TC_018_PAGE_TITLE_VARIANT}}`
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
 Execute `delete_page` with:
-- page_title=`{{PAGE_TITLE_VARIANT}}`
+- page_title=`{{TC_018_PAGE_TITLE_VARIANT}}`
 
-**Expectation:** returns "Page with ID `{{PAGE_ID_VARIANT}}` has been successfully deleted."
-
+**Expectation:** returns "Page with ID `{{TC_018_PAGE_ID_VARIANT}}` has been successfully deleted."
 ### Step 2: Verify Core Output Contract
 
 Validate success message and ensure it uses the resolved ID.
 
 ### Step 3: Verify page is removed by searching title
 
-- Execute a page lookup/search using `search_by_title` with `{{PAGE_TITLE_VARIANT}}`.
+- Execute a page lookup/search using `search_by_title` with `{{TC_018_PAGE_TITLE_VARIANT}}`.
 
 **Expectation:** the lookup/search MUST indicate the page is not present. Acceptable outcomes include:
 

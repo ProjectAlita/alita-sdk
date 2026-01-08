@@ -16,7 +16,7 @@ Validate that delete_page removes a page when either `page_id` or `page_title` i
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `delete_page` | Exact Python tool name |
-| **Primary Input(s)** | `{{PAGE_ID}}` or `{{PAGE_TITLE}}` | Inputs derived from args_schema: page_id or page_title |
+| **Primary Input(s)** | `{{TC_017_PAGE_ID}}` or `{{TC_017_PAGE_TITLE}}` | Inputs derived from args_schema: page_id or page_title |
 
 ## Config
 
@@ -28,13 +28,13 @@ generateTestData: true
 - Valid toolkit config for `confluence`
 - Confluence credentials via env vars
 - Target page exists and is deletable by the current user
-- Dummy page created for deletion test with `{{PAGE_ID}}` and title `{{PAGE_TITLE}}`
-`
+- Dummy page created for deletion test with `{{TC_017_PAGE_ID}}` and title `{{TC_017_PAGE_TITLE}}`
+
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute `delete_page` with only `page_id` set: `{{PAGE_ID}}`.
+Execute `delete_page` with only `page_id` set: `{{TC_017_PAGE_ID}}`.
 
 **Expectation:** returns "Page with ID '<resolved_id>' has been successfully deleted."
 
@@ -45,7 +45,7 @@ Execute `delete_page` with only `page_id` set: `{{PAGE_ID}}`.
 
 ### Step 3: Verify page is removed by searching title
 
-- Execute a page lookup/search using `read_page_by_id` with `{{PAGE_ID}}`.
+- Execute a page lookup/search using `read_page_by_id` with `{{TC_017_PAGE_ID}}`.
 
 **Expectation:** the lookup/search MUST indicate the page is not present. Acceptable outcomes include:
 
