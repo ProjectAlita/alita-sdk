@@ -24,81 +24,103 @@ TEXT_EDITABLE_EXTENSIONS = {
 
 
 def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
-    """
-    Parse OLD/NEW marker-based edit instructions.
-    
-    Extracts pairs of old and new content from a file query using markers:
-    - OLD <<<< ... >>>> OLD
-    - NEW <<<< ... >>>> NEW
-    
+    """Extract pairs of old/new content lines from a file query.
+
+    Final behavior:
+    1. Find each pair of ``OLD <<< ... >>> OLD`` and the following
+       ``NEW <<< ... >>> NEW`` blocks.
+    2. For each such pair, split the inner OLD/NEW block content by
+       **non-escaped** newlines (actual ``"\n"`` characters), excluding
+       empty lines after splitting.
+    3. If the number of OLD items is greater than the number of NEW items,
+       pad the NEW side with empty strings (""). If the number of NEW items
+       is greater than the number of OLD items, join the remaining NEW items
+       and append them to the last OLD item as a single extra pair.
+
     Args:
-        file_query: String containing marked old and new content sections
-        
+        file_query: The full text containing OLD/NEW markers.
+
     Returns:
-        List of tuples (old_content, new_content) for each edit pair
-        
-    Example:
-        >>> query = '''
-        ... OLD <<<<
-        ... Hello World
-        ... >>>> OLD
-        ... NEW <<<<
-        ... Hello Mars
-        ... >>>> NEW
-        ... '''
-        >>> parse_old_new_markers(query)
-        [('Hello World', 'Hello Mars')]
+        list[tuple[str, str]]: A list of (old_item, new_item) pairs.
     """
-    # Split the file content by lines
-    code_lines = file_query.split("\n")
+    # Pattern to capture the content between OLD/NEW markers, including
+    # newlines. We will then split that content by raw newlines while keeping
+    # escaped newlines ("\\n") intact within a single item.
+    block_pattern = re.compile(
+        r"OLD <<<<\s*(.*?)\s*>>>> OLD"  # OLD block
+        r"\s*"                        # optional space/newlines between OLD/NEW
+        r"NEW <<<<\s*(.*?)\s*>>>> NEW",  # NEW block
+        re.DOTALL,
+    )
 
-    # Initialize lists to hold the contents of OLD and NEW sections
-    old_contents = []
-    new_contents = []
+    pairs: list[tuple[str, str]] = []
 
-    # Initialize variables to track whether the current line is within an OLD or NEW section
-    in_old_section = False
-    in_new_section = False
+    def _split_preserving_escaped_newlines(block: str) -> list[str]:
+        """Split block into logical lines on non-escaped newlines.
 
-    # Temporary storage for the current section's content
-    current_section_content = []
+        Escaped newlines (the two-character sequence "\\n") are preserved
+        inside a single item. Empty/whitespace-only lines are excluded.
+        """
+        # Split on real newline characters first.
+        raw_lines = block.split("\n")
+        items: list[str] = []
+        current: list[str] = []
 
-    # Iterate through each line in the file content
-    for line in code_lines:
-        # Check for OLD section start
-        if "OLD <<<" in line:
-            in_old_section = True
-            current_section_content = []  # Reset current section content
-            continue  # Skip the line with the marker
+        for segment in raw_lines:
+            if segment.endswith("\\"):
+                # Line ends with a backslash, so treat this and the next
+                # physical line as a single logical line.
+                current.append(segment.rstrip("\n"))
+                continue
 
-        # Check for OLD section end
-        if ">>>> OLD" in line:
-            in_old_section = False
-            old_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-            current_section_content = []  # Reset current section content
-            continue  # Skip the line with the marker
+            if current:
+                current.append(segment)
+                logical_line = "\n".join(current)
+                current = []
+            else:
+                logical_line = segment
 
-        # Check for NEW section start
-        if "NEW <<<" in line:
-            in_new_section = True
-            current_section_content = []  # Reset current section content
-            continue  # Skip the line with the marker
+            # Skip empty/whitespace-only lines.
+            if logical_line.strip():
+                items.append(logical_line)
 
-        # Check for NEW section end
-        if ">>>> NEW" in line:
-            in_new_section = False
-            new_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-            current_section_content = []  # Reset current section content
-            continue  # Skip the line with the marker
+        # If something remains in current, flush it as one item.
+        if current:
+            logical_line = "\n".join(current)
+            if logical_line.strip():
+                items.append(logical_line)
 
-        # If currently in an OLD or NEW section, add the line to the current section content
-        if in_old_section or in_new_section:
-            current_section_content.append(line)
+        return items
 
-    # Pair the OLD and NEW contents
-    paired_contents = list(zip(old_contents, new_contents))
+    for old_block, new_block in block_pattern.findall(file_query):
+        old_lines = _split_preserving_escaped_newlines(old_block)
+        new_lines = _split_preserving_escaped_newlines(new_block)
 
-    return paired_contents
+        if not old_lines and not new_lines:
+            continue
+
+        # If there are more OLD lines than NEW lines, pad NEW with empty strings.
+        if len(old_lines) > len(new_lines):
+            new_lines.extend([""] * (len(old_lines) - len(new_lines)))
+
+        # If there are more NEW lines than OLD lines, join the remaining NEW
+        # items and attach them to the last OLD as a single extra pair.
+        if len(new_lines) > len(old_lines) and old_lines:
+            base_count = len(old_lines)
+            # First pair old[i] with new[i] for i in range(base_count - 1).
+            for i in range(base_count - 1):
+                pairs.append((old_lines[i], new_lines[i]))
+
+            # Join remaining NEW lines and attach to last OLD line.
+            remaining_new = "\n".join(new_lines[base_count - 1 :])
+            pairs.append((old_lines[-1], remaining_new))
+            continue
+
+        # Equal lengths or NEW <= OLD after padding: simple zip.
+        for o, n in zip(old_lines, new_lines):
+            pairs.append((o, n))
+
+    return pairs
 
 
 def is_text_editable(filename: str) -> bool:

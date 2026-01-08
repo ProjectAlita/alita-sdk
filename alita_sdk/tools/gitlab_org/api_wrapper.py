@@ -8,7 +8,7 @@ from langchain_core.tools import ToolException
 from pydantic import model_validator, PrivateAttr, create_model, SecretStr
 from pydantic.fields import Field
 
-from ..elitea_base import BaseToolApiWrapper
+from ..elitea_base import BaseToolApiWrapper, BaseCodeToolApiWrapper
 from ..gitlab.utils import get_diff_w_position, get_position
 
 logger = logging.getLogger(__name__)
@@ -158,6 +158,9 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
     client: Any = None
     repo_instances: Dict[str, Any] = {}
     _active_branch: Optional[str] = PrivateAttr(default='main')
+
+    # Reuse common file helpers from BaseCodeToolApiWrapper where applicable
+    edit_file = BaseCodeToolApiWrapper.edit_file
 
     class Config:
         arbitrary_types_allowed = True
@@ -371,51 +374,76 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
         except Exception as e:
             return ToolException(e)
 
-    def update_file(self, file_path: str, update_query: str, branch: str, repository: Optional[str] = None) -> str:
-        """Updates a file with new content.
-        Parameters:
-            branch (str): The name of the branch where update the file.
-            update_query(str): Contains file contents.
-                The old file contents is wrapped in OLD <<<< and >>>> OLD
-                The new file contents is wrapped in NEW <<<< and >>>> NEW
-                For example:
-                /test/hello.txt
-                OLD <<<<
-                Hello Earth!
-                >>>> OLD
-                NEW <<<<
-                Hello Mars!
-                >>>> NEW
+    def _read_file(self, file_path: str, branch: str, **kwargs) -> str:
+        """
+        Internal read_file used by BaseCodeToolApiWrapper.edit_file.
+        Delegates to the public `read_file` implementation which supports an optional repository argument.
+        The repository may be passed via kwargs or provided earlier through `update_file` which sets
+        a temporary attribute `_tmp_repository_for_edit`.
+        """
+        # Repository from temporary context, then None
+        repository = getattr(self, "_tmp_repository_for_edit", None)
+        try:
+            # Public read_file signature: read_file(file_path, branch, repository=None)
+            return self.read_file(file_path, branch, repository)
+        except Exception as e:
+            raise ToolException(f"Can't extract file content (`{file_path}`) due to error:\n{str(e)}")
+
+    def _write_file(self, file_path: str, content: str, branch: str = None, commit_message: str = None) -> str:
+        """
+        Write content to a file (update only) in the specified GitLab repository.
+
+        This implementation follows the same commit flow as the previous `update_file`:
+        it does not attempt to create the file when it is missing — it will always
+        create a commit with a single `update` action. If the file does not exist on
+        the target branch, the underlying GitLab API will typically return an error.
         """
         try:
+            branch = branch if branch else (self._active_branch if self._active_branch else self.branch)
+            # pick repository from temporary edit context
+            repository = getattr(self, "_tmp_repository_for_edit", None)
             repo_instance = self._get_repo(repository)
-            file_content = self.read_file(file_path, branch, repository)
-            updated_file_content = file_content
-            for old, new in self.extract_old_new_pairs(update_query):
-                if not old.strip():
-                    continue
-                updated_file_content = updated_file_content.replace(old, new)
-            if file_content == updated_file_content:
-                return (
-                    "File content was not updated because old content was not found or empty."
-                    "It may be helpful to use the read_file action to get "
-                    "the current file contents."
-                )
+
+            # Always perform an 'update' action commit (do not create file when missing)
             commit = {
                 "branch": branch,
-                "commit_message": "Update " + file_path,
+                "commit_message": commit_message or f"Update {file_path}",
                 "actions": [
                     {
                         "action": "update",
                         "file_path": file_path,
-                        "content": updated_file_content,
+                        "content": content,
                     }
                 ],
             }
             repo_instance.commits.create(commit)
-            return "Updated file " + file_path
+            return f"Updated file {file_path}"
+        except ToolException:
+            raise
+        except Exception as e:
+            return ToolException(f"Unable to write file due to error: {str(e)}")
+
+    def update_file(self, file_path: str, update_query: str, branch: str, repository: Optional[str] = None) -> str:
+        """Updates a file with new content using OLD/NEW markers by delegating to `edit_file`.
+
+        The method sets a temporary repository context so that `edit_file`'s internal
+        calls to `_read_file` and `_write_file` operate on the requested repository.
+        """
+        # Set temporary repository context used by _read_file/_write_file
+        self._tmp_repository_for_edit = repository
+        try:
+            commit_message = f"Update {file_path}"
+            return self.edit_file(file_path=file_path, file_query=update_query, branch=branch, commit_message=commit_message)
+        except ToolException as e:
+            return str(e)
         except Exception as e:
             return ToolException(f"Unable to update file due to error: {str(e)}")
+        finally:
+            # Clear temporary context
+            try:
+                delattr(self, "_tmp_repository_for_edit")
+            except Exception:
+                self._tmp_repository_for_edit = None
 
     def delete_file(self, file_path: str, branch: str, repository: Optional[str] = None) -> str:
         """Deletes a file from the repo."""
@@ -428,36 +456,6 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
         except Exception as e:
             return ToolException(f"Unable to delete file due to error: {str(e)}")
 
-    def extract_old_new_pairs(self, file_query):
-        """Extract old and new content pairs from the file query."""
-        code_lines = file_query.split("\n")
-        old_contents = []
-        new_contents = []
-        in_old_section = False
-        in_new_section = False
-        current_section_content = []
-        for line in code_lines:
-            if "OLD <<<" in line:
-                in_old_section = True
-                current_section_content = []
-                continue
-            if ">>>> OLD" in line:
-                in_old_section = False
-                old_contents.append("\n".join(current_section_content).strip())
-                current_section_content = []
-                continue
-            if "NEW <<<" in line:
-                in_new_section = True
-                current_section_content = []
-                continue
-            if ">>>> NEW" in line:
-                in_new_section = False
-                new_contents.append("\n".join(current_section_content).strip())
-                current_section_content = []
-                continue
-            if in_old_section or in_new_section:
-                current_section_content.append(line)
-        return list(zip(old_contents, new_contents))
 
     def append_file(self, file_path: str, content: str, branch: str, repository: Optional[str] = None) -> str:
         """

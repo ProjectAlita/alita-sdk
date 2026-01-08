@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from atlassian.bitbucket import Bitbucket, Cloud
 from langchain_core.tools import ToolException
 from requests import Response
-from ..ado.utils import extract_old_new_pairs
+from ..utils.text_operations import parse_old_new_markers
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -145,7 +145,7 @@ class BitbucketServerApi(BitbucketApiAbstract):
     def update_file(self, file_path: str, update_query: str, branch: str) -> str:
         file_content = self.get_file(file_path=file_path, branch=branch)
         updated_file_content = file_content
-        for old, new in extract_old_new_pairs(update_query):
+        for old, new in parse_old_new_markers(update_query):
             if not old.strip():
                 continue
             updated_file_content = updated_file_content.replace(old, new)
@@ -319,7 +319,7 @@ class BitbucketCloudApi(BitbucketApiAbstract):
 
         file_content = self.get_file(file_path=file_path, branch=branch)
         updated_file_content = file_content
-        for old, new in extract_old_new_pairs(file_query=update_query):
+        for old, new in parse_old_new_markers(file_query=update_query):
             if not old.strip():
                 continue
             updated_file_content = updated_file_content.replace(old, new)
