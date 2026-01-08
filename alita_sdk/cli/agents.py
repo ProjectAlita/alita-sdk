@@ -3643,7 +3643,8 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 validation_prompt = _build_single_test_validation_prompt(tc_info, idx, execution_output)
                 
                 console.print(f"[bold yellow]🔍 Validating test case (with execution history)...[/bold yellow]")
-                
+                console.print(f"[dim]{validation_prompt}[/dim]\n")
+
                 # Create or retrieve isolated validation executor
                 validation_cache_key = f"{cache_key}_validation"
                 validation_agent_def = validator_def if validator_def else agent_def

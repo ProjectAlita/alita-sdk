@@ -92,6 +92,9 @@ jobs:
               break
             elif [ "$STATUS" = "running" ]; then
               echo "Container still running... ($ELAPSED seconds elapsed)"
+              echo "::group:: Current logs"
+              docker-compose logs alita-sdk --tail=50
+              echo "::endgroup::"
             else
               echo "Container status: $STATUS"
             fi

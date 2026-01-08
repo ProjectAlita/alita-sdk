@@ -40,14 +40,15 @@ Execute `update_pages` with `page_ids={{TC_022_PAGE_IDS_TO_UPDATE_VARIANT}}`, `n
 
 ### Step 2: Verify Core Output Contract
 
-Validate returned string represents a list where each per-page status contains "was updated successfully".
+**Expectation:** Validate returned string represents a list where each per-page status contains "was updated successfully".
 
 ### Step 3: Verify Individual Page Updates
 
 Execute the `read_page_by_id` tool for `{{TC_022_PAGE_IDS_TO_UPDATE_VARIANT}}`.
 If id's are ints convert them to strings.
 If the pages are returned with retries, that should be considered as success.
-Verify that the output contains the updated page content as text.
+
+**Expectation:** Verify that the output contains the updated page content as text.
 
 ### Step 4: Delete created pages
 

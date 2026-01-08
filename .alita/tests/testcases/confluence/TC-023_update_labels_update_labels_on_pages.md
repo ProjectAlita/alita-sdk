@@ -41,13 +41,14 @@ Execute `update_labels` with `page_ids={{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`, `n
 
 ### Step 2: Verify Core Output Contract
 
-Validate returned string represents a list where each per-page status contains "was updated successfully".
+**Expectation:** Validate returned string represents a list where each per-page status contains "was updated successfully".
 
 ### Step 3: Verify Individual Page Updates
 
 Execute the `list_pages_with_label` tool for any label from `{{TC_023_NEW_LABELS}}`.
 If the pages are returned with retries, that should be considered as success.
-Verify that the output contains pages `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`.
+
+**Expectation:** Verify that the output contains pages `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`.
 
 ### Step 4: Delete created pages
 
