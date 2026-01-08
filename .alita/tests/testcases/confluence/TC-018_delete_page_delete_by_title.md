@@ -1,0 +1,55 @@
+# delete_page: Delete page by title fallback
+
+## Priority
+
+High
+
+## Objective
+
+Validate delete_page resolves `page_id` via `page_title` when `page_id` is not provided and deletes the page, returning the success message.
+
+## Test Data Configuration
+
+### Confluence Settings
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
+| **Tool** | `delete_page` | Exact Python tool name |
+| **Primary Input(s)** | `{{PAGE_TITLE_VARIANT}}`, `{{PAGE_ID_VARIANT}}` | args_schema: page_title only |
+
+## Config
+
+path: .alita/tool_configs/confluence-config.json
+generateTestData: true
+
+## Pre-requisites
+
+- Valid toolkit config for `confluence`
+- Confluence credentials via env vars
+- A page with title `{{PAGE_TITLE_VARIANT}}` exists in configured space
+- `{{PAGE_ID_VARIANT}}` is the ID of the page with title `{{PAGE_TITLE_VARIANT}}`
+
+## Test Steps & Expectations
+
+### Step 1: Execute the Tool
+
+Execute `delete_page` with:
+- page_title=`{{PAGE_TITLE_VARIANT}}`
+
+**Expectation:** returns "Page with ID `{{PAGE_ID_VARIANT}}` has been successfully deleted."
+
+### Step 2: Verify Core Output Contract
+
+Validate success message and ensure it uses the resolved ID.
+
+### Step 3: Verify page is removed by searching title
+
+- Execute a page lookup/search using `search_by_title` with `{{PAGE_TITLE_VARIANT}}`.
+
+**Expectation:** the lookup/search MUST indicate the page is not present. Acceptable outcomes include:
+
+- An explicit not-found/resolve message such as: "Page instance could not be resolved with id '<id>' and/or title '<title>'" (where `<id>` may be empty if only title was supplied).
+- An empty result set, `null` result, or an HTTP 404 / equivalent toolkit-level error indicating the page does not exist.
+
+If the search returns a page (title or id still resolvable), the test must fail — the delete operation did not remove the page.
