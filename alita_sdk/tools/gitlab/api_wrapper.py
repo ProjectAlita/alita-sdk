@@ -244,7 +244,7 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         """
         # Default to active branch if branch is None, consistent with other methods
         branch = branch if branch else self._active_branch
-        return self.read_file(file_path, branch)
+        return str(self.read_file(file_path, branch))
 
     def create_branch(self, branch_name: str) -> str:
         try:
