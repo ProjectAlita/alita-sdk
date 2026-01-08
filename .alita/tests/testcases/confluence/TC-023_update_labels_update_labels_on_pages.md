@@ -27,6 +27,7 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Required credentials available via env vars referenced by config
+- `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}` size should be maximum 2
 - Target pages with `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}` exist and are accessible
 - `{{TC_023_NEW_LABELS}}` is a list of label strings
 
@@ -45,7 +46,6 @@ Validate returned string represents a list where each per-page status contains "
 ### Step 3: Verify Individual Page Updates
 
 Execute the `list_pages_with_label` tool for any label from `{{TC_023_NEW_LABELS}}`.
-If id's are ints convert them to strings.
 If the pages are returned with retries, that should be considered as success.
 Verify that the output contains pages `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`.
 
