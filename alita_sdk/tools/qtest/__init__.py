@@ -20,7 +20,8 @@ def get_tools(tool):
         no_of_tests_shown_in_dql_search=tool['settings'].get('no_of_tests_shown_in_dql_search'),
         qtest_configuration=tool['settings']['qtest_configuration'],
         toolkit_name=tool.get('toolkit_name'),
-        llm=tool['settings'].get('llm', None)
+        llm=tool['settings'].get('llm', None),
+        alita=tool['settings'].get('alita', None),
     )
     return toolkit.tools
 
