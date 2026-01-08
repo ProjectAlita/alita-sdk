@@ -38,12 +38,14 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
             branch: Optional[str] = None,
             whitelist: Optional[List[str]] = None,
             blacklist: Optional[List[str]] = None,
+            chunking_config: Optional[dict] = None,
             **kwargs) -> Generator[Document, None, None]:
         """Index repository files in the vector store using code parsing."""
         yield from self.loader(
             branch=branch,
             whitelist=whitelist,
-            blacklist=blacklist
+            blacklist=blacklist,
+            chunking_config=chunking_config
         )
 
     def _extend_data(self, documents: Generator[Document, None, None]):
@@ -67,7 +69,8 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
                branch: Optional[str] = None,
                whitelist: Optional[List[str]] = None,
                blacklist: Optional[List[str]] = None,
-               chunked: bool = True) -> Generator[Document, None, None]:
+               chunked: bool = True,
+               chunking_config: Optional[dict] = None) -> Generator[Document, None, None]:
         """
         Generates Documents from files in a branch, respecting whitelist and blacklist patterns.
     
@@ -77,6 +80,7 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
         - blacklist (Optional[List[str]]): File extensions or paths to exclude. Defaults to no exclusions if None.
         - chunked (bool): If True (default), applies universal chunker based on file type.
                          If False, returns raw Documents without chunking.
+        - chunking_config (Optional[dict]): Chunking configuration by file extension
     
         Returns:
         - generator: Yields Documents from files matching the whitelist but not the blacklist.
@@ -100,6 +104,19 @@ class CodeIndexerToolkit(BaseIndexerToolkit):
           - other files → default text chunker
         """
         import hashlib
+    
+        # Auto-include extensions from chunking_config if whitelist is specified
+        # This allows chunking config to work without manually adding extensions to whitelist
+        if chunking_config and whitelist:
+            for ext_pattern in chunking_config.keys():
+                # Normalize extension pattern (both ".cbl" and "*.cbl" should work)
+                normalized = ext_pattern if ext_pattern.startswith('*') else f'*{ext_pattern}'
+                if normalized not in whitelist:
+                    whitelist.append(normalized)
+                    self._log_tool_event(
+                        message=f"Auto-included extension '{normalized}' from chunking_config",
+                        tool_name="loader"
+                    )
     
         _files = self.__handle_get_files("", self.__get_branch(branch))
         self._log_tool_event(message="Listing files in branch", tool_name="loader")

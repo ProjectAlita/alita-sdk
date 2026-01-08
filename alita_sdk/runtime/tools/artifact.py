@@ -350,6 +350,21 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
 
         include_extensions = kwargs.get('include_extensions', [])
         skip_extensions = kwargs.get('skip_extensions', [])
+        chunking_config = kwargs.get('chunking_config', {})
+        
+        # Auto-include extensions from chunking_config if include_extensions is specified
+        # This allows chunking config to work without manually adding extensions to include_extensions
+        if chunking_config and include_extensions:
+            for ext_pattern in chunking_config.keys():
+                # Normalize extension pattern (both ".cbl" and "*.cbl" should work)
+                normalized = ext_pattern if ext_pattern.startswith('*') else f'*{ext_pattern}'
+                if normalized not in include_extensions:
+                    include_extensions.append(normalized)
+                    self._log_tool_event(
+                        message=f"Auto-included extension '{normalized}' from chunking_config",
+                        tool_name="loader"
+                    )
+        
         self._log_tool_event(message=f"Files filtering started. Include extensions: {include_extensions}. "
                                      f"Skip extensions: {skip_extensions}", tool_name="loader")
         # show the progress of filtering
