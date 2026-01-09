@@ -321,16 +321,31 @@ class Assistant:
             "quirky": QUIRKY_ASSISTANT,
             "cynical": CYNICAL_ASSISTANT,
         }
-        base_assistant = persona_templates.get(self.persona, DEFAULT_ASSISTANT)
 
-        escaped_prompt = base_assistant.format(
-            users_instructions=user_addon,
-            planning_instructions=plan_addon,
-            pyodite_addon=pyodite_addon,
-            data_analysis_addon=data_analysis_addon,
-            search_index_addon=search_index_addon,
-            file_handling_instructions=FILE_HANDLING_INSTRUCTIONS
-        )
+        # For predict agents with their own instructions, use those directly
+        # instead of wrapping in DEFAULT_ASSISTANT
+        if self.app_type == "openai" and prompt_instructions:
+            # Use agent's own instructions as the base system prompt
+            # Append addons only when their corresponding tools are present
+            addons = "\n\n---\n\n".join(filter(None, [
+                plan_addon,
+                search_index_addon,
+                FILE_HANDLING_INSTRUCTIONS if simple_tools else "",
+                pyodite_addon,
+                data_analysis_addon
+            ]))
+            escaped_prompt = f"{prompt_instructions}\n\n---\n\n{addons}" if addons else str(prompt_instructions)
+            logger.info("Using agent's own instructions directly (app_type=predict)")
+        else:
+            base_assistant = persona_templates.get(self.persona, DEFAULT_ASSISTANT)
+            escaped_prompt = base_assistant.format(
+                users_instructions=user_addon,
+                planning_instructions=plan_addon,
+                pyodite_addon=pyodite_addon,
+                data_analysis_addon=data_analysis_addon,
+                search_index_addon=search_index_addon,
+                file_handling_instructions=FILE_HANDLING_INSTRUCTIONS
+            )
 
         # Properly setup the prompt for YAML
         import yaml
