@@ -516,7 +516,8 @@ class McpToolkit(BaseToolkit):
                 is_prompt=is_prompt,
                 prompt_name=tool_dict.get("_mcp_prompt_name") if is_prompt else None,
                 original_tool_name=tool_name,  # Store original name for MCP server invocation
-                session_id=session_id  # Pass session ID for stateful SSE servers
+                session_id=session_id,  # Pass session ID for stateful SSE servers
+                metadata={"toolkit_name": toolkit_name, "toolkit_type": "mcp"}
             )
         except Exception as e:
             logger.error(f"Failed to create MCP tool '{tool_name}' from toolkit '{toolkit_name}': {e}")
