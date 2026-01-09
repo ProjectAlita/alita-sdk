@@ -863,6 +863,9 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         # Read current file content
         try:
             current_content = self._read_file(file_path, branch)
+            if not isinstance(current_content, str):
+                # If current_content is a ToolException or any non-str, raise or return it
+                raise current_content if isinstance(current_content, Exception) else ToolException(str(current_content))
         except Exception as e:
             raise ToolException(f"Failed to read file {file_path}: {e}")
         
