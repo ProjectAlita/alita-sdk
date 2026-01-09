@@ -58,9 +58,12 @@ class AlitaTextLoader(BaseLoader):
                 else:
                     raise ValueError("Neither file_path nor file_content is provided for encoding detection.")
             else:
-                raise RuntimeError(f"Error loading content with encoding {self.encoding}.") from e
+                # Preserve original error details for callers
+                raise RuntimeError(f"Error loading content with encoding {self.encoding}: {e}") from e
         except Exception as e:
-            raise RuntimeError(f"Error loading content.") from e
+            # Preserve original error details so higher-level code (e.g., parse_file_content)
+            # can expose the real root cause instead of a generic message.
+            raise RuntimeError(f"Error loading content: {e}") from e
 
         return text
 

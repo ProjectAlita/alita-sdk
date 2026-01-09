@@ -109,7 +109,15 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
                                     loader_extra_config=loader_kwargs,
                                     llm=llm)
     except Exception as e:
-        return ToolException(f"Error reading file ({file_name or file_path}) content. Make sure these types are supported: {str(e)}")
+        # Surface full underlying error message (including nested causes) so that
+        # JSONDecodeError or other specific issues are not hidden behind
+        # generic RuntimeError messages from loaders.
+        root_msg = str(e)
+        if getattr(e, "__cause__", None):
+            root_msg = f"{root_msg} | Cause: {e.__cause__}"
+        return ToolException(
+            f"Error reading file ({file_name or file_path}) content. Make sure these types are supported: {root_msg}"
+        )
 
 def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                        sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False) -> List[Document] | ToolException:
