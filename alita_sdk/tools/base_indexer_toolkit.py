@@ -186,7 +186,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             #
             results_count = result["count"]
             # Final update should always be forced
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count, update_force=True)
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count, update_force=True, error=None)
             self._emit_index_event(index_name)
             #
             return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
@@ -195,8 +195,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             # Do maximum effort at least send custom event for supposed changed status
             msg = str(e)
             try:
-                # Error update should also be forced
-                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"], update_force=True)
+                # Error update should also be forced and include the error message
+                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"], update_force=True, error=msg)
             except Exception as ie:
                 logger.error(f"Failed to update index meta status to FAILED for index '{index_name}': {ie}")
                 msg = f"{msg}; additionally failed to update index meta status to FAILED: {ie}"
@@ -505,12 +505,14 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "task_id": None,
                 "conversation_id": None,
                 "toolkit_id": self.toolkit_id,
+                # Initialize error field to keep track of the latest failure reason if any
+                "error": None,
             }
             metadata["history"] = json.dumps([metadata])
             index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)
             add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc])
 
-    def index_meta_update(self, index_name: str, state: str, result: int, update_force: bool = True, interval: Optional[float] = None):
+    def index_meta_update(self, index_name: str, state: str, result: int, update_force: bool = True, interval: Optional[float] = None, error: Optional[str] = None):
         """Update `index_meta` document with optional time-based throttling.
 
         Args:
@@ -522,6 +524,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             interval: Optional custom interval (in seconds) for this call when `update_force` is `False`.
                       If `None`, falls back to the value stored in `self._index_meta_config["update_interval"]`
                       if present, otherwise uses `INDEX_META_UPDATE_INTERVAL`.
+            error: Optional error message to record when the state represents a failed index.
         """
         self._ensure_vectorstore_initialized()
         if not hasattr(self, "_index_meta_last_update_time"):
@@ -560,6 +563,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             metadata["updated"] = result
             metadata["state"] = state
             metadata["updated_on"] = time.time()
+            # Attach error if provided, else clear on success
+            if error is not None:
+                metadata["error"] = error
+            elif state == IndexerKeywords.INDEX_META_COMPLETED.value:
+                # Clear previous error on successful completion
+                metadata["error"] = None
             #
             history_raw = metadata.pop("history", "[]")
             try:
