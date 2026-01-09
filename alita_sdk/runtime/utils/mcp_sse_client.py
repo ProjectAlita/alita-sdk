@@ -374,7 +374,7 @@ class McpSseClient:
                     "sampling": {}
                 },
                 "clientInfo": {
-                    "name": "Alita MCP Client",
+                    "name": "ELITEA MCP Client",
                     "version": "1.0.0"
                 }
             }
