@@ -551,16 +551,23 @@ def _create_check_connection_for_http(server_name: str, server_config: Dict[str,
                     timeout=timeout
                 )
                 tools = []
+                args_schemas = {}
                 try:
                     async with client:
                         await client.initialize()
                         discovered = await client.list_tools()
                         for tool in discovered:
+                            tool_name = tool.get('name', 'unknown')
+                            input_schema = tool.get('inputSchema')
                             tools.append({
-                                'name': tool.get('name', 'unknown'),
-                                'description': tool.get('description', '')
+                                'name': tool_name,
+                                'description': tool.get('description', ''),
+                                'inputSchema': input_schema,  # Include schema in tool object
                             })
-                    return tools
+                            # Also build args_schemas dict for API format
+                            if input_schema:
+                                args_schemas[tool_name] = input_schema
+                    return {'tools': tools, 'args_schemas': args_schemas}
                 except Exception as e:
                     logger.error(f"[MCP Config] Tool discovery failed for {server_name}: {e}")
                     raise
@@ -572,14 +579,14 @@ def _create_check_connection_for_http(server_name: str, server_config: Dict[str,
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         future = executor.submit(asyncio.run, _discover())
-                        tools = future.result(timeout=timeout)
+                        result = future.result(timeout=timeout)
                 else:
-                    tools = loop.run_until_complete(_discover())
+                    result = loop.run_until_complete(_discover())
             except RuntimeError:
-                tools = asyncio.run(_discover())
+                result = asyncio.run(_discover())
 
-            logger.info(f"[MCP Config] Discovered {len(tools)} tools from {server_name}")
-            return {'tools': tools}
+            logger.info(f"[MCP Config] Discovered {len(result.get('tools', []))} tools from {server_name}")
+            return result
 
         except Exception as e:
             error_msg = f"Failed to discover tools: {str(e)}"
@@ -673,14 +680,14 @@ def get_mcp_config_toolkit_schemas() -> List[BaseModel]:
             field_definitions[param_name] = (field_type, field_info)
 
         # Determine categories based on server type
-        # Use 'integrations' as the UI category for visibility in credentials page
+        # Use 'mcp' as the UI category for visibility in toolkits page
         # Keep MCP-specific info in extra_categories for search/filtering
         if server_type == 'stdio':
-            categories = ['integrations']
-            extra_categories = ['mcp', 'local', 'subprocess', config.get('runtime', 'npm')]
+            categories = ['mcp']
+            extra_categories = ['local', 'subprocess', config.get('runtime', 'npm')]
         else:
-            categories = ['integrations']
-            extra_categories = ['mcp', 'remote', 'http', 'sse']
+            categories = ['mcp']
+            extra_categories = ['remote', 'http', 'sse']
 
         # Create the Pydantic model for this MCP server
         model = create_model(
@@ -694,8 +701,8 @@ def get_mcp_config_toolkit_schemas() -> List[BaseModel]:
                         'categories': categories,
                         'extra_categories': extra_categories,
                         'description': description,
-                        # Section for configuration registration (credentials page)
-                        'section': 'credentials',
+                        # Section for configuration registration (toolkits page)
+                        'section': 'toolkits',
                         # Custom metadata for MCP config
                         'mcp_server_type': server_type,
                         'mcp_server_name': server_name,

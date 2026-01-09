@@ -326,12 +326,15 @@ class SandboxToolkit(BaseToolkit):
 
     @staticmethod
     def toolkit_config_schema() -> Type[BaseModel]:
-        # Create sample tools to get their schemas
-        sample_tools = [
-            PyodideSandboxTool(),
-            StatefulPyodideSandboxTool()
-        ]
-        selected_tools = {x.name: x.args_schema.model_json_schema() for x in sample_tools}
+        # Get tool schemas without instantiating the tools (avoids Deno requirement)
+        try:
+            selected_tools = {
+                "pyodide_sandbox": sandbox_tool_input.model_json_schema(),
+                "stateful_pyodide_sandbox": sandbox_tool_input.model_json_schema(),
+            }
+        except Exception as e:
+            logger.warning(f"Could not generate sandbox tool schemas: {e}")
+            selected_tools = {}
 
         return create_model(
             'sandbox',
