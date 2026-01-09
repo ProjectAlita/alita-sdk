@@ -180,7 +180,29 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             connection = Connection(base_url=values['organization_url'], creds=credentials)
             cls._client = connection.clients.get_test_plan_client()
         except Exception as e:
-            raise ImportError(f"Failed to connect to Azure DevOps: {e}")
+            error_msg = str(e).lower()
+            if "expired" in error_msg or "token" in error_msg and ("invalid" in error_msg or "unauthorized" in error_msg):
+                raise ValueError(
+                    "Azure DevOps connection failed: Your access token has expired or is invalid. "
+                    "Please refresh your token in the toolkit configuration."
+                )
+            elif "401" in error_msg or "unauthorized" in error_msg:
+                raise ValueError(
+                    "Azure DevOps connection failed: Authentication failed. "
+                    "Please check your credentials in the toolkit configuration."
+                )
+            elif "404" in error_msg or "not found" in error_msg:
+                raise ValueError(
+                    "Azure DevOps connection failed: Organization or project not found. "
+                    "Please verify your organization URL and project name."
+                )
+            elif "timeout" in error_msg or "timed out" in error_msg:
+                raise ValueError(
+                    "Azure DevOps connection failed: Connection timed out. "
+                    "Please check your network connection and try again."
+                )
+            else:
+                raise ValueError(f"Azure DevOps connection failed: {e}")
         return super().validate_toolkit(values)
 
     def create_test_plan(self, test_plan_create_params: str):
