@@ -53,13 +53,30 @@ class AzureDevOpsReposToolkit(BaseToolkit):
             embedding_model=(Optional[str], Field(default=None, description="Embedding configuration.", json_schema_extra={'configuration_model': 'embedding'})),
 
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
-            __config__={'json_schema_extra': {'metadata':
-                {
-                    "label": "ADO repos",
-                    "icon_url": "ado-repos-icon.svg",
-                    "categories": ["code repositories"],
-                    "extra_categories": ["code", "repository", "version control"],
-                }}}
+            __config__={
+                'json_schema_extra': {
+                    'metadata': {
+                        "label": "ADO repos",
+                        "icon_url": "ado-repos-icon.svg",
+                        "categories": ["code repositories"],
+                        "extra_categories": ["code", "repository", "version control"],
+                        "sections": {
+                            "auth": {
+                                "required": True,
+                                "subsections": [
+                                    {
+                                        "name": "Token",
+                                        "fields": ["token"]
+                                    }
+                                ]
+                            }
+                        },
+                        "configuration_group": {
+                            "name": "ado",
+                        }
+                    }
+                }
+            }
         )
 
         @check_connection_response
