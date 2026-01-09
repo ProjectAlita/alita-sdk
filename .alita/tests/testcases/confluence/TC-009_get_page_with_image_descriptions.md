@@ -11,8 +11,6 @@ Verify that the `get_page_with_image_descriptions` tool correctly retrieves a Co
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `get_page_with_image_descriptions` | Confluence tool to execute for getting page with image descriptions |
 | **Page ID** | `104300545` | ID of the page containing images |

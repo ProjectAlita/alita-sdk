@@ -11,8 +11,6 @@ Verify that the `site_search` tool correctly performs a site-wide search in Conf
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `site_search` | Confluence tool to execute for site search |
 | **Query** | `test` | Search query text |

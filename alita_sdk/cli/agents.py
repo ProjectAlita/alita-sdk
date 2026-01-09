@@ -141,15 +141,16 @@ def parse_test_case(test_case_path: str) -> Dict[str, Any]:
         if gen_data_match:
             generate_test_data = gen_data_match.group(1).lower() == 'true'
     
-    # Extract Test Data Configuration table
-    test_data_config = {}
+    # Extract Test Data Configuration section as a raw fenced code block string
+    # NOTE: We intentionally store the entire section as a single string rather than parsing
+    # individual table rows. This preserves the original formatting for downstream tools
+    # which may prefer the raw markdown block.
+    test_data_config = None
     config_section_match = re.search(r'##\s+Test Data Configuration\s*\n(.+?)(?=\n##|\Z)', content, re.DOTALL)
     if config_section_match:
-        config_section = config_section_match.group(1)
-        # Parse markdown table (format: | Parameter | Value | Description |)
-        table_rows = re.findall(r'\|\s*\*\*([^*]+)\*\*\s*\|\s*`?([^|`]+)`?\s*\|', config_section)
-        for param, value in table_rows:
-            test_data_config[param.strip()] = value.strip()
+        config_section = config_section_match.group(1).strip()
+        # Store as a fenced code block to make it clear this is a raw block of text
+        test_data_config = f"\n{config_section}\n"
     
     # Extract Pre-requisites section
     prerequisites = ""
@@ -252,27 +253,31 @@ def _build_bulk_data_gen_prompt(parsed_test_cases: list) -> str:
     for idx, tc in enumerate(parsed_test_cases, 1):
         test_case = tc['data']
         test_file = tc['file']
-        
+        # Build parts for this test case (do not include separator lines here;
+        # the entire block is wrapped with separators at the top-level)
         parts = [f"Test Case #{idx}: {test_case['name']}", f"File: {test_file.name}", ""]
         
         if test_case.get('test_data_config'):
             parts.append("Test Data Configuration:")
-            for param, value in test_case['test_data_config'].items():
-                parts.append(f"  - {param}: {value}")
-        
+            td = test_case['test_data_config']
+            raw_lines = str(td).splitlines()
+            for line in raw_lines:
+                parts.append(f"{line}")
+    
         if test_case.get('prerequisites'):
             parts.append(f"\nPre-requisites:\n{test_case['prerequisites']}")
         
-        if test_case.get('variables'):
-            parts.append(f"\nVariables to generate: {', '.join(test_case['variables'])}")
-        
         requirements.append("\n".join(parts))
     
-    return f"""{'='*60}
+    # If no requirements were collected, return an empty string to avoid
+    # producing a prompt with only separator lines.
+    if not requirements:
+        return ""
 
-{chr(10).join(requirements)}
-
-{'='*60}"""
+    # Use a visible divider between test cases so each entry is clearly separated
+    divider = '-' * 40
+    body = f"\n\n{divider}\n\n".join(requirements)
+    return f"{('='*60)}\n\n{body}\n\n{('='*60)}"
 
 
 def _build_single_test_execution_prompt(test_case_info: dict, test_number: int) -> str:
@@ -3503,7 +3508,7 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
             
             bulk_data_gen_prompt = _build_bulk_data_gen_prompt(test_cases_needing_data_gen)
             
-            console.print(f"Executing test data generation prompt {bulk_data_gen_prompt}\n")
+            console.print(f"Executing test data generation prompt \n{bulk_data_gen_prompt}\n")
 
             try:
                 # Setup data generator agent
@@ -3638,7 +3643,8 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
                 validation_prompt = _build_single_test_validation_prompt(tc_info, idx, execution_output)
                 
                 console.print(f"[bold yellow]🔍 Validating test case (with execution history)...[/bold yellow]")
-                
+                console.print(f"[dim]{validation_prompt}[/dim]\n")
+
                 # Create or retrieve isolated validation executor
                 validation_cache_key = f"{cache_key}_validation"
                 validation_agent_def = validator_def if validator_def else agent_def
