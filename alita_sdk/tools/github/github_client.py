@@ -1156,13 +1156,18 @@ class GitHubClient(BaseModel):
             file_path, edit_content = file_query.split("\n", 1)
             file_path = file_path.strip()
 
-            # Delegate to shared edit_file implementation
-            return self.edit_file(
-                file_path=file_path,
-                file_query=edit_content,
-                branch=branch,
-                commit_message=commit_message or f"Update {file_path}",
-            )
+            # Set temporary repo override for internal helpers
+            self._tmp_repo_for_edit = repo_name
+            try:
+                return self.edit_file(
+                    file_path=file_path,
+                    file_query=edit_content,
+                    branch=branch,
+                    commit_message=commit_message or f"Update {file_path}",
+                )
+            finally:
+                if hasattr(self, "_tmp_repo_for_edit"):
+                    delattr(self, "_tmp_repo_for_edit")
         except Exception as e:
             return f"Unable to update file due to error:\n{str(e)}"
 
@@ -1400,11 +1405,12 @@ class GitHubClient(BaseModel):
             str: The file decoded as a string, or an error message if not found
         """
         try:
-            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            # Prefer temporary repo set by update_file, then explicit repo_name
+            effective_repo = getattr(self, "_tmp_repo_for_edit", None) or repo_name
+            repo = self.github_api.get_repo(effective_repo) if effective_repo else self.github_repo_instance
             file = repo.get_contents(file_path, ref=branch)
             return file.decoded_content.decode("utf-8")
         except Exception as e:
-            from traceback import format_exc
             return f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}"
 
     def read_file(self, file_path: str, branch: Optional[str] = None, repo_name: Optional[str] = None) -> str:
@@ -1442,7 +1448,9 @@ class GitHubClient(BaseModel):
             Success message
         """
         try:
-            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            # Prefer temporary repo set by update_file, then explicit repo_name
+            effective_repo = getattr(self, "_tmp_repo_for_edit", None) or repo_name
+            repo = self.github_api.get_repo(effective_repo) if effective_repo else self.github_repo_instance
             branch = branch or self.active_branch
             
             if branch == self.github_base_branch:
