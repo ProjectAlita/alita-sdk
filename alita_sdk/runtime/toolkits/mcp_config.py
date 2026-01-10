@@ -57,11 +57,87 @@ _session_manager_lock = threading.Lock()
 _session_manager: Optional['McpStdioSessionManager'] = None
 
 
+def _create_stdio_tool_func(original_tool_name: str, server_name: str, server_config: Dict[str, Any]):
+    """
+    Create a tool function that uses the MCP SDK directly with proper session lifecycle.
+
+    Creates a fresh session for each tool call and cleans up after.
+    This ensures subprocesses don't leak.
+    """
+
+    def tool_func(**kwargs) -> str:
+        """Execute the MCP tool with proper session management using MCP SDK directly."""
+        import json
+
+        async def _execute():
+            try:
+                from mcp import ClientSession, StdioServerParameters
+                from mcp.client.stdio import stdio_client
+            except ImportError:
+                raise ImportError(
+                    "mcp package is required for stdio MCP servers. "
+                    "Install with: pip install mcp"
+                )
+
+            command = server_config['command']
+            args = server_config.get('args', [])
+
+            # Build environment
+            env = dict(os.environ)
+            static_env = server_config.get('env', {})
+            env.update(static_env)
+
+            server_params = StdioServerParameters(
+                command=command,
+                args=args,
+                env=env
+            )
+
+            logger.debug(f"[MCP Config] Starting stdio session for tool {original_tool_name}")
+
+            # Use MCP SDK's context managers for proper subprocess cleanup
+            async with stdio_client(server_params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    # Initialize the connection
+                    await session.initialize()
+
+                    # Call the tool directly
+                    logger.debug(f"[MCP Config] Calling tool {original_tool_name} with args: {kwargs}")
+                    result = await session.call_tool(original_tool_name, kwargs)
+
+                    # Format the result
+                    if hasattr(result, 'content') and result.content:
+                        # MCP returns CallToolResult with content list
+                        content_parts = []
+                        for content_item in result.content:
+                            if hasattr(content_item, 'text'):
+                                content_parts.append(content_item.text)
+                            elif hasattr(content_item, 'data'):
+                                content_parts.append(str(content_item.data))
+                            else:
+                                content_parts.append(str(content_item))
+                        return '\n'.join(content_parts)
+                    elif hasattr(result, 'text'):
+                        return result.text
+                    else:
+                        return str(result)
+
+        # Run async code - use asyncio.run for clean event loop management
+        try:
+            return asyncio.run(_execute())
+        except Exception as e:
+            logger.error(f"[MCP Config] Error executing tool {original_tool_name}: {e}")
+            raise
+
+    return tool_func
+
+
+# Legacy session manager - kept for backwards compatibility but not used
 class McpStdioSessionManager:
     """
     Manages MCP stdio server sessions across agent executions.
 
-    Keeps MCP server subprocesses alive for stateful servers.
+    NOTE: This is deprecated. Use McpStdioToolWrapper instead for proper cleanup.
     """
 
     def __init__(self):
@@ -380,39 +456,116 @@ class McpConfigToolkit(BaseToolkit):
         excluded_tools: Optional[List[str]],
         toolkit_name: str,
     ) -> List[BaseTool]:
-        """Load tools from stdio MCP server asynchronously."""
+        """Load tools from stdio MCP server asynchronously.
+
+        Uses McpStdioToolWrapper which creates a fresh session per tool invocation
+        and properly cleans up subprocesses after each call.
+        """
         try:
-            from langchain_mcp_adapters.tools import load_mcp_tools
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
         except ImportError:
             raise ImportError(
-                "langchain-mcp-adapters is required for stdio MCP servers. "
-                "Install with: pip install langchain-mcp-adapters"
+                "mcp package is required for stdio MCP servers. "
+                "Install with: pip install mcp"
             )
 
-        session_manager = get_session_manager()
-        session, client = await session_manager.get_or_create_session(
-            server_name, server_config
+        command = server_config['command']
+        args = server_config.get('args', [])
+
+        # Build environment
+        env = dict(os.environ)
+        static_env = server_config.get('env', {})
+        env.update(static_env)
+
+        server_params = StdioServerParameters(
+            command=command,
+            args=args,
+            env=env
         )
 
-        tools = await load_mcp_tools(
-            session,
-            connection=client.connections[server_name],
-            server_name=server_name
-        )
+        # Discover tools by temporarily connecting to the server
+        tool_definitions = []
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                tool_list = await session.list_tools()
 
-        logger.info(f"[MCP Config] Discovered {len(tools)} tools from stdio server {server_name}")
+                for tool in tool_list.tools:
+                    tool_definitions.append({
+                        'name': tool.name,
+                        'description': tool.description or '',
+                        'inputSchema': tool.inputSchema if hasattr(tool, 'inputSchema') else None,
+                    })
+
+        logger.info(f"[MCP Config] Discovered {len(tool_definitions)} tools from stdio server {server_name}")
 
         # Apply filtering
         if selected_tools:
-            tools = [t for t in tools if t.name in selected_tools]
+            tool_definitions = [t for t in tool_definitions if t['name'] in selected_tools]
         if excluded_tools:
-            tools = [t for t in tools if t.name not in excluded_tools]
+            tool_definitions = [t for t in tool_definitions if t['name'] not in excluded_tools]
 
-        # Add toolkit context
-        if toolkit_name:
-            for tool in tools:
-                if not tool.description.startswith(f"[{toolkit_name}]"):
-                    tool.description = f"[{toolkit_name}] {tool.description}"
+        # Create tools using StructuredTool.from_function for proper LangChain integration
+        from langchain_core.tools import StructuredTool
+
+        tools = []
+        for tool_def in tool_definitions:
+            tool_name = tool_def['name']
+            tool_desc = tool_def['description']
+
+            # Add toolkit context to description
+            if toolkit_name and not tool_desc.startswith(f"[{toolkit_name}]"):
+                tool_desc = f"[{toolkit_name}] {tool_desc}"
+
+            # Create the tool function that handles session lifecycle
+            tool_func = _create_stdio_tool_func(tool_name, server_name, server_config)
+
+            # Build args_schema from inputSchema if available
+            args_schema = None
+            input_schema = tool_def.get('inputSchema')
+            if input_schema and isinstance(input_schema, dict):
+                try:
+                    from pydantic import create_model, Field as PydanticField
+                    fields = {}
+                    properties = input_schema.get('properties', {})
+                    required = input_schema.get('required', [])
+
+                    for prop_name, prop_def in properties.items():
+                        prop_type = prop_def.get('type', 'string')
+                        prop_desc = prop_def.get('description', '')
+
+                        # Map JSON schema types to Python types
+                        type_map = {
+                            'string': str,
+                            'integer': int,
+                            'number': float,
+                            'boolean': bool,
+                            'array': list,
+                            'object': dict,
+                        }
+                        python_type = type_map.get(prop_type, str)
+
+                        if prop_name not in required:
+                            python_type = Optional[python_type]
+                            fields[prop_name] = (python_type, PydanticField(default=None, description=prop_desc))
+                        else:
+                            fields[prop_name] = (python_type, PydanticField(description=prop_desc))
+
+                    if fields:
+                        args_schema = create_model(f'{tool_name}Args', **fields)
+                except Exception as e:
+                    logger.debug(f"[MCP Config] Could not create args_schema for {tool_name}: {e}")
+
+            # Create StructuredTool with the function
+            tool = StructuredTool.from_function(
+                func=tool_func,
+                name=tool_name,
+                description=tool_desc,
+                args_schema=args_schema,
+            )
+
+            tools.append(tool)
 
         return tools
 
@@ -512,6 +665,105 @@ def _discover_tools_for_http_server(url: str, headers: Optional[Dict[str, Any]] 
     except Exception as e:
         logger.debug(f"[MCP Config] Tool discovery error: {e}")
         return []
+
+
+def _create_check_connection_for_stdio(server_name: str, server_config: Dict[str, Any]):
+    """
+    Create a check_connection static method for a stdio MCP server.
+
+    This method starts the MCP server subprocess, discovers tools, and returns them.
+    Returns dict with 'tools' on success, or error message string on failure.
+    """
+    def check_connection(settings: dict) -> dict | str | None:
+        """
+        Discover tools from the stdio MCP server.
+
+        Args:
+            settings: Dictionary containing user-provided configuration
+
+        Returns:
+            Dict with 'tools' list on success, error message string on failure
+        """
+        import asyncio
+        import subprocess
+        import signal
+
+        # Resolve environment variables from user config
+        env = dict(os.environ)  # Start with current environment
+        static_env = server_config.get('env', {})
+        env.update(static_env)
+
+        env_mapping = server_config.get('env_mapping', {})
+        for env_var, config_ref in env_mapping.items():
+            config_key = config_ref.strip('{}')
+            if config_key in settings:
+                value = settings[config_key]
+                if isinstance(value, list):
+                    value = ','.join(str(v) for v in value)
+                env[env_var] = str(value)
+
+        logger.info(f"[MCP Config] Discovering tools from stdio server {server_name}")
+
+        async def _discover():
+            try:
+                from mcp import ClientSession, StdioServerParameters
+                from mcp.client.stdio import stdio_client
+            except ImportError:
+                raise ImportError(
+                    "mcp package is required for stdio MCP servers. "
+                    "Install with: pip install mcp"
+                )
+
+            command = server_config['command']
+            args = server_config.get('args', [])
+
+            server_params = StdioServerParameters(
+                command=command,
+                args=args,
+                env=env
+            )
+
+            tools = []
+            args_schemas = {}
+
+            # Use the MCP SDK's stdio_client context manager for proper cleanup
+            async with stdio_client(server_params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    # Initialize the connection
+                    await session.initialize()
+
+                    # List tools
+                    tool_list = await session.list_tools()
+
+                    for tool in tool_list.tools:
+                        tool_name = tool.name
+                        tool_desc = tool.description or ''
+                        input_schema = tool.inputSchema if hasattr(tool, 'inputSchema') else None
+
+                        tools.append({
+                            'name': tool_name,
+                            'description': tool_desc,
+                            'inputSchema': input_schema,
+                        })
+                        if input_schema:
+                            args_schemas[tool_name] = input_schema
+
+            logger.info(f"[MCP Config] stdio_client context exited for {server_name}")
+            return {'tools': tools, 'args_schemas': args_schemas}
+
+        try:
+            # Run async discovery - always use asyncio.run for clean event loop
+            result = asyncio.run(_discover())
+
+            logger.info(f"[MCP Config] Discovered {len(result.get('tools', []))} tools from stdio server {server_name}")
+            return result
+
+        except Exception as e:
+            error_msg = f"Failed to discover tools from {server_name}: {str(e)}"
+            logger.error(f"[MCP Config] {error_msg}")
+            return error_msg
+
+    return check_connection
 
 
 def _create_check_connection_for_http(server_name: str, server_config: Dict[str, Any]):
@@ -720,6 +972,8 @@ def get_mcp_config_toolkit_schemas() -> List[BaseModel]:
         # Attach check_connection method for tool discovery
         if server_type == 'http':
             model.check_connection = staticmethod(_create_check_connection_for_http(server_name, config))
+        elif server_type == 'stdio':
+            model.check_connection = staticmethod(_create_check_connection_for_stdio(server_name, config))
 
         schemas.append(model)
 
