@@ -274,11 +274,20 @@ def try_apply_edit(
         (updated_content, used_fallback)
     """
     # Stage 1: exact match
-    if old_text in content:
-        return content.replace(old_text, new_text), False
+    if old_text:
+        occurrences = content.count(old_text)
+        if occurrences == 1:
+            return content.replace(old_text, new_text, 1), False
+        if occurrences > 1:
+            logger.warning(
+                "Exact OLD block appears %d times in %s; no replacement applied to avoid ambiguity.",
+                occurrences,
+                file_path or "<unknown>",
+            )
+            return content, False
 
     # Stage 2: tolerant match
-    if not old_text.strip() or not content:
+    if not old_text or not old_text.strip() or not content:
         return content, False
 
     # Logical OLD: drop empty/whitespace-only lines

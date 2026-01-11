@@ -887,7 +887,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             if new_updated == updated_content:
                 # No change applied for this pair (exact nor fallback)
                 logger.warning(
-                    "Old content not found or could not be safely matched in %s. Snippet: %s...",
+                    "Old content not found, appears several times or could not be safely matched in %s. Snippet: %s...",
                     file_path,
                     old_text[:100].replace("\n", "\\n"),
                 )
