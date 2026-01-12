@@ -27,7 +27,7 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Required credentials available via env vars referenced by config
-- Target pages with `{{TC_021_PAGE_IDS_TO_UPDATE}}` exist and are accessible
+- Create pages with `{{TC_021_PAGE_IDS_TO_UPDATE}}` before test execution
 - `{{TC_021_NEW_CONTENTS_TO_INSERT}}` length equals `{{TC_021_PAGE_IDS_TO_UPDATE}}` length
 
 ## Test Steps & Expectations

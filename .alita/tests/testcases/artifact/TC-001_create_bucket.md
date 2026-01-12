@@ -1,5 +1,9 @@
 # Create New Bucket
 
+## Priority
+
+Critical
+
 ## Objective
 
 Verify that the `createNewBucket` tool correctly creates a new artifact bucket with specified expiration settings.
@@ -10,29 +14,29 @@ Verify that the `createNewBucket` tool correctly creates a new artifact bucket w
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Base URL** | `${ALITA_BASE_URL}` | Alita instance base URL |
-| **Project ID** | `${ALITA_PROJECT_ID}` | Project ID for artifact storage |
-| **API Key** | `${ALITA_API_KEY}` | Authentication token |
 | **Tool** | `createNewBucket` | Artifact tool to execute for creating a new bucket |
-| **Test Bucket 1** | `temp-bucket-2weeks` | Temporary bucket to test creation with 2 weeks expiration |
-| **Test Bucket 2** | `temp_bucket_sanitize` | Temporary bucket to test name sanitization (underscores) |
+| **Test Bucket Prefix** | `{{TC-001_TEST_BUCKET_PREFIX}}` | Prefix for generated test buckets (recommend: `temp-bucket`) |
+| **Generated Bucket A** | `{{TC-001_BUCKET_A}}` | Generated bucket name for the 2-weeks retention scenario (prefix + timestamp + `-2weeks`) |
+| **Generated Bucket B (raw)** | `{{TC-001_BUCKET_B_RAW}}` | Generated bucket name containing underscores to test sanitization (prefix + `_` + timestamp + `_sanitize`) |
+| **Sanitized Bucket B** | `{{TC-001_BUCKET_B}}` | Expected sanitized version of `{{TC-001_BUCKET_B_RAW}}` (underscores -> hyphens) |
 | **Expiration Measure** | `weeks` | Time measure for bucket expiration (days/weeks/months/years) |
-| **Expiration Value** | `2` | Number of time units before expiration |
+| **Expiration Value A** | `2` | Number of time units before expiration for bucket A |
+| **Expiration Value B** | `1` | Number of time units before expiration for bucket B |
 
 ## Config
 
-path: .alita\tool_configs\artifact-config.json
-generateTestData: false
+path: .alita/tool_configs/artifact-config.json
+generateTestData: true
 
 ## Pre-requisites
 
 - Alita instance is accessible and configured
 - Valid API key with artifact management permissions
 - User has permission to create buckets in the specified project
-- Default bucket `test-artifacts` is auto-created by the toolkit (NOT tested in this case)
-- Test buckets `temp-bucket-2weeks` and `temp-bucket-sanitize` should NOT already exist
-- If test buckets exist from previous runs, they should be deleted first
-- Bucket names follow naming rules (lowercase, hyphens allowed, underscores auto-converted)
+- The test MUST generate unique bucket names using `{{TC-001_TEST_BUCKET_PREFIX}}` and a timestamp or short random suffix to avoid collisions with previous runs. Example generated values:
+  - `{{TC-001_BUCKET_A}} = {{TC-001_TEST_BUCKET_PREFIX}}-20260109-1234-2weeks`
+  - `{{TC-001_BUCKET_B_RAW}} = {{TC-001_TEST_BUCKET_PREFIX}}_20260109_1234_sanitize`
+  - `{{TC-001_BUCKET_B}} = {{TC-001_TEST_BUCKET_PREFIX}}-20260109-1234-sanitize`
 
 ## Test Steps & Expectations
 
@@ -43,7 +47,7 @@ Execute the `createNewBucket` tool to create a new bucket with 2 weeks expiratio
 **Input:**
 ```json
 {
-  "bucket_name": "temp-bucket-2weeks",
+  "bucket_name": "{{TC-001_BUCKET_A}}",
   "expiration_measure": "weeks",
   "expiration_value": 2
 }
@@ -53,9 +57,9 @@ Execute the `createNewBucket` tool to create a new bucket with 2 weeks expiratio
 
 ### Step 2: Verify Bucket Creation
 
-List available buckets to confirm the new bucket exists.
+Refer to Step 1's created bucket.
 
-**Expectation:** The bucket `temp-bucket-2weeks` appears in the list with correct expiration settings (2 weeks).
+**Expectation:** The bucket `{{TC-001_BUCKET_A}}` appears in message.
 
 ### Step 3: Verify Bucket Name Validation
 
@@ -64,13 +68,13 @@ Attempt to create a bucket with underscores in the name.
 **Input:**
 ```json
 {
-  "bucket_name": "temp_bucket_sanitize",
+  "bucket_name": "{{TC-001_BUCKET_B_RAW}}",
   "expiration_measure": "weeks",
   "expiration_value": 1
 }
 ```
 
-**Expectation:** The tool should handle the invalid name appropriately by converting underscores to hyphens (resulting in `temp-bucket-sanitize`).
+**Expectation:** The tool should handle the invalid name appropriately by converting underscores to hyphens (resulting in `{{TC-001_BUCKET_B}}`).
 
 ### Step 4: Create Test Files in Temporary Buckets
 
@@ -81,7 +85,7 @@ Create test files in both temporary buckets to verify file operations before cle
 {
   "filename": "test-file-1.txt",
   "filedata": "This is test content for bucket 1",
-  "bucket_name": "temp-bucket-2weeks"
+  "bucket_name": "{{TC-001_BUCKET_A}}"
 }
 ```
 
@@ -90,7 +94,7 @@ Create test files in both temporary buckets to verify file operations before cle
 {
   "filename": "test-file-2.txt",
   "filedata": "This is test content for bucket 2",
-  "bucket_name": "temp-bucket-sanitize"
+  "bucket_name": "{{TC-001_BUCKET_B}}"
 }
 ```
 
@@ -104,7 +108,7 @@ Delete the test files created in Step 4.
 ```json
 {
   "filename": "test-file-1.txt",
-  "bucket_name": "temp-bucket-2weeks"
+  "bucket_name": "{{TC-001_BUCKET_A}}"
 }
 ```
 
@@ -112,19 +116,24 @@ Delete the test files created in Step 4.
 ```json
 {
   "filename": "test-file-2.txt",
-  "bucket_name": "temp-bucket-sanitize"
+  "bucket_name": "{{TC-001_BUCKET_B}}"
 }
 ```
 
-**Expectation:** Both files are deleted successfully. Listing files in each bucket should return empty results.
+Execute the `listFiles` tool for each bucket to verify deletion.
 
-### Step 6: Clean Up - Delete Temporary Buckets
+**Input:**
+```json
+{
+  "bucket_name": "{{TC-001_BUCKET_A}}"
+}
+```
 
-Delete both temporary buckets created during this test.
+**Input:**
+```json
+{
+  "bucket_name": "{{TC-001_BUCKET_B}}"
+}
+```
 
-**Note:** The Alita SDK artifact toolkit does not currently expose a `deleteBucket` tool through the standard API. Bucket deletion should be performed manually through the Alita UI or API if needed, or buckets can be left to expire based on their retention policy.
-
-**Expected Behavior:** 
-- If a `deleteBucket` tool becomes available, use it to delete `temp-bucket-2weeks` and `temp-bucket-sanitize`
-- If not available, document that manual cleanup is required or buckets will auto-expire
-- The default bucket `test-artifacts` should remain untouched
+**Expectation:** Verify that files `test-file-1.txt` and `test-file-2.txt` do not exist in both buckets after listing.

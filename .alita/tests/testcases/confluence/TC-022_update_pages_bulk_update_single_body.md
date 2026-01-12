@@ -27,7 +27,7 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Required credentials available via env vars referenced by config
-- Target pages with `{{TC_022_PAGE_IDS_TO_UPDATE_VARIANT}}` exist and are accessible
+- Create pages with IDs `{{TC_022_PAGE_IDS_TO_UPDATE_VARIANT}}` before test execution
 - `{{TC_022_NEW_BODY_SHARED}}` is valid per representation
 
 ## Test Steps & Expectations

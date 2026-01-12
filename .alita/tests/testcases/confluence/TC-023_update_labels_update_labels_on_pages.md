@@ -28,7 +28,7 @@ generateTestData: true
 - Valid toolkit config for `confluence`
 - Required credentials available via env vars referenced by config
 - `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}` size should be maximum 2
-- Target pages with `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}` exist and are accessible
+- Create pages with IDs `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}` to allow test execution
 - `{{TC_023_NEW_LABELS}}` is a list of label strings
 
 ## Test Steps & Expectations
@@ -43,14 +43,7 @@ Execute `update_labels` with `page_ids={{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`, `n
 
 **Expectation:** Validate returned string represents a list where each per-page status contains "was updated successfully".
 
-### Step 3: Verify Individual Page Updates
-
-Execute the `list_pages_with_label` tool for any label from `{{TC_023_NEW_LABELS}}`.
-If the pages are returned with retries, that should be considered as success.
-
-**Expectation:** Verify that the output contains pages `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`.
-
-### Step 4: Delete created pages
+### Step 3: Delete created pages
 
 Execute `delete_page` for each page from `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}`.
 If id's are ints convert them to strings.

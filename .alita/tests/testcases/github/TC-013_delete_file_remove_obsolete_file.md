@@ -28,9 +28,8 @@ generateTestData: true
 ## Pre-requisites
 
 - Valid configuration for toolkit `github`
-- Target branch is not `testdata-TC-052-read-multiple-files`
-- File `{{FILE_PATH}}` exists on the active branch and can be deleted
- - Target branch for verification: `testdata-TC-052-read-multiple-files` (deletion should occur on this branch)
+- File `{{FILE_PATH}}` exists on `testdata-TC-052-read-multiple-files` branch
+- Target branch for verification: `testdata-TC-052-read-multiple-files` (deletion should occur on this branch)
 
 ## Test Steps & Expectations
 
