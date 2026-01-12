@@ -369,50 +369,94 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
             )
 
     def _base_loader(
-            self,
-            url: Optional[str] = None,
-            file_keys_include: Optional[List[str]] = None,
-            file_keys_exclude: Optional[List[str]] = None,
-            node_ids_include: Optional[List[str]] = None,
-            node_ids_exclude: Optional[List[str]] = None,
-            node_types_include: Optional[List[str]] = None,
-            node_types_exclude: Optional[List[str]] = None,
-            number_of_threads: Optional[int] = None,
-            **kwargs
+        self,
+        urls_or_file_keys: Optional[str] = None,
+        node_ids_include: Optional[List[str]] = None,
+        node_ids_exclude: Optional[List[str]] = None,
+        node_types_include: Optional[List[str]] = None,
+        node_types_exclude: Optional[List[str]] = None,
+        number_of_threads: Optional[int] = None,
+        **kwargs,
     ) -> Generator[Document, None, None]:
-        if url:
-            file_key, node_ids_from_url = self._parse_figma_url(url)
-            # Override include params based on URL
-            file_keys_include = [file_key]
-            if node_ids_from_url and not node_ids_include:
-                node_ids_include = node_ids_from_url
-        
-        # If both include and exclude are provided, use only include
-        if file_keys_include:
-            self._log_tool_event(f"Loading files: {file_keys_include}")
-            for file_key in file_keys_include:
-                self._log_tool_event(f"Loading file `{file_key}`")
-                file = self._client.get_file(file_key, geometry='depth=1') # fetch only top-level structure (only pages without inner components)
-                if not file:
-                    raise ToolException(f"Unexpected error while retrieving file {file_key}. Please try specifying the node-id of an inner page.")
-                # propagate per-call number_of_threads override via metadata so _process_document can respect it
-                metadata = {
-                    'id': file_key,
-                    'file_key': file_key,
-                    'name': file.name,
-                    'updated_on': file.last_modified,
-                    'figma_pages_include': node_ids_include or [],
-                    'figma_pages_exclude': node_ids_exclude or [],
-                    'figma_nodes_include': node_types_include or [],
-                    'figma_nodes_exclude': node_types_exclude or [],
-                }
-                if isinstance(number_of_threads, int) and 1 <= number_of_threads <= 5:
-                    metadata['number_of_threads_override'] = number_of_threads
-                yield Document(page_content=json.dumps(metadata), metadata=metadata)
-        elif file_keys_exclude or node_ids_exclude:
-            raise ValueError("Excludes without parent (file_keys_include) do not make sense.")
-        else:
-            raise ValueError("You must provide file_keys_include or a URL.")
+        """Base loader used by the indexer tool.
+
+        Args:
+            urls_or_file_keys: Comma-separated list of Figma file URLs or raw file keys. Each
+                entry can be:
+                  - a full Figma URL (https://www.figma.com/file/... or /design/...) optionally
+                    with a node-id query parameter, or
+                  - a bare file key string.
+                URL entries are parsed via _parse_figma_url; raw keys are used as-is.
+            node_ids_include: Optional list of top-level node IDs (pages) to include when an
+                entry does not specify node-id in the URL and is not otherwise constrained.
+            node_ids_exclude: Optional list of top-level node IDs (pages) to exclude when
+                node_ids_include is not provided.
+            node_types_include: Optional list of node types to include within each page.
+            node_types_exclude: Optional list of node types to exclude when node_types_include
+                is not provided.
+            number_of_threads: Optional override for number of worker threads to use when
+                processing images.
+        """
+        if not urls_or_file_keys:
+            raise ValueError("You must provide urls_or_file_keys with at least one URL or file key.")
+
+        # Parse the comma-separated entries into concrete (file_key, per_entry_node_ids_include)
+        entries = [item.strip() for item in urls_or_file_keys.split(',') if item.strip()]
+        if not entries:
+            raise ValueError("You must provide urls_or_file_keys with at least one non-empty value.")
+
+        # Validate number_of_threads override once and pass via metadata
+        metadata_threads_override: Optional[int] = None
+        if isinstance(number_of_threads, int) and 1 <= number_of_threads <= 5:
+            metadata_threads_override = number_of_threads
+
+        for entry in entries:
+            per_file_node_ids_include: Optional[List[str]] = None
+            file_key: Optional[str] = None
+
+            # Heuristic: treat as URL if it has a scheme and figma.com host
+            if entry.startswith("http://") or entry.startswith("https://"):
+                file_key, node_ids_from_url = self._parse_figma_url(entry)
+                per_file_node_ids_include = node_ids_from_url
+            else:
+                # Assume this is a raw file key
+                file_key = entry
+
+            if not file_key:
+                continue
+
+            # If URL-derived node IDs exist, they take precedence over global include list
+            effective_node_ids_include = per_file_node_ids_include or node_ids_include or []
+
+            self._log_tool_event(f"Loading file `{file_key}`")
+            try:
+                file = self._client.get_file(file_key, geometry='depth=1')
+            except ToolException as e:
+                # Enrich the error message with the file_key for easier troubleshooting
+                raise ToolException(
+                    f"Failed to retrieve Figma file '{file_key}'. Original error: {e}"
+                ) from e
+
+            if not file:
+                raise ToolException(
+                    f"Unexpected error while retrieving file {file_key}. Please try specifying the node-id of an inner page."
+                )
+
+            metadata = {
+                'id': file_key,
+                'file_key': file_key,
+                'name': file.name,
+                'updated_on': file.last_modified,
+                'figma_pages_include': effective_node_ids_include,
+                'figma_pages_exclude': node_ids_exclude or [],
+                'figma_nodes_include': node_types_include or [],
+                'figma_nodes_exclude': node_types_exclude or [],
+            }
+
+            if metadata_threads_override is not None:
+                metadata['number_of_threads_override'] = metadata_threads_override
+
+            yield Document(page_content=json.dumps(metadata), metadata=metadata)
 
     def has_image_representation(self, node):
         node_type = node.get('type', '').lower()
@@ -672,44 +716,58 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
                     )
 
     def _index_tool_params(self):
-         """Return the parameters for indexing data."""
-         return {
-             "url": (Optional[str], Field(
-                 description=(
-                     "Full Figma file or page URL to index. Must be in one of the following formats: "
-                     "'https://www.figma.com/file/<FILE_KEY>/...' or 'https://www.figma.com/design/<FILE_KEY>/...'. "
-                     "If present, the 'node-id' query parameter (e.g. '?node-id=<PAGE_ID>') will be used to limit "
-                     "indexing to that page or node. When this URL is provided, it overrides 'file_keys_include' ('node_ids_include')."
-                 ),
-                 default=None)),
-             'number_of_threads': (Optional[int], Field(
-                 description=(
-                     "Optional override for the number of worker threads used when indexing Figma images. "
-                     f"Valid values are from 1 to 5. Default is {DEFAULT_NUMBER_OF_THREADS}."
-                 ),
-                 default=DEFAULT_NUMBER_OF_THREADS,
-                 ge=1,
-                 le=5,
-             )),
-              'file_keys_include': (Optional[List[str]], Field(
-                  description="List of file keys to include in index if project_id is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
-                  default=None)),
-             'file_keys_exclude': (Optional[List[str]], Field(
-                 description="List of file keys to exclude from index. It is applied only if project_id is provided and file_keys_include is not provided: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
-                 default=None)),
-             'node_ids_include': (Optional[List[str]], Field(
-                 description="List of top-level nodes (pages) in file to include in index. It is node-id from figma url: i.e. ['123-56', '7651-9230'].",
-                 default=None)),
-             'node_ids_exclude': (Optional[List[str]], Field(
-                 description="List of top-level nodes (pages) in file to exclude from index. It is applied only if node_ids_include is not provided. It is node-id from figma url: i.e. ['Fp24FuzPwH0L74ODSrCnQo', 'jmhAr6q78dJoMRqt48zisY']",
-                 default=None)),
-             'node_types_include': (Optional[List[str]], Field(
-                 description="List type of nodes to include in index: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...].",
-                 default=None)),
-             'node_types_exclude': (Optional[List[str]], Field(
-                 description="List type of nodes to exclude from index. It is applied only if node_types_include is not provided: i.e. ['FRAME', 'COMPONENT', 'RECTANGLE', 'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...]",
-                 default=None)),
-         }
+        """Return the parameters for indexing data."""
+        return {
+            "urls_or_file_keys": (str, Field(
+                description=(
+                    "Comma-separated list of Figma file URLs or raw file keys to index. "
+                    "Each entry may be a full Figma URL (with optional node-id query) or a file key. "
+                    "Example: 'https://www.figma.com/file/<FILE_KEY>/...?node-id=<NODE_ID>,Fp24FuzPwH0L74ODSrCnQo'."
+                ))),
+            'number_of_threads': (Optional[int], Field(
+                description=(
+                    "Optional override for the number of worker threads used when indexing Figma images. "
+                    f"Valid values are from 1 to 5. Default is {DEFAULT_NUMBER_OF_THREADS}."
+                ),
+                default=DEFAULT_NUMBER_OF_THREADS,
+                ge=1,
+                le=5,
+            )),
+            'node_ids_include': (Optional[List[str]], Field(
+                description=(
+                    "List of top-level node IDs (pages) to include in the index. Values should match "
+                    "Figma node-id format like ['123-56', '7651-9230']. These include rules are applied "
+                    "for each entry in urls_or_file_keys when the URL does not specify node-id and for "
+                    "each raw file_key entry."
+                ),
+                default=None,
+            )),
+            'node_ids_exclude': (Optional[List[str]], Field(
+                description=(
+                    "List of top-level node IDs (pages) to exclude from the index when node_ids_include "
+                    "is not provided. Values should match Figma node-id format. These exclude rules are "
+                    "applied for each entry in urls_or_file_keys (URLs without node-id and raw fileKey "
+                    "entries)."
+                ),
+                default=None,
+            )),
+            'node_types_include': (Optional[List[str]], Field(
+                description=(
+                    "List of node types to include in the index, e.g. ['FRAME', 'COMPONENT', 'RECTANGLE', "
+                    "'COMPONENT_SET', 'INSTANCE', 'VECTOR', ...]. If provided, only these types are indexed "
+                    "for each page loaded from each urls_or_file_keys entry."
+                ),
+                default=None,
+            )),
+            'node_types_exclude': (Optional[List[str]], Field(
+                description=(
+                    "List of node types to exclude from the index when node_types_include is not provided. "
+                    "These exclude rules are applied to nodes within each page loaded from each "
+                    "urls_or_file_keys entry."
+                ),
+                default=None,
+            )),
+        }
 
     def _send_request(
         self,
@@ -972,8 +1030,7 @@ class FigmaApiWrapper(NonCodeIndexerToolkit):
 
         # Delegate URL and file_key handling to _base_loader
         base_docs = self._base_loader(
-            url=url,
-            file_keys_include=[file_key] if file_key else None,
+            urls_or_file_keys=url or file_key,
             node_ids_include=node_ids_include_list,
             node_ids_exclude=node_ids_exclude_list,
         )
