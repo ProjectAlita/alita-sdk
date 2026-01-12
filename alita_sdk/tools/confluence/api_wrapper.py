@@ -620,11 +620,18 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
     def _process_search(self, cql, skip_images: bool = False):
         start = 0
         pages_info = []
+        seen_ids: set = set()  # Track seen page IDs to avoid duplicates
         for _ in range((self.max_pages + self.limit - 1) // self.limit):
             pages = self.client.cql(cql, start=start, limit=self.limit).get("results", [])
             if not pages:
                 break
-            page_ids = [page['content']['id'] for page in pages]
+            # Deduplicate page IDs before processing
+            page_ids = []
+            for page in pages:
+                page_id = page['content']['id']
+                if page_id not in seen_ids:
+                    seen_ids.add(page_id)
+                    page_ids.append(page_id)
             for page in self.get_pages_by_id(page_ids, skip_images):
                 page_info = {
                     'content': page.page_content,

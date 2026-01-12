@@ -64,7 +64,7 @@ class OpenApiConfiguration(BaseModel):
         ),
     )
     auth_type: Optional[Literal['Basic', 'Bearer', 'Custom']] = Field(
-        default='Bearer',
+        default=None,
         description=(
             "How to apply the API key. "
             "- 'Bearer': sets 'Authorization: Bearer <api_key>' "
@@ -111,7 +111,7 @@ class OpenApiConfiguration(BaseModel):
         )
     )
     method: Optional[Literal['default', 'Basic']] = Field(
-        default='default',
+        default=None,
         description=(
             "Token exchange method for client credentials flow. "
             "'default': Sends client_id and client_secret in POST body (Azure AD, Auth0, most providers). "

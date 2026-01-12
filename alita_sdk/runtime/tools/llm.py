@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from traceback import format_exc
-from typing import Any, Optional, List, Union, Literal
+from typing import Any, Optional, List, Union, Literal, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -67,7 +67,7 @@ class LLMNode(BaseTool):
     client: Any = Field(default=None, description='LLM client instance')
     return_type: str = Field(default="str", description='Return type')
     response_key: str = Field(default="messages", description='Response key')
-    structured_output_dict: Optional[dict[str, str]] = Field(default=None, description='Structured output dictionary')
+    structured_output_dict: Optional[Dict[str, Any]] = Field(default=None, description='Structured output dictionary')
     output_variables: Optional[List[str]] = Field(default=None, description='Output variables')
     input_mapping: Optional[dict[str, dict]] = Field(default=None, description='Input mapping')
     input_variables: Optional[List[str]] = Field(default=None, description='Input variables')
@@ -82,7 +82,7 @@ class LLMNode(BaseTool):
         Prepare structured output parameters from structured_output_dict.
 
         Expected self.structured_output_dict formats:
-          - {"field": "str"} / {"field": "list"} / {"field": "list[str]"} / {"field": "any"} ...
+          - {"field": "str"} / {"field": "list"} / {"field": "list[dict]"} / {"field": "any"} ...
           - OR {"field": {"type": "...", "description": "...", "default": ...}}  (optional)
 
         Returns:
@@ -93,19 +93,20 @@ class LLMNode(BaseTool):
         for key, value in (self.structured_output_dict or {}).items():
             # Allow either a plain type string or a dict with details
             if isinstance(value, dict):
-                type_str = (value.get("type") or "any")
+                type_str = str(value.get("type") or "any")
                 desc = value.get("description", "") or ""
                 entry: dict = {"type": type_str, "description": desc}
                 if "default" in value:
                     entry["default"] = value["default"]
             else:
-                type_str = (value or "any") if isinstance(value, str) else "any"
-                entry = {"type": type_str, "description": ""}
+                # Ensure we always have a string type
+                if isinstance(value, str):
+                    type_str = value
+                else:
+                    # If it's already a type object, convert to string representation
+                    type_str = getattr(value, '__name__', 'any')
 
-            # Normalize: only convert the *exact* "list" into "list[str]"
-            # (avoid the old bug where "if 'list' in value" also hits "blacklist", etc.)
-            if isinstance(entry.get("type"), str) and entry["type"].strip().lower() == "list":
-                entry["type"] = "list[str]"
+                entry = {"type": type_str, "description": ""}
 
             struct_params[key] = entry
 
@@ -1146,5 +1147,5 @@ class LLMNode(BaseTool):
 
         return new_messages, current_completion
 
-    def __get_struct_output_model(self, llm_client, pydantic_model, method: Literal["function_calling", "json_mode", "json_schema"] = "json_schema"):
+    def __get_struct_output_model(self, llm_client, pydantic_model, method: Literal["function_calling", "json_mode", "json_schema"] = "function_calling"):
         return llm_client.with_structured_output(pydantic_model, method=method)

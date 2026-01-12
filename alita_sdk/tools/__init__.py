@@ -186,7 +186,9 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
                 toolkit = tkitclass.get_toolkit(**get_toolkit_params)
                 toolkit_tools.extend(toolkit.get_tools())
             except Exception as e:
+                import traceback
                 logger.error(f"Error in getting custom toolkit: {e}")
+                logger.error(f"Traceback:\n{traceback.format_exc()}")
         else:
             if tool_type in FAILED_IMPORTS:
                 logger.warning(f"Tool '{tool_type}' is not available: {FAILED_IMPORTS[tool_type]}")

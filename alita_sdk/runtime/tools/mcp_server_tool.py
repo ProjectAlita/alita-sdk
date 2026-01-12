@@ -1,9 +1,12 @@
 import uuid
 from logging import getLogger
-from typing import Any, Type, Literal, Optional, Union, List
+from typing import Any, Type, Literal, Optional, Union, List, Annotated
 
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, create_model, EmailStr, constr, ConfigDict
+from pydantic import BaseModel, Field, create_model, ConfigDict, StringConstraints
+
+# EmailStr moved to pydantic_extra_types in pydantic v2, use str for simplicity
+EmailStr = str
 
 logger = getLogger(__name__)
 
@@ -59,7 +62,7 @@ class McpServerTool(BaseTool):
                 if field.get("format") == "email":
                     return EmailStr
                 if "pattern" in field:
-                    return constr(regex=field["pattern"])
+                    return Annotated[str, StringConstraints(pattern=field["pattern"])]
                 return str
             if t == "integer":
                 return int
