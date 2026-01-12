@@ -27,7 +27,7 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Required credentials available via env vars referenced by config
-- Target page with `{{TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE}}` exists and is accessible
+- Create page with `{{TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE}}` before test execution
 
 ## Test Steps & Expectations
 

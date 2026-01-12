@@ -27,16 +27,20 @@ generateTestData: false
 ## Pre-requisites
 
 - Valid configuration for toolkit `github`
-- Repository contains at least one issue or PR matching `is:issue state:open ` with title including `AI issue for comments`
+- Repository contains at least one issue or PR matching `is:issue state:open` with title including `AI issue for comments`
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute the `search_issues` tool with:
-- `search_query`: `is:issue state:open`
-- `repo_name`: `ProjectAlita/elitea-testing`
-- `max_count`: `1`
+Execute the github toolkit tool `search_issues` tool with:
+```
+{
+  "search_query": "state:open",
+  "repo_name": "ProjectAlita/elitea-testing",
+  "max_count": 1
+}
+```
 
 **Expectation:** The tool runs without errors and returns a list of items.
 

@@ -39,9 +39,9 @@ Verify that the output contains page details including page_id, page_title, page
 
 **Expectation:** The output contains `[
   {
-    "page_id": "104300545",
-    "page_title": "Test Label Page",
-    "page_url": "https://epamelitea.atlassian.net/spaces/AT/pages/104300545/Test+Label+Page",
+    "page_id": "138969168",
+    "page_title": "TC-003 Page with label",
+    "page_url": "https://epamelitea.atlassian.net/spaces/AT/pages/138969168/TC-003+Page+with+label",
     "content": "ANY NON-BLANK CONTENT"
   }
-]` .
+]`

@@ -3,7 +3,7 @@ name: "test-case-generator"
 description: "Generate autonomous Critical/High test cases for requested toolkits under alita_sdk/tools"
 model: "gpt-5"
 temperature: 0.1
-max_tokens: 50000
+max_tokens: 100000
 step_limit: 30
 persona: "qa"
 ---
@@ -157,9 +157,21 @@ Rules:
 
 Do not use generic placeholders like `{{IDENTIFIER}}` or `{{VALUE}}`.
 
-- Inputs: derive names from `args_schema` fields (e.g., `file_path` → `{{FILE_PATH}}`).
-- Outputs: use expected‑value variables aligned to what the tool returns (e.g., `{{EXPECTED_FILE_SNIPPET}}`).
-- High variation: introduce `*_VARIANT` inputs (e.g., `{{BRANCH_NAME_VARIANT}}`) that should still succeed.
+**CRITICAL: All test data variables MUST be prefixed with the TC number** to ensure uniqueness and one-to-one mapping between variables and test cases.
+
+Format: `{{TC-<NNN>_VARIABLE_NAME}}`
+
+Examples:
+- `{{TC-001_PAGE_ID}}` (not `{{PAGE_ID}}`)
+- `{{TC-023_FILE_PATH}}` (not `{{FILE_PATH}}`)
+- `{{TC-045_EXPECTED_FILE_SNIPPET}}` (not `{{EXPECTED_FILE_SNIPPET}}`)
+- `{{TC-007_BRANCH_NAME_VARIANT}}` (not `{{BRANCH_NAME_VARIANT}}`)
+
+Rules:
+- Inputs: derive names from `args_schema` fields (e.g., `file_path` → `{{TC-001_FILE_PATH}}`).
+- Outputs: use expected‑value variables aligned to what the tool returns (e.g., `{{TC-001_EXPECTED_FILE_SNIPPET}}`).
+- High variation: introduce `*_VARIANT` inputs (e.g., `{{TC-002_BRANCH_NAME_VARIANT}}`) that should still succeed.
+- The TC number in the variable name must match the test case file's TC number (e.g., variables in `TC-023_update_labels_update_labels_on_pages.md` must all start with `TC-023_`).
 
 ## Markdown template (match existing examples)
 

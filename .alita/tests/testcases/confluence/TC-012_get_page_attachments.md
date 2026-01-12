@@ -13,7 +13,7 @@ Verify that the `get_page_attachments` tool correctly retrieves all attachments 
 | **Space** | `AT` | Target Confluence space key |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `get_page_attachments` | Confluence tool to execute for retrieving attachments |
-| **Page ID** | 104693762 | ID of the page with attachments |
+| **Page ID** | `140869772` | ID of the page with attachments |
 
 ## Config
 
@@ -24,14 +24,14 @@ generateTestData: false
 
 - A Confluence space `AT` exists and is accessible
 - Valid Confluence API token with read permissions
-- A page with ID 104693762 exists and has at least one attachment
+- A page with ID `140869772` exists and has at least one attachment
 - If attachement is not present, add one
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute the `get_page_attachments` tool with page_id parameter set to `104693762`.
+Execute the `get_page_attachments` tool with page_id parameter set to `140869772`.
 
 **Expectation:** The tool runs without errors and returns attachment information.
 

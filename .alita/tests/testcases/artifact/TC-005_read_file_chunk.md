@@ -1,5 +1,9 @@
 # Read File Chunk (Partial Read)
 
+## Priority
+
+Critical
+
 ## Objective
 
 Verify that the `read_file_chunk` tool correctly reads specific line ranges from text files in an artifact bucket.
@@ -10,23 +14,52 @@ Verify that the `read_file_chunk` tool correctly reads specific line ranges from
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Base URL** | `${ALITA_BASE_URL}` | Alita instance base URL |
-| **Project ID** | `${ALITA_PROJECT_ID}` | Project ID for artifact storage |
-| **API Key** | `${ALITA_API_KEY}` | Authentication token |
-| **Tool** | `read_file_chunk` | Artifact tool to execute for partial file reading |
-| **Bucket Name** | `test-artifacts` | Target bucket to read files from |
+| **Tools Used** | `createNewBucket`, `createFile`, `read_file_chunk`, `deleteFile` | Tools for setup, verification, and cleanup |
+| **Bucket Name** | `TC-005-read-file-chunk` | Dedicated bucket for this test (created if missing) |
+| **Primary Input(s)** | `{{TC_005_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_005_TXT_FILENAME}}={{RANDOM_STRING}}.txt` | Required and optional inputs derived from args_schema |
 
 ## Config
 
 path: .alita\tool_configs\artifact-config.json
-generateTestData: false
+generateTestData: true
 
 ## Pre-requisites
 
 - Alita instance is accessible and configured
-- Valid API key with artifact read permissions
-- Bucket `test-artifacts` exists with text files created in TC-002
-- File `test-document.txt` contains at least 4 lines
+- Valid API key with artifact read/write permissions
+- User has permission to manage files and create buckets in the project
+- Create bucket `TC-005-read-file-chunk` if missing. If it already exists, bucket creation must be treated as a non-error (idempotent).
+- Ensure the bucket exists
+
+Tool: `createNewBucket`
+
+Input:
+```json
+{
+  "bucket_name": "TC-005-read-file-chunk",
+  "expiration_measure": "weeks",
+  "expiration_value": 1
+}
+```
+
+- Create files used for partial reads
+
+Tool: `createFile`
+
+Inputs:
+{
+  "filename": "{{TC_005_TXT_FILENAME}}",
+  "filedata": "This is a test document for TC-005.\nLine 2: Testing partial reads.\nLine 3: More content here.\nLine 4: Final line.",
+  "bucket_name": "TC-005-read-file-chunk"
+}
+```
+```json
+{
+  "filename": "{{TC_005_MD_FILENAME}}",
+  "filedata": "# TC-005 README\n\nThis is a markdown file used for chunk read verification.",
+  "bucket_name": "TC-005-read-file-chunk"
+}
+```
 
 ## Test Steps & Expectations
 
@@ -37,16 +70,17 @@ Execute the `read_file_chunk` tool to read lines 1-2 from the test document.
 **Input:**
 ```json
 {
-  "file_path": "test-document.txt",
+  "file_path": "{{TC_005_TXT_FILENAME}}",
   "start_line": 1,
   "end_line": 2,
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-005-read-file-chunk"
 }
 ```
 
 **Expectation:** The tool returns only the first two lines:
+
 ```
-This is a test document.
+This is a test document for TC-005.
 Line 2: Testing partial reads.
 ```
 
@@ -57,10 +91,10 @@ Execute the `read_file_chunk` tool to read lines 2-3.
 **Input:**
 ```json
 {
-  "file_path": "test-document.txt",
+  "file_path": "{{TC_005_TXT_FILENAME}}",
   "start_line": 2,
   "end_line": 3,
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-005-read-file-chunk"
 }
 ```
 
@@ -77,9 +111,9 @@ Execute the `read_file_chunk` tool without specifying end_line to read to the en
 **Input:**
 ```json
 {
-  "file_path": "test-document.txt",
+  "file_path": "{{TC_005_TXT_FILENAME}}",
   "start_line": 3,
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-005-read-file-chunk"
 }
 ```
 
@@ -96,10 +130,10 @@ Execute the `read_file_chunk` tool to read just one line.
 **Input:**
 ```json
 {
-  "file_path": "test-document.txt",
+  "file_path": "{{TC_005_TXT_FILENAME}}",
   "start_line": 2,
   "end_line": 2,
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-005-read-file-chunk"
 }
 ```
 
@@ -115,11 +149,44 @@ Execute the `read_file_chunk` tool on the markdown file.
 **Input:**
 ```json
 {
-  "file_path": "test-readme.md",
+  "file_path": "{{TC_005_MD_FILENAME}}",
   "start_line": 1,
   "end_line": 3,
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-005-read-file-chunk"
 }
 ```
 
 **Expectation:** The tool returns the first 3 lines of the markdown file with formatting preserved.
+
+### Step 6: Cleanup — Delete Created Files
+
+Delete the files created during setup from `TC-005-read-file-chunk`. Buckets are intentionally left in place.
+
+Tool: `deleteFile`
+
+Inputs:
+```json
+{
+  "filename": "{{TC_005_TXT_FILENAME}}",
+  "bucket_name": "TC-005-read-file-chunk"
+}
+```
+```json
+{
+  "filename": "{{TC_005_MD_FILENAME}}",
+  "bucket_name": "TC-005-read-file-chunk"
+}
+```
+
+
+Execute the `listFiles` tool to verify deletion.
+
+**Input:**
+```json
+{
+  "bucket_name": "TC-005-read-file-chunk"
+}
+```
+`
+**Expectation:** Verify that files `{{TC_005_MD_FILENAME}}`, `{{TC_005_TXT_FILENAME}}` do not exist in the bucket after listing.
+

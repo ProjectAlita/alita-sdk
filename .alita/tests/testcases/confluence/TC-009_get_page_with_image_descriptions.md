@@ -13,7 +13,7 @@ Verify that the `get_page_with_image_descriptions` tool correctly retrieves a Co
 | **Space** | `AT` | Target Confluence space key |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `get_page_with_image_descriptions` | Confluence tool to execute for getting page with image descriptions |
-| **Page ID** | `104300545` | ID of the page containing images |
+| **Page ID** | `139395168` | ID of the page containing images |
 
 ## Config
 
@@ -24,14 +24,14 @@ generateTestData: false
 
 - A Confluence space `AT` exists and is accessible
 - Valid Confluence API token with read permissions
-- A page with ID `104300545` exists and contains at least one image
+- A page with ID `139395168` exists and contains at least one image
 - LLM is configured and available for image analysis
 
 ## Test Steps & Expectations
 
 ### Step 1: Execute the Tool
 
-Execute the `get_page_with_image_descriptions` tool with page_id parameter set to `104300545`.
+Execute the `get_page_with_image_descriptions` tool with page_id parameter set to `139395168`.
 
 **Expectation:** The tool runs without errors and returns page content with images replaced by descriptions.
 
@@ -39,4 +39,4 @@ Execute the `get_page_with_image_descriptions` tool with page_id parameter set t
 
 Verify that the output contains page content in markdown format with image descriptions instead of image references.
 
-**Expectation:** The output is a string containing the actual immage describes field with green crops. Make sure that the description matches contextually.  
+**Expectation:** The output is a string containing the actual immage describes fores or wood or green trees. Make sure that the description matches contextually.  

@@ -42,6 +42,6 @@ Set active branch to a tc-file-ops-2025-12-08 branch, not the main/master branch
 
 ### Step 2: Execute the Tool
 
-Execute the `create_file` tool with file path `{{CURRENT_TIME}}.aitest.txt` and contents `{{CURRENT_TIME_AND_DATE}}`.
+Execute the `create_file` tool with file path `{{CURRENT_TIME}}.{{RANDOM_STRING_3_ALPHABETIC}}.aitest.txt` and contents `{{CURRENT_TIME_AND_DATE}}`.
 
-**Expectation:** The tool runs without errors and returns a success message like "Created file {{CURRENT_TIME}}.aitest.txt".
+**Expectation:** The tool runs without errors and returns a success message like "Created file {{CURRENT_TIME}}.{{RANDOM_STRING_3_ALPHABETIC}}.aitest.txt".

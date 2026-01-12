@@ -27,7 +27,7 @@ generateTestData: true
 
 - Valid toolkit config for `confluence`
 - Confluence credentials via env vars
-- A page with title `{{TC_018_PAGE_TITLE_VARIANT}}` exists in configured space
+- Create page with title `{{TC_018_PAGE_TITLE_VARIANT}}`
 - `{{TC_018_PAGE_ID_VARIANT}}` is the ID of the page with title `{{TC_018_PAGE_TITLE_VARIANT}}`
 
 ## Test Steps & Expectations

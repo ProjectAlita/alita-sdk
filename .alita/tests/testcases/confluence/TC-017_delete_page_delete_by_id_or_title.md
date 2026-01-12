@@ -28,7 +28,7 @@ generateTestData: true
 - Valid toolkit config for `confluence`
 - Confluence credentials via env vars
 - Target page exists and is deletable by the current user
-- Dummy page created for deletion test with `{{TC_017_PAGE_ID}}` and title `{{TC_017_PAGE_TITLE}}`
+- Create page for deletion test with `{{TC_017_PAGE_ID}}` and title `{{TC_017_PAGE_TITLE}}`
 
 ## Test Steps & Expectations
 
