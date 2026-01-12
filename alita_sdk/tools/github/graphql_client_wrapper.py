@@ -1464,6 +1464,7 @@ class GraphQLClientWrapper(BaseModel):
 
         missing_fields = []
         fields_to_update = []
+        updated_fields = []
 
         if fields:
             try:
