@@ -65,7 +65,7 @@ class Artifact:
     def delete(self, artifact_name: str, bucket_name = None):
         if not bucket_name:
             bucket_name = self.bucket_name
-        self.client.delete_artifact(bucket_name, artifact_name)
+        return self.client.delete_artifact(bucket_name, artifact_name)
     
     def list(self, bucket_name: str = None, return_as_string = True) -> str|dict:
         if not bucket_name:

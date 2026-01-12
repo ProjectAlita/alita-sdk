@@ -287,7 +287,10 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def delete_file(self, filename: str, bucket_name = None):
-        return self.artifact.delete(filename, bucket_name)
+        result = self.artifact.delete(filename, bucket_name)
+        if result and isinstance(result, dict) and result.get('error'):
+            raise ToolException(f'Error (deleteFile): {result.get("error")}')
+        return f'File "{filename}" deleted successfully.'
 
     def append_data(self, filename: str, filedata: str, bucket_name = None):
         result = self.artifact.append(filename, filedata, bucket_name)
