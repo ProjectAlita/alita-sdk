@@ -14,10 +14,12 @@ from .prompt import PromptToolkit
 from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from .mcp import McpToolkit
+from .mcp_config import McpConfigToolkit, get_mcp_config_toolkit_schemas
 from .skill_router import SkillRouterToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
 from ..tools.image_generation import ImageGenerationToolkit
+from ..tools.data_analysis import DataAnalysisToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
 from ...tools.memory import MemoryToolkit
@@ -95,11 +97,16 @@ def get_toolkits():
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
         ImageGenerationToolkit.toolkit_config_schema(),
+        DataAnalysisToolkit.toolkit_config_schema(),
         McpToolkit.toolkit_config_schema(),
+        McpConfigToolkit.toolkit_config_schema(),
         SkillRouterToolkit.toolkit_config_schema()
     ]
 
-    return core_toolkits + community_toolkits() + alita_toolkits()
+    # Add configured MCP servers (stdio and http) as available toolkits
+    mcp_config_toolkits = get_mcp_config_toolkit_schemas()
+
+    return core_toolkits + mcp_config_toolkits + community_toolkits() + alita_toolkits()
 
 
 def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None) -> list:
@@ -198,6 +205,20 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         pgvector_configuration=tool.get('settings', {}).get('pgvector_configuration'),
                         conversation_id=conversation_id,
                     ).get_tools()
+                elif tool['name'] == 'data_analysis':
+                    # Data Analysis internal tool - uses conversation attachment bucket
+                    settings = tool.get('settings', {})
+                    bucket_name = settings.get('bucket_name')
+                    if bucket_name:
+                        tools += DataAnalysisToolkit.get_toolkit(
+                            alita_client=alita_client,
+                            llm=llm,
+                            bucket_name=bucket_name,
+                            toolkit_name="Data Analyst",
+                        ).get_tools()
+                    else:
+                        logger.warning("Data Analysis internal tool requested "
+                                       "but no bucket_name provided in settings")
             elif tool['type'] == 'artifact':
                 tool_handled = True
                 toolkit_tools = ArtifactToolkit.get_toolkit(
@@ -322,8 +343,14 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 logger.info(f"Processing skill_router toolkit: {tool}")
                 try:
                     settings = tool.get('settings', {})
+                    toolkit_name = tool.get('toolkit_name', '')
+                    selected_tools = settings.get('selected_tools', [])
+
                     toolkit_tools = SkillRouterToolkit.get_toolkit(
                         client=alita_client,
+                        llm=llm,
+                        toolkit_name=toolkit_name,
+                        selected_tools=selected_tools,
                         **settings
                     ).get_tools()
 
@@ -332,6 +359,47 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 except Exception as e:
                     logger.error(f"❌ Failed to initialize SkillRouterToolkit: {e}")
                     raise
+            elif tool['type'] == 'mcp_config' or tool['type'].startswith('mcp_'):
+                tool_handled = True
+                # MCP Config toolkit - pre-configured MCP servers (stdio or http)
+                # Handle both explicit 'mcp_config' type and dynamic names like 'mcp_playwright'
+                logger.info(f"Processing mcp_config toolkit: {tool}")
+                try:
+                    settings = tool.get('settings', {})
+
+                    # Server name can come from settings or be extracted from type name
+                    server_name = settings.get('server_name')
+                    if not server_name and tool['type'].startswith('mcp_') and tool['type'] != 'mcp_config':
+                        # Extract server name from type (e.g., 'mcp_playwright' -> 'playwright')
+                        server_name = tool['type'][4:]  # Remove 'mcp_' prefix
+
+                    if not server_name:
+                        logger.error(f"❌ No server_name found for mcp_config toolkit: {tool}")
+                        continue
+
+                    toolkit_name = tool.get('toolkit_name', '') or server_name
+                    selected_tools = settings.get('selected_tools', [])
+                    excluded_tools = settings.get('excluded_tools', [])
+
+                    # Get server config (may be in settings or from global config)
+                    server_config = settings.get('server_config')
+
+                    toolkit_tools = McpConfigToolkit.get_toolkit(
+                        server_name=server_name,
+                        server_config=server_config,
+                        user_config=settings,
+                        selected_tools=selected_tools if selected_tools else None,
+                        excluded_tools=excluded_tools if excluded_tools else None,
+                        toolkit_name=toolkit_name,
+                        client=alita_client,
+                    ).get_tools()
+
+                    tools.extend(toolkit_tools)
+                    logger.info(f"✅ Successfully added {len(toolkit_tools)} tools from McpConfigToolkit ({server_name})")
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize McpConfigToolkit: {e}")
+                    if not debug_mode:
+                        raise
         except McpAuthorizationRequired:
             # Re-raise auth required exceptions directly
             raise

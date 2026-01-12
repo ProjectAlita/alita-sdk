@@ -10,6 +10,7 @@ from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.pgvector import PgVectorConfiguration
 from ...configurations.zephyr import ZephyrConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "zephyr_scale"
 
@@ -38,7 +39,7 @@ class ZephyrScaleToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in ZephyrScaleApiWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
-            max_results=(int, Field(default=100, description="Results count to show")),
+            max_results=(int, Field(default=100, description="Results count to show", gt=0)),
             zephyr_configuration=(ZephyrConfiguration, Field(description="Zephyr Configuration",
                                                                        json_schema_extra={'configuration_types': ['zephyr']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None, description="PgVector Configuration",
@@ -88,7 +89,7 @@ class ZephyrScaleToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 

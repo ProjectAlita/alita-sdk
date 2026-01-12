@@ -12,10 +12,6 @@ from github.Consts import DEFAULT_BASE_URL
 from langchain_core.tools import ToolException
 
 from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
-from .schemas import (
-    GitHubAuthConfig,
-    GitHubRepoConfig,
-)
 
 from .schemas import (
     GitHubAuthConfig,
@@ -415,26 +411,53 @@ class GitHubClient(BaseModel):
         Returns:
             str: A detailed diff comparison between the two commits or an error message.
         """
+        def safe_author_info(commit_obj):
+            """Safely extract author info from a commit object, handling None values."""
+            author = commit_obj.commit.author
+            if author:
+                return {
+                    "name": author.name or "Unknown",
+                    "date": author.date.isoformat() if author.date else None
+                }
+            # Fallback to GitHub user info if git author is not available
+            elif commit_obj.author:
+                return {
+                    "name": commit_obj.author.login,
+                    "date": None
+                }
+            return {"name": "Unknown", "date": None}
+
         try:
             # Get the repository
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
-            
+
             # Get the comparison between the two commits
             comparison = repo.compare(base_sha, head_sha)
-            
+
+            # Get head commit - the GitHub Compare API doesn't return head_commit,
+            # so we get it from the commits list or fetch it directly
+            if comparison.commits:
+                head_commit_obj = comparison.commits[-1]
+            else:
+                # For identical commits or edge cases, fetch head commit directly
+                head_commit_obj = repo.get_commit(head_sha)
+
+            base_author = safe_author_info(comparison.base_commit)
+            head_author = safe_author_info(head_commit_obj)
+
             # Extract comparison information
             diff_info = {
                 "base_commit": {
                     "sha": comparison.base_commit.sha,
                     "message": comparison.base_commit.commit.message,
-                    "author": comparison.base_commit.commit.author.name,
-                    "date": comparison.base_commit.commit.author.date.isoformat()
+                    "author": base_author["name"],
+                    "date": base_author["date"]
                 },
                 "head_commit": {
-                    "sha": comparison.head_commit.sha,
-                    "message": comparison.head_commit.commit.message,
-                    "author": comparison.head_commit.commit.author.name,
-                    "date": comparison.head_commit.commit.author.date.isoformat()
+                    "sha": head_commit_obj.sha,
+                    "message": head_commit_obj.commit.message,
+                    "author": head_author["name"],
+                    "date": head_author["date"]
                 },
                 "status": comparison.status,  # ahead, behind, identical, or diverged
                 "ahead_by": comparison.ahead_by,
@@ -443,14 +466,15 @@ class GitHubClient(BaseModel):
                 "commits": [],
                 "files": []
             }
-            
+
             # Get commits in the comparison
             for commit in comparison.commits:
+                author_info = safe_author_info(commit)
                 commit_info = {
                     "sha": commit.sha,
                     "message": commit.commit.message,
-                    "author": commit.commit.author.name,
-                    "date": commit.commit.author.date.isoformat(),
+                    "author": author_info["name"],
+                    "date": author_info["date"],
                     "url": commit.html_url
                 }
                 diff_info["commits"].append(commit_info)
@@ -1124,65 +1148,12 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"Unable to create file due to error:\n{str(e)}"
 
-    def extract_old_new_pairs(self, file_query):
-        # Split the file content by lines
-        code_lines = file_query.split("\n")
-
-        # Initialize lists to hold the contents of OLD and NEW sections
-        old_contents = []
-        new_contents = []
-
-        # Initialize variables to track whether the current line is within an OLD or NEW section
-        in_old_section = False
-        in_new_section = False
-
-        # Temporary storage for the current section's content
-        current_section_content = []
-
-        # Iterate through each line in the file content
-        for line in code_lines:
-            # Check for OLD section start
-            if "OLD <<<" in line:
-                in_old_section = True
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for OLD section end
-            if ">>>> OLD" in line:
-                in_old_section = False
-                old_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for NEW section start
-            if "NEW <<<" in line:
-                in_new_section = True
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # Check for NEW section end
-            if ">>>> NEW" in line:
-                in_new_section = False
-                new_contents.append("\n".join(current_section_content).strip())  # Add the captured content
-                current_section_content = []  # Reset current section content
-                continue  # Skip the line with the marker
-
-            # If currently in an OLD or NEW section, add the line to the current section content
-            if in_old_section or in_new_section:
-                current_section_content.append(line)
-
-        # Pair the OLD and NEW contents
-        paired_contents = list(zip(old_contents, new_contents))
-
-        return paired_contents
-
     def update_file(self, file_query: str, repo_name: Optional[str] = None, commit_message: Optional[str] = None) -> str:
-        """
-        Updates a file with new content.
+        """Updates a file with new content using OLD/NEW markers and edit_file.
+
         Parameters:
-            file_query(str): Contains the file path and the file contents.
-                The old file contents is wrapped in OLD <<<< and >>>> OLD
-                The new file contents is wrapped in NEW <<<< and >>>> NEW
+            file_query(str): Contains the file path on the first line and the file contents
+                wrapped in OLD <<<< and >>>> OLD / NEW <<<< and >>>> NEW markers.
                 For example:
                 /test/hello.txt
                 OLD <<<<
@@ -1191,13 +1162,13 @@ class GitHubClient(BaseModel):
                 NEW <<<<
                 Hello Mars!
                 >>>> NEW
-            repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            repo_name (Optional[str]): Name of the repository in format 'owner/repo'. Currently
+                not used by edit_file and must refer to the initialized repository.
 
         Returns:
             A success or failure message
         """
         try:
-            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
             branch = self.active_branch
 
             if branch == self.github_base_branch:
@@ -1206,29 +1177,27 @@ class GitHubClient(BaseModel):
                     "which is protected. Please create a new branch and try again."
                 )
 
-            file_path: str = file_query.split("\n")[0]
-
-            file_content = self._read_file(file_path, branch, repo_name)
-            updated_file_content = file_content
-            for old, new in self.extract_old_new_pairs(file_query):
-                if not old.strip():
-                    continue
-                updated_file_content = updated_file_content.replace(old, new)
-
-            if file_content == updated_file_content:
+            if "\n" not in file_query:
                 return (
-                    "File content was not updated because old content was not found or empty. "
-                    "It may be helpful to use the read_file action to get the current file contents."
+                    "Invalid file_query format. Expected first line to be the file path "
+                    "followed by OLD/NEW blocks."
                 )
 
-            repo.update_file(
-                path=file_path,
-                message=commit_message if commit_message else f"Update {file_path}",
-                content=updated_file_content,
-                branch=branch,
-                sha=repo.get_contents(file_path, ref=branch).sha,
-            )
-            return f"Updated file {file_path}"
+            file_path, edit_content = file_query.split("\n", 1)
+            file_path = file_path.strip()
+
+            # Set temporary repo override for internal helpers
+            self._tmp_repo_for_edit = repo_name
+            try:
+                return self.edit_file(
+                    file_path=file_path,
+                    file_query=edit_content,
+                    branch=branch,
+                    commit_message=commit_message or f"Update {file_path}",
+                )
+            finally:
+                if hasattr(self, "_tmp_repo_for_edit"):
+                    delattr(self, "_tmp_repo_for_edit")
         except Exception as e:
             return f"Unable to update file due to error:\n{str(e)}"
 
@@ -1466,11 +1435,12 @@ class GitHubClient(BaseModel):
             str: The file decoded as a string, or an error message if not found
         """
         try:
-            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            # Prefer temporary repo set by update_file, then explicit repo_name
+            effective_repo = getattr(self, "_tmp_repo_for_edit", None) or repo_name
+            repo = self.github_api.get_repo(effective_repo) if effective_repo else self.github_repo_instance
             file = repo.get_contents(file_path, ref=branch)
             return file.decoded_content.decode("utf-8")
         except Exception as e:
-            from traceback import format_exc
             return f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}"
 
     def read_file(self, file_path: str, branch: Optional[str] = None, repo_name: Optional[str] = None) -> str:
@@ -1508,7 +1478,9 @@ class GitHubClient(BaseModel):
             Success message
         """
         try:
-            repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
+            # Prefer temporary repo set by update_file, then explicit repo_name
+            effective_repo = getattr(self, "_tmp_repo_for_edit", None) or repo_name
+            repo = self.github_api.get_repo(effective_repo) if effective_repo else self.github_repo_instance
             branch = branch or self.active_branch
             
             if branch == self.github_base_branch:

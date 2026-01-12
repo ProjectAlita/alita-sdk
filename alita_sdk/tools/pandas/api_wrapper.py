@@ -158,39 +158,62 @@ class PandasWrapper(BaseToolApiWrapper):
                         f"Retrying Code Generation ({attempts}/{max_retries})..."
                     )
     
-    def process_query(self, query: str, filename: str) -> str:
-        """Analyze and process using query on dataset""" 
+    def pandas_analyze_data(self, query: str, filename: str) -> str:
+        """Analyze data from a file using natural language query.
+        
+        This tool allows you to perform data analysis operations on files using natural language.
+        It automatically generates and executes Python pandas code based on your query.
+        
+        Supported file formats: CSV, Excel (.xlsx, .xls), Parquet, JSON, XML, HDF5, Feather, Pickle
+        
+        Parameters:
+            query: Natural language description of the analysis to perform. Examples:
+                - "Calculate the average sales by region"
+                - "Show me a bar chart of products by revenue"
+                - "Filter rows where price > 100 and status is 'active'"
+                - "What is the correlation between age and income?"
+            filename: Name of the file in the artifact bucket (e.g., 'sales_data.csv', 'report.xlsx')
+        
+        Returns:
+            Analysis results as text, or confirmation message if a chart was generated and saved.
+            Charts are automatically saved to the artifact bucket as PNG files.
+        
+        Examples:
+            - pandas_analyze_data(query="Show summary statistics", filename="data.csv")
+            - pandas_analyze_data(query="Create a histogram of ages", filename="customers.xlsx")
+            - pandas_analyze_data(query="What's the total revenue by month?", filename="sales.parquet")
+        """
         df = self._get_dataframe(filename)
         code = self.generate_code_with_retries(df, query)
-        self._log_tool_event(tool_name="process_query",
+        self._log_tool_event(tool_name="pandas_analyze_data",
                              message=f"Executing generated code... \n\n```python\n{code}\n```")
         try:
             result = self.execute_code(df, code)
         except Exception as e:
             logger.error(f"Code execution failed: {format_exc()}")
-            self._log_tool_event(tool_name="process_query",
-                                 message=f"Executing generated code... \n\n```python\n{code}\n```")
             raise
-        self._log_tool_event(tool_name="process_query",
-                             message=f"Executing generated code... \n\n```python\n{code}\n```")
         if result.get("df") is not None:
             df = result.pop("df")
             # Not saving dataframe to artifact repo for now
             # self._save_dataframe(df, filename)
         if result.get('chart'):
+            chart_results = []
             if isinstance(result['chart'], list):
                 for ind, chart in enumerate(result['chart']):
                     chart_filename = f"chart_{uuid4()}.png"
                     chart_data = base64.b64decode(chart)
                     self.alita.create_artifact(self.bucket_name, chart_filename, chart_data)
-                    result['result'] = f"Chart #{ind} saved to {chart_filename}"
+                    chart_url = f"{self.alita.base_url}/api/v1/artifacts/artifact/default/{self.alita.project_id}/{self.bucket_name}/{chart_filename}"
+                    chart_results.append(f"Chart #{ind+1} saved and available at: {chart_url}")
+                result['result'] = "\n".join(chart_results)
             else:
                 # Handle single chart case (not in a list)
                 chart = result['chart']
                 chart_filename = f"chart_{uuid4()}.png"
                 chart_data = base64.b64decode(chart)
                 self.alita.create_artifact(self.bucket_name, chart_filename, chart_data)
-                result['result'] = f"Chart saved to {chart_filename}"
+                chart_url = f"{self.alita.base_url}/api/v1/artifacts/artifact/default/{self.alita.project_id}/{self.bucket_name}/{chart_filename}"
+                result['result'] = f"Chart saved and available at: {chart_url}\n\nYou can embed this image in your response using markdown: ![Chart]({chart_url})"
         return result.get("result", None)
 
     def save_dataframe(self, source_df: str, target_file: str) -> str:
@@ -253,23 +276,13 @@ class PandasWrapper(BaseToolApiWrapper):
     def get_available_tools(self):
         return [
             {
-                "name": "process_query",
-                "ref": self.process_query,
-                "description": self.process_query.__doc__,
+                "name": "pandas_analyze_data",
+                "ref": self.pandas_analyze_data,
+                "description": self.pandas_analyze_data.__doc__,
                 "args_schema": create_model(
-                    "ProcessQueryModel",
-                    query=(str, Field(description="Task to solve")),
-                    filename=(str, Field(description="File to be processed"))
-                )
-            },
-            {
-                "name": "save_dataframe",
-                "ref": self.save_dataframe,
-                "description": self.save_dataframe.__doc__,
-                "args_schema": create_model(
-                    "SaveDataFrameModel",
-                    source_df=(str, Field(description="Source dataframe file to be saved")),
-                    target_file=(str, Field(description="Target filename with extension for saving"))
+                    "AnalyseDataModel",
+                    query=(str, Field(description="Natural language query describing what analysis to perform on the data")),
+                    filename=(str, Field(description="Name of the file to analyze (e.g., 'data.csv', 'report.xlsx')"))
                 )
             }
         ]

@@ -9,6 +9,7 @@ from alita_sdk.configurations.delta_lake import DeltaLakeConfiguration
 from ...utils import clean_string, get_max_toolkit_length
 from .api_wrapper import DeltaLakeApiWrapper
 from .tool import DeltaLakeAction
+from ....runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "delta_lake"
 
@@ -126,7 +127,7 @@ class DeltaLakeToolkit(BaseToolkit):
                             name=t["name"],
                             description=description,
                             args_schema=t["args_schema"],
-                            metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                            metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: t["name"]} if toolkit_name else {TOOL_NAME_META: t["name"]}
                         )
                     )
         return instance

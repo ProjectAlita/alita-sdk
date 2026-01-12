@@ -973,6 +973,9 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                     created_date = hist.get('createdDate', '') if hist else attachment.get('created', '')
                     last_updated = hist.get('lastUpdated', {}).get('when', '') if hist else ''
 
+                    attachment_path = attachment['_links']['download'] if attachment.get(
+                            '_links', {}).get('download') else ''
+                    download_url = self.client.url.rstrip('/') + attachment_path
                     metadata = {
                         'name': title,
                         'size': attachment.get('extensions', {}).get('fileSize', None),
@@ -982,14 +985,10 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                         'media_type': media_type,
                         'labels': [label['name'] for label in
                                    attachment.get('metadata', {}).get('labels', {}).get('results', [])],
-                        'download_url': self.base_url.rstrip('/') + attachment['_links']['download'] if attachment.get(
-                            '_links', {}).get('download') else None
+                        'download_url': download_url
                     }
-
-                    download_url = self.base_url.rstrip('/') + attachment['_links']['download']
-
                     try:
-                        resp = self.client.request(method="GET", path=download_url[len(self.base_url):], advanced_mode=True)
+                        resp = self.client.request(method="GET", path=attachment_path, advanced_mode=True)
                         if resp.status_code == 200:
                             content = resp.content
                         else:
@@ -1880,8 +1879,8 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             "page_ids": (Optional[List[str]], Field(description="List of page IDs to retrieve.", default=None)),
             "label": (Optional[str], Field(description="Label to filter pages.", default=None)),
             "cql": (Optional[str], Field(description="CQL query to filter pages.", default=None)),
-            "limit": (Optional[int], Field(description="Limit the number of results.", default=10)),
-            "max_pages": (Optional[int], Field(description="Maximum number of pages to retrieve.", default=1000)),
+            "limit": (Optional[int], Field(description="Limit the number of results.", default=10, gt=0)),
+            "max_pages": (Optional[int], Field(description="Maximum number of pages to retrieve.", default=1000, gt=0)),
             "include_restricted_content": (Optional[bool], Field(description="Include restricted content.", default=False)),
             "include_archived_content": (Optional[bool], Field(description="Include archived content.", default=False)),
             "include_attachments": (Optional[bool], Field(description="Include attachments.", default=False)),

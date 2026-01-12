@@ -13,7 +13,10 @@ from langchain_core.messages import (
     BaseMessage, SystemMessage, HumanMessage
 )
 from langchain_core.prompts import MessagesPlaceholder
-from .constants import REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON, DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON
+from .constants import (REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON,
+                        QA_ASSISTANT, NERDY_ASSISTANT, QUIRKY_ASSISTANT, CYNICAL_ASSISTANT,
+                        DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
+                        SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS)
 from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..tools.echo import EchoTool
 from langchain_core.tools import BaseTool, ToolException
@@ -34,11 +37,13 @@ class Assistant:
                  debug_mode: Optional[bool] = False,
                  mcp_tokens: Optional[dict] = None,
                  conversation_id: Optional[str] = None,
-                 ignored_mcp_servers: Optional[list] = None):
+                 ignored_mcp_servers: Optional[list] = None,
+                 persona: Optional[str] = "generic"):
 
         self.app_type = app_type
         self.memory = memory
         self.store = store
+        self.persona = persona
         self.max_iterations = data.get('meta', {}).get('step_limit', 25)
 
         logger.debug("Data for agent creation: %s", data)
@@ -89,8 +94,24 @@ class Assistant:
         # Handle internal tools
         meta = data.get('meta', {})
         if meta.get("internal_tools"):
+            # Find bucket from artifact toolkit marked with is_attachment flag
+            bucket_name = None
+            for tool in version_tools:
+                if tool.get('type') == 'artifact' and tool.get('is_attachment'):
+                    bucket_name = tool.get('settings', {}).get('bucket')
+                    break
+            # Fallback: use first artifact toolkit with a bucket
+            if not bucket_name:
+                for tool in version_tools:
+                    if tool.get('type') == 'artifact' and tool.get('settings', {}).get('bucket'):
+                        bucket_name = tool['settings']['bucket']
+                        break
+
             for internal_tool_name in meta.get("internal_tools"):
-                version_tools.append({"type": "internal_tool", "name": internal_tool_name})
+                tool_config = {"type": "internal_tool", "name": internal_tool_name, "settings": {}}
+                if bucket_name:
+                    tool_config["settings"]["bucket_name"] = bucket_name
+                version_tools.append(tool_config)
 
         self.tools = get_tools(
             version_tools,
@@ -274,7 +295,7 @@ class Assistant:
                 chat_history_messages.append(message)
         
         # Only use prompt_instructions if explicitly specified (for predict app_type)
-        if self.app_type == "predict" and isinstance(self.prompt, str):
+        if self.app_type in ["predict", "react"] and isinstance(self.prompt, str):
             prompt_instructions = self.prompt
         
         # Add tool binding only if tools are present
@@ -289,14 +310,43 @@ class Assistant:
         
         user_addon = USER_ADDON.format(prompt=str(prompt_instructions)) if prompt_instructions else ""
         plan_addon = PLAN_ADDON if 'update_plan' in tool_names else ""
+        data_analysis_addon = DATA_ANALYSIS_ADDON if 'pandas_analyze_data' in tool_names else ""
         pyodite_addon = PYODITE_ADDON if 'pyodide_sandbox' in tool_names else ""
-        escaped_prompt = DEFAULT_ASSISTANT.format(
-            users_instructions=user_addon,
-            planning_instructions=plan_addon,
-            pyodite_addon=pyodite_addon
-        )
-            
-        
+        search_index_addon = SEARCH_INDEX_ADDON if 'stepback_summary_index' in tool_names else ""
+
+        # Select assistant template based on persona
+        persona_templates = {
+            "qa": QA_ASSISTANT,
+            "nerdy": NERDY_ASSISTANT,
+            "quirky": QUIRKY_ASSISTANT,
+            "cynical": CYNICAL_ASSISTANT,
+        }
+
+        # For predict agents with their own instructions, use those directly
+        # instead of wrapping in DEFAULT_ASSISTANT
+        if self.app_type == "openai" and prompt_instructions:
+            # Use agent's own instructions as the base system prompt
+            # Append addons only when their corresponding tools are present
+            addons = "\n\n---\n\n".join(filter(None, [
+                plan_addon,
+                search_index_addon,
+                FILE_HANDLING_INSTRUCTIONS if simple_tools else "",
+                pyodite_addon,
+                data_analysis_addon
+            ]))
+            escaped_prompt = f"{prompt_instructions}\n\n---\n\n{addons}" if addons else str(prompt_instructions)
+            logger.info("Using agent's own instructions directly (app_type=predict)")
+        else:
+            base_assistant = persona_templates.get(self.persona, DEFAULT_ASSISTANT)
+            escaped_prompt = base_assistant.format(
+                users_instructions=user_addon,
+                planning_instructions=plan_addon,
+                pyodite_addon=pyodite_addon,
+                data_analysis_addon=data_analysis_addon,
+                search_index_addon=search_index_addon,
+                file_handling_instructions=FILE_HANDLING_INSTRUCTIONS
+            )
+
         # Properly setup the prompt for YAML
         import yaml
         

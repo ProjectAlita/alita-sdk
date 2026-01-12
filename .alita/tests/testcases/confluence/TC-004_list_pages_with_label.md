@@ -11,8 +11,6 @@ Verify that the `list_pages_with_label` tool correctly retrieves a list of page 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `list_pages_with_label` | Confluence tool to execute for listing labeled pages |
 | **Label** | `test-label` | Label to filter pages |
@@ -40,4 +38,4 @@ Execute the `list_pages_with_label` tool with the label parameter set to `test-l
 
 Verify that the output contains a list of dictionaries with 'id' and 'title' keys.
 
-**Expectation:** The output is exactly this content `[{"id": "104300545","title": "Test Label Page"}]`
+**Expectation:** The output is exactly this content `[{'id': '104300545', 'title': 'Test Label Page'}]`

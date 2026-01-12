@@ -2,6 +2,7 @@
 import fnmatch
 from typing import Any, Dict, List, Optional
 
+from gitlab import GitlabGetError
 from langchain_core.tools import ToolException
 from pydantic import create_model, Field, model_validator, SecretStr, PrivateAttr
 
@@ -9,6 +10,7 @@ from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 from ..utils.content_parser import parse_file_content
+from .utils import get_position
 
 AppendFileModel = create_model(
     "AppendFileModel",
@@ -35,7 +37,7 @@ ReadFileModel = create_model(
 )
 UpdateFileModel = create_model(
     "UpdateFileModel",
-    file_query=(str, Field(description="The file query string")),
+    file_query=(str, Field(description="The file query string containing file path on first line, followed by OLD/NEW markers. Format: file_path\\nOLD <<<< old content >>>> OLD\\nNEW <<<< new content >>>> NEW")),
     branch=(str, Field(description="The branch to update the file in")),
 )
 CommentOnIssueModel = create_model(
@@ -52,6 +54,11 @@ CreatePullRequestModel = create_model(
     pr_body=(str, Field(description="The body of the pull request")),
     branch=(str, Field(description="The branch to create the pull request from")),
 )
+CommentOnPRModel = create_model(
+    "CommentOnPRModel",
+    pr_number=(int, Field(description="The number of the pull request/merge request")),
+    comment=(str, Field(description="The comment text to add")),
+)
 
 CreateBranchModel = create_model(
     "CreateBranchModel",
@@ -59,7 +66,7 @@ CreateBranchModel = create_model(
 )
 ListBranchesInRepoModel = create_model(
     "ListBranchesInRepoModel",
-    limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.")),
+    limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.", gt=0)),
     branch_wildcard=(Optional[str], Field(default=None, description="Wildcard pattern to filter branches by name. If not provided, all branches will be returned."))
 
 )
@@ -90,9 +97,9 @@ GetPRChangesModel = create_model(
 CreatePRChangeCommentModel = create_model(
     "CreatePRChangeCommentModel",
     pr_number=(int, Field(description="GitLab Merge Request (Pull Request) number")),
-    file_path=(str, Field(description="File path of the changed file")),
-    line_number=(int, Field(description="Line number from the diff for a changed file")),
-    comment=(str, Field(description="Comment content")),
+    file_path=(str, Field(description="File path of the changed file as shown in the diff")),
+    line_number=(int, Field(description="Line index (0-based) from the diff output. Use get_pr_changes first to see the diff and identify the correct line index to comment on.")),
+    comment=(str, Field(description="Comment content to add to the specific line")),
 )
 GetCommitsModel = create_model(
     "GetCommitsModel",
@@ -235,7 +242,9 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         Returns:
             File content as string
         """
-        return self.read_file(file_path, branch)
+        # Default to active branch if branch is None, consistent with other methods
+        branch = branch if branch else self._active_branch
+        return str(self.read_file(file_path, branch))
 
     def create_branch(self, branch_name: str) -> str:
         try:
@@ -322,7 +331,30 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         except Exception as e:
             return "Unable to make comment due to error:\n" + str(e)
 
+    def comment_on_pr(self, pr_number: int, comment: str) -> str:
+        """
+        Add a comment to a pull request (merge request) in GitLab.
+
+        This method adds a general comment to the entire merge request,
+        not tied to specific code lines or file changes.
+
+        Parameters:
+            pr_number: GitLab Merge Request (Pull Request) number
+            comment: Comment text to add
+
+        Returns:
+            Success message or error description
+        """
+        try:
+            mr = self.repo_instance.mergerequests.get(pr_number)
+            mr.notes.create({"body": comment})
+            return "Commented on merge request " + str(pr_number)
+        except Exception as e:
+            return "Unable to make comment due to error:\n" + str(e)
+
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
+        # Default to active branch if branch is None
+        branch = branch if branch else self._active_branch
         try:
             self.set_active_branch(branch)
             self.repo_instance.files.get(file_path, branch)
@@ -339,6 +371,8 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             return "Created file " + file_path
 
     def read_file(self, file_path: str, branch: str) -> str:
+        # Default to active branch if branch is None
+        branch = branch if branch else self._active_branch
         self.set_active_branch(branch)
         file = self.repo_instance.files.get(file_path, branch)
         return parse_file_content(file_name=file_path,
@@ -406,43 +440,52 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def update_file(self, file_query: str, branch: str) -> str:
+        """
+        Update file using edit_file functionality.
+
+        This method now delegates to edit_file which uses OLD/NEW markers.
+        For backwards compatibility, it extracts the file_path from the query.
+
+        Expected format:
+            file_path
+            OLD <<<<
+            old content
+            >>>> OLD
+            NEW <<<<
+            new content
+            >>>> NEW
+
+        Args:
+            file_query: File path on first line, followed by OLD/NEW markers
+            branch: Branch to update the file in
+
+        Returns:
+            Success or error message
+        """
         if branch == self.branch:
             return (
-                "You're attempting to commit to the directly"
+                "You're attempting to commit directly "
                 f"to the {self.branch} branch, which is protected. "
                 "Please create a new branch and try again."
             )
         try:
-            file_path: str = file_query.split("\n")[0]
-            self.set_active_branch(branch)
-            file_content = self.read_file(file_path, branch)
-            updated_file_content = file_content
-            for old, new in self.extract_old_new_pairs(file_query):
-                if not old.strip():
-                    continue
-                updated_file_content = updated_file_content.replace(old, new)
-
-            if file_content == updated_file_content:
+            # Extract file path from first line
+            lines = file_query.split("\n", 1)
+            if len(lines) < 2:
                 return (
-                    "File content was not updated because old content was not found or empty."
-                    "It may be helpful to use the read_file action to get "
-                    "the current file contents."
+                    "Invalid file_query format. Expected:\n"
+                    "file_path\n"
+                    "OLD <<<< old content >>>> OLD\n"
+                    "NEW <<<< new content >>>> NEW"
                 )
 
-            commit = {
-                "branch": branch,
-                "commit_message": "Create " + file_path,
-                "actions": [
-                    {
-                        "action": "update",
-                        "file_path": file_path,
-                        "content": updated_file_content,
-                    }
-                ],
-            }
+            file_path = lines[0].strip()
+            edit_content = lines[1] if len(lines) > 1 else ""
 
-            self.repo_instance.commits.create(commit)
-            return "Updated file " + file_path
+            # Delegate to edit_file method with appropriate commit message
+            commit_message = f"Update {file_path}"
+            return self.edit_file(file_path, edit_content, branch, commit_message)
+
         except Exception as e:
             return "Unable to update file due to error:\n" + str(e)
 
@@ -494,10 +537,41 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         return res
 
     def create_pr_change_comment(self, pr_number: int, file_path: str, line_number: int, comment: str) -> str:
-        mr = self.repo_instance.mergerequests.get(pr_number)
-        position = {"position_type": "text", "new_path": file_path, "new_line": line_number}
-        mr.discussions.create({"body": comment, "position": position})
-        return "Comment added"
+        """
+        Create a comment on a specific line in a pull request (merge request) change in GitLab.
+
+        This method adds an inline comment to a specific line in the diff of a merge request.
+        The line_number parameter refers to the line index in the diff output (0-based),
+        not the line number in the original file.
+
+        **Important**: Use get_pr_changes first to see the diff and identify the correct
+        line index for commenting.
+
+        Parameters:
+            pr_number: GitLab Merge Request number
+            file_path: Path to the file being commented on (as shown in the diff)
+            line_number: Line index from the diff (0-based index)
+            comment: Comment text to add
+
+        Returns:
+            Success message or error description
+        """
+        try:
+            mr = self.repo_instance.mergerequests.get(pr_number)
+        except GitlabGetError as e:
+            if e.response_code == 404:
+                raise ToolException(f"Merge request number {pr_number} wasn't found: {e}")
+            raise ToolException(f"Error retrieving merge request {pr_number}: {e}")
+
+        try:
+            # Calculate proper position with SHA references and line mappings
+            position = get_position(file_path=file_path, line_number=line_number, mr=mr)
+
+            # Create discussion with the comment
+            mr.discussions.create({"body": comment, "position": position})
+            return f"Comment added successfully to line {line_number} in {file_path} on MR #{pr_number}"
+        except Exception as e:
+            raise ToolException(f"Failed to create comment on MR #{pr_number}: {e}")
 
     def get_commits(self, sha: Optional[str] = None, path: Optional[str] = None, since: Optional[str] = None, until: Optional[str] = None, author: Optional[str] = None):
         params = {}
@@ -576,6 +650,12 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
                 "args_schema": CommentOnIssueModel,
             },
             {
+                "name": "comment_on_pr",
+                "ref": self.comment_on_pr,
+                "description": self.comment_on_pr.__doc__ or "Comment on a pull request (merge request) in the repository.",
+                "args_schema": CommentOnPRModel,
+            },
+            {
                 "name": "create_file",
                 "ref": self.create_file,
                 "description": self.create_file.__doc__ or "Create a new file in the repository.",
@@ -620,7 +700,7 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             {
                 "name": "create_pr_change_comment",
                 "ref": self.create_pr_change_comment,
-                "description": "Create a comment on a pull request change.",
+                "description": self.create_pr_change_comment.__doc__ or "Create an inline comment on a specific line in a pull request change. Use get_pr_changes first to see the diff and identify the line index for commenting. The line_number is a 0-based index from the diff output, not the file line number.",
                 "args_schema": CreatePRChangeCommentModel,
             },
             {

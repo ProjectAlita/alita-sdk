@@ -11,6 +11,7 @@ from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.pgvector import PgVectorConfiguration
 from ...configurations.xray import XrayConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "xray_cloud"
 
@@ -40,7 +41,7 @@ class XrayToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in XrayApiWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
-            limit=(Optional[int], Field(description="Limit", default=100)),
+            limit=(Optional[int], Field(description="Limit", default=100, gt=0)),
             xray_configuration=(XrayConfiguration, Field(description="Xray Configuration", json_schema_extra={'configuration_types': ['xray']})),
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration",
@@ -89,7 +90,7 @@ class XrayToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 

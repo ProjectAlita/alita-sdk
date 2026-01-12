@@ -109,7 +109,15 @@ def parse_file_content(file_name=None, file_content=None, is_capture_image: bool
                                     loader_extra_config=loader_kwargs,
                                     llm=llm)
     except Exception as e:
-        return ToolException(f"Error reading file ({file_name or file_path}) content. Make sure these types are supported: {str(e)}")
+        # Surface full underlying error message (including nested causes) so that
+        # JSONDecodeError or other specific issues are not hidden behind
+        # generic RuntimeError messages from loaders.
+        root_msg = str(e)
+        if getattr(e, "__cause__", None):
+            root_msg = f"{root_msg} | Cause: {e.__cause__}"
+        return ToolException(
+            f"Error reading file ({file_name or file_path}) content. Make sure these types are supported: {root_msg}"
+        )
 
 def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                        sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False) -> List[Document] | ToolException:
@@ -130,7 +138,38 @@ def load_file_docs(file_name=None, file_content=None, is_capture_image: bool = F
 
 def get_loader_kwargs(loader_object, file_name=None, file_content=None, is_capture_image: bool = False, page_number: int = None,
                     sheet_name: str = None, llm=None, file_path: str = None, excel_by_sheets: bool = False, prompt=None):
-    loader_kwargs = deepcopy(loader_object['kwargs'])
+    """Build loader kwargs safely without deepcopying non-picklable objects like LLMs.
+
+    We avoid copying keys that are going to be overridden by this function anyway
+    (file_path, file_content, file_name, extract_images, llm, page_number,
+    sheet_name, excel_by_sheets, prompt, row_content, json_documents) to
+    prevent errors such as `cannot pickle '_thread.RLock' object` when an LLM
+    or client with internal locks is stored in the original kwargs.
+    """
+    if not loader_object:
+        raise ToolException("Loader configuration is missing.")
+
+    original_kwargs = loader_object.get("kwargs", {}) or {}
+
+    # Keys that will be overwritten below – skip them when copying
+    overridden_keys = {
+        "file_path",
+        "file_content",
+        "file_name",
+        "extract_images",
+        "llm",
+        "page_number",
+        "sheet_name",
+        "excel_by_sheets",
+        "prompt",
+        "row_content",
+        "json_documents",
+    }
+
+    # Build a safe shallow copy without overridden keys to avoid deepcopy
+    # of potentially non-picklable objects (e.g., llm with internal RLock).
+    loader_kwargs = {k: v for k, v in original_kwargs.items() if k not in overridden_keys}
+
     loader_kwargs.update({
         "file_path": file_path,
         "file_content": file_content,
@@ -211,6 +250,41 @@ def load_content_from_bytes(file_content: bytes, extension: str = None, loader_e
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+
+def _load_content_from_bytes_with_prompt(file_content: bytes, extension: str = None, loader_extra_config: dict = None, llm = None, prompt: str = image_processing_prompt) -> str:
+    """Internal helper that behaves like load_content_from_bytes but also propagates prompt.
+
+    This keeps the public load_content_from_bytes API unchanged while allowing newer
+    code paths to pass an explicit prompt through to the loader.
+    """
+    temp_file_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w+b', delete=False, suffix=extension or '') as temp_file:
+            temp_file.write(file_content)
+            temp_file.flush()
+            temp_file_path = temp_file.name
+
+        # Use prepare_loader so that prompt and other kwargs are handled consistently
+        loader = prepare_loader(
+            file_name=None,
+            file_content=None,
+            is_capture_image=loader_extra_config.get('extract_images') if loader_extra_config else False,
+            page_number=loader_extra_config.get('page_number') if loader_extra_config else None,
+            sheet_name=loader_extra_config.get('sheet_name') if loader_extra_config else None,
+            llm=llm or (loader_extra_config.get('llm') if loader_extra_config else None),
+            file_path=temp_file_path,
+            excel_by_sheets=loader_extra_config.get('excel_by_sheets') if loader_extra_config else False,
+            prompt=prompt or (loader_extra_config.get('prompt') if loader_extra_config else image_processing_prompt),
+        )
+
+        documents = loader.load()
+        page_contents = [doc.page_content for doc in documents]
+        return "\n".join(page_contents)
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
 
 def process_document_by_type(content, extension_source: str, document: Document = None, llm = None, chunking_config=None) \
         -> Generator[Document, None, None]:

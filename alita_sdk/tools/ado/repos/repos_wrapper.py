@@ -23,7 +23,8 @@ from langchain_core.tools import ToolException
 from msrest.authentication import BasicAuthentication
 from pydantic import Field, PrivateAttr, create_model, model_validator, SecretStr
 
-from ..utils import extract_old_new_pairs, generate_diff, get_content_from_generator
+from ...elitea_base import BaseCodeToolApiWrapper
+from ..utils import generate_diff, get_content_from_generator
 from ...code_indexer_toolkit import CodeIndexerToolkit
 from ...utils.available_tools_decorator import extend_with_parent_available_tools
 
@@ -129,9 +130,30 @@ class ArgsSchema(Enum):
     )
     UpdateFile = create_model(
         "UpdateFile",
-        branch_name=(str, Field(description="The name of the branch, e.g. `my_branch`.")),
-        file_path=(str, Field(description="Path of a file to be updated.")),
-        update_query=(str, Field(description="Update query used to adjust target file.")),
+        branch_name=(
+            str,
+            Field(description="The name of the branch, e.g. `my_branch`.")
+        ),
+        file_path=(
+            str,
+            Field(description="Path of a file to be updated."),
+        ),
+        update_query=(
+            str,
+            Field(
+                description=(
+                    "The exact OLD text to be replaced and the NEW "
+                    "text to insert, using one or more block pairs like:"
+                    "OLD <<<<Hello Earth!>>>> OLD NEW <<<<Hello Mars!>>>> NEW"
+                    "Each OLD block must contain the exact text that will be replaced "
+                    "via string replacement (exact full match including non-written characters). Each corresponding NEW "
+                    "block contains the replacement text. For multi-line changes, it is "
+                    "preferred to provide several smaller OLD/NEW pairs rather than one "
+                    "large block, so that each OLD block closely matches a contiguous "
+                    "snippet from the file."
+                )
+            ),
+        ),
     )
     DeleteFile = create_model(
         "DeleteFile",
@@ -251,6 +273,9 @@ class ReposApiWrapper(CodeIndexerToolkit):
     active_branch: Optional[str]
     token: Optional[SecretStr]
     _client: Optional[GitClient] = PrivateAttr()
+
+    # Reuse common file helpers from BaseCodeToolApiWrapper
+    edit_file = BaseCodeToolApiWrapper.edit_file
 
     class Config:
         arbitrary_types_allowed = True
@@ -835,22 +860,50 @@ class ReposApiWrapper(CodeIndexerToolkit):
             logger.error(msg)
             return ToolException(msg)
 
-    def update_file(self, branch_name: str, file_path: str, update_query: str) -> str:
+    def _write_file(self, file_path: str, content: str, branch: str = None, commit_message: str = None) -> str:
+        """Write content to a file in Azure DevOps by creating an edit commit.
+
+        This implementation follows the previous `update_file` behavior: it always
+        performs an 'edit' change (does not create the file), gets the latest
+        commit id for the branch and pushes a new commit containing the change.
         """
-        Updates a file with new content in Azure DevOps.
+        try:
+            # Get the latest commit ID of the target branch
+            branch_obj = self._client.get_branch(
+                repository_id=self.repository_id,
+                project=self.project,
+                name=branch,
+            )
+            if branch_obj is None or not hasattr(branch_obj, 'commit') or not hasattr(branch_obj.commit, 'commit_id'):
+                raise ToolException(f"Branch `{branch}` does not exist or has no commits.")
+
+            latest_commit_id = branch_obj.commit.commit_id
+
+            # Build edit change and push
+            change = GitChange("edit", file_path, content).to_dict()
+
+            ref_update = GitRefUpdate(name=f"refs/heads/{branch}", old_object_id=latest_commit_id)
+            new_commit = GitCommit(comment=commit_message or ("Update " + file_path), changes=[change])
+            push = GitPush(commits=[new_commit], ref_updates=[ref_update])
+
+            self._client.create_push(push=push, repository_id=self.repository_id, project=self.project)
+            return f"Updated file {file_path}"
+        except ToolException:
+            # Re-raise known tool exceptions
+            raise
+        except Exception as e:
+            logger.error(f"Unable to write file {file_path}: {e}")
+            raise ToolException(f"Unable to write file {file_path}: {str(e)}")
+
+    def update_file(self, branch_name: str, file_path: str, update_query: str) -> str:
+        """Updates a file with new content in Azure DevOps using OLD/NEW markers.
+
         Parameters:
             branch_name (str): The name of the branch where update the file.
             file_path (str): Path to the file for update.
-            update_query(str): Contains the file contents requried to be updated.
-                The old file contents is wrapped in OLD <<<< and >>>> OLD
-                The new file contents is wrapped in NEW <<<< and >>>> NEW
-                For example:
-                OLD <<<<
-                Hello Earth!
-                >>>> OLD
-                NEW <<<<
-                Hello Mars!
-                >>>> NEW
+            update_query(str): Contains the file contents required to be updated,
+                wrapped in Git-style OLD/NEW blocks.
+
         Returns:
             A success or failure message
         """
@@ -863,43 +916,16 @@ class ReposApiWrapper(CodeIndexerToolkit):
                 "Please create a new branch and try again."
             )
         try:
-            file_content = self._read_file(file_path, branch_name)
-
-            if isinstance(file_content, ToolException):
-                return file_content
-
-            updated_file_content = file_content
-            for old, new in extract_old_new_pairs(update_query):
-                if not old.strip():
-                    continue
-                updated_file_content = updated_file_content.replace(old, new)
-
-            if file_content == updated_file_content:
-                return (
-                    "File content was not updated because old content was not found or empty. "
-                    "It may be helpful to use the read_file action to get "
-                    "the current file contents."
-                )
-
-            # Get the latest commit ID of the active branch to use as oldObjectId
-            branch = self._client.get_branch(
-                repository_id=self.repository_id,
-                project=self.project,
-                name=self.active_branch,
+            # Let edit_file handle parsing and content updates; this will call _read_file and _write_file.
+            # For ADO, branch_name is used as branch; commit message is derived from file_path.
+            return self.edit_file(
+                file_path=file_path,
+                file_query=update_query,
+                branch=self.active_branch,
+                commit_message=f"Update {file_path}",
             )
-            latest_commit_id = branch.commit.commit_id
-
-            change = GitChange("edit", file_path, updated_file_content).to_dict()
-
-            ref_update = GitRefUpdate(
-                name=f"refs/heads/{self.active_branch}", old_object_id=latest_commit_id
-            )
-            new_commit = GitCommit(comment=f"Update {file_path}", changes=[change])
-            push = GitPush(commits=[new_commit], ref_updates=[ref_update])
-            self._client.create_push(
-                push=push, repository_id=self.repository_id, project=self.project
-            )
-            return "Updated file " + file_path
+        except ToolException as e:
+            return str(e)
         except Exception as e:
             msg = f"Unable to update file due to error:\n{str(e)}"
             logger.error(msg)

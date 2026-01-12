@@ -6,6 +6,7 @@ from pydantic import create_model, BaseModel, Field, SecretStr
 
 from .yagmail_wrapper import YagmailWrapper, SMTP_SERVER
 from ..base.tool import BaseAction
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "yagmail"
 
@@ -53,7 +54,7 @@ class AlitaYagmailToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 

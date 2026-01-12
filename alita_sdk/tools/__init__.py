@@ -49,6 +49,9 @@ def _safe_import_tool(tool_name, module_path, get_tools_name=None, toolkit_class
         if hasattr(module, 'get_toolkit'):
             imported['get_toolkit'] = getattr(module, 'get_toolkit')
 
+        if hasattr(module, 'get_toolkit_available_tools'):
+            imported['get_toolkit_available_tools'] = getattr(module, 'get_toolkit_available_tools')
+
         if toolkit_class_name and hasattr(module, toolkit_class_name):
             imported['toolkit_class'] = getattr(module, toolkit_class_name)
             AVAILABLE_TOOLKITS[toolkit_class_name] = getattr(module, toolkit_class_name)
@@ -64,7 +67,7 @@ def _safe_import_tool(tool_name, module_path, get_tools_name=None, toolkit_class
 
 # Safe imports for all tools
 _safe_import_tool('github', 'github', 'get_tools', 'AlitaGitHubToolkit')
-_safe_import_tool('openapi', 'openapi', 'get_tools')
+_safe_import_tool('openapi', 'openapi', 'get_tools', 'AlitaOpenAPIToolkit')
 _safe_import_tool('jira', 'jira', 'get_tools', 'JiraToolkit')
 _safe_import_tool('confluence', 'confluence', 'get_tools', 'ConfluenceToolkit')
 _safe_import_tool('service_now', 'servicenow', 'get_tools', 'ServiceNowToolkit')
@@ -99,7 +102,7 @@ _safe_import_tool('k8s', 'cloud.k8s', None, 'KubernetesToolkit')
 _safe_import_tool('elastic', 'elastic', None, 'ElasticToolkit')
 _safe_import_tool('keycloak', 'keycloak', None, 'KeycloakToolkit')
 _safe_import_tool('localgit', 'localgit', None, 'AlitaLocalGitToolkit')
-_safe_import_tool('pandas', 'pandas', 'get_tools', 'PandasToolkit')
+# pandas toolkit removed - use Data Analysis internal tool instead
 _safe_import_tool('azure_search', 'azure_ai.search', 'get_tools', 'AzureSearchToolkit')
 _safe_import_tool('figma', 'figma', 'get_tools', 'FigmaToolkit')
 _safe_import_tool('salesforce', 'salesforce', 'get_tools', 'SalesforceToolkit')
@@ -183,7 +186,9 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
                 toolkit = tkitclass.get_toolkit(**get_toolkit_params)
                 toolkit_tools.extend(toolkit.get_tools())
             except Exception as e:
+                import traceback
                 logger.error(f"Error in getting custom toolkit: {e}")
+                logger.error(f"Traceback:\n{traceback.format_exc()}")
         else:
             if tool_type in FAILED_IMPORTS:
                 logger.warning(f"Tool '{tool_type}' is not available: {FAILED_IMPORTS[tool_type]}")
@@ -240,6 +245,42 @@ def get_available_toolkit_models():
     """Return dict with available toolkit classes."""
     return deepcopy(AVAILABLE_TOOLS)
 
+
+def get_toolkit_available_tools(toolkit_type: str, settings: dict) -> dict:
+    """Return dynamic available tools + per-tool JSON schemas for a toolkit instance.
+
+    This is the single SDK entrypoint used by backend services (e.g. indexer_worker)
+    when the UI needs spec/instance-dependent tool enumeration. Toolkits that don't
+    support dynamic enumeration should return an empty payload.
+
+    Args:
+        toolkit_type: toolkit type string (e.g. 'openapi')
+        settings: persisted toolkit settings
+
+    Returns:
+        {
+          "tools": [{"name": str, "description": str}],
+          "args_schemas": {"tool_name": <json schema dict>}
+        }
+    """
+    toolkit_type = (toolkit_type or '').strip().lower()
+    if not isinstance(settings, dict):
+        settings = {}
+
+    tool_module = AVAILABLE_TOOLS.get(toolkit_type) or {}
+    enumerator = tool_module.get('get_toolkit_available_tools')
+    if not callable(enumerator):
+        return {"tools": [], "args_schemas": {}}
+
+    try:
+        result = enumerator(settings)
+        if not isinstance(result, dict):
+            return {"tools": [], "args_schemas": {}, "error": "Invalid response from toolkit enumerator"}
+        return result
+    except Exception as e:  # pylint: disable=W0718
+        logger.exception("Failed to compute available tools for toolkit_type=%s", toolkit_type)
+        return {"tools": [], "args_schemas": {}, "error": str(e)}
+
 def diagnose_imports():
     """Print diagnostic information about tool imports."""
     available_count = len(AVAILABLE_TOOLS)
@@ -276,6 +317,7 @@ def diagnose_imports():
 __all__ = [
     'get_tools',
     'get_toolkits',
+    'get_toolkit_available_tools',
     'get_available_tools',
     'get_failed_imports',
     'get_available_toolkits',

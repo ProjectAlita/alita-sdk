@@ -23,6 +23,7 @@ from langgraph.store.base import BaseStore
 from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping, safe_format
+from ..utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META
 from ..tools.function import FunctionTool
 from ..tools.indexer_tool import IndexerNode
 from ..tools.llm import LLMNode
@@ -188,7 +189,7 @@ Answer only with step name, no need to add descrip in case none of the steps are
                 decision_input = state.get('messages', [])[:]
             else:
                 if len(additional_info) == 0:
-                    additional_info = """### Additoinal info: """
+                    additional_info = """### Additional info: """
                 additional_info += "{field}: {value}\n".format(field=field, value=state.get(field, ""))
         decision_input.append(HumanMessage(
             self.prompt.format(steps=self.steps, description=safe_format(self.description, state), additional_info=additional_info)))
@@ -447,6 +448,50 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
     return compiled
 
 
+def find_tool_by_name_or_metadata(tools: list, tool_name: str, toolkit_name: Optional[str] = None) -> Optional[BaseTool]:
+    """
+    Find a tool by name or by matching metadata (toolkit_name + tool_name).
+
+    For toolkit nodes with toolkit_name specified, this function checks:
+    1. Metadata match first (toolkit_name + tool_name) - PRIORITY when toolkit_name is provided
+    2. Direct tool name match (backward compatibility fallback)
+
+    For toolkit nodes without toolkit_name, or other node types:
+    1. Direct tool name match
+
+    Args:
+        tools: List of available tools
+        tool_name: The tool name to search for
+        toolkit_name: Optional toolkit name for metadata matching
+
+    Returns:
+        The matching tool or None if not found
+    """
+    # When toolkit_name is specified, prioritize metadata matching
+    if toolkit_name:
+        for tool in tools:
+            # Check metadata match first
+            if hasattr(tool, 'metadata') and tool.metadata:
+                metadata_toolkit_name = tool.metadata.get(TOOLKIT_NAME_META)
+                metadata_tool_name = tool.metadata.get(TOOL_NAME_META)
+
+                # Match if both toolkit_name and tool_name in metadata match
+                if metadata_toolkit_name == toolkit_name and metadata_tool_name == tool_name:
+                    return tool
+
+        # Fallback to direct name match for backward compatibility
+        for tool in tools:
+            if tool.name == tool_name:
+                return tool
+    else:
+        # No toolkit_name specified, use direct name match only
+        for tool in tools:
+            if tool.name == tool_name:
+                return tool
+
+    return None
+
+
 def create_graph(
         client: Any,
         yaml_schema: str,
@@ -482,19 +527,37 @@ def create_graph(
             node_type = node.get('type', 'function')
             node_id = clean_string(node['id'])
             toolkit_name = node.get('toolkit_name')
-            tool_name = clean_string(node.get('tool', node_id))
+            tool_name = clean_string(node.get('tool', ''))
             # Tool names are now clean (no prefix needed)
             logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
             if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
-                if node_type == 'mcp' and tool_name not in [tool.name for tool in tools]:
-                    # MCP is not connected and node cannot be added
-                    raise ToolException(f"MCP tool '{tool_name}' not found in the provided tools. "
-                                        f"Make sure it is connected properly. Available tools: {[tool.name for tool in tools]}")
-                for tool in tools:
-                    if tool.name == tool_name:
+                if node_type in ['mcp', 'toolkit', 'agent'] and not tool_name:
+                    # tool is not specified
+                    raise ToolException(f"Tool name is required for {node_type} node with id '{node_id}'")
+
+                # Unified validation and tool finding for toolkit, mcp, and agent node types
+                matching_tool = None
+                if node_type in ['toolkit', 'mcp', 'agent']:
+                    # Use enhanced validation that checks both direct name and metadata
+                    matching_tool = find_tool_by_name_or_metadata(tools, tool_name, toolkit_name)
+                    if not matching_tool:
+                        # tool is not found in the provided tools
+                        error_msg = f"Node `{node_id}` with type `{node_type}` has tool '{tool_name}'"
+                        if toolkit_name:
+                            error_msg += f" (toolkit: '{toolkit_name}')"
+                        error_msg += f" which is not found in the provided tools. Make sure it is connected properly. Available tools: {format_tools(tools)}"
+                        raise ToolException(error_msg)
+                else:
+                    # For other node types, find tool by direct name match
+                    for tool in tools:
+                        if tool.name == tool_name:
+                            matching_tool = tool
+                            break
+
+                if matching_tool:
                         if node_type in ['function', 'toolkit', 'mcp']:
                             lg_builder.add_node(node_id, FunctionTool(
-                                tool=tool, name=node_id, return_type='dict',
+                                tool=matching_tool, name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_mapping=node.get('input_mapping',
                                                        {'messages': {'type': 'variable', 'value': 'messages'}}),
@@ -505,7 +568,7 @@ def create_graph(
                                                      {'messages': {'type': 'variable', 'value': 'messages'}})
                             output_vars = node.get('output', [])
                             lg_builder.add_node(node_id, FunctionTool(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 name=node_id, return_type='str',
                                 output_variables=output_vars + ['messages'] if 'messages' not in output_vars else output_vars,
                                 input_variables=input_params,
@@ -513,15 +576,15 @@ def create_graph(
                             ))
                         elif node_type == 'subgraph' or node_type == 'pipeline':
                             # assign parent memory/store
-                            # tool.checkpointer = memory
-                            # tool.store = store
+                            # matching_tool.checkpointer = memory
+                            # matching_tool.store = store
                             # wrap with mappings
                             pipeline_name = node.get('tool', None)
                             if not pipeline_name:
                                 raise ValueError(
                                     "Subgraph must have a 'tool' node: add required tool to the subgraph node")
                             node_fn = SubgraphRunnable(
-                                inner=tool.graph,
+                                inner=matching_tool.graph,
                                 name=pipeline_name,
                                 input_mapping=node.get('input_mapping', {}),
                                 output_mapping=node.get('output_mapping', {}),
@@ -530,7 +593,7 @@ def create_graph(
                             break  # skip legacy handling
                         elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
@@ -539,7 +602,7 @@ def create_graph(
                             ))
                         elif node_type == 'loop':
                             lg_builder.add_node(node_id, LoopNode(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 name=node_id, return_type='dict',
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
@@ -557,7 +620,7 @@ def create_graph(
                                         lg_builder.add_node(node_id, LoopToolNode(
                                             client=client,
                                             name=node_id, return_type='dict',
-                                            tool=tool, loop_tool=t,
+                                            tool=matching_tool, loop_tool=t,
                                             variables_mapping=node.get('variables_mapping', {}),
                                             output_variables=node.get('output', []),
                                             input_variables=node.get('input', ['messages']),
@@ -573,7 +636,7 @@ def create_graph(
                                     indexer_tool = t
                             logger.info(f"Indexer tool: {indexer_tool}")
                             lg_builder.add_node(node_id, IndexerNode(
-                                client=client, tool=tool,
+                                client=client, tool=matching_tool,
                                 index_tool=indexer_tool,
                                 input_mapping=node.get('input_mapping', {}),
                                 name=node_id, return_type='dict',
@@ -582,7 +645,6 @@ def create_graph(
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 structured_output=node.get('structured_output', False)))
-                        break
             elif node_type == 'code':
                 from ..tools.sandbox import create_sandbox_tool
                 sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
@@ -651,10 +713,13 @@ def create_graph(
                     ))
                 elif node_type == 'decision':
                     logger.info(f'Adding decision: {node["nodes"]}')
+                    # fallback to old-style decision node
+                    decisional_inputs = node.get('decisional_inputs')
+                    decisional_inputs = node.get('input', ['messages']) if not decisional_inputs else decisional_inputs
                     lg_builder.add_node(node_id, DecisionEdge(
                         client, node['nodes'],
                         node.get('description', ""),
-                        decisional_inputs=node.get('decisional_inputs', ['messages']),
+                        decisional_inputs=decisional_inputs,
                         default_output=node.get('default_output', 'END'),
                         is_node=True
                     ))
@@ -749,8 +814,20 @@ def create_graph(
             debug=debug,
         )
     except ValueError as e:
-        raise ValueError(
-            f"Validation of the schema failed. {e}\n\nDEBUG INFO:**Schema Nodes:**\n\n{lg_builder.nodes}\n\n**Schema Enges:**\n\n{lg_builder.edges}\n\n**Tools Available:**\n\n{tools}")
+        # Build a clearer debug message without complex f-string expressions
+        debug_nodes = "\n*".join(lg_builder.nodes.keys()) if lg_builder and lg_builder.nodes else ""
+        debug_message = (
+            "Validation of the schema failed. {err}\n\n"
+            "DEBUG INFO:**Schema Nodes:**\n\n*{nodes}\n\n"
+            "**Schema Edges:**\n\n{edges}\n\n"
+            "**Tools Available:**\n\n{tools}"
+        ).format(
+            err=e,
+            nodes=debug_nodes,
+            edges=lg_builder.edges if lg_builder else {},
+            tools=format_tools(tools),
+        )
+        raise ValueError(debug_message)
     # If building a nested subgraph, return the raw CompiledStateGraph
     if for_subgraph:
         return graph
@@ -763,6 +840,14 @@ def create_graph(
         output_variables=node.get('output', [])
     )
     return compiled.validate()
+
+def format_tools(tools_list: list) -> str:
+    """Format a list of tool names into a comma-separated string."""
+    try:
+        return ', '.join([tool.name for tool in tools_list])
+    except Exception as e:
+        logger.warning(f"Failed to format tools list: {e}")
+        return str(tools_list)
 
 def set_defaults(d):
     """Set default values for dictionary entries based on their type."""
@@ -967,7 +1052,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     (msg.content for msg in reversed(messages)
                      if not isinstance(msg, HumanMessage)),
                     messages[-1].content
-                )
+                ) if messages else result.get('output')
             elif printer_output is not None:
                 # Printer node has output (interrupted state)
                 output = printer_output
@@ -981,7 +1066,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 )
         except Exception:
             # Fallback: try to get last value or last message
-            output = list(result.values())[-1] if result else None
+            output = str(list(result.values())[-1]) if result else 'Output is undefined'
         config_state = self.get_state(config)
         is_execution_finished = not config_state.next
         if is_execution_finished:

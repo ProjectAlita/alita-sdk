@@ -842,7 +842,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         Raises:
             ToolException: If file is not text-editable or edit fails
         """
-        from .utils.text_operations import parse_old_new_markers, is_text_editable
+        from .utils.text_operations import parse_old_new_markers, is_text_editable, try_apply_edit
         from langchain_core.callbacks import dispatch_custom_event
         
         # Validate file is text-editable
@@ -863,26 +863,45 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         # Read current file content
         try:
             current_content = self._read_file(file_path, branch)
+            if not isinstance(current_content, str):
+                # If current_content is a ToolException or any non-str, raise or return it
+                raise current_content if isinstance(current_content, Exception) else ToolException(str(current_content))
         except Exception as e:
             raise ToolException(f"Failed to read file {file_path}: {e}")
         
-        # Apply all edits
+        # Apply all edits (with tolerant fallback)
         updated_content = current_content
+        fallbacks_used = 0
+        edits_applied = 0
         for old_text, new_text in edits:
             if not old_text.strip():
                 continue
             
-            if old_text not in updated_content:
+            new_updated, used_fallback = try_apply_edit(
+                content=updated_content,
+                old_text=old_text,
+                new_text=new_text,
+                file_path=file_path,
+            )
+
+            if new_updated == updated_content:
+                # No change applied for this pair (exact nor fallback)
                 logger.warning(
-                    f"Old content not found in {file_path}. "
-                    f"Looking for: {old_text[:100]}..."
+                    "Old content not found, appears several times or could not be safely matched in %s. Snippet: %s...",
+                    file_path,
+                    old_text[:100].replace("\n", "\\n"),
                 )
                 continue
-            
-            updated_content = updated_content.replace(old_text, new_text)
+
+            # A replacement was applied
+            edits_applied += 1
+            if used_fallback:
+                fallbacks_used += 1
+
+            updated_content = new_updated
         
         # Check if any changes were made
-        if current_content == updated_content:
+        if current_content == updated_content or edits_applied == 0:
             return (
                 f"No changes made to {file_path}. "
                 "Old content was not found or is empty. "
@@ -908,7 +927,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
                 "tool_name": "edit_file",
                 "toolkit": self.__class__.__name__,
                 "operation_type": "modify",
-                "edits_applied": len(edits)
+                "edits_applied": edits_applied,
             })
         except Exception as e:
             logger.warning(f"Failed to dispatch file_modified event: {e}")

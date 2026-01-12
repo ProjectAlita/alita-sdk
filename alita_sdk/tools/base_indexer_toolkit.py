@@ -29,12 +29,6 @@ class IndexTools(str, Enum):
     REMOVE_INDEX = "remove_index"
     LIST_COLLECTIONS = "list_collections"
 
-# Base Vector Store Schema Models
-BaseIndexParams = create_model(
-    "BaseIndexParams",
-    index_name=(str, Field(description="Index name (max 7 characters)", min_length=1, max_length=7)),
-)
-
 RemoveIndexParams = create_model(
     "RemoveIndexParams",
     index_name=(Optional[str], Field(description="Optional index name (max 7 characters)", default="", max_length=7)),
@@ -52,7 +46,7 @@ BaseSearchParams = create_model(
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
     cut_off=(Optional[float], Field(description="Cut-off score for search results", default=DEFAULT_CUT_OFF, ge=0, le=1)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
+    search_top=(Optional[int], Field(description="Number of top results to return", default=10, gt=0)),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
         default=None
@@ -82,7 +76,7 @@ BaseStepbackSearchParams = create_model(
         examples=["{\"key\": \"value\"}", "{\"status\": \"active\"}"]
     )),
     cut_off=(Optional[float], Field(description="Cut-off score for search results", default=DEFAULT_CUT_OFF, ge=0, le=1)),
-    search_top=(Optional[int], Field(description="Number of top results to return", default=10)),
+    search_top=(Optional[int], Field(description="Number of top results to return", default=10, gt=0)),
     full_text_search=(Optional[Dict[str, Any]], Field(
         description="Full text search parameters. Can be a dictionary with search options.",
         default=None
@@ -99,16 +93,6 @@ BaseStepbackSearchParams = create_model(
             description="Reranking configuration. Can be a dictionary with reranking settings.",
             default=None
         )),
-)
-
-BaseIndexDataParams = create_model(
-    "indexData",
-    __base__=BaseIndexParams,
-    clean_index=(Optional[bool], Field(default=False,
-                       description="Optional flag to enforce clean existing index before indexing new data")),
-    progress_step=(Optional[int], Field(default=10, ge=0, le=100,
-                         description="Optional step size for progress reporting during indexing")),
-    chunking_config=(Optional[dict], Field(description="Chunking tool configuration", default=loaders_allowed_to_override)),
 )
 
 
@@ -202,7 +186,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             #
             results_count = result["count"]
             # Final update should always be forced
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count, update_force=True)
+            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count, update_force=True, error=None)
             self._emit_index_event(index_name)
             #
             return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
@@ -211,8 +195,8 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             # Do maximum effort at least send custom event for supposed changed status
             msg = str(e)
             try:
-                # Error update should also be forced
-                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"], update_force=True)
+                # Error update should also be forced and include the error message
+                self.index_meta_update(index_name, IndexerKeywords.INDEX_META_FAILED.value, result["count"], update_force=True, error=msg)
             except Exception as ie:
                 logger.error(f"Failed to update index meta status to FAILED for index '{index_name}': {ie}")
                 msg = f"{msg}; additionally failed to update index meta status to FAILED: {ie}"
@@ -236,7 +220,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             self._log_tool_event(f"Dependent documents were processed. "
                                  f"Applying chunking tool '{chunking_tool}' if specified and preparing documents for indexing...")
             documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
-            self._clean_metadata(documents)
+            documents = self._clean_metadata(documents)
 
             logger.debug(f"Indexing base document #{base_doc_counter}: {base_doc} and all dependent documents: {documents}")
 
@@ -521,12 +505,14 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "task_id": None,
                 "conversation_id": None,
                 "toolkit_id": self.toolkit_id,
+                # Initialize error field to keep track of the latest failure reason if any
+                "error": None,
             }
             metadata["history"] = json.dumps([metadata])
             index_meta_doc = Document(page_content=f"{IndexerKeywords.INDEX_META_TYPE.value}_{index_name}", metadata=metadata)
             add_documents(vectorstore=self.vectorstore, documents=[index_meta_doc])
 
-    def index_meta_update(self, index_name: str, state: str, result: int, update_force: bool = True, interval: Optional[float] = None):
+    def index_meta_update(self, index_name: str, state: str, result: int, update_force: bool = True, interval: Optional[float] = None, error: Optional[str] = None):
         """Update `index_meta` document with optional time-based throttling.
 
         Args:
@@ -538,6 +524,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             interval: Optional custom interval (in seconds) for this call when `update_force` is `False`.
                       If `None`, falls back to the value stored in `self._index_meta_config["update_interval"]`
                       if present, otherwise uses `INDEX_META_UPDATE_INTERVAL`.
+            error: Optional error message to record when the state represents a failed index.
         """
         self._ensure_vectorstore_initialized()
         if not hasattr(self, "_index_meta_last_update_time"):
@@ -576,6 +563,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             metadata["updated"] = result
             metadata["state"] = state
             metadata["updated_on"] = time.time()
+            # Attach error if provided, else clear on success
+            if error is not None:
+                metadata["error"] = error
+            elif state == IndexerKeywords.INDEX_META_COMPLETED.value:
+                # Clear previous error on successful completion
+                metadata["error"] = None
             #
             history_raw = metadata.pop("history", "[]")
             try:
@@ -670,21 +663,49 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """
         Returns the standardized vector search tools (search operations only).
         Index operations are toolkit-specific and should be added manually to each toolkit.
-        
+
+        This method constructs the argument schemas for each tool, merging base parameters with any extra parameters
+        defined in the subclass. It also handles the special case for chunking tools and their configuration.
+
         Returns:
-            List of tool dictionaries with name, ref, description, and args_schema
+            list: List of tool dictionaries with name, ref, description, and args_schema.
         """
+        index_params = {
+            "index_name": (
+                str,
+                Field(description="Index name (max 7 characters)", min_length=1, max_length=7)
+            ),
+            "clean_index": (
+                Optional[bool],
+                Field(default=False, description="Optional flag to enforce clean existing index before indexing new data")
+            ),
+            "progress_step": (
+                Optional[int],
+                Field(default=10, ge=0, le=100, description="Optional step size for progress reporting during indexing")
+            ),
+        }
+        chunking_config = (
+            Optional[dict],
+            Field(description="Chunking tool configuration", default=loaders_allowed_to_override)
+        )
+
+        index_extra_params = self._index_tool_params() or {}
+        chunking_tool = index_extra_params.pop("chunking_tool", None)
+        if chunking_tool:
+            index_params = {
+                **index_params,
+                "chunking_tool": chunking_tool,
+            }
+        index_params["chunking_config"] = chunking_config
+        index_args_schema = create_model("IndexData", **index_params, **index_extra_params)
+
         return [
             {
                 "name": IndexTools.INDEX_DATA.value,
                 "mode": IndexTools.INDEX_DATA.value,
                 "ref": self.index_data,
                 "description": "Loads data to index.",
-                "args_schema": create_model(
-                    "IndexData",
-                    __base__=BaseIndexDataParams,
-                    **self._index_tool_params() if self._index_tool_params() else {}
-                )
+                "args_schema": index_args_schema,
             },
             {
                 "name": IndexTools.SEARCH_INDEX.value,

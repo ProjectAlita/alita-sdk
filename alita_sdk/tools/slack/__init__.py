@@ -15,6 +15,7 @@ from .api_wrapper import SlackApiWrapper
 from ..utils import clean_string, get_max_toolkit_length, check_connection_response
 from slack_sdk.errors import SlackApiError
 from slack_sdk import WebClient
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "slack"
 
@@ -85,12 +86,12 @@ class SlackToolkit(BaseToolkit):
             if toolkit_name:
                 description = f"{description}\nToolkit: {toolkit_name}"
             description = description[:1000]
-            tools.append(BaseAction(                
+            tools.append(BaseAction(
                 api_wrapper=slack_api_wrapper,
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 

@@ -72,7 +72,7 @@ jobs:
        
           TIMEOUT=10000
           ELAPSED=0
-          INTERVAL=5
+          INTERVAL=20
           
           while [ $ELAPSED -lt $TIMEOUT ]; do
             STATUS=$(docker inspect alita-sdk-dev --format='{{.State.Status}}' 2>/dev/null || echo "not-found")
@@ -92,6 +92,9 @@ jobs:
               break
             elif [ "$STATUS" = "running" ]; then
               echo "Container still running... ($ELAPSED seconds elapsed)"
+              echo "::group:: Current logs"
+              docker-compose logs alita-sdk --tail=50
+              echo "::endgroup::"
             else
               echo "Container status: $STATUS"
             fi

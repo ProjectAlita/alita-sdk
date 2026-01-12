@@ -6,7 +6,6 @@ from typing import Any, Optional, List, Union, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
-from langchain_core.exceptions import OutputParserException
 from langchain_core.callbacks import dispatch_custom_event
 from pydantic import Field
 
@@ -44,6 +43,17 @@ logger = logging.getLogger(__name__)
     
 #     return supports_reasoning
 
+JSON_INSTRUCTION_TEMPLATE = (
+        "\n\n**IMPORTANT: You MUST respond with ONLY a valid JSON object.**\n\n"
+        "Required JSON fields:\n{field_descriptions}\n\n"
+        "Example format:\n"
+        "{{\n{example_fields}\n}}\n\n"
+        "Rules:\n"
+        "1. Output ONLY the JSON object - no markdown, no explanations, no extra text\n"
+        "2. Ensure all required fields are present\n"
+        "3. Use proper JSON syntax with double quotes for strings\n"
+        "4. Do not wrap the JSON in code blocks or backticks"
+    )
 
 class LLMNode(BaseTool):
     """Enhanced LLM node with chat history and tool binding support"""
@@ -66,6 +76,240 @@ class LLMNode(BaseTool):
     tool_names: Optional[List[str]] = Field(default=None, description='Specific tool names to filter')
     steps_limit: Optional[int] = Field(default=25, description='Maximum steps for tool execution')
     tool_execution_timeout: Optional[int] = Field(default=900, description='Timeout (seconds) for tool execution. Default is 15 minutes.')
+
+    def _prepare_structured_output_params(self) -> dict:
+        """
+        Prepare structured output parameters from structured_output_dict.
+
+        Expected self.structured_output_dict formats:
+          - {"field": "str"} / {"field": "list"} / {"field": "list[str]"} / {"field": "any"} ...
+          - OR {"field": {"type": "...", "description": "...", "default": ...}}  (optional)
+
+        Returns:
+            Dict[str, Dict] suitable for create_pydantic_model(...)
+        """
+        struct_params: dict[str, dict] = {}
+
+        for key, value in (self.structured_output_dict or {}).items():
+            # Allow either a plain type string or a dict with details
+            if isinstance(value, dict):
+                type_str = (value.get("type") or "any")
+                desc = value.get("description", "") or ""
+                entry: dict = {"type": type_str, "description": desc}
+                if "default" in value:
+                    entry["default"] = value["default"]
+            else:
+                type_str = (value or "any") if isinstance(value, str) else "any"
+                entry = {"type": type_str, "description": ""}
+
+            # Normalize: only convert the *exact* "list" into "list[str]"
+            # (avoid the old bug where "if 'list' in value" also hits "blacklist", etc.)
+            if isinstance(entry.get("type"), str) and entry["type"].strip().lower() == "list":
+                entry["type"] = "list[str]"
+
+            struct_params[key] = entry
+
+        # Add default output field for proper response to user
+        struct_params[ELITEA_RS] = {
+            "description": "final output to user (summarized output from LLM)",
+            "type": "str",
+            "default": None,
+        }
+
+        return struct_params
+
+    def _invoke_with_structured_output(self, llm_client: Any, messages: List, struct_model: Any, config: RunnableConfig):
+        """
+        Invoke LLM with structured output, handling tool calls if present.
+
+        Args:
+            llm_client: LLM client instance
+            messages: List of conversation messages
+            struct_model: Pydantic model for structured output
+            config: Runnable configuration
+
+        Returns:
+            Tuple of (completion, initial_completion, final_messages)
+        """
+        initial_completion = llm_client.invoke(messages, config=config)
+
+        if hasattr(initial_completion, 'tool_calls') and initial_completion.tool_calls:
+            # Handle tool calls first, then apply structured output
+            new_messages, _ = self._run_async_in_sync_context(
+                self.__perform_tool_calling(initial_completion, messages, llm_client, config)
+            )
+            llm = self.__get_struct_output_model(llm_client, struct_model)
+            completion = llm.invoke(new_messages, config=config)
+            return completion, initial_completion, new_messages
+        else:
+            # Direct structured output without tool calls
+            llm = self.__get_struct_output_model(llm_client, struct_model)
+            completion = llm.invoke(messages, config=config)
+            return completion, initial_completion, messages
+
+    def _build_json_instruction(self, struct_model: Any) -> str:
+        """
+        Build JSON instruction message for fallback handling.
+
+        Args:
+            struct_model: Pydantic model with field definitions
+
+        Returns:
+            Formatted JSON instruction string
+        """
+        field_descriptions = []
+        for name, field in struct_model.model_fields.items():
+            field_type = field.annotation.__name__ if hasattr(field.annotation, '__name__') else str(field.annotation)
+            field_desc = field.description or field_type
+            field_descriptions.append(f"  - {name} ({field_type}): {field_desc}")
+
+        example_fields = ",\n".join([
+            f'  "{k}": <{field.annotation.__name__ if hasattr(field.annotation, "__name__") else "value"}>'
+            for k, field in struct_model.model_fields.items()
+        ])
+
+        return JSON_INSTRUCTION_TEMPLATE.format(
+            field_descriptions="\n".join(field_descriptions),
+            example_fields=example_fields
+        )
+
+    def _create_fallback_completion(self, content: str, struct_model: Any) -> Any:
+        """
+        Create a fallback completion object when JSON parsing fails.
+
+        Args:
+            content: Plain text content from LLM
+            struct_model: Pydantic model to construct
+
+        Returns:
+            Pydantic model instance with fallback values
+        """
+        result_dict = {}
+        for k, field in struct_model.model_fields.items():
+            if k == ELITEA_RS:
+                result_dict[k] = content
+            elif field.is_required():
+                # Set default values for required fields based on type
+                result_dict[k] = field.default if field.default is not None else None
+            else:
+                result_dict[k] = field.default
+        return struct_model.model_construct(**result_dict)
+
+    def _handle_structured_output_fallback(self, llm_client: Any, messages: List, struct_model: Any,
+                                          config: RunnableConfig, original_error: Exception) -> Any:
+        """
+        Handle structured output fallback through multiple strategies.
+
+        Tries fallback methods in order:
+        1. json_mode with explicit instructions
+        2. function_calling method
+        3. Plain text with JSON extraction
+
+        Args:
+            llm_client: LLM client instance
+            messages: Original conversation messages
+            struct_model: Pydantic model for structured output
+            config: Runnable configuration
+            original_error: The original ValueError that triggered fallback
+
+        Returns:
+            Completion with structured output (best effort)
+
+        Raises:
+            Propagates exceptions from LLM invocation
+        """
+        logger.error(f"Error invoking structured output model: {format_exc()}")
+        logger.info("Attempting to fall back to json mode")
+
+        # Build JSON instruction once
+        json_instruction = self._build_json_instruction(struct_model)
+
+        # Add instruction to messages
+        modified_messages = messages.copy()
+        if modified_messages and isinstance(modified_messages[-1], HumanMessage):
+            modified_messages[-1] = HumanMessage(
+                content=modified_messages[-1].content + json_instruction
+            )
+        else:
+            modified_messages.append(HumanMessage(content=json_instruction))
+
+        # Try json_mode with explicit instructions
+        try:
+            completion = self.__get_struct_output_model(
+                llm_client, struct_model, method="json_mode"
+            ).invoke(modified_messages, config=config)
+            return completion
+        except Exception as json_mode_error:
+            logger.warning(f"json_mode also failed: {json_mode_error}")
+            logger.info("Falling back to function_calling method")
+
+            # Try function_calling as a third fallback
+            try:
+                completion = self.__get_struct_output_model(
+                    llm_client, struct_model, method="function_calling"
+                ).invoke(modified_messages, config=config)
+                return completion
+            except Exception as function_calling_error:
+                logger.error(f"function_calling also failed: {function_calling_error}")
+                logger.info("Final fallback: using plain LLM response")
+
+                # Last resort: get plain text response and wrap in structure
+                plain_completion = llm_client.invoke(modified_messages, config=config)
+                content = plain_completion.content.strip() if hasattr(plain_completion, 'content') else str(plain_completion)
+
+                # Try to extract JSON from the response
+                import json
+                import re
+
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    try:
+                        parsed_json = json.loads(json_match.group(0))
+                        # Validate it has expected fields and wrap in pydantic model
+                        completion = struct_model(**parsed_json)
+                        return completion
+                    except (json.JSONDecodeError, Exception) as parse_error:
+                        logger.warning(f"Could not parse extracted JSON: {parse_error}")
+                        return self._create_fallback_completion(content, struct_model)
+                else:
+                    # No JSON found, create response with content in elitea_response
+                    return self._create_fallback_completion(content, struct_model)
+
+    def _format_structured_output_result(self, result: dict, messages: List, initial_completion: Any) -> dict:
+        """
+        Format structured output result with properly formatted messages.
+
+        Args:
+            result: Result dictionary from model_dump()
+            messages: Original conversation messages
+            initial_completion: Initial completion before tool calls
+
+        Returns:
+            Formatted result dictionary with messages
+        """
+        # Ensure messages are properly formatted
+        if result.get('messages') and isinstance(result['messages'], list):
+            result['messages'] = [{'role': 'assistant', 'content': '\n'.join(result['messages'])}]
+        else:
+            # Extract content from initial_completion, handling thinking blocks
+            fallback_content = result.get(ELITEA_RS, '')
+            if not fallback_content and initial_completion:
+                content_parts = self._extract_content_from_completion(initial_completion)
+                fallback_content = content_parts.get('text') or ''
+                thinking = content_parts.get('thinking')
+
+                # Log thinking if present
+                if thinking:
+                    logger.debug(f"Thinking content present in structured output: {thinking[:100]}...")
+
+                if not fallback_content:
+                    # Final fallback to raw content
+                    content = initial_completion.content
+                    fallback_content = content if isinstance(content, str) else str(content)
+
+            result['messages'] = messages + [AIMessage(content=fallback_content)]
+
+        return result
 
     def get_filtered_tools(self) -> List[BaseTool]:
         """
@@ -164,8 +408,6 @@ class LLMNode(BaseTool):
             if func_args.get('system') is None or func_args.get('task') is None:
                 raise ToolException(f"LLMNode requires 'system' and 'task' parameters in input mapping. "
                                     f"Actual params: {func_args}")
-                raise ToolException(f"LLMNode requires 'system' and 'task' parameters in input mapping. "
-                                    f"Actual params: {func_args}")
             # cast to str in case user passes variable different from str
             messages = [SystemMessage(content=str(func_args.get('system'))), *func_args.get('chat_history', []), HumanMessage(content=str(func_args.get('task')))]
             # Remove pre-last item if last two messages are same type and content
@@ -197,78 +439,23 @@ class LLMNode(BaseTool):
         try:
             if self.structured_output and self.output_variables:
                 # Handle structured output
-                struct_params = {
-                    key: {
-                        "type": 'list[str]' if 'list' in value else value,
-                        "description": ""
-                    }
-                    for key, value in (self.structured_output_dict or {}).items()
-                }
-                # Add default output field for proper response to user
-                struct_params['elitea_response'] = {
-                    'description': 'final output to user (summarized output from LLM)', 'type': 'str',
-                    "default": None}
+                struct_params = self._prepare_structured_output_params()
                 struct_model = create_pydantic_model(f"LLMOutput", struct_params)
-                initial_completion = llm_client.invoke(messages, config=config)
-                if hasattr(initial_completion, 'tool_calls') and initial_completion.tool_calls:
-                    new_messages, _ = self._run_async_in_sync_context(
-                        self.__perform_tool_calling(initial_completion, messages, llm_client, config)
-                    )
-                    llm = self.__get_struct_output_model(llm_client, struct_model)
-                    completion = llm.invoke(new_messages, config=config)
-                    result = completion.model_dump()
-                else:
-                    try:
-                        llm = self.__get_struct_output_model(llm_client, struct_model)
-                        completion = llm.invoke(messages, config=config)
-                    except (ValueError, OutputParserException) as e:
-                        logger.error(f"Error invoking structured output model: {format_exc()}")
-                        logger.info("Attempting to fall back to json mode")
-                        try:
-                            # Fallback to regular LLM with JSON extraction
-                            completion = self.__get_struct_output_model(llm_client, struct_model,
-                                                                        method="json_mode").invoke(messages, config=config)
-                        except (ValueError, OutputParserException) as e2:
-                            logger.error(f"json_mode fallback also failed: {format_exc()}")
-                            logger.info("Attempting to fall back to function_calling")
-                            # Final fallback to function_calling method
-                            completion = self.__get_struct_output_model(llm_client, struct_model,
-                                                                        method="json_schema").invoke(messages, config=config)
-                    result = completion.model_dump()
 
-                # Ensure messages are properly formatted
-                if result.get('messages') and isinstance(result['messages'], list):
-                    result['messages'] = [{'role': 'assistant', 'content': '\n'.join(result['messages'])}]
-                else:
-                    # Extract content from initial_completion, handling thinking blocks
-                    fallback_content = result.get(ELITEA_RS, '')
-                    if not fallback_content and initial_completion:
-                        content_parts = self._extract_content_from_completion(initial_completion)
-                        fallback_content = content_parts.get('text') or ''
-                        thinking = content_parts.get('thinking')
-                        
-                        # Dispatch thinking event if present
-                        if thinking:
-                            try:
-                                model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'LLM')
-                                dispatch_custom_event(
-                                    name="thinking_step",
-                                    data={
-                                        "message": thinking,
-                                        "tool_name": f"LLM ({model_name})",
-                                        "toolkit": "reasoning",
-                                    },
-                                    config=config,
-                                )
-                            except Exception as e:
-                                logger.warning(f"Failed to dispatch thinking event: {e}")
-                        
-                        if not fallback_content:
-                            # Final fallback to raw content
-                            content = initial_completion.content
-                            fallback_content = content if isinstance(content, str) else str(content)
-                    
-                    result['messages'] = messages + [AIMessage(content=fallback_content)]
+                try:
+                    completion, initial_completion, final_messages = self._invoke_with_structured_output(
+                        llm_client, messages, struct_model, config
+                    )
+                except ValueError as e:
+                    # Handle fallback for structured output failures
+                    completion = self._handle_structured_output_fallback(
+                        llm_client, messages, struct_model, config, e
+                    )
+                    initial_completion = None
+                    final_messages = messages
+
+                result = completion.model_dump()
+                result = self._format_structured_output_result(result, final_messages, initial_completion or completion)
 
                 return result
             else:

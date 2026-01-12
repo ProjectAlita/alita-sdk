@@ -10,6 +10,7 @@ from ....configurations.ado import AdoConfiguration
 from ....configurations.pgvector import PgVectorConfiguration
 from ...base.tool import BaseAction
 from ...utils import clean_string, get_max_toolkit_length, check_connection_response
+from ....runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "ado_boards"
 
@@ -37,7 +38,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
         m = create_model(
             name,
             ado_configuration=(AdoConfiguration, Field(description="Ado Work Item configuration", json_schema_extra={'configuration_types': ['ado']})),
-            limit=(Optional[int], Field(description="ADO plans limit used for limitation of the list with results", default=5)),
+            limit=(Optional[int], Field(description="Default ADO boards result limit (can be overridden by agent instructions)", default=5, gt=0)),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default = None,
@@ -117,7 +118,7 @@ class AzureDevOpsWorkItemsToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 

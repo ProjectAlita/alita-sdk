@@ -1,14 +1,20 @@
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from langchain_core.tools import BaseTool, BaseToolkit
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..base.tool import BaseAction
-from .api_wrapper import FigmaApiWrapper, GLOBAL_LIMIT
+from .api_wrapper import (
+    FigmaApiWrapper,
+    GLOBAL_LIMIT,
+    DEFAULT_FIGMA_IMAGES_PROMPT,
+    DEFAULT_FIGMA_SUMMARY_PROMPT,
+    DEFAULT_NUMBER_OF_THREADS,
+)
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.figma import FigmaConfiguration
 from ...configurations.pgvector import PgVectorConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "figma"
 
@@ -28,7 +34,14 @@ def get_tools(tool):
             collection_name=str(tool['toolkit_name']),
             doctype='doc',
             embedding_model=tool['settings'].get('embedding_model'),
-            vectorstore_type="PGVector"
+            vectorstore_type="PGVector",
+            # figma summary/image prompt settings (toolkit-level)
+            # TODO disabled until new requirements
+            # apply_images_prompt=tool["settings"].get("apply_images_prompt"),
+            # images_prompt=tool["settings"].get("images_prompt"),
+            # apply_summary_prompt=tool["settings"].get("apply_summary_prompt"),
+            # summary_prompt=tool["settings"].get("summary_prompt"),
+            # number_of_threads=tool["settings"].get("number_of_threads"),
         )
         .get_tools()
     )
@@ -45,7 +58,40 @@ class FigmaToolkit(BaseToolkit):
         }
         return create_model(
             name,
-            global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT)),
+            # TODO disabled until new requirements
+            # apply_images_prompt=(Optional[bool], Field(
+            #     description="Enable advanced image processing instructions for Figma image nodes.",
+            #     default=True,
+            # )),
+            # images_prompt=(Optional[Dict[str, str]], Field(
+            #     description=(
+            #         "Instruction for how to analyze image-based nodes "
+            #         "(screenshots, diagrams, etc.) during Figma file retrieving. "
+            #         "Must contain a single 'prompt' key with the text."
+            #     ),
+            #     default=DEFAULT_FIGMA_IMAGES_PROMPT,
+            # )),
+            # apply_summary_prompt=(Optional[bool], Field(
+            #     description="Enable LLM-based summarization over loaded Figma data.",
+            #     default=True,
+            # )),
+            # summary_prompt=(Optional[Dict[str, str]], Field(
+            #     description=(
+            #         "Instruction for the LLM on how to summarize loaded Figma data. "
+            #         "Must contain a single 'prompt' key with the text."
+            #     ),
+            #     default=DEFAULT_FIGMA_SUMMARY_PROMPT,
+            # )),
+            number_of_threads=(Optional[int], Field(
+                description=(
+                    "Number of worker threads to use when downloading and processing Figma images. "
+                    f"Valid values are from 1 to 5. Default is {DEFAULT_NUMBER_OF_THREADS}."
+                ),
+                default=DEFAULT_NUMBER_OF_THREADS,
+                ge=1,
+                le=5,
+            )),
+            global_limit=(Optional[int], Field(description="Global limit", default=GLOBAL_LIMIT, gt=0)),
             global_regexp=(Optional[str], Field(description="Global regex pattern", default=None)),
             selected_tools=(
                 List[Literal[tuple(selected_tools)]],
@@ -98,7 +144,7 @@ class FigmaToolkit(BaseToolkit):
                     name=tool["name"],
                     description=description,
                     args_schema=tool["args_schema"],
-                    metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                    metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
                 )
             )
         return cls(tools=tools)

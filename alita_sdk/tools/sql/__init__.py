@@ -9,6 +9,7 @@ from .models import SQLDialect
 from ..elitea_base import filter_missconfigured_index_tools
 from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.sql import SqlConfiguration
+from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "sql"
 
@@ -31,7 +32,7 @@ class SQLToolkit(BaseToolkit):
         supported_dialects = (d.value for d in SQLDialect)
         return create_model(
             name,
-            dialect=(Literal[tuple(supported_dialects)], Field(description="Database dialect (mysql or postgres)")),
+            dialect=(Literal[tuple(supported_dialects)], Field(default=SQLDialect.POSTGRES.value, description="Database dialect (mysql or postgres)")),
             database_name=(str, Field(description="Database name")),
             sql_configuration=(SqlConfiguration, Field(description="SQL Configuration", json_schema_extra={'configuration_types': ['sql']})),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
@@ -68,7 +69,7 @@ class SQLToolkit(BaseToolkit):
                 name=tool["name"],
                 description=description,
                 args_schema=tool["args_schema"],
-                metadata={"toolkit_name": toolkit_name} if toolkit_name else {}
+                metadata={TOOLKIT_NAME_META: toolkit_name, TOOLKIT_TYPE_META: name, TOOL_NAME_META: tool["name"]} if toolkit_name else {TOOL_NAME_META: tool["name"]}
             ))
         return cls(tools=tools)
 

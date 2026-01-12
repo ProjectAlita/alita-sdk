@@ -43,6 +43,8 @@ Use the `read_file` tool to retrieve the current content of the `test-data/gener
 
 ### Step 2: Prepare Update Query
 
+Save "{{RANDOM_STRING}} by TC-012 {{CURRENT_DATE}}" to {{TEST_NEW_CONTENT}} before preparing the file_query.
+
 Prepare the file_query parameter in the correct format:
 ```
 test-data/generated/TC-010_sample.md
@@ -58,7 +60,7 @@ NEW <<<<
 
 ### Step 3: Execute the Tool
 
-Execute the `update_file` tool for the `tc-file-ops-2025-12-08` branch with the prepared file_query.
+Switch to the `tc-file-ops-2025-12-08` branch and execute the `update_file` tool for the switched branch with the prepared file_query.
 
 **Expectation:** The tool runs without errors and returns a success message indicating the file was updated successfully.
 

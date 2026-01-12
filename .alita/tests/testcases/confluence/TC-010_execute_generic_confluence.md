@@ -11,8 +11,6 @@ Verify that the `execute_generic_confluence` tool correctly executes generic Con
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Space** | `AT` | Target Confluence space key |
-| **Username** | `CONFLUENCE_USERNAME` | Confluence user email |
-| **API Key** | `CONFLUENCE_API_KEY` | Confluence API token for authentication |
 | **Base URL** | `https://epamelitea.atlassian.net/` | Confluence instance URL |
 | **Tool** | `execute_generic_confluence` | Confluence tool to execute generic API calls |
 | **Method** | `GET` | HTTP method to use |

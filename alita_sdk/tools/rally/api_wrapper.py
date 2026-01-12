@@ -40,7 +40,7 @@ RallyGetEntities = create_model(
     entity_type=(Optional[str], Field(description="Artifact type, e.g. 'HierarchicalRequirement', 'Defect', 'UserStory'", default="UserStory")),
     query=(Optional[str], Field(description="Query for searching Rally stories", default=None)),
     fetch=(Optional[bool], Field(description="Whether to fetch the full details of the stories", default=True)),
-    limit=(Optional[int], Field(description="Limit the number of results", default=10))
+    limit=(Optional[int], Field(description="Limit the number of results", default=10, gt=0))
 )
 
 RallyGetProject = create_model(

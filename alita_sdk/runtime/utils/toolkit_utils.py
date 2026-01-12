@@ -59,10 +59,12 @@ def instantiate_toolkit_with_client(toolkit_config: Dict[str, Any],
 
         # Create a tool configuration dict with required fields
         # Note: MCP toolkit always requires toolkit_name, other toolkits respect use_prefix flag
+        # Note: 'name' is always set for provider-based toolkits (used by provider_worker.utils.tools)
         tool_config = {
             'id': toolkit_config.get('id', random.randint(1, 1000000)),
             'type': toolkit_config.get('type', toolkit_type),
             'settings': settings,
+            'name': toolkit_name,  # Always pass name for provider toolkits
             'toolkit_name': toolkit_name if (use_prefix or toolkit_type == 'mcp') else None
         }
         

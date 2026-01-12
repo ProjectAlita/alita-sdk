@@ -1,6 +1,7 @@
 {
   "type": "github",
   "toolkit_name": "github",
+  "id": 3,
   "github_configuration": {
     "access_token": "${GIT_TOOL_ACCESS_TOKEN}"
   },
