@@ -1116,60 +1116,77 @@ def extend_with_file_operations(method):
     """
     Decorator to automatically add file operation tools to toolkits that implement
     _read_file and _write_file methods.
-    
+
     Adds:
     - read_file_chunk: Read specific line ranges
     - read_multiple_files: Batch read files
     - search_file: Search for patterns in files
     - edit_file: Edit files using OLD/NEW markers
+
+    Custom Schema Support:
+    Toolkits can provide custom schemas by implementing _get_file_operation_schemas() method
+    that returns a dict mapping tool names to Pydantic models. This allows toolkits like
+    ArtifactWrapper to use bucket_name instead of branch.
+
+    Example:
+        def _get_file_operation_schemas(self):
+            return {
+                "read_file_chunk": MyCustomReadFileChunkInput,
+                "read_multiple_files": MyCustomReadMultipleFilesInput,
+            }
     """
     def wrapper(self, *args, **kwargs):
         tools = method(self, *args, **kwargs)
-        
+
         # Only add file operations if toolkit has implemented the required methods
         # Check for both _read_file and _write_file methods
         has_file_ops = (hasattr(self, '_read_file') and callable(getattr(self, '_read_file')) and
                         hasattr(self, '_write_file') and callable(getattr(self, '_write_file')))
-        
+
         if has_file_ops:
             # Import schemas from elitea_base
             from . import elitea_base
-            
+
+            # Check for toolkit-specific custom schemas
+            custom_schemas = {}
+            if hasattr(self, '_get_file_operation_schemas') and callable(getattr(self, '_get_file_operation_schemas')):
+                custom_schemas = self._get_file_operation_schemas() or {}
+
             file_operation_tools = [
                 {
                     "name": "read_file_chunk",
                     "mode": "read_file_chunk",
                     "ref": self.read_file_chunk,
                     "description": self.read_file_chunk.__doc__,
-                    "args_schema": elitea_base.ReadFileChunkInput
+                    "args_schema": custom_schemas.get("read_file_chunk", elitea_base.ReadFileChunkInput)
                 },
                 {
                     "name": "read_multiple_files",
                     "mode": "read_multiple_files",
                     "ref": self.read_multiple_files,
                     "description": self.read_multiple_files.__doc__,
-                    "args_schema": elitea_base.ReadMultipleFilesInput
+                    "args_schema": custom_schemas.get("read_multiple_files", elitea_base.ReadMultipleFilesInput)
                 },
                 {
                     "name": "search_file",
                     "mode": "search_file",
                     "ref": self.search_file,
                     "description": self.search_file.__doc__,
-                    "args_schema": elitea_base.SearchFileInput
+                    "args_schema": custom_schemas.get("search_file", elitea_base.SearchFileInput)
                 },
                 {
                     "name": "edit_file",
                     "mode": "edit_file",
                     "ref": self.edit_file,
                     "description": self.edit_file.__doc__,
-                    "args_schema": elitea_base.EditFileInput
+                    "args_schema": custom_schemas.get("edit_file", elitea_base.EditFileInput)
                 },
             ]
-            
+
             tools.extend(file_operation_tools)
-        
+
         return tools
-    
+
     return wrapper
 
 
