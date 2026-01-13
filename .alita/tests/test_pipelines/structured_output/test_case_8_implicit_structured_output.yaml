@@ -88,16 +88,14 @@ nodes:
             "test_description": "structured_output: true without structured_output_dict"
         }
         test_results = result
+        test_results
 
-        # Add results to messages
-        messages = alita_state.get('messages', [])
-        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - title
       - items
       - count
     output:
-      - test_results
+
       - messages
-    structured_output: true
+    structured_output: false
     transition: END

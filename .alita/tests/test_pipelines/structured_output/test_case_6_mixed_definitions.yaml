@@ -130,10 +130,8 @@ nodes:
             }
         }
         test_results = result
+        test_results
 
-        # Add results to messages
-        messages = alita_state.get('messages', [])
-        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - name
       - tags
@@ -141,7 +139,7 @@ nodes:
       - count
       - description
     output:
-      - test_results
+
       - messages
-    structured_output: true
+    structured_output: false
     transition: END

@@ -146,10 +146,8 @@ nodes:
             "test_description": "fstring templates with multiple variable types interpolated"
         }
         test_results = result
+        test_results
 
-        # Add results to messages
-        messages = alita_state.get('messages', [])
-        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - output_format
       - num_items
@@ -159,7 +157,7 @@ nodes:
       - metadata
       - status
     output:
-      - test_results
+
       - messages
-    structured_output: true
+    structured_output: false
     transition: END

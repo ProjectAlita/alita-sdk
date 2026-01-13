@@ -121,10 +121,8 @@ nodes:
             }
         }
         test_results = result
+        test_results
 
-        # Add results to messages
-        messages = alita_state.get('messages', [])
-        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - blacklist
       - playlist
@@ -132,7 +130,7 @@ nodes:
       - checklist
       - actual_list
     output:
-      - test_results
+
       - messages
-    structured_output: true
+    structured_output: false
     transition: END

@@ -112,17 +112,15 @@ nodes:
             "description_test": "Dict format with type/description/default should preserve all metadata"
         }
         test_results = result
+        test_results
 
-        # Add results to messages
-        messages = alita_state.get('messages', [])
-        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - title
       - items
       - notes
       - status
     output:
-      - test_results
+
       - messages
-    structured_output: true
+    structured_output: false
     transition: END
