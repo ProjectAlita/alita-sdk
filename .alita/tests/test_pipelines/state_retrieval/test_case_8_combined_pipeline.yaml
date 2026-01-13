@@ -1,0 +1,102 @@
+name: "Test Case 8 - Combined Pipeline Test"
+description: "Full integration test simulating real usage - LLM generates code, code node processes it"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  user_query:
+    type: str
+    value: "Write a Python function to calculate factorial"
+  llm_output:
+    type: str
+  iteration_count:
+    type: int
+    value: 1
+  metadata:
+    type: dict
+    value:
+      model: "gpt-4"
+      tokens: 150
+  test_results:
+    type: dict
+
+entry_point: generate_code
+
+nodes:
+  - id: generate_code
+    type: llm
+    input:
+      - user_query
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful coding assistant. Always wrap code in markdown code blocks with ```python syntax. Be concise."
+      task:
+        type: variable
+        value: user_query
+    output:
+      - llm_output
+    transition: process_response
+
+  - id: process_response
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+
+        # Verify all state variables are accessible and correctly typed
+        output = alita_state.get('llm_output', '')
+        count = alita_state.get('iteration_count', 0)
+        meta = alita_state.get('metadata', {})
+        query = alita_state.get('user_query', '')
+
+        # Extract code from markdown
+        code_match = re.search(r'```python\n(.*?)\n```', output, re.DOTALL)
+        extracted_code = code_match.group(1) if code_match else None
+
+        # Build comprehensive result
+        result = {
+            "test_passed": (
+                isinstance(alita_state, dict) and
+                isinstance(output, str) and
+                "```" in output and
+                isinstance(count, int) and
+                isinstance(meta, dict)
+            ),
+            "state_is_dict": isinstance(alita_state, dict),
+            "llm_output_is_string": isinstance(output, str),
+            "has_code_block": "```python" in output or "```" in output,
+            "code_extracted": extracted_code is not None,
+            "iteration_is_int": isinstance(count, int),
+            "iteration_value": count,
+            "metadata_is_dict": isinstance(meta, dict),
+            "model_name": meta.get('model'),
+            "tokens_value": meta.get('tokens'),
+            "user_query_preserved": query == "Write a Python function to calculate factorial",
+            "extracted_code_preview": extracted_code[:50] if extracted_code else None,
+            "llm_output_preview": output[:100] if output else None
+        }
+        result
+    input:
+      - llm_output
+      - iteration_count
+      - metadata
+      - user_query
+    output:
+      - test_results
+    structured_output: true
+    transition: print_results
+
+  - id: print_results
+    type: printer
+    input_mapping:
+      printer:
+        type: variable
+        value: test_results
+    transition: END

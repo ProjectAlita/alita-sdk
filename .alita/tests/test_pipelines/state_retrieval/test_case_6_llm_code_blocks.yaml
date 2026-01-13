@@ -1,0 +1,75 @@
+name: "Test Case 6 - LLM Output with Code Blocks"
+description: "Verify LLM-generated content with markdown code blocks is preserved as string"
+
+state:
+  input:
+    type: str
+  llm_response:
+    type: str
+  messages:
+    type: list
+  test_results:
+    type: dict
+entry_point: generate_code
+nodes:
+  - id: generate_code
+    type: llm
+    input:
+      - input
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a helpful coding assistant. Always wrap code in markdown code blocks with the language specified.
+      task:
+        type: fixed
+        value: Write a simple Python function called "add" that takes two parameters a and b and returns their sum. Include a brief explanation.
+    output:
+      - llm_response
+    transition: verify_code_blocks
+  - id: verify_code_blocks
+    type: code
+    code:
+      type: fixed
+      value: |
+        response = alita_state.get('llm_response', '')
+
+        is_string = isinstance(response, str)
+        has_code_block = "```" in response if is_string else False
+        has_python_block = "```python" in response.lower() if is_string else False
+        newline_count = response.count('\n') if is_string else 0
+        has_newlines = newline_count >= 2
+
+        # Check for function definition
+        has_def = "def " in response if is_string else False
+        has_add = "add" in response if is_string else False
+
+        all_passed = is_string and has_code_block and has_newlines
+
+        result = {
+            "test_passed": all_passed,
+            "is_string": is_string,
+            "has_code_block": has_code_block,
+            "has_python_block": has_python_block,
+            "newline_count": newline_count,
+            "has_newlines": has_newlines,
+            "has_def": has_def,
+            "has_add": has_add,
+            "preview": response[:200] if is_string else str(response)[:200]
+        }
+        result
+    input:
+      - llm_response
+    output:
+      - test_results
+    structured_output: true
+    transition: print_results
+  - id: print_results
+    type: printer
+    input_mapping:
+      printer:
+        type: variable
+        value: test_results
+    transition: END
