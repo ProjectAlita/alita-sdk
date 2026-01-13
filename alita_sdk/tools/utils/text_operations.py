@@ -26,48 +26,119 @@ TEXT_EDITABLE_EXTENSIONS = {
 def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
     """Parse OLD/NEW marker-based edit instructions.
 
-    Extracts pairs of old and new content from a file query using markers in
-    a minimal, regex-based way without additional line splitting logic.
+    Format:
 
-    Supported forms (OLD/NEW blocks must appear in pairs):
-    - OLD <<<< ... >>>> OLD
-      NEW <<<< ... >>>> NEW
-    - If no such pairs are found, we also accept the slightly incorrect
-      "<<<" form as a fallback:
-      OLD <<< ... >>> OLD
-      NEW <<< ... >>> NEW
+        OLD <<<<[optional text or newline]
+        ... OLD content ...
+        >>>> OLD
+        NEW <<<<[optional text or newline]
+        ... NEW content ...
+        >>>> NEW
+
+    Rules:
+    - OLD block:
+      - Starts at the first line that contains "OLD <<<<".
+      - OLD content includes:
+        * On that line: everything after the first "OLD <<<<" (if any),
+        * Plus all following lines up to (but not including) the first line
+          that contains ">>>> OLD".
+    - NEW block:
+      - Starts at the first line, after the OLD block, that contains "NEW <<<<".
+      - NEW content includes:
+        * On that line: everything after the first "NEW <<<<" (if any),
+        * Plus all following lines up to (but not including) the first line
+          that contains ">>>> NEW".
+    - Only the first complete OLD/NEW pair is returned.
 
     Args:
         file_query: String containing marked old and new content sections.
 
     Returns:
-        List of (old_content, new_content) tuples, where each content string
-        is the raw inner block (with leading/trailing whitespace stripped),
-        but otherwise unmodified.
+        A list with at most one (old_content, new_content) tuple. Each
+        content string includes newlines but excludes the marker substrings
+        and their closing lines.
     """
-    # Primary pattern: correct 4-< markers
-    pattern_primary = re.compile(
-        r"OLD <<<<(\s*.*?\s*)>>>> OLD"  # OLD block
-        r"\s*"                          # optional whitespace between OLD/NEW
-        r"NEW <<<<(\s*.*?\s*)>>>> NEW",  # NEW block
-        re.DOTALL,
-    )
 
-    matches = pattern_primary.findall(file_query)
+    if not file_query:
+        return []
 
-    # Fallback pattern: accept 3-< markers if no proper 4-< markers found
-    if not matches:
-        pattern_fallback = re.compile(
-            r"OLD <<<(\s*.*?\s*)>>>> OLD"   # OLD block (3 < and 4 > to support previous version)
-            r"\s*"                          # optional whitespace between OLD/NEW
-            r"NEW <<<(\s*.*?\s*)>>>> NEW",  # NEW block (3 < and 4 > to support previous version)
-            re.DOTALL,
-        )
-        matches = pattern_fallback.findall(file_query)
+    lines = file_query.splitlines(keepends=True)
 
-    # Preserve block content exactly as captured so Stage 1 can use exact
-    # substring replacement (including indentation and trailing spaces).
-    return [(old_block, new_block) for old_block, new_block in matches]
+    old_open = "OLD <<<<"
+    old_close = ">>>> OLD"
+    new_open = "NEW <<<<"
+    new_close = ">>>> NEW"
+
+    state = "search_old"  # -> in_old -> search_new -> in_new
+    old_parts: list[str] = []
+    new_parts: list[str] = []
+
+    i = 0
+    n = len(lines)
+
+    # 1. Find OLD block
+    while i < n and state == "search_old":
+        line = lines[i]
+        pos = line.find(old_open)
+        if pos != -1:
+            # Start OLD content after the first "OLD <<<<" on this line
+            after = line[pos + len(old_open):]
+            old_parts.append(after)
+            state = "in_old"
+        i += 1
+
+    if state != "in_old":
+        # No OLD block found
+        return []
+
+    # Collect until a line containing ">>>> OLD"
+    while i < n and state == "in_old":
+        line = lines[i]
+        if old_close in line:
+            # Stop before this line; do not include any part of it
+            state = "search_new"
+        else:
+            old_parts.append(line)
+        i += 1
+
+    if state != "search_new":
+        # Didn't find a proper OLD close
+        return []
+
+    # 2. Find NEW block after OLD
+    while i < n and state == "search_new":
+        line = lines[i]
+        pos = line.find(new_open)
+        if pos != -1:
+            # NEW content starts from the *next* line after the marker line
+            state = "in_new"
+            i += 1
+            break
+        i += 1
+
+    if state != "in_new":
+        # No NEW block found
+        return []
+
+    # Collect until a line containing ">>>> NEW"
+    while i < n and state == "in_new":
+        line = lines[i]
+        close_pos = line.rfind(new_close)
+        if close_pos != -1:
+            # Include content up to but not including the *last* ">>>> NEW" on the line
+            before_close = line[:close_pos]
+            new_parts.append(before_close)
+            break
+        else:
+            new_parts.append(line)
+        i += 1
+
+    if not old_parts or not new_parts:
+        return []
+
+    old_content = "".join(old_parts)
+    new_content = "".join(new_parts)
+    return [(old_content, new_content)]
 
 
 def is_text_editable(filename: str) -> bool:
