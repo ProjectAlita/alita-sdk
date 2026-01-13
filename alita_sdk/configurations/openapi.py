@@ -31,7 +31,7 @@ class OpenApiConfiguration(BaseModel):
                     "enabled_when": {
                         "all_fields_set": ["client_id", "client_secret", "method", "token_url"],
                     },
-                    "disabled_tooltip": "Available only for OAuth (client Credentials). Please setup client_id, client_secret, method and token_url to activate it on setup.",
+                    "disabled_tooltip": "Available only for OAuth (Client Credentials). Please setup client_id, client_secret, method and token_url to activate it on setup.",
                 },
                 "sections": {
                     "auth": {
