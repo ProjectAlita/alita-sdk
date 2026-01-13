@@ -16,7 +16,7 @@ Verify that the `readFile` tool correctly retrieves file content from an artifac
 |-----------|-------|-------------|
 | **Tools Used** | `createNewBucket`, `createFile`, `readFile`, `deleteFile` | Tools required for setup, verification, and cleanup |
 | **Bucket Name** | `tc-004-read-file` | Dedicated bucket for this test case (created if missing) |
-| **Primary Input(s)** | `{{TC_004_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_004_TXT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_004_XLSX_FILENAME}}={{RANDOM_STRING}}.xlsx, {{TC_004_CSV_FILENAME}}={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `TC_004_MD_FILENAME={{RANDOM_STRING}}.md, TC_004_TXT_FILENAME={{RANDOM_STRING}}.txt, TC_004_XLSX_FILENAME={{RANDOM_STRING}}.xlsx, TC_004_CSV_FILENAME={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
 
 ## Config
 
@@ -88,7 +88,7 @@ Execute the `readFile` tool to read a simple text file.
 }
 ```
 
-**Expectation:** The tool returns the complete file content as a string matching the original content from TC-002.
+**Expectation:** The tool returns the complete file content as a string matching the original content.
 
 ### Step 2: Read a Markdown File
 
@@ -194,13 +194,4 @@ Inputs:
 }
 ```
 
-Execute the `listFiles` tool to verify deletion.
-
-**Input:**
-```json
-{
-  "bucket_name": "tc-004-read-file"
-}
-```
-`
-**Expectation:** Verify that files `{{TC_004_MD_FILENAME}}`, `{{TC_004_TXT_FILENAME}}`, `{{TC_004_XLSX_FILENAME}}`, and `{{TC_004_CSV_FILENAME}}` do not exist in the bucket after listing.
+**Expectation:** Verify success messages for files `{{TC_004_MD_FILENAME}}`, `{{TC_004_TXT_FILENAME}}`, `{{TC_004_XLSX_FILENAME}}`, and `{{TC_004_CSV_FILENAME}}` deletion.

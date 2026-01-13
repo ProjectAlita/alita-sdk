@@ -16,7 +16,7 @@ Verify bulk update when a single new body applies to all page IDs returns aggreg
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `update_pages` | Exact Python tool name |
-| **Primary Input(s)** | `{{TC_022_PAGE_IDS_TO_UPDATE_VARIANT}}, {{TC_022_NEW_BODY_SHARED}}` | Inputs derived from args_schema |
+| **Primary Input(s)** | `TC_022_PAGE_IDS_TO_UPDATE_VARIANT, TC_022_NEW_BODY_SHARED` | Inputs derived from args_schema |
 
 ## Config
 

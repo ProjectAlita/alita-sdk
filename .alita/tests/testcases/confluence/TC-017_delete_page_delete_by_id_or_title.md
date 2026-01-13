@@ -16,7 +16,7 @@ Validate that delete_page removes a page when either `page_id` or `page_title` i
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `delete_page` | Exact Python tool name |
-| **Primary Input(s)** | `{{TC_017_PAGE_ID}}` or `{{TC_017_PAGE_TITLE}}` | Inputs derived from args_schema: page_id or page_title |
+| **Primary Input(s)** | `TC_017_PAGE_ID` or `TC_017_PAGE_TITLE` | Inputs derived from args_schema: page_id or page_title |
 
 ## Config
 

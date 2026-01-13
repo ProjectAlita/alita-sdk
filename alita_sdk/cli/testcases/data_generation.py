@@ -105,7 +105,7 @@ def execute_bulk_data_generation(
             
             # Store chat history from data generation to pass to test executors
             return [
-                {"role": "user", "content": bulk_data_gen_prompt},
+                # {"role": "user", "content": bulk_data_gen_prompt},
                 {"role": "assistant", "content": bulk_gen_output}
             ]
         else:

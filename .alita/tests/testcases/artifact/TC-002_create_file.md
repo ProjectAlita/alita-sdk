@@ -15,8 +15,19 @@ Verify that the `createFile` tool correctly creates files in an artifact bucket,
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Tool** | `createFile` | Artifact tool to execute for creating files |
-| **Bucket Name** | `test-artifacts` | Target bucket for file creation |
-| **Primary Input(s)** | `{{TC_002_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_002_TXT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_002_XLSX_FILENAME}}={{RANDOM_STRING}}.xlsx, {{TC_002_CSV_FILENAME}}={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
+| **Bucket Name** | `TC-002-create-file` | Target bucket for file creation |
+| **Primary Input(s)** | `TC_002_MD_FILENAME={{RANDOM_STRING}}.md, TC_002_TXT_FILENAME={{RANDOM_STRING}}.txt, TC_002_XLSX_FILENAME={{RANDOM_STRING}}.xlsx, TC_002_CSV_FILENAME={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
+
+## Config
+
+path: .alita\tool_configs\artifact-config.json
+generateTestData: true
+
+## Pre-requisites
+
+- Alita instance is accessible and configured
+- Valid API key with artifact write permissions
+- User has permission to create files in the bucket
 - Create bucket `TC-002-create-file` if missing. If it already exists, bucket creation must be treated as a non-error (idempotent).
 Tool: `createNewBucket`
 
@@ -29,18 +40,6 @@ Input:
 }
 ```
 
-## Config
-
-path: .alita\tool_configs\artifact-config.json
-generateTestData: true
-
-## Pre-requisites
-
-- Alita instance is accessible and configured
-- Valid API key with artifact write permissions
-- Bucket `test-artifacts` exists (created in TC-001)
-- User has permission to create files in the bucket
-
 ## Test Steps & Expectations
 
 ### Step 1: Create a Text File
@@ -52,7 +51,7 @@ Execute the `createFile` tool to create a simple text file.
 {
   "filename": "{{TC_002_TXT_FILENAME}}",
   "filedata": "This is a test document.\nLine 2: Testing partial reads.\nLine 3: More content here.\nLine 4: Final line.",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -66,7 +65,7 @@ Execute the `readFile` tool to read back the created text file.
 ```json
 {
   "filename": "{{TC_002_TXT_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -81,7 +80,7 @@ Execute the `createFile` tool to create a markdown file.
 {
   "filename": "{{TC_002_MD_FILENAME}}",
   "filedata": "# Test README\n\n## Section 1\nContent for section 1.\n\n## Section 2\nContent for section 2.",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -95,7 +94,7 @@ Execute the `readFile` tool to read back the created markdown file.
 ```json
 {
   "filename": "{{TC_002_MD_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -110,7 +109,7 @@ Execute the `createFile` tool to create an Excel file using JSON format.
 {
   "filename": "{{TC_002_XLSX_FILENAME}}",
   "filedata": "{\"Sheet1\": [[\"Name\", \"Age\", \"City\"], [\"Alice\", 25, \"New York\"], [\"Bob\", 30, \"San Francisco\"]], \"Sheet2\": [[\"Product\", \"Price\"], [\"Widget\", 19.99], [\"Gadget\", 29.99]]}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -124,7 +123,7 @@ Execute the `readFile` tool to read back the created Excel file.
 ```json
 {
   "filename": "{{TC_002_XLSX_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -139,7 +138,7 @@ Execute the `createFile` tool to create a CSV file.
 {
   "filename": "{{TC_002_CSV_FILENAME}}",
   "filedata": "Name,Email,Role\nJohn Doe,john@example.com,Developer\nJane Smith,jane@example.com,Designer\nBob Johnson,bob@example.com,Manager",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -153,7 +152,7 @@ Execute the `readFile` tool to read back the created CSV file.
 ```json
 {
   "filename": "{{TC_002_CSV_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-002-create-file"
 }
 ```
 
@@ -168,7 +167,7 @@ Create a file with special characters in the name.
 {
   "filename": "tc 002 special@file(name)#m4t2j8!.txt",
   "filedata": "Testing filename sanitization",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-002-create-file"
 }
 ```
 
@@ -182,7 +181,7 @@ Execute the `readFile` tool to read back.
 ```json
 {
   "filename": "tc-002-specialfilenamem4t2j8.txt",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-002-create-file"
 }
 ```
 
@@ -191,47 +190,39 @@ Execute the `readFile` tool to read back.
 ### Step 11: Cleanup Created Files
 
 Execute the `deleteFile` tool to remove all files created during this test case.
+If any deltion is failing, proceed to the next file deletion.
 
-**Input:**
+**Inputs:**
 ```json
 {
   "filename": "{{TC_002_MD_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-002-create-file"
 }
 ```
 ```json
 {
   "filename": "{{TC_002_TXT_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-002-create-file"
 }
 ```
 ```json
 {
   "filename": "{{TC_002_XLSX_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-002-create-file"
 }
 ```
 ```json
 {
   "filename": "{{TC_002_CSV_FILENAME}}",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-002-create-file"
 }
 ```
 ```json
 {
   "filename": "tc-002-specialfilenamem4t2j8.txt",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-002-create-file"
 }
 ```
 
-Execute the `listFiles` tool to verify deletion.
-
-**Input:**
-```json
-{
-  "bucket_name": "test-artifacts"
-}
-```
-`
-**Expectation:** Verify that files `{{TC_002_MD_FILENAME}}`, `{{TC_002_TXT_FILENAME}}`, `{{TC_002_XLSX_FILENAME}}`, `{{TC_002_CSV_FILENAME}}`, and `tc-002-specialfilenamem4t2j8.txt` do not exist in the bucket after listing.
+**Expectation:** Verify success messages for files `{{TC_002_MD_FILENAME}}`, `{{TC_002_TXT_FILENAME}}`, `{{TC_002_XLSX_FILENAME}}`, `{{TC_002_CSV_FILENAME}}`,  `tc-002-specialfilenamem4t2j8.txt` deletion.
 

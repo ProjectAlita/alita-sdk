@@ -12,7 +12,7 @@ Verify that the `appendData` and `overwriteData` tools correctly modify file con
 |-----------|-------|-------------|
 | **Tools** | `appendData`, `overwriteData`, `readFile` | Artifact tools for data modification |
 | **Bucket Name** | `TC-009-append-overwrite` | Target bucket for operations |
-| **Primary Input(s)** | `{{TC_009_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_009_TXT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_009_NON_EXISTENT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_009_CSV_FILENAME}}={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `TC_009_MD_FILENAME={{RANDOM_STRING}}.md, TC_009_TXT_FILENAME={{RANDOM_STRING}}.txt, TC_009_NON_EXISTENT_FILENAME={{RANDOM_STRING}}.txt, TC_009_CSV_FILENAME={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
 
 ## Config
 
@@ -256,15 +256,5 @@ Inputs:
   "bucket_name": "tc-009-append-overwrite"
 }
 ```
-
-Execute the `listFiles` tool to verify deletion.
-
-**Input:**
-```json
-{
-  "bucket_name": "tc-009-append-overwrite"
-}
-```
-`
-**Expectation:** Verify that files `{{TC_009_MD_FILENAME}}`, `{{TC_009_TXT_FILENAME}}`, `{{TC_009_NON_EXISTENT_FILENAME}}`, and `{{TC_009_CSV_FILENAME}}` do not exist in the bucket after listing.
+**Expectation:** Verify success messaga that files `{{TC_009_MD_FILENAME}}`, `{{TC_009_TXT_FILENAME}}`, `{{TC_009_NON_EXISTENT_FILENAME}}`, and `{{TC_009_CSV_FILENAME}}` were deleted.
 

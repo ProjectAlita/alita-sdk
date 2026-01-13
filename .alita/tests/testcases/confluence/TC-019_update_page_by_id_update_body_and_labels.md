@@ -16,7 +16,7 @@ Ensure updating page content and labels by page ID returns a success message and
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `update_page_by_id` | Exact Python tool name |
-| **Primary Input(s)** | `{{TC_019_PAGE_ID_TO_UPDATE}}, {{TC_019_NEW_BODY}}, {{TC_019_NEW_LABEL}}` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `TC_019_PAGE_ID_TO_UPDATE`, `TC_019_NEW_BODY`, `TC_019_NEW_LABEL` | Required and optional inputs derived from args_schema |
 
 ## Config
 

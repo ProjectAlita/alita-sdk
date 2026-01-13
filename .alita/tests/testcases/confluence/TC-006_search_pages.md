@@ -32,10 +32,4 @@ generateTestData: false
 
 Execute the `search_pages` tool with query parameter set to `Template`.
 
-**Expectation:** The tool runs without errors and returns search results.
-
-### Step 2: Verify the Output
-
-Verify that the output contains page information matching the search query.
-
-**Expectation:** The output is a string containing page details (page_id, page_title, page_url, content) for pages matching the query, or an error message if no results found.
+**Expectation:** The tool runs without errors and returns search results. The output is a string containing page details (page_id, page_title, page_url, content) for pages matching the query, or an error message if no results found.

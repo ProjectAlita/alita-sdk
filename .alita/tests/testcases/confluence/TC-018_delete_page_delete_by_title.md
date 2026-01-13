@@ -16,7 +16,7 @@ Validate delete_page resolves `page_id` via `page_title` when `page_id` is not p
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `delete_page` | Exact Python tool name |
-| **Primary Input(s)** | `{{TC_018_PAGE_TITLE_VARIANT}}`, `{{TC_018_PAGE_ID_VARIANT}}` | args_schema: page_title only |
+| **Primary Input(s)** | `TC_018_PAGE_TITLE_VARIANT`, `TC_018_PAGE_ID_VARIANT` | args_schema: page_title only |
 
 ## Config
 

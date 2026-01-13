@@ -16,7 +16,7 @@ Verify that the `listFiles` tool correctly lists all files in an artifact bucket
 |-----------|-------|-------------|
 | **Primary Bucket Name** | `tc-003-list-files` | Dedicated bucket for this test case (created if missing) |
 | **Tools Used** | `createNewBucket`, `createFile`, `listFiles`, `deleteFile` | Tools needed for setup, verification, and cleanup |
-| **Primary Input(s)** | `{{TC_003_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_003_TXT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_003_XLSX_FILENAME}}={{RANDOM_STRING}}.xlsx, {{TC_003_CSV_FILENAME}}={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `TC_003_MD_FILENAME={{RANDOM_STRING}}.md, TC_003_TXT_FILENAME={{RANDOM_STRING}}.txt, TC_003_XLSX_FILENAME={{RANDOM_STRING}}.xlsx, TC_003_CSV_FILENAME={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
 
 ## Config
 
@@ -84,7 +84,7 @@ Execute the `listFiles` tool to retrieve all files in the test bucket.
 - `name`
 - `link` in format: `{base_url}/api/v2/artifacts/artifact/default/{project_id}/{bucket_name}/{filename}`
 - `modified` (timestamp)
-- `size` (bytes)
+- `size`
 
 ### Step 2: Verify File List Contents
 
@@ -106,7 +106,7 @@ https://{BASE_URL}/api/v2/artifacts/artifact/default/{ALITA_PROJECT_ID}/tc-003-l
 ```
 And similarly for the other filenames returned.
 
-### Step 6: List Files Using Default Bucket (No Input)
+### Step 4: List Files Using Default Bucket (No Input)
 
 Execute the `listFiles` tool without specifying `bucket_name`. This should use the default bucket configured in the toolkit.
 
@@ -117,7 +117,7 @@ Execute the `listFiles` tool without specifying `bucket_name`. This should use t
 
 **Expectation:** The tool returns files from the default bucket. There should be no files.
 
-### Step 7: Verify Empty Bucket Listing
+### Step 5: Verify Empty Bucket Listing
 
 Create a new, empty bucket and list its contents to verify that an empty result is returned.
 
@@ -137,11 +137,12 @@ Create a new, empty bucket and list its contents to verify that an empty result 
 }
 ```
 
-**Expectation:** The tool returns an empty list or an appropriate message indicating no files found. Buckets are not removed by this test.
+**Expectation:** The tool returns an empty list or an appropriate message indicating no files found.
 
-### Step 8: Cleanup — Delete Created Files (Bucket remains)
+### Step 6: Cleanup — Delete Created Files (Bucket remains)
 
-Delete the files created from `tc-003-list-files`. Buckets are intentionally left in place.
+Execute the `deleteFile` tool to remove all files created during this test case.
+If any deltion is failing, proceed to the next file deletion.
 
 **Inputs:**
 ```json
@@ -169,13 +170,4 @@ Delete the files created from `tc-003-list-files`. Buckets are intentionally lef
 }
 ```
 
-Execute the `listFiles` tool to verify deletion.
-
-**Input:**
-```json
-{
-  "bucket_name": "tc-003-list-files"
-}
-```
-`
-**Expectation:** Verify that files `{{TC_003_MD_FILENAME}}`, `{{TC_003_TXT_FILENAME}}`, `{{TC_003_XLSX_FILENAME}}`, and `{{TC_003_CSV_FILENAME}}` do not exist in the bucket after listing.
+**Expectation:** Verify success messages for files `{{TC_003_MD_FILENAME}}`, `{{TC_003_TXT_FILENAME}}`, `{{TC_003_XLSX_FILENAME}}`, and `{{TC_003_CSV_FILENAME}}` deletion.
