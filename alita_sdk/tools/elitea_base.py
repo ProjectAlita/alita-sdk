@@ -837,10 +837,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             commit_message: Commit message (VCS toolkits only)
             
         Returns:
-            Success message or error
-            
-        Raises:
-            ToolException: If file is not text-editable or edit fails
+            Success message or raises ToolException on failure.
         """
         from .utils.text_operations import parse_old_new_markers, is_text_editable, try_apply_edit
         from langchain_core.callbacks import dispatch_custom_event
@@ -868,45 +865,35 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
                 raise current_content if isinstance(current_content, Exception) else ToolException(str(current_content))
         except Exception as e:
             raise ToolException(f"Failed to read file {file_path}: {e}")
-        
-        # Apply all edits (with tolerant fallback)
+
+        # Apply all edits (stop on first warning/error)
         updated_content = current_content
-        fallbacks_used = 0
         edits_applied = 0
         for old_text, new_text in edits:
             if not old_text.strip():
                 continue
             
-            new_updated, used_fallback = try_apply_edit(
+            new_updated, error_message = try_apply_edit(
                 content=updated_content,
                 old_text=old_text,
                 new_text=new_text,
                 file_path=file_path,
             )
 
-            if new_updated == updated_content:
-                # No change applied for this pair (exact nor fallback)
-                logger.warning(
-                    "Old content not found, appears several times or could not be safely matched in %s. Snippet: %s...",
-                    file_path,
-                    old_text[:100].replace("\n", "\\n"),
-                )
-                continue
+            if error_message:
+                return error_message
 
             # A replacement was applied
             edits_applied += 1
-            if used_fallback:
-                fallbacks_used += 1
-
             updated_content = new_updated
         
         # Check if any changes were made
-        if current_content == updated_content or edits_applied == 0:
-            return (
-                f"No changes made to {file_path}. "
-                "Old content was not found or is empty. "
-                "Use read_file or search_file to verify current content."
-            )
+        if current_content == updated_content:
+            # At least one edit was applied, but the final content is identical.
+            # This usually means the sequence of OLD/NEW pairs is redundant or cancels out.
+            return (f"Edits for {file_path} were applied but the final content is identical to the original. "
+                    "The sequence of OLD/NEW pairs appears to be redundant or self-cancelling. "
+                    "Please simplify or review the update_query.")
         
         # Write updated content
         try:
