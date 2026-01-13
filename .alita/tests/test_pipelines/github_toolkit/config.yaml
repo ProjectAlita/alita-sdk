@@ -1,0 +1,171 @@
+# GitHub Toolkit Test Suite Configuration
+# This file defines setup, execution, and cleanup for the test suite
+
+name: github_toolkit
+description: GitHub toolkit integration tests
+
+# Environment variable mappings
+# These map .env variables to config values used in setup
+env_mapping:
+  toolkit_config: ${GIT_CONFIG_PATH:../../../tool_configs/git-config.json}
+  access_token: ${GIT_TOOL_ACCESS_TOKEN}
+  repository: ${GITHUB_TEST_REPO:ProjectAlita/elitea-testing}
+  base_branch: ${GITHUB_BASE_BRANCH:main}
+
+# Setup steps executed before running tests
+# Steps are executed in order; if a step fails, setup stops
+setup:
+  # Step 1: Create or update the GitHub toolkit on the platform
+  - name: Create GitHub Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      # Load base config from git-config.json
+      config_file: ../../../tool_configs/git-config.json
+      # Override/substitute values from environment
+      overrides:
+        # Credentials must use secret reference format (platform requirement)
+        github_configuration:
+          private: true
+          alita_title: ${GITHUB_SECRET_NAME:github}
+        repository: ${GITHUB_TEST_REPO:ProjectAlita/elitea-testing}
+        active_branch: ${GITHUB_BASE_BRANCH:main}
+        base_branch: ${GITHUB_BASE_BRANCH:main}
+      # Name for the toolkit on platform
+      toolkit_name: ${GITHUB_TOOLKIT_NAME:testing}
+    # Save created toolkit ID to environment for pipeline substitution
+    save_to_env:
+      - key: GITHUB_TOOLKIT_ID
+        value: $.id
+      - key: GITHUB_TOOLKIT_NAME
+        value: $.name
+
+  # Step 2: Create a test branch for write operations
+  - name: Create Test Branch
+    type: github
+    action: create_branch
+    enabled: true
+    config:
+      # Use the toolkit created in previous step
+      toolkit_ref: ${GITHUB_TOOLKIT_ID}
+      branch_name: tc-test-${TIMESTAMP}
+      from_branch: ${GITHUB_BASE_BRANCH:main}
+    # Only run if branch doesn't exist
+    skip_if_exists: true
+    save_to_env:
+      - key: GITHUB_TEST_BRANCH
+        value: $.branch_name
+
+  # Step 3: Ensure test issue exists for read tests
+  - name: Ensure Test Issue Exists
+    type: github
+    action: ensure_issue
+    enabled: true
+    config:
+      toolkit_ref: ${GITHUB_TOOLKIT_ID}
+      title: "[Test] Automated Test Issue"
+      body: |
+        This issue is used for automated testing of the GitHub toolkit.
+        Do not close or delete this issue.
+      labels:
+        - test
+        - automated
+    skip_if_exists: true
+    match_by: title
+    save_to_env:
+      - key: GITHUB_TEST_ISSUE_NUMBER
+        value: $.number
+
+# Test execution configuration
+execution:
+  # Order of test execution (by file pattern or explicit list)
+  order:
+    - test_case_1_*.yaml   # Read operations first
+    - test_case_2_*.yaml
+    - test_case_3_*.yaml
+    - test_case_4_*.yaml
+    - test_case_5_*.yaml
+    - test_case_6_*.yaml
+    - test_case_7_*.yaml
+    - test_case_8_*.yaml   # Write operations
+    - test_case_9_*.yaml
+    - test_case_10_*.yaml
+
+  # Variables to substitute in test YAML files
+  substitutions:
+    GITHUB_TOOLKIT_ID: ${GITHUB_TOOLKIT_ID}
+    GITHUB_TOOLKIT_NAME: ${GITHUB_TOOLKIT_NAME}
+    GITHUB_TEST_BRANCH: ${GITHUB_TEST_BRANCH}
+    GITHUB_TEST_ISSUE_NUMBER: ${GITHUB_TEST_ISSUE_NUMBER}
+
+  # Execution settings
+  settings:
+    timeout: 120
+    parallel: 1  # Sequential for dependent tests
+    stop_on_failure: false
+
+# Cleanup steps executed after tests complete
+# Steps are executed in order; failures are logged but don't stop cleanup
+cleanup:
+  # Step 1: Delete test branches created during tests
+  - name: Delete Test Branches
+    type: github
+    action: delete_branches
+    config:
+      toolkit_ref: ${GITHUB_TOOLKIT_ID}
+      pattern: "tc-test-*"
+      # Keep branches newer than this (for debugging)
+      keep_recent: 0
+    # Continue even if this fails
+    continue_on_error: true
+
+  # Step 2: Close test PRs
+  - name: Close Test Pull Requests
+    type: github
+    action: close_pull_requests
+    config:
+      toolkit_ref: ${GITHUB_TOOLKIT_ID}
+      pattern: "[Test]*"
+      add_comment: "Closing PR - automated test cleanup"
+    continue_on_error: true
+
+  # Step 3: Delete test files created in test branch
+  - name: Delete Test Files
+    type: github
+    action: delete_files
+    config:
+      toolkit_ref: ${GITHUB_TOOLKIT_ID}
+      branch: ${GITHUB_TEST_BRANCH}
+      pattern: "test-file-*.md"
+    continue_on_error: true
+
+  # Step 4: Delete seeded pipelines
+  - name: Delete Test Pipelines
+    type: pipeline
+    action: delete
+    config:
+      pattern: "GH*"  # All GitHub test pipelines
+    continue_on_error: true
+
+  # Step 5: Delete the test toolkit
+  - name: Delete Test Toolkit
+    type: toolkit
+    action: delete
+    config:
+      toolkit_id: ${GITHUB_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+# Hooks for custom actions
+hooks:
+  # Run before any setup steps
+  pre_setup: []
+
+  # Run after all setup steps complete
+  post_setup: []
+
+  # Run before cleanup starts
+  pre_cleanup: []
+
+  # Run after cleanup completes
+  post_cleanup: []

@@ -299,8 +299,20 @@ def main():
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
     parser.add_argument("--exit-code", "-e", action="store_true",
                         help="Use exit code to indicate suite result (0=all pass, 1=failures)")
+    parser.add_argument("--env-file", help="Load environment variables from file")
 
     args = parser.parse_args()
+
+    # Load environment file if provided
+    if args.env_file:
+        from seed_pipelines import set_env_file
+        env_path = Path(args.env_file)
+        if not env_path.exists():
+            print(f"Error: Env file not found: {args.env_file}", file=sys.stderr)
+            sys.exit(1)
+        set_env_file(env_path)
+        if args.verbose:
+            print(f"Loading environment from: {args.env_file}")
 
     # Validate arguments
     if not args.folder and not args.pattern and not args.ids:

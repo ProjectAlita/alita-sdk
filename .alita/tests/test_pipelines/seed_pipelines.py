@@ -28,14 +28,41 @@ DEFAULT_LLM_SETTINGS = {
     "max_tokens": 4096,
 }
 
+# Global env file override (set via --env-file CLI option)
+_env_file_override: Path | None = None
+
+
+def set_env_file(env_file: str | Path | None):
+    """Set a custom env file to load variables from (has highest priority)."""
+    global _env_file_override
+    if env_file:
+        _env_file_override = Path(env_file)
+    else:
+        _env_file_override = None
+
 
 def load_from_env(var_name: str) -> str | None:
-    """Load value from environment variable or .env file."""
+    """Load value from environment variable or .env file.
+
+    Priority order:
+    1. Custom env file (if set via --env-file)
+    2. OS environment variables
+    3. Default .env file locations
+    """
+    # First check custom env file if set
+    if _env_file_override and _env_file_override.exists():
+        with open(_env_file_override) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and line.startswith(f"{var_name}="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+
+    # Then check OS environment
     value = os.environ.get(var_name)
     if value:
         return value
 
-    # Try to load from .env file
+    # Finally try default .env file locations
     env_paths = [
         Path(__file__).parent / ".env",
         Path(__file__).parent.parent.parent.parent / ".env",  # alita-sdk root
@@ -47,7 +74,7 @@ def load_from_env(var_name: str) -> str | None:
             with open(env_path) as f:
                 for line in f:
                     line = line.strip()
-                    if line.startswith(f"{var_name}="):
+                    if line and not line.startswith("#") and line.startswith(f"{var_name}="):
                         return line.split("=", 1)[1].strip().strip('"').strip("'")
 
     return None
@@ -358,6 +385,10 @@ Authentication (use one of these):
         help="GitHub toolkit ID (can also be set via GITHUB_TOOLKIT_ID env var)",
     )
     parser.add_argument(
+        "--env-file",
+        help="Load environment variables from a specific file (e.g., .env.generated from setup.py)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print payloads without actually sending requests",
@@ -371,6 +402,15 @@ Authentication (use one of these):
 
     args = parser.parse_args()
 
+    # Set custom env file if provided (must be done before any load_from_env calls)
+    if args.env_file:
+        env_file_path = Path(args.env_file)
+        if not env_file_path.exists():
+            print(f"Error: Env file not found: {args.env_file}", file=sys.stderr)
+            sys.exit(1)
+        set_env_file(env_file_path)
+        print(f"Loading environment from: {args.env_file}")
+
     # Resolve base URL and project ID from args or environment
     base_url = args.base_url or load_base_url_from_env() or DEFAULT_BASE_URL
     project_id = args.project_id or load_project_id_from_env() or DEFAULT_PROJECT_ID
@@ -378,7 +418,7 @@ Authentication (use one of these):
     # Build environment substitutions for YAML templates
     env_substitutions = {}
     github_toolkit_id = args.github_toolkit_id or load_github_toolkit_id_from_env()
-    if github_toolkit_id:
+    if github_toolkit_id is not None:  # Allow ID=0 (though unusual)
         env_substitutions["GITHUB_TOOLKIT_ID"] = github_toolkit_id
     github_toolkit_name = load_github_toolkit_name_from_env()
     if github_toolkit_name:
