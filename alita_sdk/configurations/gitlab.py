@@ -65,7 +65,7 @@ class GitlabConfiguration(BaseModel):
             return f"GitLab URL must be a base URL like {base_suggestion}"
 
         # Normalize URL - ensure no trailing slash
-        url = f"{parsed_url.scheme}://{parsed_url.netloc}".rstrip("/")
+        url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         
         # Validate private_token
         private_token = settings.get("private_token")
