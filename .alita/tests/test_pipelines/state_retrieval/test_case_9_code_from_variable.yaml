@@ -1,4 +1,4 @@
-name: "Test Case 9 - Code from State Variable"
+name: "SR9 - Code from Variable"
 description: "Verify code stored in state variable can be executed (code.type: variable)"
 
 state:
@@ -71,19 +71,16 @@ nodes:
             "computed_sum": results.get('sum'),
             "computed_message": results.get('message')
         }
-        final_result
+        test_results = final_result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - test_results
       - html_content
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

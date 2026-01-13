@@ -1,0 +1,112 @@
+name: "GH8 - Create Branch"
+description: "Verify create_branch tool creates a new feature branch from base"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  branch_name:
+    type: str
+    value: "feature/tc-017"
+  proposed_branch_name:
+    type: str
+  tool_result:
+    type: str
+  created_branch:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_branch_name
+
+nodes:
+  - id: prepare_branch_name
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique branch name with timestamp and random suffix
+        base_branch_name = alita_state.get('branch_name', 'feature/tc-017')
+        timestamp = time.strftime('%Y-%m-%d')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        proposed_branch_name = f"{base_branch_name}-{timestamp}-{random_suffix}"
+        proposed_branch_name
+    input:
+      - branch_name
+    output:
+      - proposed_branch_name
+    structured_output: false
+    transition: invoke_create_branch
+
+  - id: invoke_create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - proposed_branch_name
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: proposed_branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+
+        # Process the result from toolkit node
+        create_result = alita_state.get('tool_result')
+        proposed_branch_name = alita_state.get('proposed_branch_name')
+
+        tool_executed = create_result is not None
+        error_message = None
+        actual_branch_name = None
+
+        # Extract actual branch name from result
+        if isinstance(create_result, str):
+            if 'created successfully' in create_result.lower():
+                match = re.search(r"['\"]([^'\"]+)['\"]", create_result)
+                if match:
+                    actual_branch_name = match.group(1)
+                else:
+                    actual_branch_name = proposed_branch_name
+
+        # Verify branch was created
+        branch_created = 'created' in str(create_result).lower() if create_result else False
+
+        test_results = {
+            "test_passed": tool_executed and branch_created,
+            "tool_executed": tool_executed,
+            "proposed_branch_name": proposed_branch_name,
+            "actual_branch_name": actual_branch_name or proposed_branch_name,
+            "branch_created": branch_created,
+            "tool_response": str(create_result)[:500] if create_result else None,
+            "error": error_message
+        }
+
+        # Store created branch name for dependent tests
+        created_branch = actual_branch_name or proposed_branch_name
+        test_results
+        # Add results to messages
+    input:
+      - proposed_branch_name
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

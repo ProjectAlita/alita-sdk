@@ -1,4 +1,4 @@
-name: "Test Case 5 - JSON String Within State"
+name: "SR5 - JSON Strings"
 description: "Verify strings that contain JSON are not double-parsed"
 
 state:
@@ -76,19 +76,16 @@ nodes:
             "config_parsed": config_parsed,
             "parse_error": parse_error
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - api_response
       - config_json
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

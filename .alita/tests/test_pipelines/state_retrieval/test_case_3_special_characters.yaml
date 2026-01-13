@@ -1,4 +1,4 @@
-name: "Test Case 3 - Special Characters and Quotes"
+name: "SR3 - Special Characters"
 description: "Verify quotes, backslashes, and unicode are handled correctly"
 
 state:
@@ -60,7 +60,11 @@ nodes:
             "regex_value": regex,
             "expected_regex": expected_regex
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - sql_query
       - file_path
@@ -68,13 +72,6 @@ nodes:
       - regex_pattern
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

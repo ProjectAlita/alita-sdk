@@ -1,0 +1,112 @@
+name: "GH6 - Get Commits"
+description: "Verify get_commits tool retrieves recent commit history"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  max_count:
+    type: int
+    value: 5
+  sha:
+    type: str
+    value: "main"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_commits
+
+nodes:
+  - id: invoke_get_commits
+    type: toolkit
+    tool: get_commits
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - max_count
+      - sha
+    input_mapping:
+      max_count:
+        type: variable
+        value: max_count
+      sha:
+        type: variable
+        value: sha
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        commits_result = alita_state.get('tool_result')
+        max_count = alita_state.get('max_count', 5)
+
+        tool_executed = commits_result is not None
+        error_message = None
+        commits_list = []
+
+        try:
+            # Parse result
+            if isinstance(commits_result, list):
+                commits_list = commits_result
+            elif isinstance(commits_result, str):
+                import json
+                try:
+                    commits_list = json.loads(commits_result)
+                except:
+                    pass
+        except Exception as e:
+            error_message = str(e)
+
+        # Verify structure - commits should have sha, author, message
+        has_commits = len(commits_list) > 0 if isinstance(commits_list, list) else False
+        within_limit = len(commits_list) <= max_count if isinstance(commits_list, list) else False
+
+        # Check commit structure
+        commits_have_sha = all('sha' in c for c in commits_list) if commits_list else False
+        commits_have_author = all('author' in c for c in commits_list) if commits_list else False
+
+        # Extract summary
+        commits_summary = []
+        if isinstance(commits_list, list):
+            for commit in commits_list[:5]:
+                if isinstance(commit, dict):
+                    commits_summary.append({
+                        "sha": commit.get('sha', '')[:8] if commit.get('sha') else None,
+                        "author": commit.get('author'),
+                        "message": commit.get('message', '')[:50] if commit.get('message') else None
+                    })
+
+        test_results = {
+            "test_passed": tool_executed and has_commits and within_limit,
+            "tool_executed": tool_executed,
+            "max_count_requested": max_count,
+            "commits_returned": len(commits_list) if isinstance(commits_list, list) else 0,
+            "within_limit": within_limit,
+            "structure_check": {
+                "has_sha": commits_have_sha,
+                "has_author": commits_have_author
+            },
+            "commits_sample": commits_summary,
+            "error": error_message
+        }
+        test_results
+        # Add results to messages
+    input:
+      - max_count
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

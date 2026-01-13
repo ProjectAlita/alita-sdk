@@ -1,4 +1,4 @@
-name: "Test Case 2 - Multiline Strings with Newlines"
+name: "SR2 - Multiline Strings"
 description: "Verify newlines in strings are preserved"
 
 state:
@@ -48,20 +48,17 @@ nodes:
             "code_preview": code[:30],
             "text_preview": text[:30]
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - code_snippet
       - multiline_text
       - simple_newline
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

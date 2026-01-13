@@ -1,4 +1,4 @@
-name: "Test Case 7 - Empty and Null Values"
+name: "SR7 - Empty/Null Values"
 description: "Verify edge cases with empty/null values are handled correctly"
 
 state:
@@ -65,7 +65,11 @@ nodes:
             "empty_dict_value": repr(empty_dct),
             "null_value_value": repr(null_val)
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - empty_string
       - empty_list
@@ -73,13 +77,6 @@ nodes:
       - null_value
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

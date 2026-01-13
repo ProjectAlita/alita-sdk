@@ -1,0 +1,112 @@
+name: "TC1 - Basic Types"
+description: "Verify simple type definitions (str, int, bool, float) work correctly in structured output"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  greeting:
+    type: str
+  count:
+    type: int
+  pi_value:
+    type: float
+  sky_is_blue:
+    type: bool
+  test_results:
+    type: dict
+
+entry_point: generate_structured_output
+
+nodes:
+  - id: generate_structured_output
+    type: llm
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data."
+      task:
+        type: fixed
+        value: |
+          Generate the following information:
+          - A greeting message (string)
+          - The number 42 (integer)
+          - The value 3.14 (float)
+          - Whether the sky is blue (boolean, should be true)
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - greeting
+      - count
+      - pi_value
+      - sky_is_blue
+    structured_output: true
+    structured_output_dict:
+      greeting: "str"
+      count: "int"
+      pi_value: "float"
+      sky_is_blue: "bool"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify the structured output types
+        greeting = alita_state.get('greeting')
+        count = alita_state.get('count')
+        pi_value = alita_state.get('pi_value')
+        sky_is_blue = alita_state.get('sky_is_blue')
+
+        type_checks = {
+            "greeting_is_str": isinstance(greeting, str),
+            "count_is_int": isinstance(count, int),
+            "pi_value_is_float": isinstance(pi_value, (int, float)),
+            "sky_is_blue_is_bool": isinstance(sky_is_blue, bool)
+        }
+
+        value_checks = {
+            "greeting_not_empty": bool(greeting),
+            "count_is_42": count == 42,
+            "pi_value_reasonable": pi_value is not None and 3.0 < pi_value < 4.0,
+            "sky_is_blue_true": sky_is_blue == True
+        }
+
+        all_types_ok = all(type_checks.values())
+        all_values_ok = all(value_checks.values())
+
+        result = {
+            "test_passed": all_types_ok and all_values_ok,
+            "type_checks": type_checks,
+            "value_checks": value_checks,
+            "actual_values": {
+                "greeting": greeting,
+                "count": count,
+                "pi_value": pi_value,
+                "sky_is_blue": sky_is_blue
+            },
+            "actual_types": {
+                "greeting": type(greeting).__name__ if greeting is not None else "NoneType",
+                "count": type(count).__name__ if count is not None else "NoneType",
+                "pi_value": type(pi_value).__name__ if pi_value is not None else "NoneType",
+                "sky_is_blue": type(sky_is_blue).__name__ if sky_is_blue is not None else "NoneType"
+            }
+        }
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
+    input:
+      - greeting
+      - count
+      - pi_value
+      - sky_is_blue
+    output:
+      - test_results
+      - messages
+    structured_output: true
+    transition: END

@@ -1,0 +1,138 @@
+name: "TC9 - Complex State Init"
+description: "Verify structured output works with pre-populated list state containing complex objects"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  # Pre-populated list with complex objects (simulating real-world data)
+  source_data:
+    type: list
+    value:
+      - id: "item_1"
+        name: "First Item"
+        value: 100
+      - id: "item_2"
+        name: "Second Item"
+        value: 200
+      - id: "item_3"
+        name: "Third Item"
+        value: 300
+  processed_data:
+    type: list
+  summary:
+    type: str
+  total_value:
+    type: int
+  test_results:
+    type: dict
+
+entry_point: process_complex_state
+
+nodes:
+  - id: process_complex_state
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a data processor that transforms and summarizes structured data."
+      task:
+        type: fstring
+        value: |
+          Process the following source data and return:
+          1. processed_data: Transform each item by adding a "processed" field set to true
+          2. summary: A brief summary of the data
+          3. total_value: The sum of all values (should be 600)
+
+          Source data:
+          {source_data}
+
+          Return the processed results as JSON with keys: processed_data, summary, total_value
+    input:
+      - source_data
+    output:
+      - processed_data
+      - summary
+      - total_value
+    structured_output: true
+    structured_output_dict:
+      processed_data: "list[dict]"
+      summary: "str"
+      total_value: "int"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify complex state was properly accessed and processed
+        source_data = alita_state.get('source_data', [])
+        processed_data = alita_state.get('processed_data', [])
+        summary = alita_state.get('summary', '')
+        total_value = alita_state.get('total_value', 0)
+
+        # Check source data was accessible
+        source_checks = {
+            "source_data_is_list": isinstance(source_data, list),
+            "source_data_has_items": len(source_data) == 3 if isinstance(source_data, list) else False,
+            "source_items_are_dicts": all(isinstance(item, dict) for item in source_data) if source_data else False
+        }
+
+        # Check processed output
+        output_checks = {
+            "processed_data_is_list": isinstance(processed_data, list),
+            "processed_data_not_empty": len(processed_data) > 0 if isinstance(processed_data, list) else False,
+            "processed_items_are_dicts": all(isinstance(item, dict) for item in processed_data) if processed_data else False,
+            "summary_is_str": isinstance(summary, str),
+            "total_value_is_int": isinstance(total_value, int)
+        }
+
+        # Verify total value calculation
+        value_checks = {
+            "total_value_correct": total_value == 600,
+            "summary_not_empty": bool(summary)
+        }
+
+        all_source_ok = all(source_checks.values())
+        all_output_ok = all(output_checks.values())
+
+        result = {
+            "test_passed": all_source_ok and all_output_ok,
+            "complex_state_working": all_source_ok,
+            "source_data_checks": source_checks,
+            "output_checks": output_checks,
+            "value_checks": value_checks,
+            "actual_values": {
+                "source_data_count": len(source_data) if isinstance(source_data, list) else 0,
+                "processed_data_count": len(processed_data) if isinstance(processed_data, list) else 0,
+                "summary": summary,
+                "total_value": total_value
+            },
+            "actual_types": {
+                "source_data": type(source_data).__name__,
+                "processed_data": type(processed_data).__name__,
+                "summary": type(summary).__name__ if summary is not None else "NoneType",
+                "total_value": type(total_value).__name__ if total_value is not None else "NoneType"
+            },
+            "test_description": "Pre-populated list state with complex dict objects"
+        }
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
+    input:
+      - source_data
+      - processed_data
+      - summary
+      - total_value
+    output:
+      - test_results
+      - messages
+    structured_output: true
+    transition: END

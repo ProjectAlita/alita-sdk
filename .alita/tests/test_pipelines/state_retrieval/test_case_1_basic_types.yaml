@@ -1,4 +1,4 @@
-name: "Test Case 1 - Basic Types"
+name: "SR1 - Basic Types"
 description: "Verify basic primitive types are correctly passed to code node"
 
 state:
@@ -84,7 +84,11 @@ nodes:
                 }
             }
 
-        {"test_results": result}
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - string_var
       - integer_var
@@ -92,13 +96,6 @@ nodes:
       - boolean_var
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: "print_results"
-
-  - id: "print_results"
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

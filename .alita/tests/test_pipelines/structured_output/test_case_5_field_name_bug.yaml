@@ -1,0 +1,138 @@
+name: "TC5 - Field Name Bug"
+description: "Verify field names containing 'list' substring don't trigger false type conversion"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  blacklist:
+    type: str
+  playlist:
+    type: str
+  allowlist:
+    type: str
+  checklist:
+    type: list
+  actual_list:
+    type: list
+  test_results:
+    type: dict
+
+entry_point: generate_with_list_field_names
+
+nodes:
+  - id: generate_with_list_field_names
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data."
+      task:
+        type: fixed
+        value: |
+          Generate the following information:
+          1. A blacklist field - a single string value "blocked_user_123"
+          2. A playlist field - a single string value "My Favorite Songs"
+          3. An allowlist field - a single string value "approved_item_456"
+          4. A checklist field - this should be a list of strings: ["item1", "item2", "item3"]
+          5. An actual_list field - this should also be a list: ["a", "b", "c"]
+    output:
+      - blacklist
+      - playlist
+      - allowlist
+      - checklist
+      - actual_list
+    structured_output: true
+    structured_output_dict:
+      blacklist: "str"
+      playlist: "str"
+      allowlist: "str"
+      checklist: "list[str]"
+      actual_list: "list"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # BUG FIX VERIFICATION
+        # Before the fix, field names containing "list" (like "blacklist", "playlist")
+        # were incorrectly triggering type conversion because the code used:
+        #   if 'list' in value  (where value was the field NAME, not the type)
+        #
+        # After the fix, only the exact type string "list" triggers conversion
+
+        blacklist_val = alita_state.get('blacklist')
+        playlist_val = alita_state.get('playlist')
+        allowlist_val = alita_state.get('allowlist')
+        checklist_val = alita_state.get('checklist', [])
+        actual_list_val = alita_state.get('actual_list', [])
+
+        # Critical bug fix checks
+        # Fields named *list should NOT be affected by list auto-conversion
+        # Only fields with TYPE "list" should be converted
+
+        bug_fix_checks = {
+            # These should be strings, NOT lists (the bug would make them lists)
+            "blacklist_is_string": isinstance(blacklist_val, str),
+            "playlist_is_string": isinstance(playlist_val, str),
+            "allowlist_is_string": isinstance(allowlist_val, str),
+            # These should be lists (as declared)
+            "checklist_is_list": isinstance(checklist_val, list),
+            "actual_list_is_list": isinstance(actual_list_val, list)
+        }
+
+        # Verify the bug is fixed
+        bug_fixed = (
+            bug_fix_checks["blacklist_is_string"] and
+            bug_fix_checks["playlist_is_string"] and
+            bug_fix_checks["allowlist_is_string"]
+        )
+
+        result = {
+            "test_passed": all(bug_fix_checks.values()),
+            "bug_fix_verification": {
+                "field_name_bug_fixed": bug_fixed,
+                "explanation": "Field names containing 'list' should not trigger type conversion"
+            },
+            "type_checks": bug_fix_checks,
+            "actual_values": {
+                "blacklist": blacklist_val,
+                "playlist": playlist_val,
+                "allowlist": allowlist_val,
+                "checklist": checklist_val,
+                "actual_list": actual_list_val
+            },
+            "actual_types": {
+                "blacklist": type(blacklist_val).__name__ if blacklist_val is not None else "NoneType",
+                "playlist": type(playlist_val).__name__ if playlist_val is not None else "NoneType",
+                "allowlist": type(allowlist_val).__name__ if allowlist_val is not None else "NoneType",
+                "checklist": type(checklist_val).__name__,
+                "actual_list": type(actual_list_val).__name__
+            },
+            "bug_indicator": {
+                "would_fail_before_fix": not bug_fixed,
+                "reason": "Before fix: if 'list' in value checked field NAME instead of type"
+            }
+        }
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
+    input:
+      - blacklist
+      - playlist
+      - allowlist
+      - checklist
+      - actual_list
+    output:
+      - test_results
+      - messages
+    structured_output: true
+    transition: END

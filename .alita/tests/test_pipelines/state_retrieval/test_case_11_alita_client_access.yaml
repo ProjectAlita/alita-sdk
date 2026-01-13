@@ -1,4 +1,4 @@
-name: "Test Case 11 - alita_client Access from Code"
+name: "SR11 - alita_client Access"
 description: "Verify alita_client is accessible from code nodes for unsecret and other operations"
 
 state:
@@ -65,18 +65,15 @@ nodes:
             "secret_name_from_state": secret_name,
             "secret_name_correct": secret_name_correct
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - secret_name
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

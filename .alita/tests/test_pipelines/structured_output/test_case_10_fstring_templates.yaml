@@ -1,0 +1,165 @@
+name: "TC10 - fstring Templates"
+description: "Verify fstring task templates work correctly with complex variable interpolation and structured output"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  # Configuration variables for fstring interpolation
+  output_format:
+    type: str
+    value: "JSON"
+  num_items:
+    type: int
+    value: 3
+  category:
+    type: str
+    value: "technology"
+  include_metadata:
+    type: bool
+    value: true
+  # Output variables
+  generated_items:
+    type: list
+  metadata:
+    type: dict
+  status:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: generate_with_fstring
+
+nodes:
+  - id: generate_with_fstring
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fstring
+        value: |
+          You are a data generator that produces output in {output_format} format.
+          You specialize in generating content for the {category} category.
+      task:
+        type: fstring
+        value: |
+          Generate exactly {num_items} items in the {category} category.
+
+          Requirements:
+          - Output format: {output_format}
+          - Include metadata: {include_metadata}
+          - Each item should have: id, name, description
+
+          If include_metadata is true, also provide:
+          - metadata object with: generated_at (current date string), category, item_count
+          - status: "success"
+
+          Return the results with keys: generated_items, metadata, status
+    input:
+      - output_format
+      - num_items
+      - category
+      - include_metadata
+    output:
+      - generated_items
+      - metadata
+      - status
+    structured_output: true
+    structured_output_dict:
+      generated_items: "list[dict]"
+      metadata: "dict"
+      status: "str"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify fstring interpolation worked and structured output is correct
+        output_format = alita_state.get('output_format', '')
+        num_items = alita_state.get('num_items', 0)
+        category = alita_state.get('category', '')
+        include_metadata = alita_state.get('include_metadata', False)
+
+        generated_items = alita_state.get('generated_items', [])
+        metadata = alita_state.get('metadata', {})
+        status = alita_state.get('status', '')
+
+        # Check fstring variables were properly passed
+        fstring_checks = {
+            "output_format_set": output_format == "JSON",
+            "num_items_set": num_items == 3,
+            "category_set": category == "technology",
+            "include_metadata_set": include_metadata == True
+        }
+
+        # Check output structure
+        output_checks = {
+            "generated_items_is_list": isinstance(generated_items, list),
+            "generated_items_count_correct": len(generated_items) == num_items if isinstance(generated_items, list) else False,
+            "items_are_dicts": all(isinstance(item, dict) for item in generated_items) if generated_items else False,
+            "metadata_is_dict": isinstance(metadata, dict),
+            "status_is_str": isinstance(status, str)
+        }
+
+        # Check item structure
+        item_structure_ok = True
+        if isinstance(generated_items, list) and generated_items:
+            for item in generated_items:
+                if not isinstance(item, dict):
+                    item_structure_ok = False
+                    break
+                if 'name' not in item:
+                    item_structure_ok = False
+                    break
+
+        # Check metadata if expected
+        metadata_checks = {
+            "metadata_has_category": 'category' in metadata if isinstance(metadata, dict) and include_metadata else True,
+            "status_is_success": status.lower() == "success" if status else False
+        }
+
+        all_fstring_ok = all(fstring_checks.values())
+        all_output_ok = all(output_checks.values())
+
+        result = {
+            "test_passed": all_fstring_ok and all_output_ok and item_structure_ok,
+            "fstring_interpolation_working": all_fstring_ok,
+            "fstring_checks": fstring_checks,
+            "output_checks": output_checks,
+            "metadata_checks": metadata_checks,
+            "item_structure_valid": item_structure_ok,
+            "actual_values": {
+                "generated_items_count": len(generated_items) if isinstance(generated_items, list) else 0,
+                "metadata": metadata,
+                "status": status
+            },
+            "actual_types": {
+                "generated_items": type(generated_items).__name__,
+                "metadata": type(metadata).__name__,
+                "status": type(status).__name__ if status is not None else "NoneType"
+            },
+            "test_description": "fstring templates with multiple variable types interpolated"
+        }
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
+    input:
+      - output_format
+      - num_items
+      - category
+      - include_metadata
+      - generated_items
+      - metadata
+      - status
+    output:
+      - test_results
+      - messages
+    structured_output: true
+    transition: END

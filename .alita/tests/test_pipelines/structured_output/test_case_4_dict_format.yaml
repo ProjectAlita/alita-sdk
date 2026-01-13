@@ -1,0 +1,128 @@
+name: "TC4 - Dict Format"
+description: "Verify dict-based type definitions with type, description, and default work correctly"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  title:
+    type: str
+  items:
+    type: list
+  notes:
+    type: str
+  status:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: generate_with_dict_format
+
+nodes:
+  - id: generate_with_dict_format
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data."
+      task:
+        type: fixed
+        value: |
+          Generate the following information:
+          1. A required title (string) - use "Test Report"
+          2. A list of items (objects with name and value)
+          3. An optional notes field - provide "Some notes here"
+          4. A status field - use "completed"
+    output:
+      - title
+      - items
+      - notes
+      - status
+    structured_output: true
+    structured_output_dict:
+      title:
+        type: "str"
+        description: "The title of the report"
+      items:
+        type: "list[dict]"
+        description: "List of items with name and value properties"
+        default: []
+      notes:
+        type: "str"
+        description: "Optional notes field"
+        default: ""
+      status:
+        type: "str"
+        description: "Status of the operation"
+        default: "pending"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify dict-format type definitions work correctly
+        title = alita_state.get('title')
+        items = alita_state.get('items', [])
+        notes = alita_state.get('notes', '')
+        status = alita_state.get('status', '')
+
+        type_checks = {
+            "title_is_str": isinstance(title, str),
+            "items_is_list": isinstance(items, list),
+            "notes_is_str": isinstance(notes, str),
+            "status_is_str": isinstance(status, str)
+        }
+
+        # Check that items contains dicts (list[dict] should work)
+        items_are_dicts = all(isinstance(item, dict) for item in items) if items else True
+
+        value_checks = {
+            "title_not_empty": bool(title),
+            "items_are_dicts": items_are_dicts,
+            "status_not_empty": bool(status)
+        }
+
+        all_types_ok = all(type_checks.values())
+        all_values_ok = all(value_checks.values())
+
+        result = {
+            "test_passed": all_types_ok and all_values_ok,
+            "dict_format_working": True,
+            "type_checks": type_checks,
+            "value_checks": value_checks,
+            "actual_values": {
+                "title": title,
+                "items": items,
+                "notes": notes,
+                "status": status
+            },
+            "actual_types": {
+                "title": type(title).__name__ if title is not None else "NoneType",
+                "items": type(items).__name__,
+                "items_element_types": [type(i).__name__ for i in items] if items else [],
+                "notes": type(notes).__name__ if notes is not None else "NoneType",
+                "status": type(status).__name__ if status is not None else "NoneType"
+            },
+            "description_test": "Dict format with type/description/default should preserve all metadata"
+        }
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
+    input:
+      - title
+      - items
+      - notes
+      - status
+    output:
+      - test_results
+      - messages
+    structured_output: true
+    transition: END

@@ -1,4 +1,4 @@
-name: "Test Case 10 - Large String Values"
+name: "SR10 - Large Strings"
 description: "Stress test with large string payloads (simulating API responses)"
 
 state:
@@ -134,20 +134,17 @@ nodes:
             "pattern_length": pattern_length,
             "pattern_has_special": pattern_has_special
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - large_json_response
       - large_html_content
       - repeated_pattern
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

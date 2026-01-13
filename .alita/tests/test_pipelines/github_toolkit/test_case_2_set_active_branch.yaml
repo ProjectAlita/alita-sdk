@@ -1,0 +1,72 @@
+name: "GH2 - Set Active Branch"
+description: "Verify set_active_branch tool switches working branch"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  target_branch:
+    type: str
+    value: "main"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_set_branch
+
+nodes:
+  - id: invoke_set_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        tool_result = alita_state.get('tool_result')
+        target_branch = alita_state.get('target_branch', 'main')
+
+        tool_executed = tool_result is not None
+        error_message = None
+
+        # Verify success message
+        branch_set_successfully = False
+        if tool_result and isinstance(tool_result, str):
+            branch_set_successfully = target_branch in tool_result or 'set to' in tool_result.lower()
+
+        test_results = {
+            "test_passed": tool_executed and branch_set_successfully,
+            "tool_executed": tool_executed,
+            "target_branch": target_branch,
+            "branch_set_successfully": branch_set_successfully,
+            "tool_response": str(tool_result)[:500] if tool_result else None,
+            "error": error_message
+        }
+        test_results
+        # Add results to messages
+    input:
+      - target_branch
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

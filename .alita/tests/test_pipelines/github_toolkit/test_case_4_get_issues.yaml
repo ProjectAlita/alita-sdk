@@ -1,0 +1,98 @@
+name: "GH4 - Get Issues"
+description: "Verify get_issues tool retrieves list of issues from repository"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  issue_state:
+    type: str
+    value: "open"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_issues
+
+nodes:
+  - id: invoke_get_issues
+    type: toolkit
+    tool: get_issues
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - issue_state
+    input_mapping:
+      state:
+        type: variable
+        value: issue_state
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        issues_result = alita_state.get('tool_result')
+        issue_state = alita_state.get('issue_state', 'open')
+
+        tool_executed = issues_result is not None
+        error_message = None
+        issues_list = []
+
+        try:
+            # Parse result
+            if isinstance(issues_result, list):
+                issues_list = issues_result
+            elif isinstance(issues_result, str):
+                import json
+                try:
+                    issues_list = json.loads(issues_result)
+                except:
+                    pass
+        except Exception as e:
+            error_message = str(e)
+
+        # Verify structure
+        has_issues = len(issues_list) > 0 if isinstance(issues_list, list) else False
+        issues_have_numbers = all('number' in issue for issue in issues_list[:5]) if issues_list else False
+
+        # Extract summary info
+        issues_summary = []
+        if isinstance(issues_list, list):
+            for issue in issues_list[:5]:
+                if isinstance(issue, dict):
+                    issues_summary.append({
+                        "number": issue.get('number'),
+                        "title": issue.get('title', '')[:50],
+                        "state": issue.get('state')
+                    })
+
+        test_results = {
+            "test_passed": tool_executed and has_issues,
+            "tool_executed": tool_executed,
+            "issue_state_filter": issue_state,
+            "issues_count": len(issues_list) if isinstance(issues_list, list) else 0,
+            "has_issues": has_issues,
+            "issues_have_numbers": issues_have_numbers,
+            "issues_sample": issues_summary,
+            "error": error_message
+        }
+        test_results
+        # Add results to messages
+    input:
+      - issue_state
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

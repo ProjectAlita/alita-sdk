@@ -1,4 +1,4 @@
-name: "Test Case 6 - LLM Output with Code Blocks"
+name: "SR6 - LLM Code Blocks"
 description: "Verify LLM-generated content with markdown code blocks is preserved as string"
 
 state:
@@ -59,17 +59,15 @@ nodes:
             "has_add": has_add,
             "preview": response[:200] if is_string else str(response)[:200]
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - llm_response
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END

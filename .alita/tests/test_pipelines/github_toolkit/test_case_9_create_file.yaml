@@ -1,0 +1,147 @@
+name: "GH9 - Create File"
+description: "Verify create_file tool creates a new file in repository branch"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  target_branch:
+    type: str
+    value: "tc-file-ops-2025-12-08"
+  file_path_base:
+    type: str
+    value: "test-data/generated/pipeline-test"
+  file_path:
+    type: str
+  file_contents:
+    type: str
+  tool_result:
+    type: str
+  branch_setup_result:
+    type: dict
+  created_file_path:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_set_branch
+
+nodes:
+  - id: invoke_set_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: prepare_file
+
+  - id: prepare_file
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Check branch was set
+        branch_result = alita_state.get('tool_result')
+        target_branch = alita_state.get('target_branch', 'tc-file-ops-2025-12-08')
+        branch_set = target_branch in str(branch_result) or 'set to' in str(branch_result).lower() if branch_result else False
+
+        branch_setup_result = {
+            "branch_set": branch_set,
+            "target_branch": target_branch
+        }
+
+        # Generate unique file name with timestamp and random suffix
+        base_file_path = alita_state.get('file_path_base', 'test-data/generated/pipeline-test')
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"{base_file_path}-{timestamp}-{random_suffix}.txt"
+        file_contents = f"Pipeline test file created at {timestamp}\nRandom ID: {random_suffix}\nThis is a test file created by GH9 pipeline test."
+
+        # Return outputs as dict for structured capture
+        {"branch_setup_result": branch_setup_result, "file_path": file_path, "file_contents": file_contents}
+    input:
+      - tool_result
+      - target_branch
+      - file_path_base
+    output:
+      - branch_setup_result
+      - file_path
+      - file_contents
+    structured_output: true
+    transition: invoke_create_file
+
+  - id: invoke_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_contents
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_contents
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        create_result = alita_state.get('tool_result')
+        file_path = alita_state.get('file_path')
+        file_contents = alita_state.get('file_contents', '')
+
+        tool_executed = create_result is not None
+        error_message = None
+
+        # Verify file was created
+        file_created = False
+        if create_result:
+            result_str = str(create_result).lower()
+            file_created = 'created' in result_str or 'success' in result_str
+
+        test_results = {
+            "test_passed": tool_executed and file_created,
+            "tool_executed": tool_executed,
+            "file_path": file_path,
+            "file_created": file_created,
+            "file_contents_length": len(file_contents),
+            "tool_response": str(create_result)[:500] if create_result else None,
+            "error": error_message
+        }
+
+        created_file_path = file_path
+        test_results
+        # Add results to messages
+    input:
+      - file_path
+      - file_contents
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

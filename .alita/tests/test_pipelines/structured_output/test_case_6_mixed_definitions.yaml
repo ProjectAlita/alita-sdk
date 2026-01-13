@@ -1,0 +1,147 @@
+name: "TC6 - Mixed Definitions"
+description: "Verify both string types and dict definitions can be mixed together"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  name:
+    type: str
+  tags:
+    type: list
+  data_items:
+    type: list
+  count:
+    type: int
+  description:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: generate_mixed_format
+
+nodes:
+  - id: generate_mixed_format
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data."
+      task:
+        type: fixed
+        value: |
+          Generate the following data:
+          1. A simple name string: "Test User"
+          2. A list of tags: ["important", "urgent", "reviewed"]
+          3. A complex data object list with items having 'id' and 'value' fields
+          4. A count number: 42
+          5. An optional description: "This is a test"
+    output:
+      - name
+      - tags
+      - data_items
+      - count
+      - description
+    structured_output: true
+    structured_output_dict:
+      # Simple string format
+      name: "str"
+      # Simple list format
+      tags: "list[str]"
+      # Dict format with description
+      data_items:
+        type: "list[dict]"
+        description: "List of data items with id and value"
+      # Simple int format
+      count: "int"
+      # Dict format with default
+      description:
+        type: "str"
+        description: "Optional description"
+        default: "No description"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify mixed format definitions work together
+        name = alita_state.get('name')
+        tags = alita_state.get('tags', [])
+        data_items = alita_state.get('data_items', [])
+        count = alita_state.get('count')
+        description = alita_state.get('description')
+
+        type_checks = {
+            "name_is_str": isinstance(name, str),
+            "tags_is_list": isinstance(tags, list),
+            "data_items_is_list": isinstance(data_items, list),
+            "count_is_int": isinstance(count, int),
+            "description_is_str": isinstance(description, str)
+        }
+
+        # Check element types
+        element_checks = {
+            "tags_all_strings": all(isinstance(t, str) for t in tags) if tags else True,
+            "data_items_all_dicts": all(isinstance(d, dict) for d in data_items) if data_items else True
+        }
+
+        # Value presence checks
+        value_checks = {
+            "name_present": bool(name),
+            "tags_not_empty": len(tags) > 0,
+            "count_positive": count is not None and count > 0
+        }
+
+        all_types_ok = all(type_checks.values())
+        all_elements_ok = all(element_checks.values())
+        all_values_ok = all(value_checks.values())
+
+        result = {
+            "test_passed": all_types_ok and all_elements_ok,
+            "mixed_format_working": all_types_ok,
+            "type_checks": type_checks,
+            "element_checks": element_checks,
+            "value_checks": value_checks,
+            "actual_values": {
+                "name": name,
+                "tags": tags,
+                "data_items": data_items,
+                "count": count,
+                "description": description
+            },
+            "actual_types": {
+                "name": type(name).__name__ if name is not None else "NoneType",
+                "tags": type(tags).__name__,
+                "tags_elements": [type(t).__name__ for t in tags] if tags else [],
+                "data_items": type(data_items).__name__,
+                "data_items_elements": [type(d).__name__ for d in data_items] if data_items else [],
+                "count": type(count).__name__ if count is not None else "NoneType",
+                "description": type(description).__name__ if description is not None else "NoneType"
+            },
+            "format_explanation": {
+                "string_format_fields": ["name", "tags", "count"],
+                "dict_format_fields": ["data_items", "description"]
+            }
+        }
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
+    input:
+      - name
+      - tags
+      - data_items
+      - count
+      - description
+    output:
+      - test_results
+      - messages
+    structured_output: true
+    transition: END

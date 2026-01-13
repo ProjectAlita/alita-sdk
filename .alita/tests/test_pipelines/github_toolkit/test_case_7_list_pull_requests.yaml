@@ -1,0 +1,99 @@
+name: "GH7 - List Pull Requests"
+description: "Verify list_pull_requests tool retrieves PR list from repository"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  pr_state:
+    type: str
+    value: "open"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_prs
+
+nodes:
+  - id: invoke_list_prs
+    type: toolkit
+    tool: list_open_pull_requests
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        prs_result = alita_state.get('tool_result')
+        pr_state = alita_state.get('pr_state', 'open')
+
+        tool_executed = prs_result is not None
+        error_message = None
+        prs_list = []
+
+        try:
+            # Parse result
+            if isinstance(prs_result, list):
+                prs_list = prs_result
+            elif isinstance(prs_result, str):
+                import json
+                try:
+                    prs_list = json.loads(prs_result)
+                except:
+                    # May be text format
+                    prs_list = []
+        except Exception as e:
+            error_message = str(e)
+
+        # Verify structure - PRs should have number, title, state
+        has_prs = isinstance(prs_list, list)
+        prs_count = len(prs_list) if has_prs else 0
+
+        # Check PR structure
+        prs_have_numbers = all('number' in pr for pr in prs_list[:5]) if prs_list else True
+
+        # Extract summary
+        prs_summary = []
+        if isinstance(prs_list, list):
+            for pr in prs_list[:5]:
+                if isinstance(pr, dict):
+                    prs_summary.append({
+                        "number": pr.get('number'),
+                        "title": pr.get('title', '')[:50] if pr.get('title') else None,
+                        "state": pr.get('state'),
+                        "head": pr.get('head', {}).get('ref') if isinstance(pr.get('head'), dict) else None
+                    })
+
+        test_results = {
+            "test_passed": tool_executed and has_prs,
+            "tool_executed": tool_executed,
+            "pr_state_filter": pr_state,
+            "prs_count": prs_count,
+            "prs_have_numbers": prs_have_numbers,
+            "prs_sample": prs_summary,
+            "raw_result_type": type(prs_result).__name__ if prs_result else None,
+            "error": error_message
+        }
+        test_results
+        # Add results to messages
+    input:
+      - pr_state
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

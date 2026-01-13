@@ -1,0 +1,98 @@
+name: "GH5 - Get Issue"
+description: "Verify get_issue tool retrieves specific issue details by number"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  issue_number:
+    type: int
+    value: 1
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_issue
+
+nodes:
+  - id: invoke_get_issue
+    type: toolkit
+    tool: get_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - issue_number
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        issue_result = alita_state.get('tool_result')
+        issue_number = alita_state.get('issue_number', 1)
+
+        tool_executed = issue_result is not None
+        error_message = None
+        issue_data = {}
+
+        try:
+            # Parse result
+            if isinstance(issue_result, dict):
+                issue_data = issue_result
+            elif isinstance(issue_result, str):
+                import json
+                try:
+                    issue_data = json.loads(issue_result)
+                except:
+                    issue_data = {'raw': issue_result}
+        except Exception as e:
+            error_message = str(e)
+
+        # Verify structure - issue should have number, title, state, body
+        has_number = 'number' in issue_data
+        has_title = 'title' in issue_data
+        has_state = 'state' in issue_data
+        number_matches = issue_data.get('number') == issue_number
+
+        test_results = {
+            "test_passed": tool_executed and has_number and number_matches,
+            "tool_executed": tool_executed,
+            "requested_issue": issue_number,
+            "issue_found": has_number,
+            "number_matches": number_matches,
+            "issue_details": {
+                "number": issue_data.get('number'),
+                "title": issue_data.get('title', '')[:100] if issue_data.get('title') else None,
+                "state": issue_data.get('state'),
+                "has_body": 'body' in issue_data
+            },
+            "structure_check": {
+                "has_number": has_number,
+                "has_title": has_title,
+                "has_state": has_state
+            },
+            "error": error_message
+        }
+        test_results
+        # Add results to messages
+    input:
+      - issue_number
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

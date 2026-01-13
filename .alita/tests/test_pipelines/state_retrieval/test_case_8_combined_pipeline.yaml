@@ -1,4 +1,4 @@
-name: "Test Case 8 - Combined Pipeline Test"
+name: "SR8 - Combined Pipeline"
 description: "Full integration test simulating real usage - LLM generates code, code node processes it"
 
 state:
@@ -82,7 +82,11 @@ nodes:
             "extracted_code_preview": extracted_code[:50] if extracted_code else None,
             "llm_output_preview": output[:100] if output else None
         }
-        result
+        test_results = result
+
+        # Add results to messages
+        messages = alita_state.get('messages', [])
+        messages.append({"role": "assistant", "content": str(test_results)})
     input:
       - llm_output
       - iteration_count
@@ -90,13 +94,6 @@ nodes:
       - user_query
     output:
       - test_results
+      - messages
     structured_output: true
-    transition: print_results
-
-  - id: print_results
-    type: printer
-    input_mapping:
-      printer:
-        type: variable
-        value: test_results
     transition: END
