@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from copy import deepcopy
@@ -12,6 +13,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
 from ..langchain.utils import propagate_the_input_mapping
+from ..utils.serialization import safe_serialize
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +30,32 @@ class FunctionTool(BaseTool):
     alita_client: Optional[Any] = None
 
     def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> str:
-        """Prepare input for PyodideSandboxTool by injecting state into the code block."""
-        # add state into the code block here since it might be changed during the execution of the code
-        state_copy = deepcopy(state)
+        """Prepare input for PyodideSandboxTool by injecting state into the code block.
 
-        del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
-        # inject state into the code block as alita_state variable
-        pyodide_predata = f"#state dict\nalita_state = {state_copy}\n"
+        Uses base64 encoding to avoid string escaping issues when passing JSON
+        through multiple layers of parsing (Python -> Deno -> Pyodide).
+        """
+        state_copy = replace_escaped_newlines(deepcopy(state))
+
+        # remove messages to avoid issues with pickling without langchain-core
+        if 'messages' in state_copy:
+            del state_copy['messages']
+
+        # Use safe_serialize to handle Pydantic models, datetime, and other non-JSON types
+        state_json = safe_serialize(state_copy)
+
+        # Use base64 encoding to avoid all string escaping issues
+        # This is more robust than repr() when the code passes through multiple parsers
+        state_json_b64 = base64.b64encode(state_json.encode('utf-8')).decode('ascii')
+
+        # Generate code that decodes base64 and parses JSON inside Pyodide
+        pyodide_predata = f'''#state dict
+import json
+import base64
+_state_json_b64 = "{state_json_b64}"
+_state_json = base64.b64decode(_state_json_b64).decode('utf-8')
+alita_state = json.loads(_state_json)
+'''
         return pyodide_predata
 
     def _handle_pyodide_output(self, tool_result: Any) -> dict:
@@ -128,8 +149,8 @@ class FunctionTool(BaseTool):
                     return { self.output_variables[0]: tool_result }
         except ValidationError:
             return {"messages": [
-                {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
-        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
+                {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError.
+        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was
         {func_args}"""}]}
 
     def _run(self, *args, **kwargs):

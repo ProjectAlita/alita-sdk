@@ -1,0 +1,80 @@
+name: "Test Case 3 - Special Characters and Quotes"
+description: "Verify quotes, backslashes, and unicode are handled correctly"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  sql_query:
+    type: str
+    value: "SELECT * FROM users WHERE name = 'John' AND status = \"active\""
+  file_path:
+    type: str
+    value: "C:\\Users\\admin\\file.txt"
+  unicode_text:
+    type: str
+    value: "Привет мир! 你好世界 \U0001F389"
+  regex_pattern:
+    type: str
+    value: "^\\d+\\.\\d+$"
+  test_results:
+    type: dict
+
+entry_point: verify_special_chars
+
+nodes:
+  - id: verify_special_chars
+    type: code
+    code:
+      type: fixed
+      value: |
+        sql = alita_state.get("sql_query", "")
+        path = alita_state.get("file_path", "")
+        unicode_txt = alita_state.get("unicode_text", "")
+        regex = alita_state.get("regex_pattern", "")
+
+        # Check for single and double quotes in SQL
+        sql_has_quotes = "'" in sql and '"' in sql
+
+        # Check for backslash in file path
+        path_has_backslash = chr(92) in path
+
+        # Check unicode preservation
+        unicode_preserved = 'Привет' in unicode_txt and chr(127881) in unicode_txt
+
+        # Check regex pattern (should be raw string equivalent)
+        expected_regex = "^" + chr(92) + "d+" + chr(92) + "." + chr(92) + "d+$"
+        regex_correct = regex == expected_regex
+
+        all_passed = sql_has_quotes and path_has_backslash and unicode_preserved and regex_correct
+
+        result = {
+            "test_passed": all_passed,
+            "sql_has_quotes": sql_has_quotes,
+            "path_has_backslash": path_has_backslash,
+            "unicode_preserved": unicode_preserved,
+            "regex_correct": regex_correct,
+            "sql_preview": sql[:50],
+            "path_value": path,
+            "regex_value": regex,
+            "expected_regex": expected_regex
+        }
+        result
+    input:
+      - sql_query
+      - file_path
+      - unicode_text
+      - regex_pattern
+    output:
+      - test_results
+    structured_output: true
+    transition: print_results
+
+  - id: print_results
+    type: printer
+    input_mapping:
+      printer:
+        type: variable
+        value: test_results
+    transition: END

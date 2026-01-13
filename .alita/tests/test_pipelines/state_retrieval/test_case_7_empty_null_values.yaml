@@ -1,0 +1,85 @@
+name: "Test Case 7 - Empty and Null Values"
+description: "Verify edge cases with empty/null values are handled correctly"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  empty_string:
+    type: str
+    value: ""
+  empty_list:
+    type: list
+    value: []
+  empty_dict:
+    type: dict
+    value: {}
+  null_value:
+    type: str
+    value: null
+  test_results:
+    type: dict
+
+entry_point: verify_empty_null
+
+nodes:
+  - id: verify_empty_null
+    type: code
+    code:
+      type: fixed
+      value: |
+        empty_str = alita_state.get('empty_string')
+        empty_lst = alita_state.get('empty_list')
+        empty_dct = alita_state.get('empty_dict')
+        null_val = alita_state.get('null_value')
+
+        empty_string_ok = empty_str == ""
+        empty_list_ok = empty_lst == []
+        empty_dict_ok = empty_dct == {}
+        null_is_none = null_val is None
+
+        all_types_correct = (
+            isinstance(empty_str, str) and
+            isinstance(empty_lst, list) and
+            isinstance(empty_dct, dict)
+        )
+
+        all_passed = (
+            empty_string_ok and
+            empty_list_ok and
+            empty_dict_ok and
+            null_is_none and
+            all_types_correct
+        )
+
+        result = {
+            "test_passed": all_passed,
+            "empty_string_ok": empty_string_ok,
+            "empty_list_ok": empty_list_ok,
+            "empty_dict_ok": empty_dict_ok,
+            "null_is_none": null_is_none,
+            "all_types_correct": all_types_correct,
+            "empty_string_value": repr(empty_str),
+            "empty_list_value": repr(empty_lst),
+            "empty_dict_value": repr(empty_dct),
+            "null_value_value": repr(null_val)
+        }
+        result
+    input:
+      - empty_string
+      - empty_list
+      - empty_dict
+      - null_value
+    output:
+      - test_results
+    structured_output: true
+    transition: print_results
+
+  - id: print_results
+    type: printer
+    input_mapping:
+      printer:
+        type: variable
+        value: test_results
+    transition: END

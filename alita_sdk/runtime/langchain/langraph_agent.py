@@ -225,11 +225,19 @@ class StateDefaultNode(Runnable):
         for key, value in self.default_vars.items():
             if isinstance(value, dict) and 'value' in value:
                 temp_value = value['value']
-                try:
-                    result[key] = ast.literal_eval(temp_value)
-                except:
-                    logger.debug("Unable to evaluate value, using as is")
+                declared_type = value.get('type', '').lower()
+
+                # If the declared type is 'str' or 'string', preserve the string value
+                # Don't auto-convert even if it looks like a valid Python literal
+                if declared_type in ('str', 'string'):
                     result[key] = temp_value
+                else:
+                    # For other types, try to evaluate as Python literal
+                    try:
+                        result[key] = ast.literal_eval(temp_value)
+                    except:
+                        logger.debug("Unable to evaluate value, using as is")
+                        result[key] = temp_value
         return result
 
 

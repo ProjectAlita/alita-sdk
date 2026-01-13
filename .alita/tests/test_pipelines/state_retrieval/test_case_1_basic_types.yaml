@@ -1,0 +1,104 @@
+name: "Test Case 1 - Basic Types"
+description: "Verify basic primitive types are correctly passed to code node"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  string_var:
+    type: str
+    value: "Hello World"
+  integer_var:
+    type: int
+    value: 42
+  float_var:
+    type: float
+    value: 3.14159
+  boolean_var:
+    type: bool
+    value: true
+  test_results:
+    type: dict
+
+entry_point: "verify_basic_types"
+
+nodes:
+  - id: "verify_basic_types"
+    type: "code"
+    code:
+      type: fixed
+      value: |
+        # Test Case 1: Verify basic primitive types
+        # This tests that alita_state is a dict (not a string!)
+        # and all basic types are correctly preserved
+
+        is_dict = isinstance(alita_state, dict)
+
+        if not is_dict:
+            result = {
+                "test_passed": False,
+                "error": "CRITICAL: alita_state is not a dict! Type: " + str(type(alita_state)),
+                "bug_present": True
+            }
+        else:
+            # Check types
+            string_val = alita_state.get('string_var')
+            integer_val = alita_state.get('integer_var')
+            float_val = alita_state.get('float_var')
+            boolean_val = alita_state.get('boolean_var')
+
+            type_checks = {
+                "string_is_str": isinstance(string_val, str),
+                "integer_is_int": isinstance(integer_val, int),
+                "float_is_float": isinstance(float_val, float),
+                "boolean_is_bool": isinstance(boolean_val, bool)
+            }
+
+            value_checks = {
+                "string_correct": string_val == "Hello World",
+                "integer_correct": integer_val == 42,
+                "float_correct": abs(float_val - 3.14159) < 0.0001,
+                "boolean_correct": boolean_val == True
+            }
+
+            all_types_ok = all(type_checks.values())
+            all_values_ok = all(value_checks.values())
+
+            result = {
+                "test_passed": all_types_ok and all_values_ok,
+                "state_is_dict": is_dict,
+                "type_checks": type_checks,
+                "value_checks": value_checks,
+                "actual_values": {
+                    "string_var": string_val,
+                    "integer_var": integer_val,
+                    "float_var": float_val,
+                    "boolean_var": boolean_val
+                },
+                "actual_types": {
+                    "string_var": type(string_val).__name__,
+                    "integer_var": type(integer_val).__name__,
+                    "float_var": type(float_val).__name__,
+                    "boolean_var": type(boolean_val).__name__
+                }
+            }
+
+        {"test_results": result}
+    input:
+      - string_var
+      - integer_var
+      - float_var
+      - boolean_var
+    output:
+      - test_results
+    structured_output: true
+    transition: "print_results"
+
+  - id: "print_results"
+    type: printer
+    input_mapping:
+      printer:
+        type: variable
+        value: test_results
+    transition: END
