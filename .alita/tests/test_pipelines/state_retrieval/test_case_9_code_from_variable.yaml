@@ -41,7 +41,8 @@ nodes:
     input:
       - code_to_execute
     output:
-    structured_output: true
+      - test_results
+    structured_output: false
     transition: verify_results
 
   - id: verify_results
