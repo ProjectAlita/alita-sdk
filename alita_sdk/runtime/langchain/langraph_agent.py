@@ -247,9 +247,15 @@ class StateDefaultNode(Runnable):
 
 class PrinterNode(Runnable):
     name = "PrinterNode"
+    DEFAULT_FINAL_MSG = "How to proceed? To resume the pipeline - type anything..."
 
-    def __init__(self, input_mapping: Optional[dict[str, dict]]):
+    def __init__(self, input_mapping: Optional[dict[str, dict]], final_message: Optional[str] = None):
         self.input_mapping = input_mapping
+        # Apply fallback logic for empty/None values
+        if final_message and final_message.strip():
+            self.final_message = final_message.strip()
+        else:
+            self.final_message = self.DEFAULT_FINAL_MSG
 
     def invoke(self, state: BaseStore, config: Optional[RunnableConfig] = None) -> dict:
         logger.info(f"Printer Node - Current state variables: {state}")
@@ -269,7 +275,7 @@ class PrinterNode(Runnable):
             # convert formatted output to string if it's not
             if not isinstance(formatted_output, str):
                 formatted_output = str(formatted_output)
-            formatted_output += f"\n\n-----\n*How to proceed?*\n* *to resume the pipeline - type anything...*"
+            formatted_output += f"\n\n-----\n*{self.final_message}*"
         logger.debug(f"Formatted output: {formatted_output}")
         result[PRINTER_NODE_RS] = formatted_output
         return result
@@ -753,6 +759,7 @@ def create_graph(
             elif node_type == 'printer':
                 lg_builder.add_node(node_id, PrinterNode(
                     input_mapping=node.get('input_mapping', {'printer': {'type': 'fixed', 'value': ''}}),
+                    final_message=node.get('final_message'),
                 ))
 
                 # add interrupts after printer node if specified
