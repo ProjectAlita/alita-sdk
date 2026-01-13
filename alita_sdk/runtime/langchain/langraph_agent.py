@@ -12,13 +12,14 @@ from langchain_core.runnables import Runnable
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.channels.ephemeral_value import EphemeralValue
-from langgraph.errors import GraphRecursionError
+from langgraph.errors import GraphRecursionError, GraphInterrupt
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
+from langgraph.types import interrupt, Command
 
 from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE
 from .mixedAgentRenderes import convert_message_to_json
@@ -273,6 +274,92 @@ class PrinterNode(Runnable):
         logger.debug(f"Formatted output: {formatted_output}")
         result[PRINTER_NODE_RS] = formatted_output
         return result
+
+
+class InterruptNode(Runnable):
+    name = "InterruptNode"
+
+    def __init__(self, prompt: str, condition: Optional[str] = None,
+                 input_variables: Optional[list[str]] = None,
+                 output_variables: Optional[list[str]] = None,
+                 value_type: Optional[str] = None):
+        self.prompt = prompt
+        self.condition = condition
+        self.input_variables = input_variables or ["messages"]
+        self.output_variables = output_variables or []
+        self.value_type = value_type or "str"
+
+    def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> dict:
+        logger.info(f"InterruptNode - evaluating interrupt with prompt template")
+
+        # Collect input variables from state for template rendering
+        input_data = {}
+        for var in self.input_variables:
+            if var in state:
+                input_data[var] = state.get(var)
+
+        # Check if condition is specified and evaluate it
+        if self.condition:
+            logger.debug(f"Evaluating condition: {self.condition}")
+            condition_data = {}
+            for field in self.input_variables:
+                if field == 'messages':
+                    condition_data['messages'] = convert_message_to_json(state.get('messages', []))
+                elif field == 'last_message' and state.get('messages'):
+                    condition_data['last_message'] = state['messages'][-1].content
+                else:
+                    condition_data[field] = state.get(field, "")
+
+            template = EvaluateTemplate(self.condition, condition_data)
+            should_interrupt = template.evaluate()
+
+            # If condition evaluates to False, pass through existing state value
+            if not should_interrupt:
+                logger.info(f"Condition evaluated to False, skipping interrupt")
+                if self.output_variables:
+                    output_var = self.output_variables[0]
+                    existing_value = state.get(output_var, "")
+                    return Command(update={output_var: existing_value})
+                return Command(update={})
+
+        # Render the prompt template using Jinja2
+        from jinja2 import Environment
+        env = Environment()
+        template = env.from_string(self.prompt)
+        rendered_prompt = template.render(**input_data)
+
+        logger.info(f"InterruptNode - pausing execution with prompt: {rendered_prompt}")
+
+        # Call LangGraph's interrupt function to pause execution
+        user_response = interrupt(rendered_prompt)
+
+        logger.info(f"InterruptNode - received user response: {user_response}")
+
+        # Cast the response to the specified type
+        casted_value = self._cast_value(user_response, self.value_type)
+
+        # Store response in output variable
+        if self.output_variables:
+            output_var = self.output_variables[0]
+            logger.debug(f"Storing response in output variable: {output_var} = {casted_value}")
+            return Command(update={output_var: casted_value})
+
+        # No output variable specified, return empty update
+        return Command(update={})
+
+    def _cast_value(self, value: Any, value_type: str) -> Any:
+        """Cast the user response to the specified type."""
+        if value_type == "int":
+            return int(value)
+        elif value_type == "bool":
+            if isinstance(value, str):
+                return value.lower() in ('yes', 'true', '1', 'y')
+            return bool(value)
+        elif value_type == "str":
+            return str(value)
+        else:
+            # Default to string
+            return str(value)
 
 
 class StateModifierNode(Runnable):
@@ -766,6 +853,14 @@ def create_graph(
                 lg_builder.add_conditional_edges(node_id, TransitionalEdge(reset_node_id))
                 lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
                 continue
+            elif node_type == 'interrupt':
+                lg_builder.add_node(node_id, InterruptNode(
+                    prompt=node.get('prompt', 'Please provide input:'),
+                    condition=node.get('condition', None),
+                    input_variables=node.get('input', ['messages']),
+                    output_variables=node.get('output', []),
+                    value_type=node.get('value_type', 'str')
+                ))
             if node.get('transition'):
                 next_step = clean_string(node['transition'])
                 logger.info(f'Adding transition: {next_step}')
@@ -1049,6 +1144,21 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 thread_id=thread_id,
                 current_recursion_limit=current_recursion_limit,
             )
+
+        except GraphInterrupt as e:
+            # Handle interrupt - execution paused waiting for user input
+            logger.info(f"Graph execution interrupted: {e}")
+            config_state = self.get_state(config)
+
+            # Extract the interrupt prompt from the exception
+            interrupt_prompt = str(e) if str(e) else "Waiting for user input..."
+
+            return {
+                "output": interrupt_prompt,
+                "thread_id": thread_id,
+                "execution_finished": False,
+                "interrupted": True
+            }
 
         try:
             # Check if printer node output exists
