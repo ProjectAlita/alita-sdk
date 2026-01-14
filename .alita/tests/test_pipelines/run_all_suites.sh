@@ -177,7 +177,7 @@ run_suite() {
 
     # Step 2: Seed pipelines
     print_step "Step 2/4: Seeding pipelines for $suite"
-    if python seed_pipelines.py "$suite" $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
+    if python seed_pipelines.py "$suite" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
         print_success "Pipelines seeded"
     else
         print_error "Seeding failed - see $suite_output_dir/seed.log"
@@ -300,6 +300,85 @@ done
 
 TOTAL_END=$(date +%s)
 TOTAL_DURATION=$((TOTAL_END - TOTAL_START))
+
+# Print detailed failure information
+HAS_FAILURES=false
+for suite in "${SUITES[@]}"; do
+    results_file="$OUTPUT_DIR/$suite/results.json"
+    if [ -f "$results_file" ]; then
+        # Check if there are failed tests
+        failed_count=$(python -c "import json; d=json.load(open('$results_file')); print(d.get('failed', 0))" 2>/dev/null || echo "0")
+        if [ "$failed_count" -gt 0 ]; then
+            HAS_FAILURES=true
+        fi
+    fi
+done
+
+if [ "$HAS_FAILURES" = true ]; then
+    print_header "Failed Tests Details"
+
+    for suite in "${SUITES[@]}"; do
+        results_file="$OUTPUT_DIR/$suite/results.json"
+        if [ -f "$results_file" ]; then
+            # Extract and display failed tests
+            python - <<EOF
+import json
+import sys
+
+try:
+    with open('$results_file') as f:
+        data = json.load(f)
+
+    failed_tests = [r for r in data.get('results', []) if r.get('test_passed') == False]
+
+    if failed_tests:
+        print(f"\n${YELLOW}Suite: $suite${NC}")
+        print("─" * 70)
+
+        for test in failed_tests:
+            print(f"\n  ${RED}✗${NC} {test.get('pipeline_name', 'Unknown')}")
+
+            # Show error if present
+            error = test.get('error')
+            output_error = test.get('output', {}).get('result', {}).get('error') if test.get('output') else None
+            if error:
+                print(f"    Error: {error[:200]}...")
+            elif output_error:
+                print(f"    Error: {output_error}")
+
+            # Show RCA summary if present
+            rca_summary = test.get('rca_summary')
+            if rca_summary:
+                print(f"\n    ${BLUE}RCA Analysis:${NC}")
+                print(f"    {rca_summary[:150]}...")
+
+                rca = test.get('rca', {})
+                if rca:
+                    print(f"\n    ${BLUE}Category:${NC} {rca.get('category', 'unknown')}")
+                    print(f"    ${BLUE}Severity:${NC} {rca.get('severity', 'unknown')}")
+                    print(f"    ${BLUE}Confidence:${NC} {rca.get('confidence', 'unknown')}")
+
+                    fixes = rca.get('suggested_fix', [])
+                    if fixes:
+                        print(f"\n    ${BLUE}Suggested Fixes:${NC}")
+                        for i, fix in enumerate(fixes[:3], 1):
+                            print(f"      {i}. {fix[:80]}...")
+
+                    refs = rca.get('code_references', [])
+                    if refs:
+                        print(f"\n    ${BLUE}Code References:${NC}")
+                        for ref in refs[:3]:
+                            print(f"      - {ref}")
+
+            print()
+
+except Exception as e:
+    print(f"Error parsing results: {e}", file=sys.stderr)
+EOF
+        fi
+    done
+    echo ""
+fi
 
 # Print summary
 print_header "Execution Summary"

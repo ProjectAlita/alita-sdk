@@ -15,41 +15,13 @@ toolkits:
   - id: ${SDK_TOOLKIT_ID}
     name: ${SDK_TOOLKIT_NAME:sdk-analysis}
 
-# Input schema - what this pipeline accepts when invoked
-# These are mapped from test result via hooks.post_test.input_mapping
-input_schema:
-  test_name:
-    type: str
-    required: true
-    description: "Name of the failed test"
-  test_description:
-    type: str
-    required: false
-    description: "Description of the test"
-  test_results:
-    type: dict
-    required: true
-    description: "Test results including error details"
-  tool_result:
-    type: str
-    required: false
-    description: "Raw tool output from the test"
-  toolkit_name:
-    type: str
-    required: false
-    description: "Name of the toolkit being tested"
+# NO input_schema - receives raw JSON string via user_input
+# Parsing happens in parse_input node below
 
 state:
-  test_name:
+  failure_details:
     type: str
-  test_description:
-    type: str
-  test_results:
-    type: dict
-  tool_result:
-    type: str
-  toolkit_name:
-    type: str
+    default: ''
   rca_result:
     type: dict
   rca_summary:
@@ -64,15 +36,13 @@ state:
 entry_point: analyze_failure
 
 nodes:
+  # Parse raw JSON input and extract failure details
   - id: analyze_failure
     type: llm
-    model: ${RCA_MODEL:gpt-4o-mini}
+    model: ${RCA_MODEL:gpt-5-mini}
     input:
-      - test_name
-      - test_description
-      - test_results
-      - tool_result
-      - toolkit_name
+      - input
+      - messages
     input_mapping:
       chat_history:
         type: fixed
@@ -98,25 +68,13 @@ nodes:
         value: |
           ## Test Failure Analysis
 
-          **Test Name:** {test_name}
-          **Description:** {test_description}
-          **Toolkit:** {toolkit_name}
-
-          **Test Results:**
-          ```json
-          {test_results}
-          ```
-
-          **Raw Tool Output:**
-          ```
-          {tool_result}
-          ```
+          {input}
 
           ---
 
           ## Instructions
 
-          1. First, analyze the error message to identify key terms (function names, class names, error types)
+          1. First, analyze the test failure details above to identify key terms (function names, class names, error types)
           2. Use the GitHub tools to search for relevant code in the alita-sdk repository:
              - Use `search_code` to find where the error originates
              - Use `get_file_contents` to read the relevant source files
@@ -154,7 +112,6 @@ nodes:
         import json
 
         rca = alita_state.get('rca_result', {})
-        test_name = alita_state.get('test_name', 'Unknown')
 
         # Parse RCA result if it's a string
         if isinstance(rca, str):
@@ -200,8 +157,7 @@ nodes:
                 'suggested_fix': rca.get('suggested_fix', []),
                 'code_references': rca.get('code_references', []),
                 'additional_context': rca.get('additional_context', ''),
-                'confidence': rca.get('confidence', 'medium'),
-                'test_name': test_name
+                'confidence': rca.get('confidence', 'medium')
             },
             'rca_summary': rca_summary
         }
@@ -210,7 +166,6 @@ nodes:
         output_result
     input:
       - rca_result
-      - test_name
     output:
       - messages
     structured_output: false

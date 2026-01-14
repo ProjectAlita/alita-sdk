@@ -86,11 +86,23 @@ hooks:
       pipeline_id: ${RCA_PIPELINE_ID}
       condition: "result.get('test_passed') is False"
       input_mapping:
-        test_name: "result.get('pipeline_name', 'Unknown')"
-        test_description: "result.get('description', '')"
-        test_results: "result"
-        tool_result: "result.get('output', {})"
-        toolkit_name: "'state_retrieval'"
+        failure_details: |
+          f"""**Test Name:** {result.get('pipeline_name', 'Unknown')}
+          **Toolkit:** state_retrieval
+          **Status:** Test Failed
+
+          **Error Message:**
+          {result.get('error') or result.get('output', {}).get('result', {}).get('error', 'No error message')}
+
+          **Pipeline ID:** {result.get('pipeline_id', 'N/A')}
+          **Version ID:** {result.get('version_id', 'N/A')}
+          **Execution Time:** {result.get('execution_time', 'N/A')}s
+
+          **Test Output Details:**
+          - Test passed: {result.get('test_passed', False)}
+          - Tool executed: {result.get('output', {}).get('result', {}).get('tool_executed', 'N/A')}
+          - Error: {result.get('output', {}).get('result', {}).get('error', 'None')}
+          """
       output_mapping:
         "result['rca']": "rca_result"
         "result['rca_summary']": "rca_summary"

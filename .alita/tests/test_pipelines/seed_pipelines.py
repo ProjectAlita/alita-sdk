@@ -241,12 +241,17 @@ def seed_composable_pipelines(
     """
     composable_pipelines = config.get("composable_pipelines", [])
     if not composable_pipelines:
-        return {"success": True, "pipelines": [], "env_substitutions": env_substitutions}
+        return {"success": True, "pipelines": [], "env_substitutions": env_substitutions, "generated_env_vars": {}}
 
     print(f"\nSeeding {len(composable_pipelines)} composable pipeline(s)...")
     print("-" * 40)
 
-    results = {"success": True, "pipelines": [], "env_substitutions": env_substitutions.copy()}
+    results = {
+        "success": True,
+        "pipelines": [],
+        "env_substitutions": env_substitutions.copy(),
+        "generated_env_vars": {}  # Track vars generated during seeding (for .env persistence)
+    }
     script_dir = Path(__file__).parent
 
     for cp_config in composable_pipelines:
@@ -332,6 +337,7 @@ def seed_composable_pipelines(
                     extracted = extract_json_path_value(result["data"], json_path)
                     if extracted is not None:
                         results["env_substitutions"][key] = extracted
+                        results["generated_env_vars"][key] = extracted  # Track as generated
                         print(f"    Saved {key}={extracted}")
 
             results["pipelines"].append({
@@ -670,7 +676,10 @@ Authentication (use one of these):
     folder_path = script_dir / args.folder
 
     # Build environment substitutions for YAML templates
+    # env_substitutions: used for YAML template variable substitution
+    # generated_env_vars: track which vars were generated (vs loaded), for .env persistence
     env_substitutions = {}
+    generated_env_vars = {}  # Only these will be written back to .env
 
     # GitHub toolkit
     github_toolkit_id = args.github_toolkit_id or load_github_toolkit_id_from_env()
@@ -691,6 +700,7 @@ Authentication (use one of these):
     # Suite name (derived from folder name)
     suite_name = folder_path.name
     env_substitutions["SUITE_NAME"] = suite_name
+    generated_env_vars["SUITE_NAME"] = suite_name  # This is generated, can persist
 
     if not folder_path.exists():
         print(f"Error: Folder '{folder_path}' does not exist", file=sys.stderr)
@@ -756,6 +766,8 @@ Authentication (use one of these):
         )
         # Update env_substitutions with IDs from composable pipelines
         env_substitutions = composable_result["env_substitutions"]
+        # Merge generated vars from composable pipelines
+        generated_env_vars.update(composable_result.get("generated_env_vars", {}))
 
         if not composable_result["success"]:
             print("\nWarning: Some composable pipelines failed to seed")
@@ -815,6 +827,38 @@ Authentication (use one of these):
         else:
             print(f"  FAILED: {result.get('status_code', 'N/A')} - {result.get('error', 'Unknown error')}")
             results["failed"] += 1
+
+    # Write generated_env_vars back to .env file (for composable pipeline IDs, etc.)
+    # Only persist values that were generated during seeding, not loaded from environment
+    env_file = _env_file_override if _env_file_override else Path(".env")
+    if env_file.exists() and generated_env_vars:
+        # Read existing .env content
+        with open(env_file, 'r') as f:
+            lines = f.readlines()
+
+        # Build dict of existing variables
+        existing_vars = {}
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#') and '=' in stripped:
+                key = stripped.split('=', 1)[0]
+                existing_vars[key] = i
+
+        # Update or append new values from generated_env_vars
+        updated = False
+        for key, value in generated_env_vars.items():
+            if key in existing_vars:
+                # Update existing line
+                lines[existing_vars[key]] = f"{key}={value}\n"
+            else:
+                # Append new variable
+                lines.append(f"{key}={value}\n")
+            updated = True
+
+        # Write back if any updates were made
+        if updated:
+            with open(env_file, 'w') as f:
+                f.writelines(lines)
 
     # Summary
     print("\n" + "=" * 60)
