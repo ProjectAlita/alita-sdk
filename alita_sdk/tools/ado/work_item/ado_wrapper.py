@@ -127,7 +127,29 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             cls._core_client = connection.clients_v7_1.get_core_client()
 
         except Exception as e:
-            return ImportError(f"Failed to connect to Azure DevOps: {e}")
+            error_msg = str(e).lower()
+            if "expired" in error_msg or "token" in error_msg and ("invalid" in error_msg or "unauthorized" in error_msg):
+                raise ValueError(
+                    "Azure DevOps connection failed: Your access token has expired or is invalid. "
+                    "Please refresh your token in the toolkit configuration."
+                )
+            elif "401" in error_msg or "unauthorized" in error_msg:
+                raise ValueError(
+                    "Azure DevOps connection failed: Authentication failed. "
+                    "Please check your credentials in the toolkit configuration."
+                )
+            elif "404" in error_msg or "not found" in error_msg:
+                raise ValueError(
+                    "Azure DevOps connection failed: Organization or project not found. "
+                    "Please verify your organization URL and project name."
+                )
+            elif "timeout" in error_msg or "timed out" in error_msg:
+                raise ValueError(
+                    "Azure DevOps connection failed: Connection timed out. "
+                    "Please check your network connection and try again."
+                )
+            else:
+                raise ValueError(f"Azure DevOps connection failed: {e}")
 
         return super().validate_toolkit(values)
 
@@ -329,11 +351,14 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 parsed_item.update(fields_data)
 
             # extract relations if any
-            relations_data = work_item.relations
+            relations_data = None
+            if expand and str(expand).lower() in ("relations", "all"):
+                try:
+                    relations_data = getattr(work_item, 'relations', None)
+                except KeyError:
+                    relations_data = None
             if relations_data:
-                parsed_item['relations'] = []
-                for relation in relations_data:
-                    parsed_item['relations'].append(relation.as_dict())
+                parsed_item['relations'] = [relation.as_dict() for relation in relations_data]
 
             if parse_attachments:
                 # describe images in work item fields if present
@@ -344,13 +369,19 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                         for img in images:
                             src = img.get('src')
                             if src:
-                                description = self.parse_attachment_by_url(src, image_description_prompt)
+                                description = self.parse_attachment_by_url(src, image_description_prompt=image_description_prompt)
                                 img['image-description'] = description
                         parsed_item[field_name] = str(soup)
                 # parse attached documents if present
-                if parsed_item['relations']:
-                    for attachment in parsed_item['relations']:
-                        attachment['content'] = self.parse_attachment_by_url(attachment['url'], attachment['attributes']['name'], image_description_prompt)
+                for relation in parsed_item.get('relations', []):
+                    # Only process actual file attachments
+                    if relation.get('rel') == 'AttachedFile':
+                        file_name = relation.get('attributes', {}).get('name')
+                        if file_name:
+                            try:
+                                relation['content'] = self.parse_attachment_by_url(relation['url'], file_name, image_description_prompt=image_description_prompt)
+                            except Exception as att_e:
+                                logger.warning(f"Failed to parse attachment {file_name}: {att_e}")
 
 
             return parsed_item
@@ -567,9 +598,40 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         return b"".join(content_generator)
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
-        for attachment_id, file_name in document.metadata.get('attachment_ids', {}).items():
+        raw_attachment_ids = document.metadata.get('attachment_ids', {})
+
+        # Normalize attachment_ids: accept dict or JSON string, raise otherwise
+        if isinstance(raw_attachment_ids, str):
+            try:
+                loaded = json.loads(raw_attachment_ids)
+            except json.JSONDecodeError:
+                raise TypeError(
+                    f"Expected dict or JSON string for 'attachment_ids', got non-JSON string for id="
+                    f"{document.metadata.get('id')}: {raw_attachment_ids!r}"
+                )
+            if not isinstance(loaded, dict):
+                raise TypeError(
+                    f"'attachment_ids' JSON did not decode to dict for id={document.metadata.get('id')}: {loaded!r}"
+                )
+            attachment_ids = loaded
+        elif isinstance(raw_attachment_ids, dict):
+            attachment_ids = raw_attachment_ids
+        else:
+            raise TypeError(
+                f"Expected 'attachment_ids' to be dict or JSON string, got {type(raw_attachment_ids)} "
+                f"for id={document.metadata.get('id')}: {raw_attachment_ids!r}"
+            )
+
+        for attachment_id, file_name in attachment_ids.items():
             content = self.get_attachment_content(attachment_id=attachment_id)
-            yield Document(page_content="", metadata={'id': attachment_id, IndexerKeywords.CONTENT_FILE_NAME.value: file_name, IndexerKeywords.CONTENT_IN_BYTES.value: content})
+            yield Document(
+                page_content="",
+                metadata={
+                    'id': attachment_id,
+                    IndexerKeywords.CONTENT_FILE_NAME.value: file_name,
+                    IndexerKeywords.CONTENT_IN_BYTES.value: content,
+                },
+            )
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
