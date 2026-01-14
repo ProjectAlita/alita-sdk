@@ -1,8 +1,26 @@
 import difflib
+import re
 
 TOOLKIT_NAME_META = "toolkit_name"
 TOOL_NAME_META = "tool_name"
 TOOLKIT_TYPE_META = "toolkit_type"
+
+
+def extract_old_new_pairs(file_query: str):
+    """
+    Extracts old and new content pairs from a file query.
+    Parameters:
+        file_query (str): The file query containing old and new content.
+    Returns:
+        list of tuples: A list where each tuple contains (old_content, new_content).
+    """
+    old_pattern = re.compile(r"OLD <<<<\s*(.*?)\s*>>>> OLD", re.DOTALL)
+    new_pattern = re.compile(r"NEW <<<<\s*(.*?)\s*>>>> NEW", re.DOTALL)
+
+    old_contents = old_pattern.findall(file_query)
+    new_contents = new_pattern.findall(file_query)
+
+    return list(zip(old_contents, new_contents))
 
 
 def generate_diff(base_text, target_text, file_path):
