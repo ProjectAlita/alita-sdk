@@ -25,7 +25,6 @@ def _safe_import_configuration(
 _safe_import_configuration('github', 'github', 'GithubConfiguration')
 _safe_import_configuration('pgvector', 'pgvector', 'PgVectorConfiguration')
 _safe_import_configuration('ado', 'ado', 'AdoConfiguration')
-_safe_import_configuration('ado_repos', 'ado', 'AdoReposConfiguration')
 _safe_import_configuration('gitlab', 'gitlab', 'GitlabConfiguration')
 _safe_import_configuration('qtest', 'qtest', 'QtestConfiguration')
 _safe_import_configuration('bitbucket', 'bitbucket', 'BitbucketConfiguration')
