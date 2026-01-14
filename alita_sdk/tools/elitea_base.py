@@ -547,6 +547,183 @@ class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
         ]
 
 
+
+    def edit_file(
+        self,
+        file_path: str,
+        file_query: str,
+        branch: str = None,
+        commit_message: str = None
+    ) -> str:
+        """
+        Edit file using OLD/NEW markers for precise replacements.
+        
+        Only works with text files (markdown, txt, csv, json, xml, html, yaml, code files).
+        
+        Args:
+            file_path: Path to the file to edit
+            file_query: Edit instructions with OLD/NEW markers
+            branch: Branch name (None for active branch)
+            commit_message: Commit message (VCS toolkits only)
+            
+        Returns:
+            Success message or raises ToolException on failure.
+        """
+        from .utils.text_operations import parse_old_new_markers, is_text_editable, try_apply_edit
+        from langchain_core.callbacks import dispatch_custom_event
+        
+        # Validate file is text-editable
+        if not is_text_editable(file_path):
+            raise ToolException(
+                f"Cannot edit binary/document file '{file_path}'. "
+                f"Supported text formats: markdown, txt, csv, json, xml, html, yaml, code files."
+            )
+        
+        # Parse OLD/NEW markers
+        edits = parse_old_new_markers(file_query)
+        if not edits:
+            raise ToolException(
+                "No OLD/NEW marker pairs found in file_query. "
+                "Format: OLD <<<< old text >>>> OLD  NEW <<<< new text >>>> NEW"
+            )
+        
+        # Read current file content
+        try:
+            current_content = self._read_file(file_path, branch)
+            if not isinstance(current_content, str):
+                # If current_content is a ToolException or any non-str, raise or return it
+                raise current_content if isinstance(current_content, Exception) else ToolException(str(current_content))
+        except Exception as e:
+            raise ToolException(f"Failed to read file {file_path}: {e}")
+
+        # Apply all edits (stop on first warning/error)
+        updated_content = current_content
+        for old_text, new_text in edits:
+            success, result_or_error = try_apply_edit(updated_content, old_text, new_text)
+            if not success:
+                # Dispatch event for failure if callback manager available
+                # (For now just raise exception)
+                raise ToolException(f"Edit failed: {result_or_error}")
+            updated_content = result_or_error
+
+        # If content unchanged, warn but don't fail? Or fail? 
+        # (Actually if we matched OLD block, it likely changed, unless NEW == OLD)
+        if updated_content == current_content:
+            return "File content unchanged (NEW block matched OLD block)."
+
+        # Write updated content
+        try:
+            # Use toolkit specific _write_file
+            if commit_message:
+                return self._write_file(file_path, updated_content, branch, commit_message)
+            else:
+                return self._write_file(file_path, updated_content, branch)
+        except Exception as e:
+            raise ToolException(f"Failed to write file {file_path}: {e}")
+            
+    def read_file_chunk(
+        self,
+        file_path: str,
+        start_line: int,
+        end_line: Optional[int] = None,
+        branch: str = None
+    ) -> str:
+        """
+        Read a specific range of lines from a file.
+        
+        Args:
+            file_path: Path to the file
+            start_line: Starting line number (1-indexed, inclusive)
+            end_line: Ending line number (1-indexed, inclusive). If None, reads to end.
+            branch: Branch name (None for active branch)
+            
+        Returns:
+            File content for the specified line range
+        """
+        from .utils.text_operations import apply_line_slice
+        
+        # Calculate offset and limit from start_line and end_line
+        offset = start_line
+        limit = (end_line - start_line + 1) if end_line is not None else None
+        
+        # Read the file with offset/limit
+        content = self._read_file(file_path, branch, offset=offset, limit=limit)
+        
+        # Apply client-side slicing if toolkit doesn't support partial reads
+        # (toolkit's _read_file will return full content if it ignores offset/limit)
+        return apply_line_slice(content, offset=offset, limit=limit)
+    
+    def read_multiple_files(
+        self,
+        file_paths: List[str],
+        branch: str = None,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None
+    ) -> Dict[str, str]:
+        """
+        Read multiple files in batch.
+        
+        Args:
+            file_paths: List of file paths to read
+            branch: Branch name (None for active branch)
+            offset: Starting line number for all files (1-indexed)
+            limit: Number of lines to read from offset for all files
+            
+        Returns:
+            Dictionary mapping file paths to their content (or error messages)
+        """
+        results = {}
+        
+        for file_path in file_paths:
+            try:
+                content = self._read_file(
+                    file_path, 
+                    branch, 
+                    offset=offset, 
+                    limit=limit
+                )
+                results[file_path] = content
+            except Exception as e:
+                results[file_path] = f"Error reading file: {str(e)}"
+                logger.error(f"Failed to read {file_path}: {e}")
+        
+        return results
+    
+    def search_file(
+        self,
+        file_path: str,
+        pattern: str,
+        branch: str = None,
+        is_regex: bool = True,
+        context_lines: int = 2
+    ) -> str:
+        """
+        Search for pattern in file content with context.
+        
+        Args:
+            file_path: Path to the file
+            pattern: Search pattern (regex if is_regex=True, else literal)
+            branch: Branch name (None for active branch)
+            is_regex: Whether pattern is regex (default True)
+            context_lines: Lines of context before/after matches (default 2)
+            
+        Returns:
+            Formatted string with search results and context
+        """
+        from .utils.text_operations import search_in_content
+        
+        # Read full file content
+        content = self._read_file(file_path, branch)
+        
+        # Search for pattern
+        matches = search_in_content(content, pattern, is_regex, context_lines)
+        
+        if not matches:
+            return f"No matches found for pattern '{pattern}' in {file_path}"
+        
+        # Format results
+        return f"Found {len(matches)} matches in '{file_path}':\n\n" + "\n".join(matches)
+
 class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
 
     doctype: Optional[str] = 'code'

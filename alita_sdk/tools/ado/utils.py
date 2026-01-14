@@ -1,5 +1,9 @@
 import difflib
 
+TOOLKIT_NAME_META = "toolkit_name"
+TOOL_NAME_META = "tool_name"
+TOOLKIT_TYPE_META = "toolkit_type"
+
 
 def generate_diff(base_text, target_text, file_path):
     base_lines = base_text.splitlines(keepends=True)

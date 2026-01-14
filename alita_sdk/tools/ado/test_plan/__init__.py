@@ -11,7 +11,7 @@ from ....configurations.pgvector import PgVectorConfiguration
 from .test_plan_wrapper import TestPlanApiWrapper
 from ...base.tool import BaseAction
 from ...utils import clean_string, get_max_toolkit_length, check_connection_response
-from ....runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
+from ..utils import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 
 name = "azure_devops_plans"

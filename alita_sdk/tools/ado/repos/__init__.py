@@ -11,7 +11,7 @@ from ....configurations.pgvector import PgVectorConfiguration
 from ...base.tool import BaseAction
 from .repos_wrapper import ReposApiWrapper
 from ...utils import check_connection_response
-from ....runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
+from ..utils import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
 
 name = "ado_repos"
 
