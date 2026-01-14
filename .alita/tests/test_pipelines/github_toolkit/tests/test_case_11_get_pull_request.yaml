@@ -1,0 +1,102 @@
+name: "GH11 - Get Pull Request"
+description: "Verify get_pull_request tool retrieves specific PR details by number"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  pr_number:
+    type: int
+    value: 14
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_pr
+
+nodes:
+  - id: invoke_get_pr
+    type: toolkit
+    tool: get_pull_request
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_number
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        pr_result = alita_state.get('tool_result')
+        pr_number = alita_state.get('pr_number', 14)
+
+        tool_executed = pr_result is not None
+        error_message = None
+        pr_data = {}
+
+        try:
+            # Parse result
+            if isinstance(pr_result, dict):
+                pr_data = pr_result
+            elif isinstance(pr_result, str):
+                import json
+                try:
+                    pr_data = json.loads(pr_result)
+                except:
+                    pr_data = {'raw': pr_result}
+        except Exception as e:
+            error_message = str(e)
+
+        # Verify structure - PR should have number, title, state, head, base
+        has_number = 'number' in pr_data
+        has_title = 'title' in pr_data
+        has_state = 'state' in pr_data
+        has_head = 'head' in pr_data
+        has_base = 'base' in pr_data
+        number_matches = pr_data.get('number') == pr_number
+
+        test_results = {
+            "test_passed": tool_executed and has_number and number_matches,
+            "tool_executed": tool_executed,
+            "requested_pr": pr_number,
+            "pr_found": has_number,
+            "number_matches": number_matches,
+            "pr_details": {
+                "number": pr_data.get('number'),
+                "title": pr_data.get('title', '')[:100] if pr_data.get('title') else None,
+                "state": pr_data.get('state'),
+                "head_branch": pr_data.get('head', {}).get('ref') if isinstance(pr_data.get('head'), dict) else None,
+                "base_branch": pr_data.get('base', {}).get('ref') if isinstance(pr_data.get('base'), dict) else None
+            },
+            "structure_check": {
+                "has_number": has_number,
+                "has_title": has_title,
+                "has_state": has_state,
+                "has_head": has_head,
+                "has_base": has_base
+            },
+            "error": error_message
+        }
+        test_results
+    input:
+      - pr_number
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

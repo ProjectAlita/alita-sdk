@@ -1,0 +1,136 @@
+name: "GH23 - List Project Issues"
+description: "Verify list_project_issues tool retrieves items from a GitHub project board"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  board_repo:
+    type: str
+    value: "ProjectAlita/elitea-testing"
+  project_number:
+    type: int
+    value: 11
+  items_count:
+    type: int
+    value: 5
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list
+
+nodes:
+  - id: invoke_list
+    type: toolkit
+    tool: list_project_issues
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - board_repo
+      - project_number
+      - items_count
+    input_mapping:
+      board_repo:
+        type: variable
+        value: board_repo
+      project_number:
+        type: variable
+        value: project_number
+      items_count:
+        type: variable
+        value: items_count
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result
+        list_result = alita_state.get('tool_result')
+        project_number = alita_state.get('project_number', 11)
+        items_count = alita_state.get('items_count', 5)
+
+        tool_executed = list_result is not None
+        error_message = None
+        project_data = {}
+
+        try:
+            if isinstance(list_result, dict):
+                project_data = list_result
+            elif isinstance(list_result, str):
+                import json
+                try:
+                    project_data = json.loads(list_result)
+                except:
+                    project_data = {'raw': list_result}
+        except Exception as e:
+            error_message = str(e)
+
+        # Check for expected fields
+        has_id = 'id' in project_data
+        has_title = 'title' in project_data
+        has_url = 'url' in project_data
+        has_fields = 'fields' in project_data
+        has_items = 'items' in project_data
+
+        # Get items info
+        items = project_data.get('items', [])
+        items_returned = len(items) if isinstance(items, list) else 0
+
+        # Check fields for Status
+        fields = project_data.get('fields', [])
+        has_status_field = any(f.get('name') == 'Status' for f in fields) if isinstance(fields, list) else False
+
+        # Extract sample items
+        items_sample = []
+        for item in (items[:3] if isinstance(items, list) else []):
+            if isinstance(item, dict):
+                content = item.get('content', {})
+                items_sample.append({
+                    "id": item.get('id'),
+                    "type": item.get('type'),
+                    "title": content.get('title', '')[:50] if isinstance(content, dict) else None
+                })
+
+        test_results = {
+            "test_passed": tool_executed and (has_items or has_id),
+            "tool_executed": tool_executed,
+            "project_number": project_number,
+            "project_info": {
+                "id": project_data.get('id'),
+                "title": project_data.get('title'),
+                "url": project_data.get('url')
+            },
+            "items_returned": items_returned,
+            "items_requested": items_count,
+            "has_status_field": has_status_field,
+            "fields_count": len(fields) if isinstance(fields, list) else 0,
+            "items_sample": items_sample,
+            "structure_check": {
+                "has_id": has_id,
+                "has_title": has_title,
+                "has_url": has_url,
+                "has_fields": has_fields,
+                "has_items": has_items
+            },
+            "error": error_message
+        }
+        test_results
+    input:
+      - project_number
+      - items_count
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

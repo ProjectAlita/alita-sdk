@@ -1,0 +1,123 @@
+name: "GH22 - Create Issue on Project"
+description: "Verify create_issue_on_project tool adds an issue to a GitHub project board"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  board_repo:
+    type: str
+    value: "ProjectAlita/elitea-testing"
+  project_title:
+    type: str
+    value: "AI_testing_board"
+  issue_title:
+    type: str
+  issue_body:
+    type: str
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_issue
+
+nodes:
+  - id: prepare_issue
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique issue title and body
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        issue_title = f"AI title {random_id}"
+        issue_body = f"Pipeline test issue created at {timestamp} - ID: {random_id}"
+
+        {"issue_title": issue_title, "issue_body": issue_body}
+    input: []
+    output:
+      - issue_title
+      - issue_body
+    structured_output: true
+    transition: invoke_create
+
+  - id: invoke_create
+    type: toolkit
+    tool: create_issue_on_project
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - board_repo
+      - project_title
+      - issue_title
+      - issue_body
+    input_mapping:
+      board_repo:
+        type: variable
+        value: board_repo
+      project_title:
+        type: variable
+        value: project_title
+      title:
+        type: variable
+        value: issue_title
+      body:
+        type: variable
+        value: issue_body
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result
+        create_result = alita_state.get('tool_result')
+        issue_title = alita_state.get('issue_title')
+        project_title = alita_state.get('project_title')
+
+        tool_executed = create_result is not None
+        error_message = None
+        result_str = str(create_result).lower() if create_result else ''
+
+        # Check for success indicators
+        issue_created = 'issue with number' in result_str or 'created' in result_str or 'success' in result_str
+
+        # Extract issue number if present
+        issue_number = None
+        if create_result:
+            import re
+            numbers = re.findall(r'number\s*[:\s]*(\d+)', str(create_result), re.IGNORECASE)
+            issue_number = int(numbers[0]) if numbers else None
+
+        test_results = {
+            "test_passed": tool_executed and issue_created,
+            "tool_executed": tool_executed,
+            "project_title": project_title,
+            "issue_title": issue_title,
+            "issue_created": issue_created,
+            "issue_number": issue_number,
+            "tool_response": str(create_result)[:400] if create_result else None,
+            "error": error_message
+        }
+        test_results
+    input:
+      - tool_result
+      - issue_title
+      - project_title
+    output:
+      - messages
+    structured_output: false
+    transition: END

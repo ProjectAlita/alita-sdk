@@ -1,0 +1,114 @@
+name: "GH12 - List Pull Request Diffs"
+description: "Verify list_pull_request_diffs tool retrieves file changes for a PR"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  pr_number:
+    type: int
+    value: 52
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_pr_diffs
+
+nodes:
+  - id: invoke_list_pr_diffs
+    type: toolkit
+    tool: list_pull_request_diffs
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_number
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        diffs_result = alita_state.get('tool_result')
+        pr_number = alita_state.get('pr_number', 14)
+
+        tool_executed = diffs_result is not None
+        error_message = None
+        diffs_list = []
+
+        try:
+            # Parse result
+            if isinstance(diffs_result, list):
+                diffs_list = diffs_result
+            elif isinstance(diffs_result, str):
+                import json
+                try:
+                    parsed = json.loads(diffs_result)
+                    diffs_list = parsed if isinstance(parsed, list) else [parsed]
+                except:
+                    # Might be a string representation of diffs
+                    diffs_list = []
+            elif isinstance(diffs_result, dict):
+                # Single diff object
+                diffs_list = [diffs_result]
+        except Exception as e:
+            error_message = str(e)
+
+        # Verify structure - each diff should have filename, status, additions, deletions
+        has_diffs = len(diffs_list) > 0
+        sample_diff = diffs_list[0] if diffs_list else {}
+
+        # Check first diff structure
+        has_filename = 'filename' in sample_diff or 'path' in sample_diff
+        has_status = 'status' in sample_diff
+        has_additions = 'additions' in sample_diff
+        has_deletions = 'deletions' in sample_diff
+
+        # Extract sample diffs info
+        diffs_sample = []
+        for d in diffs_list[:5]:
+            if isinstance(d, dict):
+                diffs_sample.append({
+                    "filename": d.get('filename') or d.get('path', 'unknown'),
+                    "status": d.get('status', 'unknown'),
+                    "additions": d.get('additions', 0),
+                    "deletions": d.get('deletions', 0),
+                    "changes": d.get('changes', 0)
+                })
+
+        test_results = {
+            "test_passed": tool_executed and has_diffs,
+            "tool_executed": tool_executed,
+            "pr_number": pr_number,
+            "files_changed": len(diffs_list),
+            "has_diffs": has_diffs,
+            "diffs_sample": diffs_sample,
+            "structure_check": {
+                "has_filename": has_filename,
+                "has_status": has_status,
+                "has_additions": has_additions,
+                "has_deletions": has_deletions
+            },
+            "error": error_message
+        }
+        test_results
+    input:
+      - pr_number
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

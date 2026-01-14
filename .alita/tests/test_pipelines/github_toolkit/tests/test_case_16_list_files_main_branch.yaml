@@ -1,0 +1,95 @@
+name: "GH16 - List Files in Main Branch"
+description: "Verify list_files_in_main_branch tool returns files from the base branch"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  expected_file:
+    type: str
+    value: "toolkit-tests/ado-boards/Scenario_8_Link_Work_Items_To_Wiki_Page.feature"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_files
+
+nodes:
+  - id: invoke_list_files
+    type: toolkit
+    tool: list_files_in_main_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        files_result = alita_state.get('tool_result')
+        expected_file = alita_state.get('expected_file', '')
+
+        tool_executed = files_result is not None
+        error_message = None
+        files_list = []
+
+        try:
+            # Parse result
+            if isinstance(files_result, list):
+                files_list = files_result
+            elif isinstance(files_result, str):
+                # Try to parse as JSON list
+                import json
+                try:
+                    files_list = json.loads(files_result)
+                except:
+                    # Split by newlines if plain text
+                    files_list = [f.strip() for f in files_result.split('\n') if f.strip()]
+        except Exception as e:
+            error_message = str(e)
+
+        # Extract file paths (handle both string list and dict list)
+        file_paths = []
+        for f in files_list:
+            if isinstance(f, dict):
+                file_paths.append(f.get('path') or f.get('name', ''))
+            else:
+                file_paths.append(str(f))
+
+        # Verify expected file exists
+        has_expected_file = expected_file in file_paths
+        has_files = len(file_paths) > 0
+
+        # Get sample of files
+        files_sample = file_paths[:15]
+
+        test_results = {
+            "test_passed": tool_executed and has_files,
+            "tool_executed": tool_executed,
+            "files_count": len(file_paths),
+            "has_files": has_files,
+            "has_expected_file": has_expected_file,
+            "expected_file": expected_file,
+            "files_sample": files_sample,
+            "error": error_message
+        }
+        test_results
+    input:
+      - expected_file
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

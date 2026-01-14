@@ -1,0 +1,228 @@
+name: "GH24 - Update Issue on Project"
+description: "Verify update_issue_on_project tool updates an existing issue on a GitHub project board"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  board_repo:
+    type: str
+    value: "ProjectAlita/elitea-testing"
+  project_title:
+    type: str
+    value: "AI_testing_board"
+  initial_title:
+    type: str
+  initial_body:
+    type: str
+  issue_number:
+    type: str
+  new_title:
+    type: str
+  new_body:
+    type: str
+  create_result:
+    type: str
+  update_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_issue
+
+nodes:
+  # First create an issue to update (makes test self-contained)
+  - id: prepare_issue
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique initial title and body
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        initial_title = f"TC24-initial-{random_id}"
+        initial_body = f"Initial issue for TC24 test at {timestamp} - ID: {random_id}"
+
+        {"initial_title": initial_title, "initial_body": initial_body}
+    input: []
+    output:
+      - initial_title
+      - initial_body
+    structured_output: true
+    transition: create_issue
+
+  - id: create_issue
+    type: toolkit
+    tool: create_issue_on_project
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - board_repo
+      - project_title
+      - initial_title
+      - initial_body
+    input_mapping:
+      board_repo:
+        type: variable
+        value: board_repo
+      project_title:
+        type: variable
+        value: project_title
+      title:
+        type: variable
+        value: initial_title
+      body:
+        type: variable
+        value: initial_body
+    output:
+      - create_result
+    structured_output: true
+    transition: extract_issue_number
+
+  - id: extract_issue_number
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+
+        create_result = alita_state.get('create_result')
+        result_str = str(create_result) if create_result else ''
+
+        # Extract issue number from create response
+        # Response format: "The issue with number '74' has been created."
+        issue_number = None
+
+        # Try pattern with quotes: number '74' or number "74"
+        numbers = re.findall(r"number\s*['\"]?(\d+)['\"]?", result_str, re.IGNORECASE)
+        if numbers:
+            issue_number = numbers[0]  # Keep as string for the tool
+        else:
+            # Try alternate pattern with hash
+            numbers = re.findall(r'#(\d+)', result_str)
+            if numbers:
+                issue_number = numbers[0]
+
+        {"issue_number": issue_number}
+    input:
+      - create_result
+    output:
+      - issue_number
+    structured_output: true
+    transition: prepare_update
+
+  - id: prepare_update
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique updated title and body
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        new_title = f"TC24-updated-{random_id}"
+        new_body = f"Updated by TC24 pipeline test at {timestamp} - ID: {random_id}"
+
+        {"new_title": new_title, "new_body": new_body}
+    input: []
+    output:
+      - new_title
+      - new_body
+    structured_output: true
+    transition: invoke_update
+
+  - id: invoke_update
+    type: toolkit
+    tool: update_issue_on_project
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - board_repo
+      - project_title
+      - issue_number
+      - new_title
+      - new_body
+    input_mapping:
+      board_repo:
+        type: variable
+        value: board_repo
+      project_title:
+        type: variable
+        value: project_title
+      issue_number:
+        type: variable
+        value: issue_number
+      title:
+        type: variable
+        value: new_title
+      body:
+        type: variable
+        value: new_body
+    output:
+      - update_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result
+        create_result = alita_state.get('create_result')
+        update_result = alita_state.get('update_result')
+        issue_number = alita_state.get('issue_number')
+        initial_title = alita_state.get('initial_title')
+        new_title = alita_state.get('new_title')
+
+        error_message = None
+
+        # Check create succeeded
+        create_str = str(create_result).lower() if create_result else ''
+        issue_created = 'issue with number' in create_str or 'created' in create_str or 'success' in create_str
+        if not issue_created:
+            error_message = f"Failed to create issue: {create_str[:200]}"
+
+        # Check if issue number was extracted
+        if not issue_number:
+            error_message = f"Could not extract issue number from create response: {create_str[:200]}"
+
+        # Check update succeeded
+        update_str = str(update_result).lower() if update_result else ''
+        issue_updated = 'issue with number' in update_str or 'updated' in update_str or 'success' in update_str
+
+        tool_executed = update_result is not None and issue_number is not None
+
+        test_results = {
+            "test_passed": tool_executed and issue_created and issue_updated,
+            "tool_executed": tool_executed,
+            "issue_number": issue_number,
+            "initial_title": initial_title,
+            "new_title": new_title,
+            "issue_created": issue_created,
+            "issue_updated": issue_updated,
+            "create_response": str(create_result)[:200] if create_result else None,
+            "update_response": str(update_result)[:200] if update_result else None,
+            "error": error_message
+        }
+        test_results
+    input:
+      - create_result
+      - update_result
+      - issue_number
+      - initial_title
+      - new_title
+    output:
+      - messages
+    structured_output: false
+    transition: END

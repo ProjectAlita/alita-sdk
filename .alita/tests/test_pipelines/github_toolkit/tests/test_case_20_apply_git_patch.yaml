@@ -1,0 +1,150 @@
+name: "GH20 - Apply Git Patch"
+description: "Verify apply_git_patch tool applies a unified diff patch to repository"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  target_branch:
+    type: str
+    value: "tc-file-ops-2025-12-08"
+  file_path:
+    type: str
+  patch_content:
+    type: str
+  commit_message:
+    type: str
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: set_branch
+
+nodes:
+  - id: set_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: prepare_patch
+
+  - id: prepare_patch
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique file name and patch
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/patches/patch-test-{random_id}.txt"
+
+        # Create a git diff patch to create a new file
+        # Use chr(10) for newlines to avoid YAML parsing issues
+        nl = chr(10)
+        patch_content = f"diff --git a/{file_path} b/{file_path}" + nl
+        patch_content += "new file mode 100644" + nl
+        patch_content += "--- /dev/null" + nl
+        patch_content += f"+++ b/{file_path}" + nl
+        patch_content += "@@ -0,0 +1,3 @@" + nl
+        patch_content += "+# Patch Test File" + nl
+        patch_content += f"+Created by GH20 pipeline test at {timestamp}" + nl
+        patch_content += f"+Random ID: {random_id}"
+        commit_message = f"Apply patch test {random_id} at {timestamp}"
+
+        {"file_path": file_path, "patch_content": patch_content, "commit_message": commit_message}
+    input: []
+    output:
+      - file_path
+      - patch_content
+      - commit_message
+    structured_output: true
+    transition: invoke_patch
+
+  - id: invoke_patch
+    type: toolkit
+    tool: apply_git_patch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - patch_content
+      - commit_message
+    input_mapping:
+      patch_content:
+        type: variable
+        value: patch_content
+      commit_message:
+        type: variable
+        value: commit_message
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result
+        patch_result = alita_state.get('tool_result')
+        file_path = alita_state.get('file_path')
+        commit_message = alita_state.get('commit_message')
+
+        tool_executed = patch_result is not None
+        error_message = None
+        result_data = {}
+
+        try:
+            if isinstance(patch_result, dict):
+                result_data = patch_result
+            elif isinstance(patch_result, str):
+                import json
+                try:
+                    result_data = json.loads(patch_result)
+                except:
+                    result_data = {'raw': patch_result}
+        except Exception as e:
+            error_message = str(e)
+
+        # Check for success indicators
+        result_str = str(patch_result).lower() if patch_result else ''
+        patch_success = result_data.get('success', False) or 'success' in result_str or 'applied' in result_str
+
+        test_results = {
+            "test_passed": tool_executed and patch_success,
+            "tool_executed": tool_executed,
+            "file_path": file_path,
+            "commit_message": commit_message,
+            "patch_success": patch_success,
+            "applied_changes": result_data.get('applied_changes'),
+            "failed_changes": result_data.get('failed_changes'),
+            "total_changes": result_data.get('total_changes'),
+            "tool_response": str(patch_result)[:500] if patch_result else None,
+            "error": error_message
+        }
+        test_results
+    input:
+      - tool_result
+      - file_path
+      - commit_message
+    output:
+      - messages
+    structured_output: false
+    transition: END

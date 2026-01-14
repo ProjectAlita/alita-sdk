@@ -129,6 +129,8 @@ This removes all created pipelines, branches, and test data.
 
 ## Test Cases
 
+### Core Operations (GH1-GH10)
+
 | Test | Name | Description | Type |
 |------|------|-------------|------|
 | GH1 | List Branches | Verify `list_branches_in_repo` returns branch list | Read |
@@ -142,30 +144,86 @@ This removes all created pipelines, branches, and test data.
 | GH9 | Create File | Verify `create_file` creates file in branch | Write |
 | GH10 | Create PR | Verify `create_pull_request` creates pull request | Write |
 
+### Pull Request Operations (GH11-GH12)
+
+| Test | Name | Description | Type |
+|------|------|-------------|------|
+| GH11 | Get Pull Request | Verify `get_pull_request` retrieves specific PR details | Read |
+| GH12 | List PR Diffs | Verify `list_pull_request_diffs` retrieves file changes | Read |
+
+### Issue Operations (GH13, GH18)
+
+| Test | Name | Description | Type |
+|------|------|-------------|------|
+| GH13 | Comment on Issue | Verify `comment_on_issue` adds comment to issue | Write |
+| GH18 | Search Issues | Verify `search_issues` finds matching issues/PRs | Read |
+
+### File Operations (GH14-GH17)
+
+| Test | Name | Description | Type |
+|------|------|-------------|------|
+| GH14 | Update File | Verify `update_file` modifies file using OLD/NEW format | Write |
+| GH15 | Delete File | Verify `delete_file` removes file from branch | Write |
+| GH16 | List Files Main Branch | Verify `list_files_in_main_branch` returns base branch files | Read |
+| GH17 | Get Files from Directory | Verify `get_files_from_directory` lists directory contents | Read |
+
+### Advanced Operations (GH19-GH21)
+
+| Test | Name | Description | Type |
+|------|------|-------------|------|
+| GH19 | Get Commits Diff | Verify `get_commits_diff` compares two commits | Read |
+| GH20 | Apply Git Patch | Verify `apply_git_patch` applies unified diff patch | Write |
+| GH21 | Generic API Call | Verify `generic_github_api_call` calls supported methods | Read |
+
+### Project Board Operations (GH22-GH25)
+
+| Test | Name | Description | Type |
+|------|------|-------------|------|
+| GH22 | Create Issue on Project | Verify `create_issue_on_project` adds issue to board | Write |
+| GH23 | List Project Issues | Verify `list_project_issues` retrieves board items | Read |
+| GH24 | Update Issue on Project | Verify `update_issue_on_project` updates board item | Write |
+| GH25 | Search Project Issues | Verify `search_project_issues` filters board items | Read |
+
 ## Test Organization
 
-### Read Operations (GH1-GH7)
+### Read Operations
 These tests are safe to run repeatedly without side effects:
-- List branches, issues, commits, PRs
-- Read files from repository
-- Switch active branch
+- **Core**: GH1 (branches), GH3 (file), GH4-GH5 (issues), GH6 (commits), GH7 (PRs)
+- **PR Details**: GH11 (PR info), GH12 (PR diffs)
+- **Files**: GH16 (main branch files), GH17 (directory files)
+- **Search**: GH18 (search issues), GH19 (commits diff), GH21 (generic API)
+- **Project**: GH23 (list items), GH25 (search items)
 
-### Write Operations (GH8-GH10)
+### Write Operations
 These tests modify the repository:
+- **GH2**: Sets active branch
 - **GH8**: Creates a new branch with timestamp suffix
 - **GH9**: Creates a file in the `tc-file-ops-2025-12-08` branch
 - **GH10**: Creates a PR from feature branch to main
+- **GH13**: Comments on an issue
+- **GH14**: Updates file content
+- **GH15**: Deletes a file
+- **GH20**: Applies a git patch
+- **GH22**: Creates issue on project board
+- **GH24**: Updates issue on project board
 
 ## Dependent Test Flow
 
 For integrated testing, run tests in sequence:
 ```
-GH1 → GH2 → GH3 → GH4 → GH5 → GH6 → GH7 → GH8 → GH9 → GH10
+GH1 → GH2 → GH3 → ... → GH25
 ```
 
-Or for a complete write workflow:
+Or for specific workflows:
 ```
-GH8 (create branch) → GH2 (set branch) → GH9 (create file) → GH10 (create PR)
+# File operations workflow
+GH8 (create branch) → GH2 (set branch) → GH9 (create file) → GH14 (update) → GH15 (delete)
+
+# PR workflow
+GH8 (create branch) → GH9 (create file) → GH10 (create PR) → GH11 (get PR) → GH12 (diffs)
+
+# Project board workflow
+GH22 (create item) → GH23 (list) → GH24 (update) → GH25 (search)
 ```
 
 ## Code Node Pattern

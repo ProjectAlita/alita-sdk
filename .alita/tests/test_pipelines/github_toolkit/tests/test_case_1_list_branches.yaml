@@ -51,21 +51,25 @@ nodes:
         except Exception as e:
             error_message = str(e)
 
+        # Extract branch names - handle both string list and dict list formats
+        branch_names = []
+        for b in branches_found:
+            if isinstance(b, dict):
+                branch_names.append(b.get('name', ''))
+            else:
+                branch_names.append(str(b))
+
         # Verify expected branches exist
-        has_main = 'main' in branches_found or 'master' in branches_found
+        has_main = 'main' in branch_names or 'master' in branch_names
         has_branches = len(branches_found) > 0
 
-        # INTENTIONAL FAILURE: Check for a branch that doesn't exist
-        has_nonexistent_branch = 'nonexistent-test-branch-xyz' in branches_found
-
         test_results = {
-            "test_passed": tool_executed and has_branches and has_nonexistent_branch,
+            "test_passed": tool_executed and has_branches and has_main,
             "tool_executed": tool_executed,
             "branches_count": len(branches_found),
             "has_main_branch": has_main,
-            "has_nonexistent_branch": has_nonexistent_branch,
             "branches_sample": branches_found[:10] if branches_found else [],
-            "error": error_message if error_message else ("Missing expected branch: nonexistent-test-branch-xyz" if not has_nonexistent_branch else None),
+            "error": error_message,
             "raw_result_type": type(tool_result).__name__ if tool_result else None
         }
         test_results

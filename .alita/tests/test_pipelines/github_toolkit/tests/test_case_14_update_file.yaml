@@ -1,0 +1,232 @@
+name: "GH14 - Update File"
+description: "Verify update_file tool modifies existing file content using OLD/NEW delimiter format"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  target_branch:
+    type: str
+    value: "tc-file-ops-2025-12-08"
+  file_path:
+    type: str
+  original_content:
+    type: str
+  new_content:
+    type: str
+  file_query:
+    type: str
+  update_result:
+    type: str
+  verified_content:
+    type: str
+  create_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: set_branch
+
+nodes:
+  - id: set_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: prepare_file
+
+  - id: prepare_file
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique file path and initial content
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/TC014-{random_id}.md"
+        original_content = f"Initial content created at {timestamp} for update test {random_id}"
+
+        {"file_path": file_path, "original_content": original_content}
+    input: []
+    output:
+      - file_path
+      - original_content
+    structured_output: true
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: prepare_update
+
+  - id: prepare_update
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        original_content = alita_state.get('original_content', '')
+
+        # original_content is already a plain string from prepare_file step
+        original_text = str(original_content).strip()
+
+        # Generate new content
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        new_content = f"Updated by TC-014 at {timestamp} - ID: {random_id}"
+
+        # Build file_query in OLD/NEW format
+        # Use chr(10) for newlines to avoid YAML parsing issues
+        nl = chr(10)
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += original_text + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query}
+    input:
+      - file_path
+      - original_content
+    output:
+      - new_content
+      - file_query
+    structured_output: true
+    transition: invoke_update
+
+  - id: invoke_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: verify_update
+
+  - id: verify_update
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the results
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        create_result = alita_state.get('create_result')
+        new_content = alita_state.get('new_content', '')
+        original_content = alita_state.get('original_content', '')
+        file_path = alita_state.get('file_path')
+
+        error_message = None
+
+        # Check create result for errors
+        create_result_str = str(create_result) if create_result else ''
+        create_failed = 'error' in create_result_str.lower() and 'already exists' not in create_result_str.lower()
+
+        # Check update result for errors
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:200]}"
+
+        # Get verified content
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # Strip for comparison
+        verified_text_stripped = verified_text.strip()
+
+        # Check if update was successful - new content should be in file
+        content_updated = False
+        if new_content:
+            content_updated = new_content.strip() in verified_text_stripped
+            if not content_updated:
+                # Also check if partial match
+                if 'TC-014' in verified_text_stripped and 'Updated by' in verified_text_stripped:
+                    content_updated = True
+
+        # Determine if tool executed properly
+        tool_executed = update_result is not None and not update_failed and not create_failed
+
+        test_results = {
+            "test_passed": tool_executed and content_updated,
+            "tool_executed": tool_executed,
+            "file_path": file_path,
+            "content_updated": content_updated,
+            "update_response": update_result_str[:300] if update_result_str else None,
+            "new_content_preview": new_content[:100] if new_content else None,
+            "verified_content_preview": verified_text[:200] if verified_text else None,
+            "original_content_preview": original_content[:100] if original_content else None,
+            "error": error_message
+        }
+        test_results
+    input:
+      - update_result
+      - verified_content
+      - create_result
+      - new_content
+      - original_content
+      - file_path
+    output:
+      - messages
+    structured_output: false
+    transition: END
