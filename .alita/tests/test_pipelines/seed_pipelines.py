@@ -2,19 +2,24 @@
 """
 Seed test pipelines to Elitea platform via REST API.
 
+This script seeds both test pipelines and composable pipelines (if defined in config.yaml).
+Composable pipelines are seeded first so their IDs can be used by test pipelines and hooks.
+
 Usage:
-    python seed_pipelines.py <folder_name> [--base-url URL] [--project-id ID] [--session SESSION_COOKIE]
+    python seed_pipelines.py <folder_name> [--base-url URL] [--project-id ID] [--token TOKEN]
 
 Example:
     python seed_pipelines.py state_retrieval --project-id 2
-    python seed_pipelines.py structured_output --base-url http://192.168.68.115 --project-id 2
+    python seed_pipelines.py github_toolkit --base-url http://192.168.68.115 --project-id 2
 """
 
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import requests
 import yaml
@@ -122,11 +127,251 @@ def load_github_toolkit_name_from_env():
     return load_from_env("GITHUB_TOOLKIT_NAME")
 
 
-def get_yaml_files(folder_path: Path) -> list[Path]:
-    """Get all YAML test case files from the specified folder."""
+def load_sdk_toolkit_id_from_env():
+    """Load SDK toolkit ID from environment variable or .env file."""
+    value = load_from_env("SDK_TOOLKIT_ID")
+    if value:
+        try:
+            return int(value)
+        except ValueError:
+            pass
+    return None
+
+
+def load_sdk_toolkit_name_from_env():
+    """Load SDK toolkit name from environment variable or .env file."""
+    return load_from_env("SDK_TOOLKIT_NAME")
+
+
+def load_config(suite_folder: Path) -> dict | None:
+    """Load pipeline.yaml (or config.yaml for backwards compatibility) from a suite folder if it exists."""
+    # Try pipeline.yaml first (new convention)
+    config_path = suite_folder / "pipeline.yaml"
+    if not config_path.exists():
+        # Fall back to config.yaml for backwards compatibility
+        config_path = suite_folder / "config.yaml"
+        if not config_path.exists():
+            return None
+
+    with open(config_path) as f:
+        return yaml.safe_load(f)
+
+
+def resolve_env_value(value: Any, env_substitutions: dict) -> Any:
+    """Resolve environment variable references in a value.
+
+    Handles patterns like ${VAR_NAME} and ${VAR_NAME:default}.
+    """
+    if isinstance(value, str):
+        pattern = r'\$\{([^}:]+)(?::([^}]*))?\}'
+
+        def replacer(match):
+            var_name = match.group(1)
+            default = match.group(2)
+
+            # Check substitutions dict first
+            if var_name in env_substitutions:
+                return str(env_substitutions[var_name])
+            # Then check environment
+            env_value = load_from_env(var_name)
+            if env_value:
+                return env_value
+            # Fall back to default
+            if default is not None:
+                return default
+            return match.group(0)
+
+        return re.sub(pattern, replacer, value)
+    elif isinstance(value, dict):
+        return {k: resolve_env_value(v, env_substitutions) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [resolve_env_value(v, env_substitutions) for v in value]
+    return value
+
+
+def extract_json_path_value(data: dict, json_path: str) -> Any:
+    """Extract a value from a dict using a simple JSON path like $.id or $.name."""
+    if not json_path.startswith("$."):
+        return None
+
+    path = json_path[2:]  # Remove "$."
+    parts = path.split(".")
+
+    current = data
+    for part in parts:
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        else:
+            return None
+    return current
+
+
+def seed_composable_pipelines(
+    config: dict,
+    suite_folder: Path,
+    base_url: str,
+    project_id: int,
+    llm_settings: dict,
+    env_substitutions: dict,
+    session_cookie: str = None,
+    bearer_token: str = None,
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> dict:
+    """Seed composable pipelines defined in config.yaml.
+
+    Composable pipelines are seeded first so their IDs can be used by:
+    - Test pipelines (as toolkit participants)
+    - Post-test hooks (for RCA, notifications, etc.)
+
+    Args:
+        config: Loaded config.yaml dict
+        suite_folder: Path to the suite folder
+        base_url: Platform base URL
+        project_id: Project ID
+        llm_settings: LLM settings for pipelines
+        env_substitutions: Dict of env vars to substitute (will be updated with new IDs)
+        session_cookie: Session cookie for auth
+        bearer_token: Bearer token for auth
+        dry_run: If True, don't actually create pipelines
+        verbose: If True, print detailed output
+
+    Returns:
+        dict with seeded pipeline info and updated env_substitutions
+    """
+    composable_pipelines = config.get("composable_pipelines", [])
+    if not composable_pipelines:
+        return {"success": True, "pipelines": [], "env_substitutions": env_substitutions}
+
+    print(f"\nSeeding {len(composable_pipelines)} composable pipeline(s)...")
+    print("-" * 40)
+
+    results = {"success": True, "pipelines": [], "env_substitutions": env_substitutions.copy()}
+    script_dir = Path(__file__).parent
+
+    for cp_config in composable_pipelines:
+        file_path = cp_config.get("file")
+        if not file_path:
+            print("  Warning: Composable pipeline missing 'file' key, skipping")
+            continue
+
+        # Resolve relative path from suite folder
+        if file_path.startswith("../"):
+            yaml_path = (suite_folder / file_path).resolve()
+        else:
+            yaml_path = suite_folder / file_path
+
+        if not yaml_path.exists():
+            # Also try from script directory
+            yaml_path = (script_dir / file_path.lstrip("./")).resolve()
+
+        if not yaml_path.exists():
+            print(f"  Warning: Composable pipeline file not found: {file_path}")
+            continue
+
+        # Build substitutions for this composable pipeline
+        cp_env = results["env_substitutions"].copy()
+        for key, value in cp_config.get("env", {}).items():
+            cp_env[key] = resolve_env_value(value, cp_env)
+
+        # Parse and seed the pipeline
+        pipeline_data = parse_pipeline_yaml(yaml_path, env_substitutions=cp_env)
+        print(f"\n[composable] {pipeline_data['name']}")
+
+        if dry_run:
+            payload = create_application_payload(pipeline_data, llm_settings)
+            if verbose:
+                print(f"  Payload: {json.dumps(payload, indent=2)}")
+            else:
+                print(f"  Would create: {payload['name']}")
+            results["pipelines"].append({
+                "file": file_path,
+                "name": pipeline_data["name"],
+                "dry_run": True,
+            })
+            continue
+
+        result = seed_pipeline(
+            base_url,
+            project_id,
+            pipeline_data,
+            llm_settings,
+            session_cookie=session_cookie,
+            bearer_token=bearer_token,
+        )
+
+        if result["success"]:
+            app_id = result["data"].get("id")
+            version_id = result["data"].get("versions", [{}])[0].get("id")
+
+            print(f"  Created successfully (ID: {app_id})")
+
+            # Link toolkits if any are defined
+            toolkit_ids = pipeline_data.get("toolkit_ids", [])
+            if toolkit_ids and version_id:
+                for toolkit_id in toolkit_ids:
+                    link_result = link_toolkit_to_application(
+                        base_url=base_url,
+                        project_id=project_id,
+                        toolkit_id=toolkit_id,
+                        application_id=app_id,
+                        version_id=version_id,
+                        session_cookie=session_cookie,
+                        bearer_token=bearer_token,
+                    )
+                    if link_result.get("success"):
+                        print(f"    Linked toolkit {toolkit_id}")
+                    else:
+                        print(f"    Failed to link toolkit {toolkit_id}: {link_result.get('error', 'Unknown error')}")
+
+            # Save to env_substitutions if save_to_env is defined
+            for save_item in cp_config.get("save_to_env", []):
+                key = save_item.get("key")
+                json_path = save_item.get("value")
+                if key and json_path:
+                    extracted = extract_json_path_value(result["data"], json_path)
+                    if extracted is not None:
+                        results["env_substitutions"][key] = extracted
+                        print(f"    Saved {key}={extracted}")
+
+            results["pipelines"].append({
+                "file": file_path,
+                "name": pipeline_data["name"],
+                "id": app_id,
+                "version_id": version_id,
+            })
+        else:
+            print(f"  FAILED: {result.get('status_code', 'N/A')} - {result.get('error', 'Unknown error')}")
+            results["success"] = False
+            results["pipelines"].append({
+                "file": file_path,
+                "name": pipeline_data["name"],
+                "error": result.get("error"),
+            })
+
+    return results
+
+
+def get_yaml_files(folder_path: Path, config: dict = None) -> list[Path]:
+    """Get all YAML test case files from the specified folder.
+
+    Args:
+        folder_path: Base suite folder path
+        config: Optional config dict that may specify test_directory
+
+    Returns:
+        List of test case YAML files sorted by name
+    """
+    # Check if config specifies a test_directory
+    test_dir = folder_path
+    if config and "execution" in config:
+        test_subdir = config["execution"].get("test_directory")
+        if test_subdir:
+            test_dir = folder_path / test_subdir
+
     yaml_files = []
     for pattern in ["test_case_*.yaml", "test_case_*.yml"]:
-        yaml_files.extend(folder_path.glob(pattern))
+        yaml_files.extend(test_dir.glob(pattern))
     return sorted(yaml_files)
 
 
@@ -160,6 +405,11 @@ def parse_pipeline_yaml(yaml_path: Path, env_substitutions: dict = None) -> dict
 
     name = data.get("name", yaml_path.stem)
     description = data.get("description", "")
+
+    # Apply environment variable substitutions to name and description
+    if env_substitutions:
+        name = resolve_env_value(name, env_substitutions)
+        description = resolve_env_value(description, env_substitutions)
 
     # Extract toolkit IDs for later linking (before substitution to get the raw values)
     toolkits = data.get("toolkits", [])
@@ -415,8 +665,14 @@ Authentication (use one of these):
     base_url = args.base_url or load_base_url_from_env() or DEFAULT_BASE_URL
     project_id = args.project_id or load_project_id_from_env() or DEFAULT_PROJECT_ID
 
+    # Resolve folder path first (needed for SUITE_NAME)
+    script_dir = Path(__file__).parent
+    folder_path = script_dir / args.folder
+
     # Build environment substitutions for YAML templates
     env_substitutions = {}
+
+    # GitHub toolkit
     github_toolkit_id = args.github_toolkit_id or load_github_toolkit_id_from_env()
     if github_toolkit_id is not None:  # Allow ID=0 (though unusual)
         env_substitutions["GITHUB_TOOLKIT_ID"] = github_toolkit_id
@@ -424,9 +680,17 @@ Authentication (use one of these):
     if github_toolkit_name:
         env_substitutions["GITHUB_TOOLKIT_NAME"] = github_toolkit_name
 
-    # Resolve folder path
-    script_dir = Path(__file__).parent
-    folder_path = script_dir / args.folder
+    # SDK toolkit (for RCA and analysis)
+    sdk_toolkit_id = load_sdk_toolkit_id_from_env()
+    if sdk_toolkit_id is not None:
+        env_substitutions["SDK_TOOLKIT_ID"] = sdk_toolkit_id
+    sdk_toolkit_name = load_sdk_toolkit_name_from_env()
+    if sdk_toolkit_name:
+        env_substitutions["SDK_TOOLKIT_NAME"] = sdk_toolkit_name
+
+    # Suite name (derived from folder name)
+    suite_name = folder_path.name
+    env_substitutions["SUITE_NAME"] = suite_name
 
     if not folder_path.exists():
         print(f"Error: Folder '{folder_path}' does not exist", file=sys.stderr)
@@ -450,13 +714,19 @@ Authentication (use one of these):
 
     auth_method = "Bearer token" if bearer_token else "Session cookie"
 
-    # Get YAML files
-    yaml_files = get_yaml_files(folder_path)
-    if not yaml_files:
+    # Load pipeline.yaml if it exists (for composable pipelines and test_directory)
+    config = load_config(folder_path)
+
+    # Get YAML files (will look in test_directory if specified in config)
+    yaml_files = get_yaml_files(folder_path, config)
+    if not yaml_files and not (config and config.get("composable_pipelines")):
         print(f"No test case YAML files found in '{folder_path}'", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Found {len(yaml_files)} pipeline(s) in '{args.folder}'")
+    composable_count = len(config.get("composable_pipelines", [])) if config else 0
+    print(f"Found {len(yaml_files)} test pipeline(s) in '{args.folder}'")
+    if composable_count > 0:
+        print(f"Found {composable_count} composable pipeline(s) in config.yaml")
     print(f"Target: {base_url} (Project ID: {project_id})")
     print(f"Auth: {auth_method}")
     if env_substitutions:
@@ -470,8 +740,28 @@ Authentication (use one of these):
         "max_tokens": DEFAULT_LLM_SETTINGS["max_tokens"],
     }
 
-    # Process each pipeline
-    results = {"success": 0, "failed": 0, "skipped": 0}
+    # Seed composable pipelines first (so their IDs can be used by test pipelines)
+    if config and config.get("composable_pipelines"):
+        composable_result = seed_composable_pipelines(
+            config=config,
+            suite_folder=folder_path,
+            base_url=base_url,
+            project_id=project_id,
+            llm_settings=llm_settings,
+            env_substitutions=env_substitutions,
+            session_cookie=session_cookie,
+            bearer_token=bearer_token,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+        )
+        # Update env_substitutions with IDs from composable pipelines
+        env_substitutions = composable_result["env_substitutions"]
+
+        if not composable_result["success"]:
+            print("\nWarning: Some composable pipelines failed to seed")
+
+    # Process each test pipeline
+    results = {"success": 0, "failed": 0, "skipped": 0, "composable": composable_count}
 
     for yaml_file in yaml_files:
         pipeline_data = parse_pipeline_yaml(yaml_file, env_substitutions=env_substitutions)
@@ -528,7 +818,12 @@ Authentication (use one of these):
 
     # Summary
     print("\n" + "=" * 60)
-    print(f"Summary: {results['success']} created, {results['failed']} failed, {results['skipped']} skipped")
+    summary_parts = [f"{results['success']} created", f"{results['failed']} failed"]
+    if results["skipped"] > 0:
+        summary_parts.append(f"{results['skipped']} skipped")
+    if results.get("composable", 0) > 0:
+        summary_parts.append(f"{results['composable']} composable")
+    print(f"Summary: {', '.join(summary_parts)}")
 
     if results["failed"] > 0:
         sys.exit(1)

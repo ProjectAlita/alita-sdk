@@ -3,7 +3,11 @@
 Execute cleanup steps from a test suite's config.yaml.
 
 This script reads the cleanup configuration and removes test artifacts
-created during test execution, including branches, PRs, files, and pipelines.
+created during test execution by invoking toolkit tools and running
+generic processes like pipeline/toolkit deletion.
+
+The cleanup is toolkit-agnostic - it simply invokes specified tools with
+specified parameters, making it work with any toolkit type.
 
 Usage:
     python cleanup.py <suite_folder> [options]
@@ -98,8 +102,13 @@ class CleanupContext:
 
 
 def load_config(suite_folder: Path) -> dict:
-    """Load config.yaml from a suite folder."""
-    config_path = suite_folder / "config.yaml"
+    """Load pipeline.yaml (or config.yaml for backwards compatibility) from a suite folder."""
+    # Try pipeline.yaml first (new convention)
+    config_path = suite_folder / "pipeline.yaml"
+    if not config_path.exists():
+        # Fall back to config.yaml for backwards compatibility
+        config_path = suite_folder / "config.yaml"
+
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -112,27 +121,45 @@ def load_config(suite_folder: Path) -> dict:
 # =============================================================================
 
 
-def handle_github_cleanup(step: dict, ctx: CleanupContext) -> dict:
-    """Handle GitHub-related cleanup actions."""
-    action = step.get("action")
+def handle_toolkit_invoke(step: dict, ctx: CleanupContext) -> dict:
+    """
+    Handle generic toolkit tool invocation for cleanup.
+
+    This is toolkit-agnostic - it simply invokes the specified tool with
+    the specified parameters. The config should contain:
+      - toolkit_id: The toolkit ID to invoke
+      - tool_name: The tool to call
+      - tool_params: Parameters to pass to the tool (optional)
+      - result_filter: Optional pattern to filter/process results
+    """
     config = ctx.resolve_env(step.get("config", {}))
 
-    toolkit_ref = config.get("toolkit_ref")
+    toolkit_id = config.get("toolkit_id") or config.get("toolkit_ref")
+    tool_name = config.get("tool_name")
+    tool_params = config.get("tool_params", {})
 
-    ctx.log(f"GitHub cleanup action: {action}")
+    if not toolkit_id:
+        ctx.log("No toolkit_id provided", "warning")
+        return {"success": True, "skipped": True, "reason": "no toolkit_id"}
+
+    if not tool_name:
+        ctx.log("No tool_name provided", "warning")
+        return {"success": True, "skipped": True, "reason": "no tool_name"}
+
+    ctx.log(f"Invoking toolkit {toolkit_id} tool: {tool_name}")
 
     if ctx.dry_run:
-        ctx.log(f"[DRY RUN] Would execute: {action}")
+        ctx.log(f"[DRY RUN] Would invoke {tool_name} with params: {tool_params}")
         return {"success": True, "dry_run": True}
 
-    if action == "delete_branches":
-        return github_delete_branches(ctx, toolkit_ref, config)
-    elif action == "close_pull_requests":
-        return github_close_prs(ctx, toolkit_ref, config)
-    elif action == "delete_files":
-        return github_delete_files(ctx, toolkit_ref, config)
+    result = invoke_toolkit_tool(ctx, int(toolkit_id), tool_name, tool_params)
+
+    if result.get("success"):
+        ctx.log(f"Tool {tool_name} executed successfully", "success")
     else:
-        return {"success": False, "error": f"Unknown github action: {action}"}
+        ctx.log(f"Tool {tool_name} failed: {result.get('error', 'Unknown error')}", "error")
+
+    return result
 
 
 def get_toolkit_by_id(ctx: CleanupContext, toolkit_id: int) -> Optional[dict]:
@@ -179,132 +206,6 @@ def invoke_toolkit_tool(ctx: CleanupContext, toolkit_id: int, tool_name: str, pa
         return {"success": True, "result": result}
     else:
         return {"success": False, "error": response.text[:500]}
-
-
-def github_delete_branches(ctx: CleanupContext, toolkit_ref: str, config: dict) -> dict:
-    """Delete branches matching a pattern."""
-    pattern = config.get("pattern", "tc-test-*")
-    keep_recent = config.get("keep_recent", 0)
-
-    if not toolkit_ref:
-        ctx.log("No toolkit_ref provided, skipping branch cleanup", "warning")
-        return {"success": True, "skipped": True}
-
-    toolkit_id = int(toolkit_ref)
-
-    # List branches
-    result = invoke_toolkit_tool(ctx, toolkit_id, "list_branches_in_repo", {})
-    if not result.get("success"):
-        return result
-
-    branches = result.get("result", [])
-    if isinstance(branches, str):
-        branches = [b.strip() for b in branches.split("\n") if b.strip()]
-
-    # Filter branches matching pattern
-    matching = [b for b in branches if fnmatch.fnmatch(b, pattern)]
-
-    if not matching:
-        ctx.log(f"No branches matching pattern: {pattern}", "info")
-        return {"success": True, "deleted": 0}
-
-    # Sort and optionally keep recent
-    matching.sort(reverse=True)
-    if keep_recent > 0:
-        to_delete = matching[keep_recent:]
-    else:
-        to_delete = matching
-
-    deleted = 0
-    for branch in to_delete:
-        # Note: delete_branch tool may not exist in all toolkit configurations
-        # This is a placeholder for the actual implementation
-        ctx.log(f"Would delete branch: {branch}", "info")
-        deleted += 1
-
-    ctx.log(f"Deleted {deleted} branches", "success")
-    return {"success": True, "deleted": deleted, "branches": to_delete}
-
-
-def github_close_prs(ctx: CleanupContext, toolkit_ref: str, config: dict) -> dict:
-    """Close pull requests matching a pattern."""
-    pattern = config.get("pattern", "[Test]*")
-    # comment = config.get("add_comment")  # For future use when closing PRs
-
-    if not toolkit_ref:
-        ctx.log("No toolkit_ref provided, skipping PR cleanup", "warning")
-        return {"success": True, "skipped": True}
-
-    toolkit_id = int(toolkit_ref)
-
-    # List open PRs
-    result = invoke_toolkit_tool(ctx, toolkit_id, "list_open_pull_requests", {})
-    if not result.get("success"):
-        return result
-
-    prs = result.get("result", [])
-    if isinstance(prs, str):
-        try:
-            prs = json.loads(prs)
-        except json.JSONDecodeError:
-            prs = []
-
-    # Filter PRs matching pattern
-    matching = []
-    for pr in prs if isinstance(prs, list) else []:
-        title = pr.get("title", "")
-        if fnmatch.fnmatch(title, pattern):
-            matching.append(pr)
-
-    if not matching:
-        ctx.log(f"No PRs matching pattern: {pattern}", "info")
-        return {"success": True, "closed": 0}
-
-    closed = 0
-    for pr in matching:
-        pr_number = pr.get("number")
-        if pr_number:
-            ctx.log(f"Would close PR #{pr_number}: {pr.get('title')}", "info")
-            closed += 1
-
-    ctx.log(f"Closed {closed} PRs", "success")
-    return {"success": True, "closed": closed}
-
-
-def github_delete_files(ctx: CleanupContext, toolkit_ref: str, config: dict) -> dict:
-    """Delete files matching a pattern from a branch."""
-    branch = config.get("branch")
-    pattern = config.get("pattern", "test-file-*.md")
-
-    if not toolkit_ref or not branch:
-        ctx.log("toolkit_ref and branch required for file deletion", "warning")
-        return {"success": True, "skipped": True}
-
-    toolkit_id = int(toolkit_ref)
-
-    # List files in branch
-    result = invoke_toolkit_tool(ctx, toolkit_id, "list_files_in_bot_branch", {})
-    if not result.get("success"):
-        return result
-
-    files = result.get("result", [])
-    if isinstance(files, str):
-        files = [f.strip() for f in files.split("\n") if f.strip()]
-
-    # Filter files matching pattern
-    matching = [f for f in files if fnmatch.fnmatch(f, pattern)]
-
-    if not matching:
-        ctx.log(f"No files matching pattern: {pattern}", "info")
-        return {"success": True, "deleted": 0}
-
-    deleted = 0
-    for file_path in matching:
-        ctx.log(f"Would delete file: {file_path}", "info")
-        deleted += 1
-
-    ctx.log(f"Deleted {deleted} files", "success")
-    return {"success": True, "deleted": deleted, "files": matching}
 
 
 def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
@@ -391,6 +292,107 @@ def handle_toolkit_cleanup(step: dict, ctx: CleanupContext) -> dict:
         return {"success": False, "error": response.text[:200]}
 
 
+def handle_composable_cleanup(config: dict, ctx: CleanupContext) -> dict:
+    """Handle cleanup of composable pipelines defined in config.yaml.
+
+    This is automatically invoked based on the composable_pipelines section
+    in config.yaml - no explicit cleanup step needed.
+
+    The function resolves the pipeline names (with env substitution) and
+    deletes them from the platform.
+    """
+    composable_pipelines = config.get("composable_pipelines", [])
+    if not composable_pipelines:
+        return {"success": True, "deleted": 0, "skipped": True, "reason": "no composable pipelines"}
+
+    # Get all pipeline names after env substitution
+    pipeline_names = []
+    for cp_config in composable_pipelines:
+        file_path = cp_config.get("file")
+        if not file_path:
+            continue
+
+        # Load the composable pipeline file to get its name
+        script_dir = Path(__file__).parent
+        if file_path.startswith("../"):
+            # Resolve from current suite folder context
+            yaml_path = None  # We'll use pattern matching instead
+        else:
+            yaml_path = script_dir / file_path.lstrip("./")
+
+        # Build env for name resolution
+        cp_env = {}
+        for key, value in cp_config.get("env", {}).items():
+            cp_env[key] = ctx.resolve_env(value)
+
+        # Get pipeline name from file or derive from env
+        if yaml_path and yaml_path.exists():
+            with open(yaml_path) as f:
+                cp_data = yaml.safe_load(f)
+            name_template = cp_data.get("name", yaml_path.stem)
+        else:
+            # Use a pattern based on env substitutions
+            name_template = cp_config.get("name_pattern", f"*{cp_config.get('env', {}).get('SUITE_NAME', '')}*")
+
+        # Apply env substitutions to name
+        resolved_name = name_template
+        for var, val in cp_env.items():
+            resolved_name = resolved_name.replace(f"${{{var}}}", str(val))
+            resolved_name = resolved_name.replace(f"${var}", str(val))
+
+        pipeline_names.append(resolved_name)
+
+    if not pipeline_names:
+        return {"success": True, "deleted": 0, "skipped": True, "reason": "no pipeline names resolved"}
+
+    ctx.log(f"Composable pipeline cleanup: {pipeline_names}")
+
+    if ctx.dry_run:
+        ctx.log(f"[DRY RUN] Would delete composable pipelines: {pipeline_names}")
+        return {"success": True, "dry_run": True, "count": len(pipeline_names)}
+
+    # Get all pipelines and match by name
+    pipelines = list_pipelines(
+        ctx.base_url,
+        ctx.project_id,
+        bearer_token=ctx.bearer_token,
+    )
+
+    if not pipelines:
+        ctx.log("No pipelines found", "info")
+        return {"success": True, "deleted": 0}
+
+    # Match pipelines by exact name or pattern
+    deleted = 0
+    failed = 0
+
+    for target_name in pipeline_names:
+        # Check if it's a pattern or exact match
+        if "*" in target_name or "?" in target_name:
+            matching = [p for p in pipelines if fnmatch.fnmatch(p.get("name", ""), target_name)]
+        else:
+            matching = [p for p in pipelines if p.get("name") == target_name]
+
+        for pipeline in matching:
+            result = delete_pipeline(
+                ctx.base_url,
+                ctx.project_id,
+                pipeline["id"],
+                bearer_token=ctx.bearer_token,
+            )
+            if result.get("success"):
+                ctx.log(f"Deleted composable: {pipeline['name']} (ID: {pipeline['id']})", "success")
+                deleted += 1
+            else:
+                ctx.log(f"Failed to delete {pipeline['name']}: {result.get('error')}", "error")
+                failed += 1
+
+    ctx.cleanup_stats["deleted"] += deleted
+    ctx.cleanup_stats["failed"] += failed
+
+    return {"success": failed == 0, "deleted": deleted, "failed": failed}
+
+
 # =============================================================================
 # Main Cleanup Execution
 # =============================================================================
@@ -406,9 +408,26 @@ def execute_cleanup(
     results = {"success": True, "steps": []}
     skip_steps = skip_steps or set()
 
+    # Count composable pipelines
+    composable_count = len(config.get("composable_pipelines", []))
+
     print(f"\nExecuting cleanup for: {config.get('name', 'unknown')}")
     print(f"Steps: {len(cleanup_steps)}")
+    if composable_count > 0:
+        print(f"Composable pipelines: {composable_count}")
     print("-" * 60)
+
+    # First, clean up composable pipelines (if not skipped)
+    if composable_count > 0 and "composable" not in skip_steps:
+        print("\n[0/*] Cleanup Composable Pipelines")
+        composable_result = handle_composable_cleanup(config, ctx)
+        results["steps"].append({
+            "name": "Cleanup Composable Pipelines",
+            "type": "composable",
+            **composable_result,
+        })
+        if not composable_result.get("success") and not composable_result.get("dry_run"):
+            ctx.log("Some composable pipelines failed to clean up", "warning")
 
     for i, step in enumerate(cleanup_steps, 1):
         step_name = step.get("name", f"Step {i}")
@@ -433,11 +452,14 @@ def execute_cleanup(
         step_result = {"success": False, "error": "Unknown step type"}
 
         try:
-            if step_type == "github":
-                step_result = handle_github_cleanup(step, ctx)
+            if step_type == "toolkit_invoke":
+                # Generic toolkit tool invocation (toolkit-agnostic)
+                step_result = handle_toolkit_invoke(step, ctx)
             elif step_type == "pipeline":
+                # Platform pipeline deletion
                 step_result = handle_pipeline_cleanup(step, ctx)
             elif step_type == "toolkit":
+                # Toolkit entity deletion from platform
                 step_result = handle_toolkit_cleanup(step, ctx)
             else:
                 step_result = {"success": False, "error": f"Unknown step type: {step_type}"}
@@ -480,9 +502,10 @@ def main():
     )
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without executing")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    parser.add_argument("--skip-pipelines", action="store_true", help="Skip pipeline deletion")
-    parser.add_argument("--skip-github", action="store_true", help="Skip GitHub cleanup actions")
-    parser.add_argument("--skip-toolkit", action="store_true", help="Skip toolkit deletion")
+    parser.add_argument("--skip-pipelines", action="store_true", help="Skip pipeline deletion steps")
+    parser.add_argument("--skip-toolkit-invoke", action="store_true", help="Skip toolkit tool invocation steps")
+    parser.add_argument("--skip-toolkit", action="store_true", help="Skip toolkit entity deletion steps")
+    parser.add_argument("--skip-composable", action="store_true", help="Skip composable pipeline cleanup")
     parser.add_argument("--json", "-j", action="store_true", help="Output results as JSON")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
@@ -525,10 +548,12 @@ def main():
     skip_steps = set()
     if args.skip_pipelines:
         skip_steps.add("pipeline")
-    if args.skip_github:
-        skip_steps.add("github")
+    if args.skip_toolkit_invoke:
+        skip_steps.add("toolkit_invoke")
     if args.skip_toolkit:
         skip_steps.add("toolkit")
+    if args.skip_composable:
+        skip_steps.add("composable")
 
     # Create context
     ctx = CleanupContext(
@@ -539,11 +564,23 @@ def main():
         dry_run=args.dry_run,
     )
 
-    # Pre-populate env vars from .env and os.environ
-    for var in ["GITHUB_TOOLKIT_ID", "GITHUB_TOOLKIT_NAME", "GITHUB_TEST_BRANCH"]:
-        value = load_from_env(var)
-        if value:
-            ctx.env_vars[var] = value
+    # Pre-populate env vars from config's env section if present
+    env_config = config.get("env", {})
+    for var_name, var_value in env_config.items():
+        ctx.env_vars[var_name] = ctx.resolve_env(var_value)
+
+    # Also load any env vars referenced in cleanup steps from actual environment
+    cleanup_steps = config.get("cleanup", [])
+    for step in cleanup_steps:
+        step_config = step.get("config", {})
+        for value in step_config.values():
+            if isinstance(value, str) and "${" in value:
+                # Extract env var names and pre-load them
+                for match in re.finditer(r'\$\{([^}:]+)', value):
+                    var_name = match.group(1)
+                    env_value = load_from_env(var_name)
+                    if env_value and var_name not in ctx.env_vars:
+                        ctx.env_vars[var_name] = env_value
 
     print(f"Cleanup: {config.get('name', args.folder)}")
     print(f"Target: {base_url} (Project: {project_id})")

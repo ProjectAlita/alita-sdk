@@ -1,10 +1,26 @@
-# GitHub Toolkit Test Pipelines
+# GitHub Toolkit Test Suite
 
-This directory contains pipeline test cases that verify the GitHub toolkit functionality through the Alita SDK.
+This directory contains a complete test suite for validating GitHub toolkit functionality through the Alita SDK.
+
+## Directory Structure
+
+```
+github_toolkit/
+├── pipeline.yaml          # Main suite configuration
+├── tests/                 # Test case files
+│   ├── test_case_1_list_branches.yaml
+│   ├── test_case_2_set_active_branch.yaml
+│   └── ...
+├── configs/               # Suite-specific configurations
+│   └── git-config.json   # GitHub toolkit base configuration
+├── composables/           # Reusable composable pipelines
+│   └── rca_on_failure.yaml  # Root cause analysis pipeline
+└── README.md
+```
 
 ## Overview
 
-These tests validate GitHub toolkit operations by declaring toolkits as pipeline participants and invoking tools via `toolkits['github']` in code nodes. Tests are organized from read-only operations to write operations.
+These tests validate GitHub toolkit operations by declaring toolkits as pipeline participants and invoking tools via toolkit nodes or code nodes. Tests are organized from read-only operations to write operations.
 
 ## Pipeline Structure
 
@@ -51,20 +67,65 @@ nodes:
    - `.gitignore` file
    - Branch `tc-file-ops-2025-12-08` for write operations
 
-## Seeding Pipelines
+## Suite Configuration (pipeline.yaml)
+
+The `pipeline.yaml` file defines:
+
+- **Setup Steps**: Automated toolkit creation, branch creation, test data setup
+- **Composable Pipelines**: RCA (Root Cause Analysis) pipeline for test failures
+- **Test Execution**: Test directory (`tests/`), execution order, variable substitutions
+- **Cleanup Steps**: Automated teardown of test artifacts
+- **Hooks**: Post-test hooks like RCA on failure
+
+This configuration makes the suite self-contained and portable - just provide credentials and run!
+
+## Running the Suite
+
+The suite provides three main scripts that work together:
+
+### 1. Setup - Prepare Environment
 
 ```bash
-# Set the toolkit ID
-export GITHUB_TOOLKIT_ID=1
-
-# Seed pipelines
-python seed_pipelines.py github_toolkit
-
-# Or pass toolkit ID directly
-python seed_pipelines.py github_toolkit --github-toolkit-id 1
+cd /path/to/alita-sdk/.alita/tests/test_pipelines
+python setup.py github_toolkit
 ```
 
-The seeder will substitute `${GITHUB_TOOLKIT_ID}` in the YAML with the actual toolkit ID.
+This reads `pipeline.yaml` and executes setup steps:
+- Creates/verifies GitHub toolkit configuration
+- Creates test branch
+- Creates test issue
+- Sets up SDK analysis toolkit for RCA
+
+Environment variables are saved for the next steps.
+
+### 2. Seed - Create Test Pipelines
+
+```bash
+export GITHUB_TOOLKIT_ID=80 SDK_TOOLKIT_ID=81  # From setup output
+python seed_pipelines.py github_toolkit
+```
+
+This creates:
+- Composable pipelines (RCA) - seeded first
+- Test pipelines (GH1-GH10) - linked to GitHub toolkit
+- Variable substitution from environment
+
+### 3. Run - Execute Tests
+
+```bash
+export RCA_PIPELINE_ID=575  # From seed output
+python run_suite.py github_toolkit
+```
+
+This executes tests and triggers hooks (RCA on failures).
+
+### 4. Cleanup - Remove Artifacts
+
+```bash
+python cleanup.py github_toolkit --yes
+```
+
+This removes all created pipelines, branches, and test data.
 
 ## Test Cases
 

@@ -3,7 +3,13 @@
 Execute setup steps from a test suite's config.yaml.
 
 This script reads the setup configuration and prepares the environment
-for running tests, including creating toolkits, branches, and test data.
+for running tests. It is toolkit-agnostic - all toolkit-specific configuration
+comes from the config.yaml file, not hardcoded in this script.
+
+Supported step types:
+  - toolkit: Create or update toolkit entities on the platform
+  - toolkit_invoke: Invoke any tool from any toolkit
+  - configuration: Create or ensure configurations exist (credentials, etc.)
 
 Usage:
     python setup.py <suite_folder> [options]
@@ -106,8 +112,13 @@ class SetupContext:
 
 
 def load_config(suite_folder: Path) -> dict:
-    """Load config.yaml from a suite folder."""
-    config_path = suite_folder / "config.yaml"
+    """Load pipeline.yaml (or config.yaml for backwards compatibility) from a suite folder."""
+    # Try pipeline.yaml first (new convention)
+    config_path = suite_folder / "pipeline.yaml"
+    if not config_path.exists():
+        # Fall back to config.yaml for backwards compatibility
+        config_path = suite_folder / "config.yaml"
+
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -148,7 +159,18 @@ def extract_json_path(data: Any, path: str) -> Any:
 
 
 def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dict:
-    """Handle toolkit creation or update."""
+    """
+    Handle toolkit creation or update.
+
+    This is toolkit-agnostic - it creates any type of toolkit based on
+    the configuration provided. Configuration can come from:
+      - config_file: A JSON file with toolkit settings
+      - overrides: Inline overrides to apply on top of file config
+      - Direct config fields like toolkit_name, toolkit_type, settings
+
+    Configuration management (credentials) should be handled as separate
+    'configuration' steps before toolkit creation.
+    """
     config = ctx.resolve_env(step.get("config", {}))
 
     # Load base config from file if specified
@@ -157,51 +179,30 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
         file_config = load_toolkit_config(config["config_file"], base_path)
 
     # Apply overrides to file config
-    # For credential configs (github_configuration, etc.), fully replace rather than merge
-    credential_fields = {"github_configuration", "pgvector_configuration"}
     overrides = config.get("overrides", {})
     for key, value in overrides.items():
-        if key in credential_fields:
-            # Fully replace credential configs to avoid mixing token/secret formats
-            file_config[key] = value
-        elif isinstance(value, dict) and key in file_config:
+        if isinstance(value, dict) and key in file_config and isinstance(file_config[key], dict):
             file_config[key].update(value)
         else:
             file_config[key] = value
 
-    # Extract top-level fields and build settings
-    toolkit_name = config.get("toolkit_name", file_config.get("toolkit_name", "test-toolkit"))
-    toolkit_type = file_config.get("type", "github")
+    # Extract top-level fields
+    toolkit_name = config.get("toolkit_name", file_config.get("toolkit_name", file_config.get("name", "test-toolkit")))
+    toolkit_type = config.get("toolkit_type", file_config.get("type", "github"))
 
-    # Build the API payload with settings wrapper
-    # The API expects: type, name, settings: {repository, selected_tools, github_configuration, ...}
-    settings_fields = ["repository", "base_branch", "active_branch", "selected_tools",
-                       "github_configuration", "embedding_model", "pgvector_configuration"]
-    settings = {}
-    for field in settings_fields:
-        if field in file_config:
-            settings[field] = file_config[field]
+    # Build settings from file config (exclude top-level metadata fields)
+    metadata_fields = {"type", "name", "toolkit_name"}
+    settings = {k: v for k, v in file_config.items() if k not in metadata_fields}
+
+    # Allow direct settings override from config
+    if "settings" in config:
+        settings.update(config["settings"])
 
     # Ensure user has an API token for synchronous tool invocation
     ctx.log("Ensuring user API token exists...")
     token_result = ensure_user_token(ctx, "api")
     if not token_result.get("success"):
         return {"success": False, "error": f"Failed to ensure user API token: {token_result.get('error')}"}
-
-    # Ensure required configurations exist before creating toolkit
-    if "github_configuration" in settings:
-        gh_config = settings["github_configuration"]
-        config_name = gh_config.get("alita_title", "github")
-        # Map config name to env var (github -> GIT_TOOL_ACCESS_TOKEN)
-        token_env_map = {
-            "github": "GIT_TOOL_ACCESS_TOKEN",
-        }
-        token_env_var = token_env_map.get(config_name, f"{config_name.upper()}_TOKEN")
-
-        ctx.log(f"Ensuring configuration '{config_name}' exists...")
-        config_result = ensure_github_configuration(ctx, config_name, token_env_var)
-        if not config_result.get("success"):
-            return {"success": False, "error": f"Failed to ensure configuration: {config_result.get('error')}"}
 
     toolkit_config = {
         "type": toolkit_type,
@@ -210,14 +211,7 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
         "settings": settings,
     }
 
-    ctx.log(f"Creating toolkit: {toolkit_name}")
-
-    # Debug: show github_configuration (mask token)
-    if ctx.verbose and "github_configuration" in settings:
-        gh_config = settings["github_configuration"].copy()
-        if "access_token" in gh_config:
-            gh_config["access_token"] = gh_config["access_token"][:10] + "..." if gh_config["access_token"] else None
-        ctx.log(f"github_configuration: {gh_config}")
+    ctx.log(f"Creating toolkit: {toolkit_name} (type: {toolkit_type})")
 
     if ctx.dry_run:
         ctx.log(f"[DRY RUN] Would create toolkit with config: {json.dumps(toolkit_config, indent=2)[:200]}...")
@@ -316,14 +310,14 @@ def update_configuration(ctx: SetupContext, config_id: int, data: dict) -> dict:
         return {"success": False, "error": response.text[:200]}
 
 
-def ensure_github_configuration(ctx: SetupContext, alita_title: str, token_env_var: str) -> dict:
-    """Ensure a GitHub configuration exists with the correct token."""
-    existing = find_configuration_by_title(ctx, alita_title, "github")
+def ensure_configuration(ctx: SetupContext, config_type: str, alita_title: str, data: dict) -> dict:
+    """
+    Ensure a configuration exists with the specified data.
 
-    # Get token from environment
-    token = load_from_env(token_env_var)
-    if not token:
-        return {"success": False, "error": f"Environment variable {token_env_var} not set"}
+    This is generic and works with any configuration type (github, jira, etc.).
+    The data dict should contain all the fields needed for that configuration type.
+    """
+    existing = find_configuration_by_title(ctx, alita_title, config_type)
 
     if ctx.dry_run:
         if existing:
@@ -332,17 +326,43 @@ def ensure_github_configuration(ctx: SetupContext, alita_title: str, token_env_v
             ctx.log(f"[DRY RUN] Would create configuration: {alita_title}", "info")
         return {"success": True, "dry_run": True}
 
-    data = {
-        "access_token": token,
-        "base_url": "https://api.github.com",
-    }
-
     if existing:
-        ctx.log(f"Configuration '{alita_title}' exists (ID: {existing['id']}), updating token...", "info")
+        ctx.log(f"Configuration '{alita_title}' exists (ID: {existing['id']}), updating...", "info")
         return update_configuration(ctx, existing["id"], data)
     else:
         ctx.log(f"Creating configuration '{alita_title}'...", "info")
-        return create_configuration(ctx, "github", alita_title.title(), alita_title, data)
+        return create_configuration(ctx, config_type, alita_title.title(), alita_title, data)
+
+
+def handle_configuration(step: dict, ctx: SetupContext) -> dict:
+    """
+    Handle configuration creation/update for setup.
+
+    This is toolkit-agnostic - it creates any type of configuration
+    based on the config.yaml specification.
+
+    Config should contain:
+      - config_type: The configuration type (github, jira, confluence, etc.)
+      - alita_title: The configuration title/name
+      - data: The configuration data (fields depend on config_type)
+    """
+    config = ctx.resolve_env(step.get("config", {}))
+
+    config_type = config.get("config_type")
+    alita_title = config.get("alita_title")
+    data = config.get("data", {})
+
+    if not config_type:
+        ctx.log("No config_type provided", "warning")
+        return {"success": True, "skipped": True, "reason": "no config_type"}
+
+    if not alita_title:
+        ctx.log("No alita_title provided", "warning")
+        return {"success": True, "skipped": True, "reason": "no alita_title"}
+
+    ctx.log(f"Ensuring configuration '{alita_title}' of type '{config_type}'")
+
+    return ensure_configuration(ctx, config_type, alita_title, data)
 
 
 # =============================================================================
@@ -394,32 +414,44 @@ def ensure_user_token(ctx: SetupContext, token_name: str = "api") -> dict:
     return create_user_token(ctx, token_name)
 
 
-def handle_github_action(step: dict, ctx: SetupContext) -> dict:
-    """Handle GitHub-related setup actions."""
-    action = step.get("action")
+def handle_toolkit_invoke(step: dict, ctx: SetupContext) -> dict:
+    """
+    Handle generic toolkit tool invocation for setup.
+
+    This is toolkit-agnostic - it simply invokes the specified tool with
+    the specified parameters. The config should contain:
+      - toolkit_id: The toolkit ID to invoke
+      - tool_name: The tool to call
+      - tool_params: Parameters to pass to the tool (optional)
+    """
     config = ctx.resolve_env(step.get("config", {}))
 
-    toolkit_ref = config.get("toolkit_ref")
-    if not toolkit_ref:
-        return {"success": False, "error": "toolkit_ref is required for github actions"}
+    toolkit_id = config.get("toolkit_id") or config.get("toolkit_ref")
+    tool_name = config.get("tool_name")
+    tool_params = config.get("tool_params", {})
 
-    ctx.log(f"GitHub action: {action}")
+    if not toolkit_id:
+        ctx.log("No toolkit_id provided", "warning")
+        return {"success": True, "skipped": True, "reason": "no toolkit_id"}
+
+    if not tool_name:
+        ctx.log("No tool_name provided", "warning")
+        return {"success": True, "skipped": True, "reason": "no tool_name"}
+
+    ctx.log(f"Invoking toolkit {toolkit_id} tool: {tool_name}")
 
     if ctx.dry_run:
-        ctx.log(f"[DRY RUN] Would execute GitHub action: {action}")
+        ctx.log(f"[DRY RUN] Would invoke {tool_name} with params: {tool_params}")
         return {"success": True, "dry_run": True}
 
-    # Get toolkit details to invoke tools
-    toolkit = get_toolkit_by_id(ctx, int(toolkit_ref))
-    if not toolkit:
-        return {"success": False, "error": f"Toolkit {toolkit_ref} not found"}
+    result = invoke_toolkit_tool(ctx, int(toolkit_id), tool_name, tool_params)
 
-    if action == "create_branch":
-        return github_create_branch(ctx, toolkit, config)
-    elif action == "ensure_issue":
-        return github_ensure_issue(ctx, toolkit, config, step)
+    if result.get("success"):
+        ctx.log(f"Tool {tool_name} executed successfully", "success")
     else:
-        return {"success": False, "error": f"Unknown github action: {action}"}
+        ctx.log(f"Tool {tool_name} failed: {result.get('error', 'Unknown error')}", "error")
+
+    return result
 
 
 def get_toolkit_by_id(ctx: SetupContext, toolkit_id: int) -> Optional[dict]:
@@ -468,72 +500,6 @@ def invoke_toolkit_tool(ctx: SetupContext, toolkit_id: int, tool_name: str, para
         return {"success": False, "error": response.text[:500]}
 
 
-def github_create_branch(ctx: SetupContext, toolkit: dict, config: dict) -> dict:
-    """Create a branch using the GitHub toolkit."""
-    branch_name = config.get("branch_name", f"test-branch-{ctx.env_vars.get('TIMESTAMP')}")
-    from_branch = config.get("from_branch", "main")
-
-    result = invoke_toolkit_tool(
-        ctx,
-        toolkit["id"],
-        "create_branch",
-        {"branch_name": branch_name, "from_branch": from_branch},
-    )
-
-    if result.get("success"):
-        ctx.log(f"Created branch: {branch_name}", "success")
-        return {"success": True, "branch_name": branch_name}
-    else:
-        # Check if branch already exists
-        if "already exists" in str(result.get("error", "")).lower():
-            ctx.log(f"Branch already exists: {branch_name}", "info")
-            return {"success": True, "branch_name": branch_name, "existed": True}
-        ctx.log(f"Failed to create branch: {result.get('error')}", "error")
-        return result
-
-
-def github_ensure_issue(ctx: SetupContext, toolkit: dict, config: dict, step: dict) -> dict:
-    """Ensure an issue exists, create if not found."""
-    title = config.get("title", "[Test] Automated Test Issue")
-    body = config.get("body", "Test issue for automated testing")
-    labels = config.get("labels", [])
-    match_by = step.get("match_by", "title")
-
-    # First, try to find existing issue
-    result = invoke_toolkit_tool(ctx, toolkit["id"], "get_issues", {"state": "open"})
-
-    if result.get("success"):
-        issues = result.get("result", [])
-        if isinstance(issues, str):
-            # Try to parse if string
-            try:
-                issues = json.loads(issues)
-            except json.JSONDecodeError:
-                issues = []
-
-        for issue in issues if isinstance(issues, list) else []:
-            if match_by == "title" and issue.get("title") == title:
-                ctx.log(f"Found existing issue: #{issue.get('number')}", "info")
-                return {"success": True, "number": issue.get("number"), "existed": True}
-
-    # Create new issue
-    result = invoke_toolkit_tool(
-        ctx,
-        toolkit["id"],
-        "create_issue",
-        {"title": title, "body": body, "labels": ",".join(labels)},
-    )
-
-    if result.get("success"):
-        issue_data = result.get("result", {})
-        issue_number = issue_data.get("number") if isinstance(issue_data, dict) else None
-        ctx.log(f"Created issue: #{issue_number}", "success")
-        return {"success": True, "number": issue_number}
-    else:
-        ctx.log(f"Failed to create issue: {result.get('error')}", "error")
-        return result
-
-
 # =============================================================================
 # Main Setup Execution
 # =============================================================================
@@ -564,13 +530,23 @@ def execute_setup(config: dict, ctx: SetupContext, base_path: Path) -> dict:
         # Execute step based on type
         step_result = {"success": False, "error": "Unknown step type"}
 
-        if step_type == "toolkit":
-            if action == "create_or_update":
-                step_result = handle_toolkit_create(step, ctx, base_path)
-        elif step_type == "github":
-            step_result = handle_github_action(step, ctx)
-        else:
-            step_result = {"success": False, "error": f"Unknown step type: {step_type}"}
+        try:
+            if step_type == "toolkit":
+                # Create or update toolkit entity on the platform
+                if action == "create_or_update":
+                    step_result = handle_toolkit_create(step, ctx, base_path)
+                else:
+                    step_result = {"success": False, "error": f"Unknown toolkit action: {action}"}
+            elif step_type == "toolkit_invoke":
+                # Generic toolkit tool invocation (toolkit-agnostic)
+                step_result = handle_toolkit_invoke(step, ctx)
+            elif step_type == "configuration":
+                # Create or ensure configurations exist
+                step_result = handle_configuration(step, ctx)
+            else:
+                step_result = {"success": False, "error": f"Unknown step type: {step_type}"}
+        except Exception as e:
+            step_result = {"success": False, "error": str(e)}
 
         # Save environment variables from step result
         if step_result.get("success") and "save_to_env" in step:
