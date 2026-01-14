@@ -14,6 +14,7 @@ from pydantic.fields import PrivateAttr
 from ..code_indexer_toolkit import CodeIndexerToolkit
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
+from ..utils.tool_prompts import EDIT_FILE_DESCRIPTION, UPDATE_FILE_PROMPT_NO_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,7 @@ CreateFileModel = create_model(
 UpdateFileModel = create_model(
     "UpdateFileModel",
     file_path=(str, Field(description="The path of the file")),
-    update_query=(str, Field(description="Contains the file contents required to be updated. "
-                                       "The old file contents is wrapped in OLD <<<< and >>>> OLD. "
-                                       "The new file contents is wrapped in NEW <<<< and >>>> NEW")),
+    update_query=(str, Field(description=UPDATE_FILE_PROMPT_NO_PATH)),
     branch=(str, Field(description="The branch to update the file in")),
 )
 
@@ -491,7 +490,7 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
             {
                 "name": "update_file",
                 "ref": self.update_file,
-                "description": self.update_file.__doc__ or "Update the contents of a file in the repository.",
+                "description": EDIT_FILE_DESCRIPTION,
                 "args_schema": UpdateFileModel,
             },
             {

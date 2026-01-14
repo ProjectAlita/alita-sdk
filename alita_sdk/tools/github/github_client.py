@@ -45,7 +45,6 @@ from .schemas import (
 # Import prompts for tools
 from .tool_prompts import (
     CREATE_FILE_PROMPT,
-    UPDATE_FILE_PROMPT,
     CREATE_ISSUE_PROMPT,
     UPDATE_ISSUE_PROMPT,
 )
@@ -67,6 +66,8 @@ from langchain_community.tools.github.prompt import (
     LIST_PULL_REQUEST_FILES,
     CREATE_PULL_REQUEST_PROMPT
 )
+
+from ..utils.tool_prompts import EDIT_FILE_DESCRIPTION
 
 
 class GitHubClient(BaseModel):
@@ -1147,14 +1148,23 @@ class GitHubClient(BaseModel):
                     "which is protected. Please create a new branch and try again."
                 )
 
-            if "\n" not in file_query:
+            # Split into lines and find first non-empty line for file_path
+            lines = file_query.split("\n")
+            first_non_empty_idx = None
+            for i, line in enumerate(lines):
+                if line.strip():
+                    first_non_empty_idx = i
+                    break
+            
+            if first_non_empty_idx is None:
                 return (
-                    "Invalid file_query format. Expected first line to be the file path "
+                    "Invalid file_query format. Expected first non-empty line to be the file path "
                     "followed by OLD/NEW blocks."
                 )
 
-            file_path, edit_content = file_query.split("\n", 1)
-            file_path = file_path.strip()
+            file_path = lines[first_non_empty_idx].strip()
+            # Keep all lines after file_path line (preserving empty lines)
+            edit_content = "\n".join(lines[first_non_empty_idx + 1:])
 
             # Set temporary repo override for internal helpers
             self._tmp_repo_for_edit = repo_name
@@ -1984,7 +1994,7 @@ class GitHubClient(BaseModel):
                 "ref": self.update_file,
                 "name": "update_file",
                 "mode": "update_file",
-                "description": UPDATE_FILE_PROMPT,
+                "description": EDIT_FILE_DESCRIPTION,
                 "args_schema": UpdateFile,
             },
             {

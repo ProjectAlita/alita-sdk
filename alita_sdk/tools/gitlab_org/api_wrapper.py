@@ -10,6 +10,7 @@ from pydantic.fields import Field
 
 from ..elitea_base import BaseToolApiWrapper, BaseCodeToolApiWrapper
 from ..gitlab.utils import get_diff_w_position, get_position
+from ..utils.tool_prompts import EDIT_FILE_DESCRIPTION, UPDATE_FILE_PROMPT_NO_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ GitLabReadFile = create_model(
 GitLabUpdateFile = create_model(
     "GitLabUpdateFile",
     file_path=(str, Field(description="Path of the file to update")),
-    update_query=(str, Field(description="File path followed by the old and new contents")),
+    update_query=(str, Field(description=UPDATE_FILE_PROMPT_NO_PATH)),
     repository=(Optional[str], Field(description="Name of the repository", default=None)),
     branch=(str, Field(description=branch_description))
 )
@@ -639,7 +640,7 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
             },
             {
                 "name": "update_file",
-                "description": self.update_file.__doc__ or "Updates a file in the GitLab repository.",
+                "description": EDIT_FILE_DESCRIPTION,
                 "args_schema": GitLabUpdateFile,
                 "ref": self.update_file,
             },
