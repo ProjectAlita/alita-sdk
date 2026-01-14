@@ -870,9 +870,6 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         updated_content = current_content
         edits_applied = 0
         for old_text, new_text in edits:
-            if not old_text.strip():
-                continue
-            
             new_updated, error_message = try_apply_edit(
                 content=updated_content,
                 old_text=old_text,

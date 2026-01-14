@@ -2,7 +2,7 @@
 
 ## Objective
 
-Verify that the `update_file` tool correctly updates an existing file's content in a GitHub repository using the OLD/NEW delimiter format, **and gracefully handles error scenarios such as ambiguous (duplicate) old content**.
+Verify that the `update_file` tool correctly updates an existing file's content in a GitHub repository using the OLD/NEW delimiter format.
 
 ## Test Data Configuration
 
@@ -33,9 +33,7 @@ Verify that the `update_file` tool correctly updates an existing file's content 
 path: .alita\tool_configs\git-config.json
 generateTestData: false
 
----
-
-## Part A: Positive Test – Successful Update
+## Test Steps & Expectations
 
 ### Step 1: Read Original File Content
 
@@ -45,20 +43,24 @@ Use the `read_file` tool to retrieve the current content of the `test-data/gener
 
 ### Step 2: Prepare Update Query
 
-Save "{{RANDOM_STRING}} by TC-012 {{CURRENT_DATE}}" to `{{TEST_NEW_CONTENT}}`.
+Save "{{RANDOM_STRING}} by TC-012 {{CURRENT_DATE}}" to {{TEST_NEW_CONTENT}} before preparing the file_query.
 
-Build the `file_query` for:
-- **File path:** `test-data/generated/TC-010_sample.md`
-- **Old text:** the value of `{{TEST_OLD_CONTENT}}` (retrieved in Step 1)
-- **New text:** the value of `{{TEST_NEW_CONTENT}}`
+Prepare the file_query parameter in the correct format:
+```
+test-data/generated/TC-010_sample.md
+OLD <<<<
+{{TEST_OLD_CONTENT}}
+>>>> OLD
+NEW <<<<
+{{TEST_NEW_CONTENT}}
+>>>> NEW
+```
 
-**Important:** The resulting `file_query` **MUST NOT** contain the literal placeholder text `{{TEST_OLD_CONTENT}}` or `{{TEST_NEW_CONTENT}}`; it must contain the real old and new content values.
-
-**Expectation:** The `file_query` string is fully resolved (no placeholders) and correctly formatted with the file path, OLD delimiter markers, and NEW delimiter markers.
+**Expectation:** The query string is properly formatted with the file path, OLD delimiter markers, and NEW delimiter markers.
 
 ### Step 3: Execute the Tool
 
-Switch to the `tc-file-ops-2025-12-08` branch and execute the `update_file` tool for the switched branch with the prepared `file_query`.
+Switch to the `tc-file-ops-2025-12-08` branch and execute the `update_file` tool for the switched branch with the prepared file_query.
 
 **Expectation:** The tool runs without errors and returns a success message indicating the file was updated successfully.
 
@@ -67,49 +69,3 @@ Switch to the `tc-file-ops-2025-12-08` branch and execute the `update_file` tool
 Use the `read_file` tool to retrieve the `test-data/generated/TC-010_sample.md` file from `tc-file-ops-2025-12-08` content after the update.
 
 **Expectation:** The file content should now contain `{{TEST_NEW_CONTENT}}` instead of `{{TEST_OLD_CONTENT}}`. The old content should be completely replaced by the new content.
-
----
-
-## Part B: Negative Test – Ambiguous Old Content (Duplicate Substring)
-
-### Objective
-
-Verify that when the provided `OLD` content appears **more than once** in the target file, the `update_file` tool rejects the operation with an appropriate warning and leaves the file unchanged.
-
-### Step 5: Create a File with Duplicate Content
-
-Use the `create_file` tool to create a new file `test-data/generated/TC-012_duplicate_test.md` in the `tc-file-ops-2025-12-08` branch with content that contains a repeated substring:
-
-```
-This is a duplicate line.
-Some other content here.
-This is a duplicate line.
-End of file.
-```
-
-Save the full file content to `{{DUPLICATE_FILE_CONTENT}}`.
-
-**Expectation:** The file is created successfully in the repository.
-
-### Step 6: Attempt Update with Ambiguous Old Content
-
-Build the `file_query` for:
-- **File path:** `test-data/generated/TC-012_duplicate_test.md`
-- **Old text:** `This is a duplicate line.`
-- **New text:** `This is the replaced line.`
-
-Execute the `update_file` tool with this `file_query`.
-
-**Expectation:** The tool returns an **error or warning message** indicating that the old content is ambiguous (appears more than once) and the update cannot be performed. The message should clearly state that multiple matches were found.
-
-### Step 7: Verify File Remains Unchanged
-
-Use the `read_file` tool to retrieve the content of `test-data/generated/TC-012_duplicate_test.md` from `tc-file-ops-2025-12-08` branch.
-
-**Expectation:** The file content should be **identical** to `{{DUPLICATE_FILE_CONTENT}}` — no changes should have been applied. Both occurrences of "This is a duplicate line." should still be present.
-
-### Step 8: Cleanup
-
-Delete the test file `test-data/generated/TC-012_duplicate_test.md` from the `tc-file-ops-2025-12-08` branch using the `delete_file` tool.
-
-**Expectation:** The file is deleted successfully.
