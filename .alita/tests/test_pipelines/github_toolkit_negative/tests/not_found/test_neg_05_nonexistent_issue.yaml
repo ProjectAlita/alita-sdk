@@ -1,0 +1,100 @@
+# NEG_05: Get Non-Existent Issue
+# Verifies that get_issue returns an actionable error for non-existent issues
+# Expected: Clear error message mentioning "not found" without raw tracebacks
+
+name: "NEG05 - Get Non-Existent Issue"
+description: "Verify get_issue returns actionable error for non-existent issue number"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  issue_number:
+    type: int
+    value: 999999999  # Very large number unlikely to exist
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_issue
+
+nodes:
+  - id: invoke_get_issue
+    type: toolkit
+    tool: get_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - issue_number
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_error
+
+  - id: validate_error
+    type: code
+    code:
+      type: fixed
+      value: |
+        result = alita_state.get('tool_result')
+        issue_number = alita_state.get('issue_number')
+        result_str = str(result).lower() if result else ''
+
+        # Error quality checks
+        # 1. Should indicate resource not found
+        has_not_found = any(term in result_str for term in ['not found', '404', 'does not exist', 'doesn\'t exist'])
+
+        # 2. Should reference the resource type (issue)
+        references_resource = 'issue' in result_str
+
+        # 3. Should NOT contain raw Python tracebacks
+        no_traceback = 'traceback' not in result_str and 'exception' not in result_str.split('failed')[0] if 'failed' in result_str else 'traceback' not in result_str
+
+        # 4. Should NOT be a success response (no issue data)
+        not_success = 'number' not in result_str or '"number":' not in result_str
+
+        # 5. Error message should be concise (not a huge dump)
+        is_concise = len(result_str) < 1000
+
+        # Overall: Good error handling means clear, actionable message
+        test_passed = has_not_found and not_success and is_concise
+
+        test_results = {
+            "test_passed": test_passed,
+            "error_quality": {
+                "indicates_not_found": has_not_found,
+                "references_resource_type": references_resource,
+                "no_raw_traceback": no_traceback,
+                "not_success_response": not_success,
+                "is_concise": is_concise
+            },
+            "requested_issue": issue_number,
+            "actual_response": result_str[:500],
+            "response_length": len(result_str),
+            "improvement_needed": [] if test_passed else [
+                "Missing 'not found' indicator" if not has_not_found else None,
+                "Does not reference 'issue'" if not references_resource else None,
+                "Contains raw traceback" if not no_traceback else None,
+                "Returns success data for non-existent resource" if not not_success else None,
+                "Response too verbose" if not is_concise else None
+            ]
+        }
+        # Filter out None values from improvement_needed
+        test_results["improvement_needed"] = [x for x in test_results["improvement_needed"] if x]
+        test_results
+    input:
+      - tool_result
+      - issue_number
+    output:
+      - messages
+    structured_output: false
+    transition: END

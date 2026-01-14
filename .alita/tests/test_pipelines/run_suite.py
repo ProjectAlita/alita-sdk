@@ -4,11 +4,15 @@ Execute a suite of pipelines and report aggregated results.
 
 Usage:
     python run_suite.py <suite_folder> [options]
+    python run_suite.py <suite_folder>:<pipeline_file.yaml> [options]
     python run_suite.py --pattern "GH*" [options]
 
 Examples:
-    # Run all pipelines in a folder
+    # Run all pipelines in a folder (uses pipeline.yaml)
     python run_suite.py github_toolkit
+
+    # Run specific pipeline config from a folder
+    python run_suite.py github_toolkit_negative:pipeline_validation.yaml
 
     # Run pipelines matching a pattern
     python run_suite.py --pattern "GH1*" --pattern "GH2*"
@@ -21,6 +25,11 @@ Examples:
 
     # Parallel execution
     python run_suite.py github_toolkit --parallel 4
+
+Suite Specification Format:
+    - 'suite_name' - Uses default pipeline.yaml in the suite folder
+    - 'suite_name:pipeline_file.yaml' - Uses specific pipeline config file
+      e.g., 'github_toolkit_negative:pipeline_validation.yaml'
 """
 
 import argparse
@@ -48,18 +57,50 @@ from run_pipeline import (
 )
 
 
-def load_config(suite_folder: Path) -> dict | None:
-    """Load pipeline.yaml (or config.yaml for backwards compatibility) from a suite folder if it exists."""
-    # Try pipeline.yaml first (new convention)
-    config_path = suite_folder / "pipeline.yaml"
-    if not config_path.exists():
-        # Fall back to config.yaml for backwards compatibility
-        config_path = suite_folder / "config.yaml"
+def load_config(suite_folder: Path, pipeline_file: str | None = None) -> dict | None:
+    """Load pipeline config from a suite folder.
+
+    Args:
+        suite_folder: Path to the suite directory
+        pipeline_file: Optional specific pipeline file name (e.g., 'pipeline_validation.yaml').
+                      If None, uses 'pipeline.yaml' or 'config.yaml' as fallback.
+
+    Returns:
+        Parsed YAML config dict, or None if not found.
+    """
+    if pipeline_file:
+        config_path = suite_folder / pipeline_file
         if not config_path.exists():
             return None
+    else:
+        # Try pipeline.yaml first (new convention)
+        config_path = suite_folder / "pipeline.yaml"
+        if not config_path.exists():
+            # Fall back to config.yaml for backwards compatibility
+            config_path = suite_folder / "config.yaml"
+            if not config_path.exists():
+                return None
 
     with open(config_path) as f:
         return yaml.safe_load(f)
+
+
+def parse_suite_spec(suite_spec: str) -> tuple[str, str | None]:
+    """Parse suite specification into folder and optional pipeline file.
+
+    Format: 'suite_name' or 'suite_name:pipeline_file.yaml'
+
+    Examples:
+        'github_toolkit' -> ('github_toolkit', None)
+        'github_toolkit_negative:pipeline_validation.yaml' -> ('github_toolkit_negative', 'pipeline_validation.yaml')
+
+    Returns:
+        Tuple of (folder_name, pipeline_file or None)
+    """
+    if ':' in suite_spec:
+        folder, pipeline_file = suite_spec.split(':', 1)
+        return folder, pipeline_file
+    return suite_spec, None
 
 
 def resolve_env_value(value: Any, env_vars: dict) -> Any:
@@ -405,9 +446,18 @@ def get_pipelines_from_folder(
     base_url: str,
     project_id: int,
     folder_name: str,
-    headers: dict
+    headers: dict,
+    pipeline_file: str | None = None
 ) -> List[dict]:
-    """Get pipelines that match the folder's test case names."""
+    """Get pipelines that match the folder's test case names.
+
+    Args:
+        base_url: Platform base URL
+        project_id: Project ID
+        folder_name: Name of the suite folder
+        headers: Auth headers
+        pipeline_file: Optional specific pipeline config file (e.g., 'pipeline_validation.yaml')
+    """
     # Read YAML files to get pipeline names
     folder_path = Path(__file__).parent / folder_name
     if not folder_path.exists():
@@ -415,9 +465,17 @@ def get_pipelines_from_folder(
 
     import yaml
 
-    # Check if there's a pipeline.yaml with test_directory setting
+    # Check if there's a pipeline config with test_directory setting
     test_dir = folder_path
-    config_path = folder_path / "pipeline.yaml"
+    config_file = pipeline_file or "pipeline.yaml"
+    config_path = folder_path / config_file
+    if not config_path.exists() and pipeline_file:
+        # Specified file doesn't exist
+        return []
+    if not config_path.exists():
+        # Try fallback
+        config_path = folder_path / "config.yaml"
+
     if config_path.exists():
         try:
             with open(config_path) as f:
@@ -431,7 +489,17 @@ def get_pipelines_from_folder(
 
     pipeline_names = []
     # Look for test files in the appropriate directory
-    for yaml_file in sorted(test_dir.glob("test_case_*.yaml")):
+    # Support both standard test cases and negative test cases
+    # Use recursive glob (**/) to find tests in subdirectories
+    yaml_files = []
+    for pattern in ["**/test_case_*.yaml", "**/test_neg_*.yaml"]:
+        yaml_files.extend(test_dir.glob(pattern))
+    # Also check for files directly in test_dir (non-recursive)
+    for pattern in ["test_case_*.yaml", "test_neg_*.yaml"]:
+        yaml_files.extend(test_dir.glob(pattern))
+    # Remove duplicates
+    yaml_files = list(set(yaml_files))
+    for yaml_file in sorted(yaml_files):
         try:
             with open(yaml_file) as f:
                 data = yaml.safe_load(f)
@@ -678,18 +746,25 @@ def main():
     # Get pipelines to execute
     pipelines = []
     suite_name = "Custom"
+    folder_name = None
+    pipeline_file = None
 
     if args.folder:
-        suite_name = args.folder
-        pipelines = get_pipelines_from_folder(base_url, project_id, args.folder, headers)
+        # Parse suite specification: 'folder' or 'folder:pipeline_file.yaml'
+        folder_name, pipeline_file = parse_suite_spec(args.folder)
+        suite_name = args.folder  # Keep full spec as suite name for clarity
+        pipelines = get_pipelines_from_folder(base_url, project_id, folder_name, headers, pipeline_file)
         if not pipelines:
             # Try to get by pattern matching folder name prefix
             import yaml
-            folder_path = Path(__file__).parent / args.folder
+            folder_path = Path(__file__).parent / folder_name
             if folder_path.exists():
-                # Check if there's a pipeline.yaml with test_directory setting
+                # Check if there's a pipeline config with test_directory setting
                 test_dir = folder_path
-                config_path = folder_path / "pipeline.yaml"
+                config_file = pipeline_file or "pipeline.yaml"
+                config_path = folder_path / config_file
+                if not config_path.exists():
+                    config_path = folder_path / "config.yaml"
                 if config_path.exists():
                     try:
                         with open(config_path) as f:
@@ -748,9 +823,9 @@ def main():
     # Load config for hooks
     config = None
     env_vars = {}
-    if args.folder:
-        folder_path = Path(__file__).parent / args.folder
-        config = load_config(folder_path)
+    if folder_name:
+        folder_path = Path(__file__).parent / folder_name
+        config = load_config(folder_path, pipeline_file)
 
         # Build env_vars from environment and config
         if config:

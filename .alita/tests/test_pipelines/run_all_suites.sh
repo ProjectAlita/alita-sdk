@@ -57,12 +57,17 @@ print_usage() {
     echo "  If no suites specified, runs all: ${DEFAULT_SUITES[*]}"
     echo "  Available suites: github_toolkit, state_retrieval, structured_output"
     echo ""
+    echo "Suite Specification Format:"
+    echo "  'suite_name'                    - Uses default pipeline.yaml"
+    echo "  'suite_name:pipeline_file.yaml' - Uses specific pipeline config file"
+    echo ""
     echo "Examples:"
     echo "  $0                              # Run all suites with initial cleanup"
     echo "  $0 -v github_toolkit            # Run GitHub toolkit with verbose output"
     echo "  $0 --skip-cleanup               # Run all but skip post-test cleanup"
     echo "  $0 --skip-initial-cleanup       # Skip cleanup before starting"
     echo "  $0 --stop-on-failure state_retrieval structured_output"
+    echo "  $0 github_toolkit_negative:pipeline_validation.yaml  # Run specific pipeline config"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -138,36 +143,50 @@ print_error() {
 }
 
 run_suite() {
-    local suite=$1
+    local suite_spec=$1
     local suite_start=$(date +%s)
 
-    print_header "Running Test Suite: $suite"
+    # Parse suite specification: 'folder' or 'folder:pipeline_file.yaml'
+    local suite_dir
+    local pipeline_file
+    if [[ "$suite_spec" == *":"* ]]; then
+        suite_dir="${suite_spec%%:*}"
+        pipeline_file="${suite_spec#*:}"
+    else
+        suite_dir="$suite_spec"
+        pipeline_file=""
+    fi
+
+    print_header "Running Test Suite: $suite_spec"
 
     # Check if suite directory exists
-    if [ ! -d "$suite" ]; then
-        print_error "Suite directory not found: $suite"
-        SUITE_RESULTS[$suite]="FAILED"
+    if [ ! -d "$suite_dir" ]; then
+        print_error "Suite directory not found: $suite_dir"
+        SUITE_RESULTS[$suite_spec]="FAILED"
         return 1
     fi
 
-    # Check if pipeline.yaml exists
-    if [ ! -f "$suite/pipeline.yaml" ]; then
-        print_error "pipeline.yaml not found in $suite/"
-        SUITE_RESULTS[$suite]="FAILED"
+    # Check if pipeline config exists
+    local config_file="${pipeline_file:-pipeline.yaml}"
+    if [ ! -f "$suite_dir/$config_file" ]; then
+        print_error "$config_file not found in $suite_dir/"
+        SUITE_RESULTS[$suite_spec]="FAILED"
         return 1
     fi
 
-    local suite_output_dir="$OUTPUT_DIR/$suite"
+    # Create output directory using sanitized suite name (replace : with _)
+    local suite_output_name="${suite_spec//:/_}"
+    local suite_output_dir="$OUTPUT_DIR/$suite_output_name"
     mkdir -p "$suite_output_dir"
 
     # Step 1: Setup
     if [ "$SKIP_SETUP" = false ]; then
-        print_step "Step 1/4: Running setup for $suite"
-        if python setup.py "$suite" $VERBOSE --output-env .env > "$suite_output_dir/setup.log" 2>&1; then
+        print_step "Step 1/4: Running setup for $suite_spec"
+        if python setup.py "$suite_spec" $VERBOSE --output-env .env > "$suite_output_dir/setup.log" 2>&1; then
             print_success "Setup completed"
         else
             print_error "Setup failed - see $suite_output_dir/setup.log"
-            SUITE_RESULTS[$suite]="SETUP_FAILED"
+            SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
             cat "$suite_output_dir/setup.log"
             return 1
         fi
@@ -176,22 +195,22 @@ run_suite() {
     fi
 
     # Step 2: Seed pipelines
-    print_step "Step 2/4: Seeding pipelines for $suite"
-    if python seed_pipelines.py "$suite" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
+    print_step "Step 2/4: Seeding pipelines for $suite_spec"
+    if python seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
         print_success "Pipelines seeded"
     else
         print_error "Seeding failed - see $suite_output_dir/seed.log"
-        SUITE_RESULTS[$suite]="SEED_FAILED"
+        SUITE_RESULTS[$suite_spec]="SEED_FAILED"
         cat "$suite_output_dir/seed.log"
         return 1
     fi
 
     # Step 3: Run tests
-    print_step "Step 3/4: Running tests for $suite"
+    print_step "Step 3/4: Running tests for $suite_spec"
     local results_file="$suite_output_dir/results.json"
 
     # Run tests with JSON output redirected to results file
-    if python run_suite.py "$suite" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
+    if python run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
         print_success "Tests completed"
 
         # Parse results
@@ -200,29 +219,29 @@ run_suite() {
             local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
             local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total_tests', 0))" 2>/dev/null || echo "0")
 
-            SUITE_PASSED[$suite]=$passed
-            SUITE_FAILED[$suite]=$failed
+            SUITE_PASSED[$suite_spec]=$passed
+            SUITE_FAILED[$suite_spec]=$failed
 
-            echo "  Results: $passed/$total passed, $failed/$total failed"
+            echo "  Results: $passed passed, $failed failed (total: $total)"
 
             if [ "$failed" -gt 0 ]; then
-                SUITE_RESULTS[$suite]="TESTS_FAILED"
+                SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
                 print_error "Some tests failed"
             else
-                SUITE_RESULTS[$suite]="PASSED"
+                SUITE_RESULTS[$suite_spec]="PASSED"
             fi
         fi
     else
         print_error "Test execution failed - see $suite_output_dir/run.log"
-        SUITE_RESULTS[$suite]="RUN_FAILED"
+        SUITE_RESULTS[$suite_spec]="RUN_FAILED"
         cat "$suite_output_dir/run.log"
         return 1
     fi
 
     # Step 4: Cleanup
     if [ "$SKIP_CLEANUP" = false ]; then
-        print_step "Step 4/4: Cleaning up $suite"
-        if python cleanup.py "$suite" --yes $VERBOSE > "$suite_output_dir/cleanup.log" 2>&1; then
+        print_step "Step 4/4: Cleaning up $suite_spec"
+        if python cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/cleanup.log" 2>&1; then
             print_success "Cleanup completed"
         else
             print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
@@ -234,9 +253,9 @@ run_suite() {
 
     local suite_end=$(date +%s)
     local suite_duration=$((suite_end - suite_start))
-    SUITE_DURATION[$suite]=$suite_duration
+    SUITE_DURATION[$suite_spec]=$suite_duration
 
-    print_success "Suite $suite completed in ${suite_duration}s"
+    print_success "Suite $suite_spec completed in ${suite_duration}s"
 
     return 0
 }
@@ -253,13 +272,22 @@ if [ "$SKIP_INITIAL_CLEANUP" = false ]; then
     print_step "Cleaning up resources from previous runs"
 
     CLEANUP_FAILED=false
-    for suite in "${SUITES[@]}"; do
-        if [ -d "$suite" ] && [ -f "$suite/pipeline.yaml" ]; then
-            echo "  Cleaning up $suite..."
-            if python cleanup.py "$suite" --yes $VERBOSE > "$OUTPUT_DIR/${suite}_initial_cleanup.log" 2>&1; then
+    for suite_spec in "${SUITES[@]}"; do
+        # Parse suite specification to get directory
+        suite_dir=""
+        if [[ "$suite_spec" == *":"* ]]; then
+            suite_dir="${suite_spec%%:*}"
+        else
+            suite_dir="$suite_spec"
+        fi
+        log_name="${suite_spec//:/_}"
+
+        if [ -d "$suite_dir" ] && [ -f "$suite_dir/pipeline.yaml" ]; then
+            echo "  Cleaning up $suite_spec..."
+            if python cleanup.py "$suite_spec" --yes $VERBOSE > "$OUTPUT_DIR/${log_name}_initial_cleanup.log" 2>&1; then
                 echo "    ✓ Cleaned"
             else
-                echo "    ⚠ Cleanup had issues (see $OUTPUT_DIR/${suite}_initial_cleanup.log)"
+                echo "    ⚠ Cleanup had issues (see $OUTPUT_DIR/${log_name}_initial_cleanup.log)"
                 CLEANUP_FAILED=true
             fi
         fi
@@ -277,19 +305,19 @@ else
 fi
 
 # Run each suite
-for suite in "${SUITES[@]}"; do
-    if run_suite "$suite"; then
-        if [ "${SUITE_RESULTS[$suite]}" = "PASSED" ]; then
-            print_success "✓ $suite: ALL TESTS PASSED"
+for suite_spec in "${SUITES[@]}"; do
+    if run_suite "$suite_spec"; then
+        if [ "${SUITE_RESULTS[$suite_spec]}" = "PASSED" ]; then
+            print_success "✓ $suite_spec: ALL TESTS PASSED"
         else
-            print_error "✗ $suite: SOME TESTS FAILED"
+            print_error "✗ $suite_spec: SOME TESTS FAILED"
             if [ "$STOP_ON_FAILURE" = true ]; then
                 print_error "Stopping execution due to --stop-on-failure"
                 break
             fi
         fi
     else
-        print_error "✗ $suite: SUITE FAILED"
+        print_error "✗ $suite_spec: SUITE FAILED"
         if [ "$STOP_ON_FAILURE" = true ]; then
             print_error "Stopping execution due to --stop-on-failure"
             break
@@ -303,8 +331,9 @@ TOTAL_DURATION=$((TOTAL_END - TOTAL_START))
 
 # Print detailed failure information
 HAS_FAILURES=false
-for suite in "${SUITES[@]}"; do
-    results_file="$OUTPUT_DIR/$suite/results.json"
+for suite_spec in "${SUITES[@]}"; do
+    suite_output_name="${suite_spec//:/_}"
+    results_file="$OUTPUT_DIR/$suite_output_name/results.json"
     if [ -f "$results_file" ]; then
         # Check if there are failed tests
         failed_count=$(python -c "import json; d=json.load(open('$results_file')); print(d.get('failed', 0))" 2>/dev/null || echo "0")
@@ -317,8 +346,9 @@ done
 if [ "$HAS_FAILURES" = true ]; then
     print_header "Failed Tests Details"
 
-    for suite in "${SUITES[@]}"; do
-        results_file="$OUTPUT_DIR/$suite/results.json"
+    for suite_spec in "${SUITES[@]}"; do
+        suite_output_name="${suite_spec//:/_}"
+        results_file="$OUTPUT_DIR/$suite_output_name/results.json"
         if [ -f "$results_file" ]; then
             # Extract and display failed tests
             python - <<EOF
@@ -332,7 +362,7 @@ try:
     failed_tests = [r for r in data.get('results', []) if r.get('test_passed') == False]
 
     if failed_tests:
-        print(f"\n${YELLOW}Suite: $suite${NC}")
+        print(f"\n${YELLOW}Suite: $suite_spec${NC}")
         print("─" * 70)
 
         for test in failed_tests:
@@ -388,11 +418,11 @@ echo ""
 printf "%-20s %-15s %-10s %-10s %-10s\n" "SUITE" "STATUS" "PASSED" "FAILED" "DURATION"
 echo "─────────────────────────────────────────────────────────────────────"
 
-for suite in "${SUITES[@]}"; do
-    status="${SUITE_RESULTS[$suite]:-NOT_RUN}"
-    passed="${SUITE_PASSED[$suite]:-0}"
-    failed="${SUITE_FAILED[$suite]:-0}"
-    duration="${SUITE_DURATION[$suite]:-0}"
+for suite_spec in "${SUITES[@]}"; do
+    status="${SUITE_RESULTS[$suite_spec]:-NOT_RUN}"
+    passed="${SUITE_PASSED[$suite_spec]:-0}"
+    failed="${SUITE_FAILED[$suite_spec]:-0}"
+    duration="${SUITE_DURATION[$suite_spec]:-0}"
 
     # Color code status
     case $status in
@@ -407,8 +437,9 @@ for suite in "${SUITES[@]}"; do
             ;;
     esac
 
-    # Format suite column
-    printf -v suite_col "%-20s" "$suite"
+    # Format suite column (truncate if too long)
+    display_name="${suite_spec:0:20}"
+    printf -v suite_col "%-20s" "$display_name"
 
     # Calculate padding for status to align with 15 char column
     status_len=${#status}
@@ -431,8 +462,8 @@ echo ""
 
 # Calculate overall success
 OVERALL_SUCCESS=true
-for suite in "${SUITES[@]}"; do
-    status="${SUITE_RESULTS[$suite]:-NOT_RUN}"
+for suite_spec in "${SUITES[@]}"; do
+    status="${SUITE_RESULTS[$suite_spec]:-NOT_RUN}"
     if [ "$status" != "PASSED" ]; then
         OVERALL_SUCCESS=false
         break

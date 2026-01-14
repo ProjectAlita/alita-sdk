@@ -1,0 +1,188 @@
+# Root Cause Analysis for Negative Tests
+# Specialized RCA pipeline that suggests improvements to error handling code
+#
+# When a negative test fails, it means the error message wasn't clear/actionable enough.
+# This RCA analyzes the actual response and suggests code improvements.
+
+name: "RCA-Negative-${SUITE_NAME}"
+description: "Error handling improvement suggestions for ${SUITE_NAME}"
+
+# Toolkit participants - allows LLM nodes to use toolkit tools
+# SDK toolkit enables searching/reading code from alita-sdk repo
+toolkits:
+  - id: ${SDK_TOOLKIT_ID}
+    name: ${SDK_TOOLKIT_NAME:sdk-analysis}
+
+state:
+  failure_details:
+    type: str
+    default: ''
+  rca_result:
+    type: dict
+  rca_summary:
+    type: str
+  messages:
+    type: list
+    default: []
+  input:
+    type: str
+    default: ''
+
+entry_point: analyze_error_quality
+
+nodes:
+  - id: analyze_error_quality
+    type: llm
+    model: ${RCA_MODEL:gpt-5-mini}
+    input:
+      - input
+      - messages
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a code quality analyst specializing in error message design for AI agent toolkits.
+
+          Your job is to analyze why a negative test failed and suggest specific code improvements
+          to make error messages more actionable for LLM agents.
+
+          Context: These are NEGATIVE tests - they intentionally trigger error conditions to verify
+          that error messages are:
+          1. Clear and informative (not generic "error occurred")
+          2. Actionable (tell the agent what to do differently)
+          3. Reference the specific input that caused the issue
+          4. Don't expose raw tracebacks or internal details
+
+          You have access to GitHub tools to search and read the alita-sdk source code.
+          Use these to find where error handling should be improved.
+
+          Focus on:
+          1. Finding the exact code location that generates the error message
+          2. Suggesting a better error message format
+          3. Identifying if validation should happen earlier
+      task:
+        type: fstring
+        value: |
+          ## Negative Test Failure Analysis
+
+          {input}
+
+          ---
+
+          ## Instructions
+
+          This negative test failed because the error message quality wasn't good enough.
+
+          1. Analyze what the test expected vs what was returned
+          2. Use GitHub tools to find where this error is generated in alita-sdk:
+             - Search for the tool name and error-related code
+             - Look in `alita_sdk/tools/` for the toolkit implementation
+             - Find the exact function that returns this error
+          3. Suggest specific code improvements
+
+          Provide your analysis as JSON:
+          ```json
+          {{
+            "root_cause": "Why the error message wasn't good enough",
+            "category": "missing_validation|generic_error|wrong_order|missing_context|traceback_leak",
+            "severity": "high|medium|low",
+            "current_error": "The actual error message returned",
+            "suggested_error": "A better error message that would pass the test",
+            "code_location": "alita_sdk/tools/github/api_wrapper.py:123",
+            "suggested_fix": [
+              "Step 1: Add validation at line X...",
+              "Step 2: Change error message to...",
+              "Step 3: Move check before API call..."
+            ],
+            "code_references": ["path/to/file.py:line"],
+            "implementation_snippet": "Example code change (if simple)",
+            "confidence": "high|medium|low"
+          }}
+          ```
+    output:
+      - rca_result
+    structured_output: true
+    tool_names:
+      ${SDK_TOOLKIT_NAME:sdk-analysis}:
+        - search_code
+        - get_file_contents
+        - list_repo_tree
+    transition: format_output
+
+  - id: format_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        rca = alita_state.get('rca_result', {})
+
+        # Parse RCA result if it's a string
+        if isinstance(rca, str):
+            try:
+                if '```json' in rca:
+                    json_str = rca.split('```json')[1].split('```')[0].strip()
+                    rca = json.loads(json_str)
+                elif '```' in rca:
+                    json_str = rca.split('```')[1].split('```')[0].strip()
+                    rca = json.loads(json_str)
+                else:
+                    rca = json.loads(rca)
+            except (json.JSONDecodeError, IndexError):
+                rca = {
+                    'root_cause': rca[:500] if rca else 'Analysis failed',
+                    'category': 'unknown',
+                    'severity': 'medium',
+                    'suggested_fix': [],
+                    'code_references': [],
+                    'confidence': 'low'
+                }
+
+        # Build summary focused on implementation suggestion
+        category = rca.get('category', 'unknown')
+        code_loc = rca.get('code_location', '')
+        suggested_error = rca.get('suggested_error', '')[:50]
+
+        rca_summary = f"[{category}] "
+        if code_loc:
+            rca_summary += f"Fix at {code_loc}: "
+        if suggested_error:
+            rca_summary += f'Use "{suggested_error}..."'
+        else:
+            rca_summary += rca.get('root_cause', 'Unknown')[:80]
+
+        output_result = {
+            'rca_result': {
+                'root_cause': rca.get('root_cause', 'Unknown'),
+                'category': rca.get('category', 'unknown'),
+                'severity': rca.get('severity', 'medium'),
+                'current_error': rca.get('current_error', ''),
+                'suggested_error': rca.get('suggested_error', ''),
+                'code_location': rca.get('code_location', ''),
+                'suggested_fix': rca.get('suggested_fix', []),
+                'code_references': rca.get('code_references', []),
+                'implementation_snippet': rca.get('implementation_snippet', ''),
+                'confidence': rca.get('confidence', 'medium')
+            },
+            'rca_summary': rca_summary
+        }
+
+        output_result
+    input:
+      - rca_result
+    output:
+      - messages
+    structured_output: false
+    transition: END
+
+output_schema:
+  rca_result:
+    type: dict
+    description: "Structured RCA with implementation suggestions"
+  rca_summary:
+    type: str
+    description: "One-line summary with fix location"

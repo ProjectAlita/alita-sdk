@@ -1,0 +1,87 @@
+# NEG_10: Get Non-Existent Commit
+# Verifies that get_commit_changes returns an actionable error for invalid SHA
+# Expected: Clear error message mentioning "not found" or invalid SHA
+
+name: "NEG10 - Get Non-Existent Commit"
+description: "Verify get_commit_changes returns actionable error for non-existent commit SHA"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  commit_sha:
+    type: str
+    value: "0000000000000000000000000000000000000000"  # Invalid SHA
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_commit
+
+nodes:
+  - id: invoke_get_commit
+    type: toolkit
+    tool: get_commit_changes
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - commit_sha
+    input_mapping:
+      commit_sha:
+        type: variable
+        value: commit_sha
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_error
+
+  - id: validate_error
+    type: code
+    code:
+      type: fixed
+      value: |
+        result = alita_state.get('tool_result')
+        commit_sha = alita_state.get('commit_sha')
+        result_str = str(result).lower() if result else ''
+
+        # Error quality checks
+        has_not_found = any(term in result_str for term in ['not found', '404', 'does not exist', 'invalid', 'no commit'])
+        references_resource = any(term in result_str for term in ['commit', 'sha', 'ref'])
+        no_traceback = 'traceback' not in result_str
+        not_success = 'files' not in result_str or 'error' in result_str or 'failed' in result_str
+        is_concise = len(result_str) < 1000
+
+        test_passed = has_not_found and not_success and is_concise
+
+        test_results = {
+            "test_passed": test_passed,
+            "error_quality": {
+                "indicates_not_found": has_not_found,
+                "references_resource_type": references_resource,
+                "no_raw_traceback": no_traceback,
+                "not_success_response": not_success,
+                "is_concise": is_concise
+            },
+            "requested_commit": commit_sha,
+            "actual_response": result_str[:500],
+            "improvement_needed": [] if test_passed else [
+                "Missing 'not found' indicator" if not has_not_found else None,
+                "Does not reference commit" if not references_resource else None,
+                "Contains raw traceback" if not no_traceback else None,
+                "Returns success for non-existent commit" if not not_success else None
+            ]
+        }
+        test_results["improvement_needed"] = [x for x in test_results["improvement_needed"] if x]
+        test_results
+    input:
+      - tool_result
+      - commit_sha
+    output:
+      - messages
+    structured_output: false
+    transition: END

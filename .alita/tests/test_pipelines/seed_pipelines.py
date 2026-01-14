@@ -7,10 +7,16 @@ Composable pipelines are seeded first so their IDs can be used by test pipelines
 
 Usage:
     python seed_pipelines.py <folder_name> [--base-url URL] [--project-id ID] [--token TOKEN]
+    python seed_pipelines.py <folder_name>:<pipeline_file.yaml> [--base-url URL] [--project-id ID] [--token TOKEN]
 
 Example:
     python seed_pipelines.py state_retrieval --project-id 2
     python seed_pipelines.py github_toolkit --base-url http://192.168.68.115 --project-id 2
+    python seed_pipelines.py github_toolkit_negative:pipeline_validation.yaml --project-id 2
+
+Suite Specification Format:
+    - 'suite_name' - Uses default pipeline.yaml in the suite folder
+    - 'suite_name:pipeline_file.yaml' - Uses specific pipeline config file
 """
 
 import argparse
@@ -143,15 +149,47 @@ def load_sdk_toolkit_name_from_env():
     return load_from_env("SDK_TOOLKIT_NAME")
 
 
-def load_config(suite_folder: Path) -> dict | None:
-    """Load pipeline.yaml (or config.yaml for backwards compatibility) from a suite folder if it exists."""
-    # Try pipeline.yaml first (new convention)
-    config_path = suite_folder / "pipeline.yaml"
-    if not config_path.exists():
-        # Fall back to config.yaml for backwards compatibility
-        config_path = suite_folder / "config.yaml"
+def parse_suite_spec(suite_spec: str) -> tuple[str, str | None]:
+    """Parse suite specification into folder and optional pipeline file.
+
+    Format: 'suite_name' or 'suite_name:pipeline_file.yaml'
+
+    Examples:
+        'github_toolkit' -> ('github_toolkit', None)
+        'github_toolkit_negative:pipeline_validation.yaml' -> ('github_toolkit_negative', 'pipeline_validation.yaml')
+
+    Returns:
+        Tuple of (folder_name, pipeline_file or None)
+    """
+    if ':' in suite_spec:
+        folder, pipeline_file = suite_spec.split(':', 1)
+        return folder, pipeline_file
+    return suite_spec, None
+
+
+def load_config(suite_folder: Path, pipeline_file: str | None = None) -> dict | None:
+    """Load pipeline config from a suite folder if it exists.
+
+    Args:
+        suite_folder: Path to the suite directory
+        pipeline_file: Optional specific pipeline file name (e.g., 'pipeline_validation.yaml').
+                      If None, uses 'pipeline.yaml' or 'config.yaml' as fallback.
+
+    Returns:
+        Parsed YAML config dict, or None if not found.
+    """
+    if pipeline_file:
+        config_path = suite_folder / pipeline_file
         if not config_path.exists():
             return None
+    else:
+        # Try pipeline.yaml first (new convention)
+        config_path = suite_folder / "pipeline.yaml"
+        if not config_path.exists():
+            # Fall back to config.yaml for backwards compatibility
+            config_path = suite_folder / "config.yaml"
+            if not config_path.exists():
+                return None
 
     with open(config_path) as f:
         return yaml.safe_load(f)
@@ -376,9 +414,15 @@ def get_yaml_files(folder_path: Path, config: dict = None) -> list[Path]:
             test_dir = folder_path / test_subdir
 
     yaml_files = []
-    for pattern in ["test_case_*.yaml", "test_case_*.yml"]:
+    # Support both standard test cases and negative test cases
+    # Use recursive glob (**/) to find tests in subdirectories
+    for pattern in ["**/test_case_*.yaml", "**/test_case_*.yml", "**/test_neg_*.yaml", "**/test_neg_*.yml"]:
         yaml_files.extend(test_dir.glob(pattern))
-    return sorted(yaml_files)
+    # Also check for files directly in test_dir (non-recursive)
+    for pattern in ["test_case_*.yaml", "test_case_*.yml", "test_neg_*.yaml", "test_neg_*.yml"]:
+        yaml_files.extend(test_dir.glob(pattern))
+    # Remove duplicates and sort
+    return sorted(set(yaml_files))
 
 
 def parse_pipeline_yaml(yaml_path: Path, env_substitutions: dict = None) -> dict:
@@ -602,7 +646,7 @@ Authentication (use one of these):
 
     parser.add_argument(
         "folder",
-        help="Name of the folder within test_pipelines to seed (e.g., 'state_retrieval', 'structured_output')",
+        help="Suite folder name (e.g., 'state_retrieval' or 'github_toolkit_negative:pipeline_validation.yaml')",
     )
     parser.add_argument(
         "--base-url",
@@ -671,9 +715,10 @@ Authentication (use one of these):
     base_url = args.base_url or load_base_url_from_env() or DEFAULT_BASE_URL
     project_id = args.project_id or load_project_id_from_env() or DEFAULT_PROJECT_ID
 
-    # Resolve folder path first (needed for SUITE_NAME)
+    # Parse suite specification and resolve folder path (needed for SUITE_NAME)
+    folder_name, pipeline_file = parse_suite_spec(args.folder)
     script_dir = Path(__file__).parent
-    folder_path = script_dir / args.folder
+    folder_path = script_dir / folder_name
 
     # Build environment substitutions for YAML templates
     # env_substitutions: used for YAML template variable substitution
@@ -724,8 +769,8 @@ Authentication (use one of these):
 
     auth_method = "Bearer token" if bearer_token else "Session cookie"
 
-    # Load pipeline.yaml if it exists (for composable pipelines and test_directory)
-    config = load_config(folder_path)
+    # Load pipeline config if it exists (for composable pipelines and test_directory)
+    config = load_config(folder_path, pipeline_file)
 
     # Get YAML files (will look in test_directory if specified in config)
     yaml_files = get_yaml_files(folder_path, config)

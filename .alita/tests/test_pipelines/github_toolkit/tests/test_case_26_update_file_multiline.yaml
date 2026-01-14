@@ -1,0 +1,265 @@
+# GH26 - Update File with Multiline Content
+# Tests update_file with code blocks, multiple lines, and complex content
+
+name: "GH26 - Update File Multiline"
+description: "Verify update_file tool handles multiline content including code blocks"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  target_branch:
+    type: str
+    value: "tc-file-ops-2025-12-08"
+  file_path:
+    type: str
+  original_content:
+    type: str
+  new_content:
+    type: str
+  file_query:
+    type: str
+  update_result:
+    type: str
+  verified_content:
+    type: str
+  create_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: set_branch
+
+nodes:
+  - id: set_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: prepare_file
+
+  - id: prepare_file
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/multiline-test/TC026-{random_id}.py"
+
+        # Create a Python file with multiline content
+        nl = chr(10)
+        original_content = f'''# Test file created at {timestamp}
+# ID: {random_id}
+
+def hello_world():
+    """Original docstring."""
+    print("Hello, World!")
+    return True
+
+def calculate(a, b):
+    """Calculate sum."""
+    result = a + b
+    return result
+
+if __name__ == "__main__":
+    hello_world()
+'''
+
+        {"file_path": file_path, "original_content": original_content}
+    input: []
+    output:
+      - file_path
+      - original_content
+    structured_output: true
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: prepare_multiline_update
+
+  - id: prepare_multiline_update
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+        nl = chr(10)
+
+        # OLD: The original function
+        old_content = '''def hello_world():
+    """Original docstring."""
+    print("Hello, World!")
+    return True'''
+
+        # NEW: Updated function with more lines, logging, and improved docstring
+        new_content = f'''def hello_world(name: str = "World") -> bool:
+    """
+    Greet someone by name.
+
+    Args:
+        name: The name to greet. Defaults to "World".
+
+    Returns:
+        True if greeting was successful.
+
+    Updated: {timestamp}
+    Update ID: {random_id}
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Greeting {{name}}")
+    print(f"Hello, {{name}}!")
+    return True'''
+
+        # Build file_query
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+    structured_output: true
+    transition: invoke_update
+
+  - id: invoke_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: verify_update
+
+  - id: verify_update
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        create_result = alita_state.get('create_result')
+        new_content = alita_state.get('new_content', '')
+        file_path = alita_state.get('file_path')
+
+        error_message = None
+
+        # Check for errors
+        create_result_str = str(create_result) if create_result else ''
+        create_failed = 'error' in create_result_str.lower() and 'already exists' not in create_result_str.lower()
+
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:300]}"
+
+        # Get verified content
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # Multiline content checks
+        checks = {
+            "has_new_signature": "def hello_world(name: str" in verified_text,
+            "has_docstring_args": "Args:" in verified_text,
+            "has_docstring_returns": "Returns:" in verified_text,
+            "has_logging_import": "import logging" in verified_text,
+            "has_logger_call": "logger.info" in verified_text,
+            "has_fstring_greeting": 'f"Hello, {name}!"' in verified_text or "f'Hello, {name}!'" in verified_text,
+            "removed_old_docstring": "Original docstring" not in verified_text,
+            "kept_other_functions": "def calculate" in verified_text,
+        }
+
+        all_checks_passed = all(checks.values())
+        tool_executed = update_result is not None and not update_failed and not create_failed
+
+        test_results = {
+            "test_passed": tool_executed and all_checks_passed,
+            "tool_executed": tool_executed,
+            "file_path": file_path,
+            "multiline_checks": checks,
+            "all_multiline_checks_passed": all_checks_passed,
+            "update_response": update_result_str[:300] if update_result_str else None,
+            "verified_content_preview": verified_text[:500] if verified_text else None,
+            "error": error_message
+        }
+        test_results
+    input:
+      - update_result
+      - verified_content
+      - create_result
+      - new_content
+      - file_path
+    output:
+      - messages
+    structured_output: false
+    transition: END

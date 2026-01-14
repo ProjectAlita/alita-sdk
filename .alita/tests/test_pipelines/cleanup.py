@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Execute cleanup steps from a test suite's config.yaml.
+Execute cleanup steps from a test suite's pipeline config.
 
 This script reads the cleanup configuration and removes test artifacts
 created during test execution by invoking toolkit tools and running
@@ -11,12 +11,18 @@ specified parameters, making it work with any toolkit type.
 
 Usage:
     python cleanup.py <suite_folder> [options]
+    python cleanup.py <suite_folder>:<pipeline_file.yaml> [options]
 
 Examples:
     python cleanup.py github_toolkit
+    python cleanup.py github_toolkit_negative:pipeline_validation.yaml
     python cleanup.py github_toolkit --dry-run
     python cleanup.py github_toolkit --skip-pipelines
     python cleanup.py github_toolkit -v
+
+Suite Specification Format:
+    - 'suite_name' - Uses default pipeline.yaml in the suite folder
+    - 'suite_name:pipeline_file.yaml' - Uses specific pipeline config file
 """
 
 import argparse
@@ -101,16 +107,47 @@ class CleanupContext:
             print(f"{prefix.get(level, '  ')} {message}")
 
 
-def load_config(suite_folder: Path) -> dict:
-    """Load pipeline.yaml (or config.yaml for backwards compatibility) from a suite folder."""
-    # Try pipeline.yaml first (new convention)
-    config_path = suite_folder / "pipeline.yaml"
-    if not config_path.exists():
-        # Fall back to config.yaml for backwards compatibility
-        config_path = suite_folder / "config.yaml"
+def parse_suite_spec(suite_spec: str) -> tuple[str, str | None]:
+    """Parse suite specification into folder and optional pipeline file.
 
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+    Format: 'suite_name' or 'suite_name:pipeline_file.yaml'
+
+    Examples:
+        'github_toolkit' -> ('github_toolkit', None)
+        'github_toolkit_negative:pipeline_validation.yaml' -> ('github_toolkit_negative', 'pipeline_validation.yaml')
+
+    Returns:
+        Tuple of (folder_name, pipeline_file or None)
+    """
+    if ':' in suite_spec:
+        folder, pipeline_file = suite_spec.split(':', 1)
+        return folder, pipeline_file
+    return suite_spec, None
+
+
+def load_config(suite_folder: Path, pipeline_file: str | None = None) -> dict:
+    """Load pipeline config from a suite folder.
+
+    Args:
+        suite_folder: Path to the suite directory
+        pipeline_file: Optional specific pipeline file name (e.g., 'pipeline_validation.yaml').
+                      If None, uses 'pipeline.yaml' or 'config.yaml' as fallback.
+
+    Returns:
+        Parsed YAML config dict.
+    """
+    if pipeline_file:
+        config_path = suite_folder / pipeline_file
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+    else:
+        # Try pipeline.yaml first (new convention)
+        config_path = suite_folder / "pipeline.yaml"
+        if not config_path.exists():
+            # Fall back to config.yaml for backwards compatibility
+            config_path = suite_folder / "config.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
 
     with open(config_path) as f:
         return yaml.safe_load(f)
@@ -520,9 +557,10 @@ def main():
         set_env_file(env_file_path)
         print(f"Loading environment from: {args.env_file}")
 
-    # Resolve paths
+    # Parse suite specification and resolve paths
+    folder_name, pipeline_file = parse_suite_spec(args.folder)
     script_dir = Path(__file__).parent
-    suite_folder = script_dir / args.folder
+    suite_folder = script_dir / folder_name
 
     if not suite_folder.exists():
         print(f"Error: Suite folder not found: {suite_folder}", file=sys.stderr)
@@ -530,7 +568,7 @@ def main():
 
     # Load configuration
     try:
-        config = load_config(suite_folder)
+        config = load_config(suite_folder, pipeline_file)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

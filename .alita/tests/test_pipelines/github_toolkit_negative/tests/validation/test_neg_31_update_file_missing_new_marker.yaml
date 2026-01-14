@@ -1,0 +1,104 @@
+# NEG_20: Update File Missing NEW Marker
+# Verifies that update_file returns actionable error when NEW marker is missing
+# Expected: Clear error about missing OLD/NEW format
+
+name: "NEG20 - Update File Missing NEW Marker"
+description: "Verify update_file returns actionable error when NEW marker is missing"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  file_query:
+    type: str
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_invalid_query
+
+nodes:
+  - id: prepare_invalid_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        nl = chr(10)
+        # Missing NEW markers - only has OLD
+        file_query = "test/file.txt" + nl
+        file_query += "OLD <<<<" + nl
+        file_query += "some old content" + nl
+        file_query += ">>>> OLD"
+        # No NEW section!
+
+        {"file_query": file_query}
+    input: []
+    output:
+      - file_query
+    structured_output: true
+    transition: invoke_update
+
+  - id: invoke_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_error
+
+  - id: validate_error
+    type: code
+    code:
+      type: fixed
+      value: |
+        result = alita_state.get('tool_result')
+        result_str = str(result).lower() if result else ''
+
+        # Should indicate format/marker error
+        has_format_error = any(term in result_str for term in [
+            'new', 'marker', 'format', 'invalid', 'missing',
+            'expected', 'syntax', 'parse'
+        ])
+
+        no_traceback = 'traceback' not in result_str
+        not_success = 'updated' not in result_str or 'error' in result_str or 'failed' in result_str
+        is_concise = len(result_str) < 1000
+
+        test_passed = has_format_error and not_success and no_traceback
+
+        test_results = {
+            "test_passed": test_passed,
+            "error_quality": {
+                "indicates_format_error": has_format_error,
+                "no_raw_traceback": no_traceback,
+                "not_success_response": not_success,
+                "is_concise": is_concise
+            },
+            "actual_response": result_str[:500],
+            "improvement_needed": [] if test_passed else [
+                "Missing format error indicator" if not has_format_error else None,
+                "Contains raw traceback" if not no_traceback else None,
+                "Incorrectly indicates success" if not not_success else None
+            ]
+        }
+        test_results["improvement_needed"] = [x for x in test_results["improvement_needed"] if x]
+        test_results
+    input:
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END
