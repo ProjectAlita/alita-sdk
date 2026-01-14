@@ -78,7 +78,6 @@ class AlitaClient:
         self.configurations: list = configurations or []
         self.model_timeout = kwargs.get('model_timeout', 120)
         self.model_image_generation = kwargs.get('model_image_generation')
-        self.image_generation_bucket = kwargs.get('image_generation_bucket', 'imagelibrary')
 
     def get_mcp_toolkits(self):
         if user_id := self._get_real_user_id():
