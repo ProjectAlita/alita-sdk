@@ -138,8 +138,8 @@ def execute_all_test_cases(
             # Use cache key
             cache_key = toolkit_config_path if toolkit_config_path else '__no_config__'
             
-            # Execute single test case
-            execution_output = execute_single_test_case(
+            # Execute single test case (returns output and thread_id)
+            execution_output, thread_id = execute_single_test_case(
                 tc_info, idx, total_tests, bulk_gen_chat_history, test_cases_path,
                 executor_cache, client, agent_def, config, model, temperature,
                 max_tokens, work_dir, master_log, setup_executor_func,
@@ -164,12 +164,13 @@ def execute_all_test_cases(
                 {"role": "assistant", "content": execution_output}
             ]
             
-            # Validate test case
+            # Validate test case (pass thread_id so validator uses same conversation)
             test_result = validate_single_test_case(
                 tc_info, idx, execution_output, validation_chat_history,
                 validation_executor_cache, cache_key, client, validator_def,
                 agent_def, toolkit_config_path, config, model, temperature,
                 max_tokens, work_dir, master_log, setup_executor_func,
+                thread_id=thread_id,
                 verbose=verbose,
                 debug=debug,
             )

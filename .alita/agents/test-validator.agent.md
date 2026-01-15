@@ -1,7 +1,7 @@
 ---
 name: "test-validator"
 description: "Agent for validating test execution results against expectations"
-model: "gpt-5"
+model: "gpt-5.2"
 temperature: 0.0
 max_tokens: 100000
 step_limit: 10
@@ -73,3 +73,4 @@ Here is the result: {"test_number": 1, ...}
 5. Validate all steps from the test case
 6. Base validation on evidence in execution output
 7. No markdown, no explanations, no extra text
+8. Reference to exact step output if so instructed in the test case

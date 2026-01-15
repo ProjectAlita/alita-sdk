@@ -16,7 +16,7 @@ Ensure updating labels for multiple pages returns aggregated success statuses an
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `update_labels` | Exact Python tool name |
-| **Primary Input(s)** | `{{TC_023_PAGE_IDS_TO_UPDATE_LABELS}}, {{TC_023_NEW_LABELS}}` | Inputs derived from args_schema |
+| **Primary Input(s)** | `TC_023_PAGE_IDS_TO_UPDATE_LABELS, TC_023_NEW_LABELS` | Inputs derived from args_schema |
 
 ## Config
 
