@@ -23,8 +23,8 @@ class ApplicationToolkit(BaseToolkit):
     @classmethod
     def get_toolkit(cls, client: 'AlitaClient', application_id: int, application_version_id: int,
                     selected_tools: list[str] = [], store: Optional[BaseStore] = None,
-                    ignored_mcp_servers: Optional[list] = None):
-        
+                    ignored_mcp_servers: Optional[list] = None, is_subgraph: bool = False):
+
         app_details = client.get_app_details(application_id)
         version_details = client.get_app_version_details(application_id, application_version_id)
         model_settings = {
@@ -48,12 +48,14 @@ class ApplicationToolkit(BaseToolkit):
                                       return_type='str',
                                       client=client,
                                       metadata={'icon_meta': icon_meta} if icon_meta else {},
+                                      is_subgraph=is_subgraph,
                                       args_runnable={
                                           "application_id": application_id,
                                           "application_version_id": application_version_id,
                                           "store": store,
                                           "llm": client.get_llm(version_details['llm_settings']['model_name'], model_settings),
                                           "ignored_mcp_servers": ignored_mcp_servers,
+                                          "is_subgraph": is_subgraph,  # Pass is_subgraph flag
                                       })])
             
     def get_tools(self):
