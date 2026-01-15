@@ -24,121 +24,81 @@ TEXT_EDITABLE_EXTENSIONS = {
 
 
 def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
-    """Parse OLD/NEW marker-based edit instructions.
-
-    Format:
-
-        OLD <<<<[optional text or newline]
-        ... OLD content ...
-        >>>> OLD
-        NEW <<<<[optional text or newline]
-        ... NEW content ...
-        >>>> NEW
-
-    Rules:
-    - OLD block:
-      - Starts at the first line that contains "OLD <<<<".
-      - OLD content includes:
-        * On that line: everything after the first "OLD <<<<" (if any),
-        * Plus all following lines up to (but not including) the first line
-          that contains ">>>> OLD".
-    - NEW block:
-      - Starts at the first line, after the OLD block, that contains "NEW <<<<".
-      - NEW content includes:
-        * On that line: everything after the first "NEW <<<<" (if any),
-        * Plus all following lines up to (but not including) the first line
-          that contains ">>>> NEW".
-    - Only the first complete OLD/NEW pair is returned.
-
-    Args:
-        file_query: String containing marked old and new content sections.
-
-    Returns:
-        A list with at most one (old_content, new_content) tuple. Each
-        content string includes newlines but excludes the marker substrings
-        and their closing lines.
     """
+    Parse OLD/NEW marker-based edit instructions.
+    
+    Extracts the first pair of old and new content from a file query using markers:
+    - OLD <<<< ... >>>> OLD
+    - NEW <<<< ... >>>> NEW
+    
+    Args:
+        file_query: String containing marked old and new content sections
+        
+    Returns:
+        List with at most one tuple (old_content, new_content) for the first edit pair.
+        Returns empty list if no valid OLD/NEW pair is found.
+        
+    Example:
+        >>> query = '''
+        ... OLD <<<<
+        ... Hello World
+        ... >>>> OLD
+        ... NEW <<<<
+        ... Hello Mars
+        ... >>>> NEW
+        ... '''
+        >>> parse_old_new_markers(query)
+        [('Hello World', 'Hello Mars')]
+    """
+    # Split the file content by lines
+    code_lines = file_query.split("\n")
 
-    if not file_query:
-        return []
+    # Initialize variables to track section state
+    in_old_section = False
+    in_new_section = False
+    old_content = None
+    new_content = None
 
-    lines = file_query.splitlines(keepends=True)
+    # Temporary storage for the current section's content
+    current_section_content = []
 
-    old_open = "OLD <<<<"
-    old_close = ">>>> OLD"
-    new_open = "NEW <<<<"
-    new_close = ">>>> NEW"
+    # Iterate through each line in the file content
+    for line in code_lines:
+        # Check for OLD section start
+        if "OLD <<<" in line:
+            in_old_section = True
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
 
-    state = "search_old"  # -> in_old -> search_new -> in_new
-    old_parts: list[str] = []
-    new_parts: list[str] = []
+        # Check for OLD section end
+        if ">>>> OLD" in line:
+            in_old_section = False
+            old_content = "\n".join(current_section_content).strip()
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
 
-    i = 0
-    n = len(lines)
+        # Check for NEW section start
+        if "NEW <<<" in line:
+            in_new_section = True
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
 
-    # 1. Find OLD block
-    while i < n and state == "search_old":
-        line = lines[i]
-        pos = line.find(old_open)
-        if pos != -1:
-            # Start OLD content after the first "OLD <<<<" on this line
-            after = line[pos + len(old_open):]
-            old_parts.append(after)
-            state = "in_old"
-        i += 1
+        # Check for NEW section end
+        if ">>>> NEW" in line:
+            in_new_section = False
+            new_content = "\n".join(current_section_content).strip()
+            # Return immediately after finding the first complete pair
+            if old_content is not None and new_content is not None:
+                return [(old_content, new_content)]
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
 
-    if state != "in_old":
-        # No OLD block found
-        return []
+        # If currently in an OLD or NEW section, add the line to the current section content
+        if in_old_section or in_new_section:
+            current_section_content.append(line)
 
-    # Collect until a line containing ">>>> OLD"
-    while i < n and state == "in_old":
-        line = lines[i]
-        if old_close in line:
-            # Stop before this line; do not include any part of it
-            state = "search_new"
-        else:
-            old_parts.append(line)
-        i += 1
-
-    if state != "search_new":
-        # Didn't find a proper OLD close
-        return []
-
-    # 2. Find NEW block after OLD
-    while i < n and state == "search_new":
-        line = lines[i]
-        pos = line.find(new_open)
-        if pos != -1:
-            # NEW content starts from the *next* line after the marker line
-            state = "in_new"
-            i += 1
-            break
-        i += 1
-
-    if state != "in_new":
-        # No NEW block found
-        return []
-
-    # Collect until a line containing ">>>> NEW"
-    while i < n and state == "in_new":
-        line = lines[i]
-        close_pos = line.rfind(new_close)
-        if close_pos != -1:
-            # Include content up to but not including the *last* ">>>> NEW" on the line
-            before_close = line[:close_pos]
-            new_parts.append(before_close)
-            break
-        else:
-            new_parts.append(line)
-        i += 1
-
-    if not old_parts or not new_parts:
-        return []
-
-    old_content = "".join(old_parts)
-    new_content = "".join(new_parts)
-    return [(old_content, new_content)]
+    # Return empty list if no complete pair found
+    return []
 
 
 def is_text_editable(filename: str) -> bool:

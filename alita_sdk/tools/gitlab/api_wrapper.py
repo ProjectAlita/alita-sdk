@@ -11,6 +11,7 @@ from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 from ..utils.content_parser import parse_file_content
 from .utils import get_position
+from ..utils.tool_prompts import EDIT_FILE_DESCRIPTION, UPDATE_FILE_PROMPT_WITH_PATH
 
 AppendFileModel = create_model(
     "AppendFileModel",
@@ -37,7 +38,7 @@ ReadFileModel = create_model(
 )
 UpdateFileModel = create_model(
     "UpdateFileModel",
-    file_query=(str, Field(description="The file query string containing file path on first line, followed by OLD/NEW markers. Format: file_path\\nOLD <<<< old content >>>> OLD\\nNEW <<<< new content >>>> NEW")),
+    file_query=(str, Field(description=UPDATE_FILE_PROMPT_WITH_PATH)),
     branch=(str, Field(description="The branch to update the file in")),
 )
 CommentOnIssueModel = create_model(
@@ -469,18 +470,23 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
                 "Please create a new branch and try again."
             )
         try:
-            # Extract file path from first line
-            lines = file_query.split("\n", 1)
-            if len(lines) < 2:
+            # Split into lines and find first non-empty line for file_path
+            lines = file_query.split("\n")
+            first_non_empty_idx = None
+            for i, line in enumerate(lines):
+                if line.strip():
+                    first_non_empty_idx = i
+                    break
+            
+            if first_non_empty_idx is None:
                 return (
-                    "Invalid file_query format. Expected:\n"
-                    "file_path\n"
-                    "OLD <<<< old content >>>> OLD\n"
-                    "NEW <<<< new content >>>> NEW"
+                    "Invalid file_query format. Expected first non-empty line to be the file path "
+                    "followed by OLD/NEW blocks."
                 )
 
-            file_path = lines[0].strip()
-            edit_content = lines[1] if len(lines) > 1 else ""
+            file_path = lines[first_non_empty_idx].strip()
+            # Keep all lines after file_path line (preserving empty lines)
+            edit_content = "\n".join(lines[first_non_empty_idx + 1:])
 
             # Delegate to edit_file method with appropriate commit message
             commit_message = f"Update {file_path}"
@@ -670,7 +676,7 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             {
                 "name": "update_file",
                 "ref": self.update_file,
-                "description": self.update_file.__doc__ or "Update the contents of a file in the repository.",
+                "description": EDIT_FILE_DESCRIPTION,
                 "args_schema": UpdateFileModel,
             },
             {

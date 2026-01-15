@@ -27,6 +27,7 @@ from ...elitea_base import BaseCodeToolApiWrapper
 from ..utils import generate_diff, get_content_from_generator
 from ...code_indexer_toolkit import CodeIndexerToolkit
 from ...utils.available_tools_decorator import extend_with_parent_available_tools
+from ...utils.tool_prompts import EDIT_FILE_DESCRIPTION, UPDATE_FILE_PROMPT_NO_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -140,19 +141,7 @@ class ArgsSchema(Enum):
         ),
         update_query=(
             str,
-            Field(
-                description=(
-                    "The exact OLD text to be replaced and the NEW "
-                    "text to insert, using one or more block pairs like:"
-                    "OLD <<<<Hello Earth!>>>> OLD NEW <<<<Hello Mars!>>>> NEW"
-                    "Each OLD block must contain the exact text that will be replaced "
-                    "via string replacement (exact full match including non-written characters). Each corresponding NEW "
-                    "block contains the replacement text. For multi-line changes, it is "
-                    "preferred to provide several smaller OLD/NEW pairs rather than one "
-                    "large block, so that each OLD block closely matches a contiguous "
-                    "snippet from the file."
-                )
-            ),
+            Field(description=UPDATE_FILE_PROMPT_NO_PATH),
         ),
     )
     DeleteFile = create_model(
@@ -1296,7 +1285,7 @@ class ReposApiWrapper(CodeIndexerToolkit):
             {
                 "ref": self.update_file,
                 "name": "update_file",
-                "description": self.update_file.__doc__,
+                "description": EDIT_FILE_DESCRIPTION,
                 "args_schema": ArgsSchema.UpdateFile.value,
             },
             {

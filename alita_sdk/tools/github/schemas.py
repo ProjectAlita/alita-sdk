@@ -1,6 +1,9 @@
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field, SecretStr, create_model
 
+from alita_sdk.tools.utils.tool_prompts import UPDATE_FILE_PROMPT_WITH_PATH
+
+
 # Base schemas for GitHub API wrapper
 class GitHubAuthConfig(BaseModel):
     github_access_token: Optional[SecretStr] = None
@@ -42,7 +45,7 @@ ReadFile = create_model(
 
 UpdateFile = create_model(
     "UpdateFile",
-    file_query=(str, Field(description="File path and content to update with OLD and NEW markers")),
+    file_query=(str, Field(description=UPDATE_FILE_PROMPT_WITH_PATH)),
     repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository.")),
     commit_message=(Optional[str], Field(default=None, description="Commit message for the update operation")),
 )
