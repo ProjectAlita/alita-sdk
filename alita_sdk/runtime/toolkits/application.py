@@ -37,12 +37,17 @@ class ApplicationToolkit(BaseToolkit):
                                  llm=client.get_llm(version_details['llm_settings']['model_name'], 
                                                     model_settings),
                                  ignored_mcp_servers=ignored_mcp_servers)
+        
+        # Extract icon_meta from version_details meta field
+        icon_meta = version_details.get('meta', {}).get('icon_meta', {})
+        
         return cls(tools=[Application(name=app_details.get("name"), 
                                       description=app_details.get("description"), 
                                       application=app, 
                                       args_schema=applicationToolSchema,
                                       return_type='str',
                                       client=client,
+                                      metadata={'icon_meta': icon_meta} if icon_meta else {},
                                       args_runnable={
                                           "application_id": application_id,
                                           "application_version_id": application_version_id,
