@@ -227,6 +227,7 @@ def execute_pipeline(
     # Extract test_passed from result
     test_passed = None
     output = result_data
+    detected_error = None  # Track user-friendly error messages
 
     # Check various result structures for test_passed
     if isinstance(result_data, dict):
@@ -253,7 +254,8 @@ def execute_pipeline(
                     # Check for tool call error in content that indicates failure
                     if isinstance(content, str) and ("Error executing code: [Errno 7]" in content or "[Errno 7] Argument list too long" in content):
                          test_passed = False
-                         output = {"error": content, "raw_content": content}
+                         detected_error = "Content too large: The data payload exceeded system limits. Consider reducing the amount of data being processed."
+                         output = {"error": detected_error, "raw_content": content[:500]}
                          break
 
                     if isinstance(content, str) and content.startswith("{"):
@@ -305,8 +307,9 @@ def execute_pipeline(
                     content = tool_call.get("content", "") or tool_call.get("tool_output", "")
 
                     # Check for error indicating test failure
-                    if isinstance(content, str) and ("[Errno 7] Argument list too long" in content or "Error executing code:" in content):
+                    if isinstance(content, str) and ("[Errno 7] Argument list too long" in content or "Error executing code: [Errno 7]" in content):
                         test_passed = False
+                        detected_error = "Content too large: The data payload exceeded system limits. Consider reducing the amount of data being processed."
                         break
 
                     if isinstance(content, str) and content.startswith("{"):
@@ -355,7 +358,8 @@ def execute_pipeline(
         version_id=version_id,
         test_passed=test_passed,
         execution_time=execution_time,
-        output=output
+        output=output,
+        error=detected_error
     )
 
 

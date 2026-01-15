@@ -314,6 +314,9 @@ nodes:
       branch_name:
         type: variable
         value: branch_name
+      force:
+        type: fixed
+        value: true
     output:
       - tool_result
     structured_output: true

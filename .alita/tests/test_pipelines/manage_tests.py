@@ -12,6 +12,7 @@ import os
 import subprocess
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
@@ -145,6 +146,8 @@ class TestRunner:
         self.env_file = Path(args.env_file).resolve()
         self.verbose = args.verbose
         self.results_dir = Path(args.output_dir).resolve() if hasattr(args, 'output_dir') else Path("test_results").resolve()
+        # Generate timestamp for this run to avoid overwriting previous results
+        self.run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     def _get_python_cmd(self) -> List[str]:
         return [sys.executable]
@@ -184,9 +187,13 @@ class TestRunner:
                 print_color(f"✗ {task_name} failed (see {log_path})", "RED")
                 return False
 
-    def setup(self, suite_spec: str) -> bool:
+    def _get_log_dir(self, suite_spec: str) -> Path:
+        """Get timestamped log directory for a suite."""
         safe_suite_name = suite_spec.replace(":", "_")
-        log_dir = self.results_dir / safe_suite_name
+        return self.results_dir / safe_suite_name / self.run_timestamp
+
+    def setup(self, suite_spec: str) -> bool:
+        log_dir = self._get_log_dir(suite_spec)
         log_path = log_dir / "setup.log"
         
         return self._run_with_spinner(
@@ -200,8 +207,7 @@ class TestRunner:
         )
 
     def seed(self, suite_spec: str, pattern: str = "") -> bool:
-        safe_suite_name = suite_spec.replace(":", "_")
-        log_dir = self.results_dir / safe_suite_name
+        log_dir = self._get_log_dir(suite_spec)
         log_path = log_dir / "seed.log"
         
         pattern_list = pattern.split(",") if pattern else None
@@ -218,8 +224,7 @@ class TestRunner:
 
     def run_tests(self, suite_spec: str, pattern: str = "", timeout: int = 120, json_output: bool = False) -> Optional[Dict]:
         print_color(f"▶ Running test(s) for {suite_spec} (pattern: '{pattern}')...", "YELLOW")
-        safe_suite_name = suite_spec.replace(":", "_")
-        log_dir = self.results_dir / safe_suite_name
+        log_dir = self._get_log_dir(suite_spec)
         log_dir.mkdir(parents=True, exist_ok=True)
         results_json_path = log_dir / "results.json"
 
@@ -287,8 +292,7 @@ class TestRunner:
         return result.returncode == 0
 
     def cleanup(self, suite_spec: str) -> bool:
-        safe_suite_name = suite_spec.replace(":", "_")
-        log_dir = self.results_dir / safe_suite_name
+        log_dir = self._get_log_dir(suite_spec)
         log_path = log_dir / "cleanup.log"
         
         return self._run_with_spinner(
@@ -413,7 +417,24 @@ def command_suite(args):
     print_color(f"Total Tests: {stats['passed'] + stats['failed']}", "NC")
     print_color(f"Passed: {stats['passed']}", "GREEN")
     print_color(f"Failed: {stats['failed']}", "RED")
-    
+
+    # Print results location and create latest symlink
+    for suite in suites:
+        results_path = runner._get_log_dir(suite)
+        if results_path.exists():
+            print_color(f"Results: {results_path}", "BLUE")
+            # Create/update 'latest' symlink
+            latest_link = results_path.parent / "latest"
+            try:
+                if latest_link.is_symlink():
+                    latest_link.unlink()
+                elif latest_link.exists():
+                    pass  # Don't overwrite if it's a real directory
+                else:
+                    latest_link.symlink_to(results_path.name)
+            except OSError:
+                pass  # Symlinks may not work on all systems
+
     if stats["suites_failed"]:
         print_color(f"Failed Suites: {', '.join(stats['suites_failed'])}", "RED")
         sys.exit(1)

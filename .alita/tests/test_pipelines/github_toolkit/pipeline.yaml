@@ -169,6 +169,7 @@ cleanup:
       tool_name: delete_branch
       tool_params:
         branch_name: ${GITHUB_TEST_BRANCH}
+        force: true  # Allow deleting even if it's the active branch
     continue_on_error: true
 
   # Step 2: Close test PRs
