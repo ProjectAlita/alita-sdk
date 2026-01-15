@@ -4,7 +4,7 @@ from ..utils.utils import clean_string
 from langchain_core.tools import BaseTool, ToolException
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from typing import Any, Type, Optional
-from pydantic import create_model, field_validator, BaseModel
+from pydantic import create_model, model_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
 from logging import getLogger
@@ -41,8 +41,7 @@ def formulate_query(kwargs):
         if key not in ("task", "chat_history"):
             result[key] = value
     return result
-    
-    
+
 
 class Application(BaseTool):
     name: str
@@ -55,10 +54,21 @@ class Application(BaseTool):
     metadata: dict = {}
     is_subgraph: Optional[bool] = False
     
-    @field_validator('name', mode='before')
+    @model_validator(mode='before')
     @classmethod
-    def remove_spaces(cls, v):
-        return clean_string(v)
+    def preserve_original_name(cls, data: Any) -> Any:
+        """Preserve the original name in metadata before cleaning."""
+        if isinstance(data, dict):
+            original_name = data.get('name')
+            if original_name:
+                # Initialize metadata if not present
+                if data.get('metadata') is None:
+                    data['metadata'] = {}
+                # Store original name before cleaning
+                data['metadata']['original_name'] = original_name
+                # Clean the name
+                data['name'] = clean_string(original_name)
+        return data
 
     def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         """Override default invoke to preserve all fields, not just args_schema"""
