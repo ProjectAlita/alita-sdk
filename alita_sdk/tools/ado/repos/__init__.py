@@ -24,7 +24,7 @@ def get_toolkit(tool) -> BaseToolkit:
         limit=tool['settings'].get('limit', 5),
         base_branch=tool['settings'].get('base_branch', "main"),
         active_branch=tool['settings'].get('active_branch', "main"),
-        toolkit_name=tool['settings'].get('toolkit_name', ""),
+        toolkit_name=tool.get('toolkit_name', ''),
         pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
         embedding_model=tool['settings'].get('embedding_model'),
         collection_name=tool['toolkit_name'],
