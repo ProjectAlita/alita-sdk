@@ -1,0 +1,325 @@
+name: "GH06 - File Operations Workflow"
+description: "Test file lifecycle: create_file, read_file to verify, apply_git_patch to modify, read_file to verify patch, delete_file, cleanup"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  branch_name_base:
+    type: str
+    value: "test/gh9-file-ops"
+  branch_name:
+    type: str
+  file_path:
+    type: str
+  file_contents:
+    type: str
+  tool_result:
+    type: str
+  read_result:
+    type: str
+  patch_content:
+    type: str
+  commit_message:
+    type: str
+  patched_content:
+    type: str
+  validation_results:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  # Step 1: Prepare unique branch and file names
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Branch name
+        base_branch = alita_state.get('branch_name_base', 'test/gh9-file-ops')
+        branch_name = f"{base_branch}-{timestamp}-{random_suffix}"
+
+        # File path and initial content
+        file_path = f"test-data/generated/file-ops-{timestamp}-{random_suffix}.txt"
+        nl = chr(10)
+        file_contents = f"# File Operations Test{nl}Created at: {timestamp}{nl}Random ID: {random_suffix}{nl}This file tests create_file and apply_git_patch."
+
+        {"branch_name": branch_name, "file_path": file_path, "file_contents": file_contents}
+    input:
+      - branch_name_base
+    output:
+      - branch_name
+      - file_path
+      - file_contents
+    structured_output: true
+    transition: create_branch
+
+  # Step 2: Create test branch
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: set_active_branch
+
+  # Step 3: Set the new branch as active
+  - id: set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: create_file
+
+  # Step 4: Create the test file
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_contents
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_contents
+    output:
+      - tool_result
+    structured_output: true
+    transition: read_file_after_create
+
+  # Step 5: Read the file to verify it was created
+  - id: read_file_after_create
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_create
+
+  # Step 6: Validate file creation and prepare patch
+  - id: validate_create
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        file_contents = alita_state.get('file_contents', '')
+        read_result = alita_state.get('read_result', '')
+
+        # Verify file was created correctly
+        create_ok = False
+        if read_result and file_contents:
+            create_ok = file_contents.strip() in read_result.strip() or read_result.strip() in file_contents.strip()
+
+        # Prepare git patch to add new lines to the file
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        nl = chr(10)
+        # Create patch that adds lines to the end of the file
+        # Count original lines for the patch header
+        original_lines = file_contents.split(nl)
+        line_count = len(original_lines)
+
+        patch_content = f"diff --git a/{file_path} b/{file_path}" + nl
+        patch_content += f"--- a/{file_path}" + nl
+        patch_content += f"+++ b/{file_path}" + nl
+        patch_content += f"@@ -{line_count},0 +{line_count},3 @@" + nl
+        patch_content += f"+{nl}"
+        patch_content += f"+# Patch Applied{nl}"
+        patch_content += f"+Patched at: {timestamp} - ID: {random_id}"
+
+        commit_message = f"GH9 patch test {random_id}"
+
+        # Expected content after patch
+        patched_content = f"Patch Applied"
+
+        validation_results = {
+            "create_file_ok": create_ok,
+            "original_length": len(file_contents),
+            "read_length": len(read_result) if read_result else 0
+        }
+
+        {"validation_results": validation_results, "patch_content": patch_content, "commit_message": commit_message, "patched_content": patched_content}
+    input:
+      - file_path
+      - file_contents
+      - read_result
+    output:
+      - validation_results
+      - patch_content
+      - commit_message
+      - patched_content
+    structured_output: true
+    transition: apply_git_patch
+
+  # Step 7: Apply git patch to modify the file
+  - id: apply_git_patch
+    type: toolkit
+    tool: apply_git_patch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - patch_content
+      - commit_message
+    input_mapping:
+      patch_content:
+        type: variable
+        value: patch_content
+      commit_message:
+        type: variable
+        value: commit_message
+    output:
+      - tool_result
+    structured_output: true
+    transition: read_file_after_patch
+
+  # Step 8: Read file again to verify patch was applied
+  - id: read_file_after_patch
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - read_result
+    structured_output: true
+    transition: process_results
+
+  # Step 9: Process and validate all results
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        file_path = alita_state.get('file_path')
+        file_contents = alita_state.get('file_contents', '')
+        read_result = alita_state.get('read_result', '')
+        patched_content = alita_state.get('patched_content', '')
+        tool_result = alita_state.get('tool_result', '')
+        validation_results = alita_state.get('validation_results', {})
+
+        # Check if patch was applied
+        patch_result_str = str(tool_result).lower() if tool_result else ''
+        patch_executed = tool_result is not None
+        patch_success = 'success' in patch_result_str or 'applied' in patch_result_str
+
+        # Verify patched content exists in file
+        patch_content_found = patched_content in read_result if read_result and patched_content else False
+        original_preserved = file_contents.split(chr(10))[0] in read_result if read_result and file_contents else False
+
+        patch_ok = patch_executed and (patch_success or patch_content_found)
+
+        # Overall results
+        create_ok = validation_results.get('create_file_ok', False)
+        all_ok = create_ok and patch_ok
+
+        test_results = {
+            "test_passed": all_ok,
+            "operations": {
+                "create_file": create_ok,
+                "read_file_verify_create": create_ok,
+                "apply_git_patch": patch_ok,
+                "read_file_verify_patch": patch_content_found or patch_success
+            },
+            "details": {
+                "file_path": file_path,
+                "original_content_length": len(file_contents),
+                "final_content_length": len(read_result) if read_result else 0,
+                "patch_content_found": patch_content_found,
+                "original_preserved": original_preserved
+            }
+        }
+        {"test_results": test_results}
+    input:
+      - file_path
+      - file_contents
+      - read_result
+      - patched_content
+      - tool_result
+      - validation_results
+    output:
+      - test_results
+    structured_output: true
+    transition: delete_file
+
+  # Step 10: Delete the test file
+  - id: delete_file
+    type: toolkit
+    tool: delete_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - tool_result
+    structured_output: true
+    transition: delete_branch
+
+  # Step 11: Delete the test branch
+  - id: delete_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: END

@@ -24,6 +24,7 @@ Examples:
 """
 
 import argparse
+import ast
 import json
 import os
 import sys
@@ -235,32 +236,103 @@ def execute_pipeline(
         # Nested in result field
         elif "result" in result_data:
             nested = result_data.get("result", {})
-            if isinstance(nested, dict) and "test_passed" in nested:
-                test_passed = nested.get("test_passed")
+            if isinstance(nested, dict):
+                if "test_passed" in nested:
+                    test_passed = nested.get("test_passed")
+                # Nested in result.test_results (pyodide sandbox output)
+                elif "test_results" in nested:
+                    test_results = nested.get("test_results", {})
+                    if isinstance(test_results, dict) and "test_passed" in test_results:
+                        test_passed = test_results.get("test_passed")
         # Check in chat_history (pipeline response format)
         elif "chat_history" in result_data:
             chat_history = result_data.get("chat_history", [])
             for msg in chat_history:
                 if isinstance(msg, dict):
                     content = msg.get("content", "")
+                    # Check for tool call error in content that indicates failure
+                    if isinstance(content, str) and ("Error executing code: [Errno 7]" in content or "[Errno 7] Argument list too long" in content):
+                         test_passed = False
+                         output = {"error": content, "raw_content": content}
+                         break
+
                     if isinstance(content, str) and content.startswith("{"):
                         try:
                             parsed = json.loads(content)
                             if isinstance(parsed, dict):
                                 if "test_passed" in parsed:
                                     test_passed = parsed.get("test_passed")
-                                    output = parsed
+                                    if isinstance(output, dict):
+                                        output["result"] = parsed
+                                    else:
+                                        output = parsed
                                     break
                                 elif "result" in parsed:
                                     nested = parsed.get("result", {})
-                                    if isinstance(nested, dict) and "test_passed" in nested:
-                                        test_passed = nested.get("test_passed")
-                                        output = parsed
-                                        break
+                                    if isinstance(nested, dict):
+                                        if "test_passed" in nested:
+                                            test_passed = nested.get("test_passed")
+                                            if isinstance(output, dict):
+                                                output["result"] = nested
+                                            else:
+                                                output = nested
+                                            break
+                                        # Nested in result.test_results (pyodide sandbox output)
+                                        elif "test_results" in nested:
+                                            test_results = nested.get("test_results", {})
+                                            if isinstance(test_results, dict) and "test_passed" in test_results:
+                                                test_passed = test_results.get("test_passed")
+                                                if isinstance(output, dict):
+                                                    output["result"] = test_results
+                                                else:
+                                                    output = test_results
+                                                break
                         except (json.JSONDecodeError, TypeError):
                             pass
+        # Check in tool_calls_dict (pipeline tool execution results)
+        if test_passed is None and "tool_calls_dict" in result_data:
+            tool_calls = result_data.get("tool_calls_dict", {})
+            if isinstance(tool_calls, dict):
+                # Get all tool calls sorted by timestamp_finish (latest first)
+                sorted_calls = sorted(
+                    tool_calls.values(),
+                    key=lambda x: x.get("timestamp_finish", "") if isinstance(x, dict) else "",
+                    reverse=True
+                )
+                for tool_call in sorted_calls:
+                    if not isinstance(tool_call, dict):
+                        continue
+                    content = tool_call.get("content", "") or tool_call.get("tool_output", "")
+
+                    # Check for error indicating test failure
+                    if isinstance(content, str) and ("[Errno 7] Argument list too long" in content or "Error executing code:" in content):
+                        test_passed = False
+                        break
+
+                    if isinstance(content, str) and content.startswith("{"):
+                        try:
+                            # Use ast.literal_eval for Python dict repr format
+                            parsed = ast.literal_eval(content)
+                            if isinstance(parsed, dict):
+                                if "test_passed" in parsed:
+                                    test_passed = parsed.get("test_passed")
+                                    break
+                                elif "result" in parsed:
+                                    nested = parsed.get("result", {})
+                                    if isinstance(nested, dict):
+                                        if "test_passed" in nested:
+                                            test_passed = nested.get("test_passed")
+                                            break
+                                        elif "test_results" in nested:
+                                            test_results = nested.get("test_results", {})
+                                            if isinstance(test_results, dict) and "test_passed" in test_results:
+                                                test_passed = test_results.get("test_passed")
+                                                break
+                        except (ValueError, TypeError, SyntaxError):
+                            pass
+
         # Check in response/output field
-        elif "response" in result_data:
+        if test_passed is None and "response" in result_data:
             resp = result_data.get("response")
             if isinstance(resp, dict) and "test_passed" in resp:
                 test_passed = resp.get("test_passed")
@@ -269,7 +341,10 @@ def execute_pipeline(
                     parsed = json.loads(resp)
                     if isinstance(parsed, dict) and "test_passed" in parsed:
                         test_passed = parsed.get("test_passed")
-                        output = parsed
+                        if isinstance(output, dict):
+                            output["result"] = parsed
+                        else:
+                            output = parsed
                 except (json.JSONDecodeError, TypeError):
                     pass
 

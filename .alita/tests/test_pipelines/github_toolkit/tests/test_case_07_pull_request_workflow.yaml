@@ -1,0 +1,320 @@
+name: "GH07 - Pull Request Workflow"
+description: "Test full PR lifecycle: create branch, add file, create PR, get PR, list diffs, close PR, cleanup"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  branch_name_base:
+    type: str
+    value: "test/gh10-pr-workflow"
+  branch_name:
+    type: str
+  base_branch:
+    type: str
+    value: "main"
+  file_path:
+    type: str
+  file_contents:
+    type: str
+  pr_title:
+    type: str
+  pr_body:
+    type: str
+  pr_number:
+    type: int
+  tool_result:
+    type: str
+  pr_details:
+    type: str
+  pr_diffs:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  # Step 1: Prepare unique branch, file, and PR data
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Branch name
+        base_branch_name = alita_state.get('branch_name_base', 'test/gh10-pr-workflow')
+        branch_name = f"{base_branch_name}-{timestamp}-{random_suffix}"
+
+        # File to create (PR needs changes)
+        file_path = f"test-data/pr-test-{timestamp}-{random_suffix}.txt"
+        file_contents = f"PR test file created at {timestamp}\nRandom ID: {random_suffix}\nThis file is created to have changes for PR."
+
+        # PR details
+        pr_title = f"[Test] GH10 PR Workflow - {timestamp}-{random_suffix}"
+        pr_body = f"Automated test PR created by GH10 pipeline.\n\nTimestamp: {timestamp}\nRandom ID: {random_suffix}\n\nThis PR will be closed automatically after validation."
+
+        {"branch_name": branch_name, "file_path": file_path, "file_contents": file_contents, "pr_title": pr_title, "pr_body": pr_body}
+    input:
+      - branch_name_base
+    output:
+      - branch_name
+      - file_path
+      - file_contents
+      - pr_title
+      - pr_body
+    structured_output: true
+    transition: create_branch
+
+  # Step 2: Create test branch
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: set_active_branch
+
+  # Step 3: Set the new branch as active
+  - id: set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: create_file
+
+  # Step 4: Create a file on the branch (PR needs changes)
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_contents
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_contents
+    output:
+      - tool_result
+    structured_output: true
+    transition: create_pull_request
+
+  # Step 5: Create the pull request
+  - id: create_pull_request
+    type: toolkit
+    tool: create_pull_request
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_title
+      - pr_body
+      - branch_name
+      - base_branch
+    input_mapping:
+      title:
+        type: variable
+        value: pr_title
+      body:
+        type: variable
+        value: pr_body
+      head:
+        type: variable
+        value: branch_name
+      base:
+        type: variable
+        value: base_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: extract_pr_number
+
+  # Step 6: Extract PR number from result
+  - id: extract_pr_number
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+
+        create_result = alita_state.get('tool_result', '')
+        pr_number = None
+
+        # Extract PR number from various result formats
+        if isinstance(create_result, str):
+            # Look for PR #123 pattern
+            match = re.search(r'#(\d+)', create_result)
+            if match:
+                pr_number = int(match.group(1))
+            # Look for /pull/123 pattern
+            if not pr_number:
+                match = re.search(r'/pull/(\d+)', create_result)
+                if match:
+                    pr_number = int(match.group(1))
+        elif isinstance(create_result, dict):
+            pr_number = create_result.get('number')
+
+        {"pr_number": pr_number}
+    input:
+      - tool_result
+    output:
+      - pr_number
+    structured_output: true
+    transition: get_pull_request
+
+  # Step 7: Validate PR exists by fetching it
+  - id: get_pull_request
+    type: toolkit
+    tool: get_pull_request
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_number
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+    output:
+      - pr_details
+    structured_output: true
+    transition: list_pull_request_diffs
+
+  # Step 8: List PR diffs to validate file changes are visible
+  - id: list_pull_request_diffs
+    type: toolkit
+    tool: list_pull_request_diffs
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_number
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+    output:
+      - pr_diffs
+    structured_output: true
+    transition: process_results
+
+  # Step 9: Validate all results
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        pr_number = alita_state.get('pr_number')
+        pr_details = alita_state.get('pr_details', '')
+        pr_diffs = alita_state.get('pr_diffs', '')
+        pr_title = alita_state.get('pr_title', '')
+        file_path = alita_state.get('file_path', '')
+
+        # Validate PR details
+        pr_exists = False
+        if pr_details and pr_number:
+            pr_exists = str(pr_number) in str(pr_details) or 'title' in str(pr_details).lower()
+
+        # Validate PR diffs - should contain our file
+        diffs_valid = False
+        file_in_diffs = False
+        diffs_count = 0
+
+        if pr_diffs:
+            diffs_str = str(pr_diffs)
+            # Check if our file appears in diffs
+            file_in_diffs = file_path in diffs_str if file_path else False
+            # Try to count files changed
+            try:
+                if isinstance(pr_diffs, list):
+                    diffs_count = len(pr_diffs)
+                elif isinstance(pr_diffs, str):
+                    parsed = json.loads(pr_diffs)
+                    diffs_count = len(parsed) if isinstance(parsed, list) else 1
+            except:
+                diffs_count = 1 if pr_diffs else 0
+            diffs_valid = diffs_count > 0
+
+        test_results = {
+            "test_passed": pr_exists and pr_number is not None and diffs_valid,
+            "pr_number": pr_number,
+            "pr_exists": pr_exists,
+            "diffs_valid": diffs_valid,
+            "diffs_count": diffs_count,
+            "file_in_diffs": file_in_diffs,
+            "pr_details_preview": str(pr_details)[:300] if pr_details else None,
+            "pr_diffs_preview": str(pr_diffs)[:300] if pr_diffs else None
+        }
+        {"test_results": test_results}
+    input:
+      - pr_number
+      - pr_details
+      - pr_diffs
+      - pr_title
+      - file_path
+    output:
+      - test_results
+    structured_output: true
+    transition: close_pull_request
+
+  # Step 10: Close the PR using update_issue
+  - id: close_pull_request
+    type: toolkit
+    tool: update_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_number
+    input_mapping:
+      issue_id:
+        type: variable
+        value: pr_number
+      state:
+        type: fixed
+        value: "closed"
+    output:
+      - tool_result
+    structured_output: true
+    transition: delete_branch
+
+  # Step 11: Delete the test branch
+  - id: delete_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: END

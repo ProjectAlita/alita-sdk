@@ -593,16 +593,20 @@ def execute_setup(config: dict, ctx: SetupContext, base_path: Path) -> dict:
     setup_steps = config.get("setup", [])
     results = {"success": True, "steps": [], "env_vars": {}}
 
-    print(f"\nExecuting setup for: {config.get('name', 'unknown')}")
-    print(f"Steps: {len(setup_steps)}")
-    print("-" * 60)
+    if not ctx.verbose and not ctx.dry_run: # If quiet mode essentially
+         pass
+    else:
+        print(f"\nExecuting setup for: {config.get('name', 'unknown')}")
+        print(f"Steps: {len(setup_steps)}")
+        print("-" * 60)
 
     for i, step in enumerate(setup_steps, 1):
         step_name = step.get("name", f"Step {i}")
         step_type = step.get("type")
         action = step.get("action", "")
 
-        print(f"\n[{i}/{len(setup_steps)}] {step_name}")
+        if ctx.verbose:
+             print(f"\n[{i}/{len(setup_steps)}] {step_name}")
 
         # Check if step is enabled
         if not step.get("enabled", True):
@@ -673,6 +677,83 @@ def write_env_file(env_vars: dict, output_path: Path):
             f.write(f"{key}={value}\n")
 
 
+def run(
+    folder: str,
+    env_file: str | Path | None = None,
+    output_env: str | Path | None = None,
+    base_url: str | None = None,
+    project_id: int | None = None,
+    token: str | None = None,
+    dry_run: bool = False,
+    verbose: bool = False,
+    quiet: bool = False,
+) -> dict:
+    """Run set up programmatically."""
+    # Load environment file if provided
+    if env_file:
+        env_file_path = Path(env_file)
+        if not env_file_path.exists():
+            raise FileNotFoundError(f"Env file not found: {env_file}")
+        set_env_file(env_file_path)
+
+    # Parse suite specification and resolve paths
+    folder_name, pipeline_file = parse_suite_spec(folder)
+    script_dir = Path(__file__).parent
+    base_dir = script_dir.parent  # Go up from scripts/ to test_pipelines/
+    suite_folder = base_dir / folder_name
+
+    if not suite_folder.exists():
+        raise FileNotFoundError(f"Suite folder not found: {suite_folder}")
+
+    # Load configuration
+    config = load_config(suite_folder, pipeline_file)
+    if not config:
+        raise FileNotFoundError(f"Config not found in {suite_folder}")
+
+    # Resolve settings
+    base_url = base_url or load_base_url_from_env() or DEFAULT_BASE_URL
+    project_id = project_id or load_project_id_from_env() or DEFAULT_PROJECT_ID
+    bearer_token = token or load_token_from_env()
+
+    if not bearer_token and not dry_run:
+        raise ValueError("Authentication token required.")
+
+    # Create context
+    ctx = SetupContext(
+        base_url=base_url,
+        project_id=project_id,
+        bearer_token=bearer_token or "",
+        verbose=verbose,
+        dry_run=dry_run,
+    )
+    
+    # Mute logging if quiet
+    if quiet: 
+        # Hack to silence logging unless it's error
+        original_log = ctx.log
+        def quiet_log(message, level="info"):
+            if level in ("error"):
+                 original_log(message, level)
+        ctx.log = quiet_log
+
+    if not quiet:
+        print(f"Setup: {config.get('name', folder)}")
+        print(f"Target: {base_url} (Project: {project_id})")
+        if dry_run:
+            print("[DRY RUN MODE]")
+        print("=" * 60)
+
+    # Execute setup
+    results = execute_setup(config, ctx, suite_folder)
+
+    # Write env file if requested
+    if output_env and results["env_vars"]:
+        env_path = Path(output_env)
+        write_env_file(results["env_vars"], env_path)
+    
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Execute setup steps from a test suite's config.yaml",
@@ -695,63 +776,30 @@ def main():
 
     args = parser.parse_args()
 
-    # Set custom env file if provided (must be done before any load_from_env calls)
-    if args.env_file:
-        env_file_path = Path(args.env_file)
-        if not env_file_path.exists():
-            print(f"Error: Env file not found: {args.env_file}", file=sys.stderr)
-            sys.exit(1)
-        set_env_file(env_file_path)
-        print(f"Loading environment from: {args.env_file}")
-
-    # Parse suite specification and resolve paths
-    folder_name, pipeline_file = parse_suite_spec(args.folder)
-    script_dir = Path(__file__).parent
-    base_dir = script_dir.parent  # Go up from scripts/ to test_pipelines/
-    suite_folder = base_dir / folder_name
-
-    if not suite_folder.exists():
-        print(f"Error: Suite folder not found: {suite_folder}", file=sys.stderr)
-        sys.exit(1)
-
-    # Load configuration
     try:
-        config = load_config(suite_folder, pipeline_file)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        results = run(
+            folder=args.folder,
+            env_file=args.env_file,
+            output_env=args.output_env,
+            base_url=args.base_url,
+            project_id=args.project_id,
+            token=args.token,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            quiet=args.json
+        )
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": str(e)}))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-
-    # Resolve settings
-    base_url = args.base_url or load_base_url_from_env() or DEFAULT_BASE_URL
-    project_id = args.project_id or load_project_id_from_env() or DEFAULT_PROJECT_ID
-    bearer_token = args.token or load_token_from_env()
-
-    if not bearer_token and not args.dry_run:
-        print("Error: Authentication token required. Set AUTH_TOKEN or use --token", file=sys.stderr)
-        sys.exit(1)
-
-    # Create context
-    ctx = SetupContext(
-        base_url=base_url,
-        project_id=project_id,
-        bearer_token=bearer_token or "",
-        verbose=args.verbose,
-        dry_run=args.dry_run,
-    )
-
-    print(f"Setup: {config.get('name', args.folder)}")
-    print(f"Target: {base_url} (Project: {project_id})")
-    if args.dry_run:
-        print("[DRY RUN MODE]")
-    print("=" * 60)
-
-    # Execute setup
-    results = execute_setup(config, ctx, suite_folder)
 
     # Output results
-    print("\n" + "=" * 60)
-    print("Setup Results")
-    print("=" * 60)
+    if not args.json:
+        print("\n" + "=" * 60)
+        print("Setup Results")
+        print("=" * 60)
 
     if args.json:
         print(json.dumps(results, indent=2, default=str))
@@ -767,12 +815,9 @@ def main():
             # Mask sensitive values
             display_value = value if "TOKEN" not in key.upper() else f"{str(value)[:4]}***"
             print(f"  {key}={display_value}")
-
-    # Write env file if requested
-    if args.output_env and results["env_vars"]:
-        env_path = Path(args.output_env)
-        write_env_file(results["env_vars"], env_path)
-        print(f"\nEnvironment written to: {env_path}")
+        
+        if args.output_env:
+             print(f"\nEnvironment written to: {args.output_env}")
 
     # Exit with appropriate code
     if not results["success"]:

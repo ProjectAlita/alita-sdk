@@ -459,7 +459,8 @@ def get_pipelines_from_folder(
         pipeline_file: Optional specific pipeline config file (e.g., 'pipeline_validation.yaml')
     """
     # Read YAML files to get pipeline names
-    folder_path = Path(__file__).parent / folder_name
+    # Go up from scripts/ to test_pipelines/ directory
+    folder_path = Path(__file__).parent.parent / folder_name
     if not folder_path.exists():
         return []
 
@@ -593,6 +594,7 @@ def run_suite(
     config: dict = None,
     env_vars: dict = None,
     headers: dict = None,
+    quiet: bool = False,
 ) -> SuiteResult:
     """Execute multiple pipelines and aggregate results.
 
@@ -608,6 +610,7 @@ def run_suite(
         config: Suite config.yaml (optional, for hooks)
         env_vars: Environment variables for hook substitution
         headers: Auth headers (for hook pipeline invocation)
+        quiet: Suppress stdout output (useful for JSON mode)
     """
     start_time = time.time()
     suite = SuiteResult(suite_name=suite_name, total=len(pipelines))
@@ -635,16 +638,23 @@ def run_suite(
     results = []
 
     if parallel > 1:
-        # Parallel execution
+        # Parallel execution (hooks not supported during parallel execution yet)
         with ThreadPoolExecutor(max_workers=parallel) as executor:
             futures = {executor.submit(execute_one, p): p for p in pipelines}
             for future in as_completed(futures):
                 try:
                     result = future.result()
-                    results.append(result)
+                    # Convert to dict immediate and add timestamp
+                    r_dict = result.to_dict()
+                    r_dict['timestamp'] = datetime.now(timezone.utc).isoformat()
+                    results.append(r_dict)
+                    
                     if verbose:
                         status = "PASS" if result.test_passed else "FAIL"
                         print(f"  [{status}] {result.pipeline_name}")
+                    elif not quiet:
+                        status = "\033[92m✓\033[0m" if result.test_passed else "\033[91m✗\033[0m"
+                        print(f"{status} {result.pipeline_name}", flush=True)
                 except Exception as e:
                     pipeline = futures[future]
                     results.append(PipelineResult(
@@ -656,40 +666,91 @@ def run_suite(
     else:
         # Sequential execution
         for pipeline in pipelines:
+            pipeline_name = pipeline.get('name', f"ID: {pipeline.get('id')}")
+            
             if verbose:
-                print(f"Running: {pipeline.get('name')}...")
-
+                print(f"Running: {pipeline_name}...")
+            elif not quiet:
+                sys.stdout.write(f"▶ {pipeline_name}...\r")
+                sys.stdout.flush()
+            
+            # 1. Execute Pipeline
             result = execute_one(pipeline)
-            results.append(result)
 
+            # 2. Run post-test hooks immediately (e.g. RCA)
+            result_dict = result.to_dict()
+            result_dict['timestamp'] = datetime.now(timezone.utc).isoformat()
+            rca_info = ""
+            
+            if post_test_hooks:
+                result_dict = run_post_test_hooks(
+                    base_url=base_url,
+                    project_id=project_id,
+                    result=result_dict,
+                    hooks_config=post_test_hooks,
+                    env_vars=env_vars,
+                    headers=headers,
+                    timeout=timeout,
+                    verbose=verbose
+                )
+                # Check if RCA added any results
+                # Assuming RCA hook output is merged into result['test_results']['rca'] or similar
+                # This depends on output_mapping in config.yaml
+                # But generic check: if result was fail, and now we have extra info?
+                if not result.test_passed:
+                    # Try to find RCA output. Common pattern is 'rca' key.
+                    # Or check for 'hook_results' if we added that (we didn't yet).
+                    pass
+
+            results.append(result_dict) # Store dictionary with hook results
+
+            # 3. Print Result
             if verbose:
                 status = "PASS" if result.test_passed else "FAIL"
                 print(f"  [{status}] {result.execution_time:.1f}s")
+            elif not quiet:
+                # Clear running line
+                sys.stdout.write("\033[2K\r")
+                sys.stdout.flush()
+                
+                if result.test_passed:
+                    status = "\033[92m✓\033[0m" # Green check
+                    print(f"{status} {pipeline.get('name')} ({result.execution_time:.1f}s)", flush=True)
+                else:
+                    status = "\033[91m✗\033[0m" # Red x
+                    print(f"{status} {pipeline.get('name')} ({result.execution_time:.1f}s)", flush=True)
+                    
+                    # Print RCA info if available in result_dict
+                    rca_summary = result_dict.get('rca_summary')
+                    if rca_summary:
+                         print(f"    \033[33mRCA Analysis:\033[0m {rca_summary}", flush=True)
+                    
+                    rca_details = result_dict.get('rca')
+                    if rca_details and rca_details != rca_summary:
+                         # Print specific details if they exist and are different
+                         # Often 'rca' is the main text block
+                         lines = str(rca_details).split('\n')
+                         print(f"    \033[33mRCA Detail:\033[0m", flush=True)
+                         for line in lines:
+                             print(f"      {line}", flush=True)
 
-    # Aggregate results and run post-test hooks
-    for result in results:
-        result_dict = result.to_dict()
+    # Aggregate results (results list now contains dicts for sequential, objects for parallel)
+    for res in results:
+        # Normalize to dict
+        if hasattr(res, 'to_dict'):
+            r = res.to_dict()
+        else:
+            r = res # Already a dict from sequential loop
 
-        # Run post-test hooks (e.g., RCA on failure)
-        if post_test_hooks:
-            result_dict = run_post_test_hooks(
-                base_url=base_url,
-                project_id=project_id,
-                result=result_dict,
-                hooks_config=post_test_hooks,
-                env_vars=env_vars,
-                headers=headers,
-                timeout=timeout,
-                verbose=verbose
-            )
+        # (Hooks already run for sequential, need to run for parallel if we supported it)
+        
+        suite.results.append(r)
 
-        suite.results.append(result_dict)
-
-        if result.error:
+        if r.get('error'):
             suite.errors += 1
-        elif result.test_passed is True:
+        elif r.get('test_passed') is True:
             suite.passed += 1
-        elif result.test_passed is False:
+        elif r.get('test_passed') is False:
             suite.failed += 1
         else:
             suite.skipped += 1
@@ -713,6 +774,7 @@ def main():
     parser.add_argument("--timeout", "-t", type=int, default=120, help="Execution timeout per pipeline")
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel executions")
     parser.add_argument("--json", "-j", action="store_true", help="Output JSON format")
+    parser.add_argument("--output-json", help="Save JSON results to file (can be used with or without --json)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
     parser.add_argument("--exit-code", "-e", action="store_true",
@@ -762,7 +824,8 @@ def main():
         if not pipelines:
             # Try to get by pattern matching folder name prefix
             import yaml
-            folder_path = Path(__file__).parent / folder_name
+            # Go up from scripts/ to test_pipelines/ directory
+            folder_path = Path(__file__).parent.parent / folder_name
             if folder_path.exists():
                 # Check if there's a pipeline config with test_directory setting
                 test_dir = folder_path
@@ -829,7 +892,8 @@ def main():
     config = None
     env_vars = {}
     if folder_name:
-        folder_path = Path(__file__).parent / folder_name
+        # Go up from scripts/ to test_pipelines/ directory
+        folder_path = Path(__file__).parent.parent / folder_name
         config = load_config(folder_path, pipeline_file)
 
         # Build env_vars from environment and config
@@ -860,9 +924,14 @@ def main():
         config=config,
         env_vars=env_vars,
         headers=headers,
+        quiet=args.json,
     )
 
     # Output results
+    if args.output_json:
+        with open(args.output_json, "w") as f:
+            f.write(result.to_json())
+
     if args.json:
         print(result.to_json())
     else:

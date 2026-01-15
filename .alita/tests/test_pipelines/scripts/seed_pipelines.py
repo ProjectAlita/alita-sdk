@@ -623,109 +623,37 @@ def seed_pipeline(
             "error": response.text,
         }
 
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Seed test pipelines to Elitea platform",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    %(prog)s state_retrieval --token "your_api_key"
-    %(prog)s structured_output --project-id 2 --token "your_api_key"
-    %(prog)s state_retrieval --base-url http://localhost:8080 --session "your_session_cookie"
-
-Environment Variables:
-    AUTH_TOKEN, ELITEA_TOKEN, or API_KEY - Bearer token for authentication (preferred)
-    ELITEA_SESSION - Session cookie value (centry_auth_session) for authentication
-    BASE_URL or DEPLOYMENT_URL - Platform base URL
-    GITHUB_TOOLKIT_ID - GitHub toolkit ID for substitution in pipeline YAML
-
-Authentication (use one of these):
-    --token: Bearer token (API key from Elitea settings)
-    --session: Session cookie (from browser DevTools → Cookies → centry_auth_session)
-        """,
-    )
-
-    parser.add_argument(
-        "folder",
-        help="Suite folder name (e.g., 'state_retrieval' or 'github_toolkit_negative:pipeline_validation.yaml')",
-    )
-    parser.add_argument(
-        "--base-url",
-        default=None,
-        help=f"Base URL of the Elitea platform (default: from BASE_URL env or {DEFAULT_BASE_URL})",
-    )
-    parser.add_argument(
-        "--project-id",
-        type=int,
-        default=None,
-        help=f"Project ID to seed pipelines to (default: from PROJECT_ID env or {DEFAULT_PROJECT_ID})",
-    )
-    parser.add_argument(
-        "--token",
-        help="Bearer token (API key) for authentication (can also be set via ELITEA_TOKEN or API_KEY env var)",
-    )
-    parser.add_argument(
-        "--session",
-        help="Session cookie for authentication (can also be set via ELITEA_SESSION env var)",
-    )
-    parser.add_argument(
-        "--model-name",
-        default=DEFAULT_LLM_SETTINGS["model_name"],
-        help=f"LLM model name (default: {DEFAULT_LLM_SETTINGS['model_name']})",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=DEFAULT_LLM_SETTINGS["temperature"],
-        help=f"LLM temperature (default: {DEFAULT_LLM_SETTINGS['temperature']})",
-    )
-    parser.add_argument(
-        "--github-toolkit-id",
-        type=int,
-        default=None,
-        help="GitHub toolkit ID (can also be set via GITHUB_TOOLKIT_ID env var)",
-    )
-    parser.add_argument(
-        "--env-file",
-        help="Load environment variables from a specific file (e.g., .env.generated from setup.py)",
-    )
-    parser.add_argument(
-        "--pattern",
-        "-p",
-        action="append",
-        help="Filter tests by name pattern (can repeat for multiple patterns). "
-             "Matches against file name or pipeline name.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print payloads without actually sending requests",
-    )
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Print detailed output",
-    )
-
-    args = parser.parse_args()
-
+def run(
+    folder: str,
+    env_file: str | Path | None = None,
+    pattern: list[str] | None = None,
+    base_url: str | None = None,
+    project_id: int | None = None,
+    token: str | None = None,
+    session: str | None = None,
+    model_name: str = "gpt-5-mini",
+    temperature: float = 0.5,
+    github_toolkit_id: int | None = None,
+    dry_run: bool = False,
+    verbose: bool = False,
+    quiet: bool = False,
+) -> dict:
+    """Run seed pipelines programmatically."""
     # Set custom env file if provided (must be done before any load_from_env calls)
-    if args.env_file:
-        env_file_path = Path(args.env_file)
+    if env_file:
+        env_file_path = Path(env_file)
         if not env_file_path.exists():
-            print(f"Error: Env file not found: {args.env_file}", file=sys.stderr)
-            sys.exit(1)
+            raise FileNotFoundError(f"Env file not found: {env_file}")
         set_env_file(env_file_path)
-        print(f"Loading environment from: {args.env_file}")
+        if not quiet:
+            print(f"Loading environment from: {env_file}")
 
     # Resolve base URL and project ID from args or environment
-    base_url = args.base_url or load_base_url_from_env() or DEFAULT_BASE_URL
-    project_id = args.project_id or load_project_id_from_env() or DEFAULT_PROJECT_ID
+    base_url = base_url or load_base_url_from_env() or DEFAULT_BASE_URL
+    project_id = project_id or load_project_id_from_env() or DEFAULT_PROJECT_ID
 
     # Parse suite specification and resolve folder path (needed for SUITE_NAME)
-    folder_name, pipeline_file = parse_suite_spec(args.folder)
+    folder_name, pipeline_file = parse_suite_spec(folder)
     script_dir = Path(__file__).parent
     base_dir = script_dir.parent  # Go up from scripts/ to test_pipelines/
     folder_path = base_dir / folder_name
@@ -737,9 +665,9 @@ Authentication (use one of these):
     generated_env_vars = {}  # Only these will be written back to .env
 
     # GitHub toolkit
-    github_toolkit_id = args.github_toolkit_id or load_github_toolkit_id_from_env()
-    if github_toolkit_id is not None:  # Allow ID=0 (though unusual)
-        env_substitutions["GITHUB_TOOLKIT_ID"] = github_toolkit_id
+    gh_toolkit_id = github_toolkit_id or load_github_toolkit_id_from_env()
+    if gh_toolkit_id is not None:  # Allow ID=0 (though unusual)
+        env_substitutions["GITHUB_TOOLKIT_ID"] = gh_toolkit_id
     github_toolkit_name = load_github_toolkit_name_from_env()
     if github_toolkit_name:
         env_substitutions["GITHUB_TOOLKIT_NAME"] = github_toolkit_name
@@ -763,24 +691,17 @@ Authentication (use one of these):
         env_substitutions["TIMESTAMP"] = timestamp
 
     if not folder_path.exists():
-        print(f"Error: Folder '{folder_path}' does not exist", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"Folder '{folder_path}' does not exist")
 
     if not folder_path.is_dir():
-        print(f"Error: '{folder_path}' is not a directory", file=sys.stderr)
-        sys.exit(1)
+        raise NotADirectoryError(f"'{folder_path}' is not a directory")
 
     # Get authentication credentials
-    bearer_token = args.token or load_token_from_env()
-    session_cookie = args.session or load_session_from_env()
+    bearer_token = token or load_token_from_env()
+    session_cookie = session or load_session_from_env()
 
-    if not bearer_token and not session_cookie and not args.dry_run:
-        print(
-            "Error: Authentication required. Provide --token (API key) or --session (cookie)",
-            file=sys.stderr,
-        )
-        print("  Set ELITEA_TOKEN/API_KEY or ELITEA_SESSION environment variable", file=sys.stderr)
-        sys.exit(1)
+    if not bearer_token and not session_cookie and not dry_run:
+        raise ValueError("Authentication required. Provide token (API key) or session (cookie)")
 
     auth_method = "Bearer token" if bearer_token else "Session cookie"
 
@@ -790,44 +711,47 @@ Authentication (use one of these):
     # Get YAML files (will look in test_directory if specified in config)
     yaml_files = get_yaml_files(folder_path, config)
     if not yaml_files and not (config and config.get("composable_pipelines")):
-        print(f"No test case YAML files found in '{folder_path}'", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"No test case YAML files found in '{folder_path}'")
 
     # Filter by pattern if specified
-    if args.pattern:
+    if pattern:
         original_count = len(yaml_files)
         filtered_files = []
         for yaml_file in yaml_files:
             # Check if any pattern matches the filename
-            for pattern in args.pattern:
-                if pattern.lower() in yaml_file.name.lower():
+            for p in pattern:
+                if p.lower() in yaml_file.name.lower():
                     filtered_files.append(yaml_file)
                     break
         yaml_files = filtered_files
-        print(f"Filtered {original_count} -> {len(yaml_files)} test(s) matching: {args.pattern}")
+        if not quiet:
+            print(f"Filtered {original_count} -> {len(yaml_files)} test(s) matching: {pattern}")
         if not yaml_files:
-            print(f"No test files match pattern(s): {args.pattern}", file=sys.stderr)
-            sys.exit(1)
+             raise FileNotFoundError(f"No test files match pattern(s): {pattern}")
 
     composable_count = len(config.get("composable_pipelines", [])) if config else 0
-    print(f"Found {len(yaml_files)} test pipeline(s) in '{args.folder}'")
-    if composable_count > 0:
-        print(f"Found {composable_count} composable pipeline(s) in config.yaml")
-    print(f"Target: {base_url} (Project ID: {project_id})")
-    print(f"Auth: {auth_method}")
-    if env_substitutions:
-        print(f"Substitutions: {env_substitutions}")
-    print("-" * 60)
+    
+    if not quiet:
+        print(f"Found {len(yaml_files)} test pipeline(s) in '{folder}'")
+        if composable_count > 0:
+            print(f"Found {composable_count} composable pipeline(s) in config.yaml")
+        print(f"Target: {base_url} (Project ID: {project_id})")
+        print(f"Auth: {auth_method}")
+        if env_substitutions:
+            print(f"Substitutions: {env_substitutions}")
+        print("-" * 60)
 
     # Prepare LLM settings
     llm_settings = {
-        "model_name": args.model_name,
-        "temperature": args.temperature,
+        "model_name": model_name,
+        "temperature": temperature,
         "max_tokens": DEFAULT_LLM_SETTINGS["max_tokens"],
     }
 
     # Seed composable pipelines first (so their IDs can be used by test pipelines)
     if config and config.get("composable_pipelines"):
+        if not quiet:
+            print("Seeding composable pipeline(s)...")
         composable_result = seed_composable_pipelines(
             config=config,
             suite_folder=folder_path,
@@ -837,31 +761,36 @@ Authentication (use one of these):
             env_substitutions=env_substitutions,
             session_cookie=session_cookie,
             bearer_token=bearer_token,
-            dry_run=args.dry_run,
-            verbose=args.verbose,
+            dry_run=dry_run,
+            verbose=verbose,
         )
         # Update env_substitutions with IDs from composable pipelines
         env_substitutions = composable_result["env_substitutions"]
         # Merge generated vars from composable pipelines
         generated_env_vars.update(composable_result.get("generated_env_vars", {}))
 
-        if not composable_result["success"]:
+        if not composable_result["success"] and not quiet:
             print("\nWarning: Some composable pipelines failed to seed")
 
     # Process each test pipeline
-    results = {"success": 0, "failed": 0, "skipped": 0, "composable": composable_count}
+    results = {"success": 0, "failed": 0, "skipped": 0, "composable": composable_count, "details": []}
 
     for yaml_file in yaml_files:
         pipeline_data = parse_pipeline_yaml(yaml_file, env_substitutions=env_substitutions)
-        print(f"\n[{yaml_file.name}] {pipeline_data['name']}")
+        if not quiet:
+            print(f"\n[{yaml_file.name}] {pipeline_data['name']}")
 
-        if args.dry_run:
+        if dry_run:
             payload = create_application_payload(pipeline_data, llm_settings)
-            if args.verbose:
-                print(f"  Payload: {json.dumps(payload, indent=2)}")
-            else:
-                print(f"  Would create: {payload['name']}")
+            msg = f"Would create: {payload['name']}"
+            if verbose:
+                msg = f"Payload: {json.dumps(payload, indent=2)}"
+            
+            if not quiet:
+                print(f"  {msg}")
+                
             results["skipped"] += 1
+            results["details"].append({"name": pipeline_data["name"], "status": "skipped", "reason": "dry_run"})
             continue
 
         result = seed_pipeline(
@@ -879,7 +808,8 @@ Authentication (use one of these):
             versions = result["data"].get("versions", [])
             version_id = versions[0].get("id") if versions else None
 
-            print(f"  Created successfully (ID: {app_id})")
+            if not quiet:
+                print(f"  Created successfully (ID: {app_id})")
 
             # Link toolkits if any are defined
             toolkit_ids = pipeline_data.get("toolkit_ids", [])
@@ -894,15 +824,20 @@ Authentication (use one of these):
                         session_cookie=session_cookie,
                         bearer_token=bearer_token,
                     )
-                    if link_result["success"]:
-                        print(f"    Linked toolkit {toolkit_id}")
-                    else:
-                        print(f"    Failed to link toolkit {toolkit_id}: {link_result.get('error', 'Unknown error')}")
+                    if not quiet:
+                        if link_result["success"]:
+                            print(f"    Linked toolkit {toolkit_id}")
+                        else:
+                            print(f"    Failed to link toolkit {toolkit_id}: {link_result.get('error', 'Unknown error')}")
 
             results["success"] += 1
+            results["details"].append({"name": pipeline_data["name"], "status": "created", "id": app_id})
         else:
-            print(f"  FAILED: {result.get('status_code', 'N/A')} - {result.get('error', 'Unknown error')}")
+            error = result.get('error', 'Unknown error')
+            if not quiet:
+                print(f"  FAILED: {result.get('status_code', 'N/A')} - {error}")
             results["failed"] += 1
+            results["details"].append({"name": pipeline_data["name"], "status": "failed", "error": error})
 
     # Write generated_env_vars back to .env file (for composable pipeline IDs, etc.)
     # Only persist values that were generated during seeding, not loaded from environment
@@ -935,6 +870,75 @@ Authentication (use one of these):
         if updated:
             with open(env_file, 'w') as f:
                 f.writelines(lines)
+    
+    return results
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Seed pipelines to Elitea",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+
+    parser.add_argument("folder", help="Pipeline definitions folder (e.g., 'github_toolkit')")
+    parser.add_argument("--base-url", default=None, help="Platform base URL")
+    parser.add_argument("--project-id", type=int, default=None, help="Project ID")
+    parser.add_argument("--token", help="Bearer token for authentication")
+    parser.add_argument("--session", help="Session cookie for authentication")
+    parser.add_argument("--github-toolkit-id", type=int, help="Override GitHub toolkit ID")
+    parser.add_argument(
+        "--env-file",
+        help="Load environment variables from a specific file",
+    )
+    parser.add_argument(
+        "--pattern",
+        action="append",
+        help="Filter test files by name pattern",
+    )
+    parser.add_argument(
+        "--model-name",
+        default="gpt-5-mini",
+        help="LLM model name (default: gpt-5-mini)",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.5,
+        help="Model temperature (default: 0.5)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print payloads without actually sending requests",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print detailed output",
+    )
+
+    args = parser.parse_args()
+
+    try:
+        results = run(
+            folder=args.folder,
+            env_file=args.env_file,
+            pattern=args.pattern,
+            base_url=args.base_url,
+            project_id=args.project_id,
+            token=args.token,
+            session=args.session,
+            model_name=args.model_name,
+            temperature=args.temperature,
+            github_toolkit_id=args.github_toolkit_id,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            quiet=False
+        )
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Summary
     print("\n" + "=" * 60)

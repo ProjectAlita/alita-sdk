@@ -1,4 +1,4 @@
-name: "GH1 - List Branches"
+name: "GH01 - List Branches"
 description: "Verify list_branches_in_repo tool returns branches including expected branch names"
 
 toolkits:

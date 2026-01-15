@@ -1,4 +1,4 @@
-name: "GH7 - List Pull Requests"
+name: "GH05 - List Pull Requests"
 description: "Verify list_pull_requests tool retrieves PR list from repository"
 
 toolkits:

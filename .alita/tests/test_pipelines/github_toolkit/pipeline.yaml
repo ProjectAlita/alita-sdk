@@ -132,31 +132,17 @@ execution:
   # Tests are located in tests/ subdirectory
   test_directory: tests
   order:
-    - test_case_1_*.yaml   # Read operations first
-    - test_case_2_*.yaml
-    - test_case_3_*.yaml
-    - test_case_4_*.yaml
-    - test_case_5_*.yaml
-    - test_case_6_*.yaml
-    - test_case_7_*.yaml
-    - test_case_8_*.yaml   # Write operations
-    - test_case_9_*.yaml
-    - test_case_10_*.yaml
-    - test_case_11_*.yaml
-    - test_case_12_*.yaml
-    - test_case_13_*.yaml
-    - test_case_14_*.yaml  # Comprehensive update_file tests (multiple scenarios)
-    - test_case_15_*.yaml
-    - test_case_16_*.yaml
-    - test_case_17_*.yaml
-    - test_case_18_*.yaml
-    - test_case_19_*.yaml
-    - test_case_20_*.yaml
-    - test_case_21_*.yaml
-    - test_case_22_*.yaml
-    - test_case_23_*.yaml
-    - test_case_24_*.yaml
-    - test_case_25_*.yaml
+    - test_case_01_*.yaml  # GH01 - List Branches
+    - test_case_02_*.yaml  # GH02 - File Reading Workflow
+    - test_case_03_*.yaml  # GH03 - Issue Workflow
+    - test_case_04_*.yaml  # GH04 - Commits Workflow
+    - test_case_05_*.yaml  # GH05 - List Pull Requests
+    - test_case_06_*.yaml  # GH06 - File Operations Workflow
+    - test_case_07_*.yaml  # GH07 - Pull Request Workflow
+    - test_case_08_*.yaml  # GH08 - Update File Tests (7 scenarios)
+    - test_case_09_*.yaml  # GH09 - Search Issues
+    - test_case_10_*.yaml  # GH10 - Generic API Call
+    - test_case_11_*.yaml  # GH11 - Project Issue Workflow
 
   # Variables to substitute in test YAML files
   substitutions:

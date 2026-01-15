@@ -1,4 +1,4 @@
-# GH14 - Update File Comprehensive Test Pipeline
+# GH08 - Update File Comprehensive Test Pipeline
 # Tests update_file functionality across multiple scenarios:
 #   1. Simple single-line content replacement
 #   2. Multiline code block replacement
@@ -8,7 +8,7 @@
 #   6. Whitespace tolerance matching
 #   7. Empty replacement (deletion)
 
-name: "GH14 - Update File Tests"
+name: "GH08 - Update File Tests"
 description: "Comprehensive end-to-end tests for update_file tool covering positive scenarios, edge cases, and error handling"
 
 toolkits:
@@ -1420,26 +1420,26 @@ nodes:
         passed_scenarios = sum(1 for s in scenario_results.values() if s.get('passed', False))
         failed_scenarios = total_scenarios - passed_scenarios
 
-        # Collect all errors
-        errors = []
-        for name, result in scenario_results.items():
-            if not result.get('passed', False):
-                error = result.get('error') or f"Scenario '{name}' failed checks"
-                errors.append(f"{name}: {error}")
-
         # Overall test passed only if ALL scenarios passed
         test_passed = failed_scenarios == 0
 
+        # Simplified flat structure matching other tests
         test_results = {
             "test_passed": test_passed,
-            "summary": {
-                "total_scenarios": total_scenarios,
-                "passed": passed_scenarios,
-                "failed": failed_scenarios
+            "operations": {
+                "single_line_update": scenario_results.get("single_line", {}).get("passed", False),
+                "multiline_update": scenario_results.get("multiline", {}).get("passed", False),
+                "multiple_replacements": scenario_results.get("multiple_replacements", {}).get("passed", False),
+                "special_characters": scenario_results.get("special_characters", {}).get("passed", False),
+                "old_not_found_handling": scenario_results.get("old_not_found", {}).get("passed", False),
+                "whitespace_tolerance": scenario_results.get("whitespace_tolerance", {}).get("passed", False),
+                "empty_replacement": scenario_results.get("empty_replacement", {}).get("passed", False)
             },
-            "scenarios": scenario_results,
-            "errors": errors if errors else None,
-            "message": f"Update file tests: {passed_scenarios}/{total_scenarios} scenarios passed"
+            "details": {
+                "total_scenarios": total_scenarios,
+                "passed_count": passed_scenarios,
+                "failed_count": failed_scenarios
+            }
         }
         {"test_results": test_results}
     input:
