@@ -1461,7 +1461,7 @@ nodes:
         type: variable
         value: target_branch
       force:
-        type: const
+        type: fixed
         value: true
     output:
       - create_result

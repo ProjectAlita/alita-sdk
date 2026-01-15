@@ -15,7 +15,7 @@ state:
   issue_body:
     type: str
   issue_number:
-    type: int
+    type: str
   tool_result:
     type: str
   issues_list:
@@ -97,7 +97,7 @@ nodes:
             f"Test ID: {random_suffix}"
         )
 
-        {{"issue_title": issue_title, "issue_body": issue_body, "plain_comment": plain_comment, "code_comment": code_comment, "markdown_comment": markdown_comment}}
+        {"issue_title": issue_title, "issue_body": issue_body, "plain_comment": plain_comment, "code_comment": code_comment, "markdown_comment": markdown_comment}
     input: []
     output:
       - issue_title
@@ -143,21 +143,21 @@ nodes:
             # Look for #123 pattern
             match = re.search(r'#(\d+)', create_result)
             if match:
-                issue_number = int(match.group(1))
+                issue_number = match.group(1)
             # Look for issue/123 pattern
             if not issue_number:
                 match = re.search(r'issues?/(\d+)', create_result)
                 if match:
-                    issue_number = int(match.group(1))
+                    issue_number = match.group(1)
             # Look for "number": 123 pattern
             if not issue_number:
                 match = re.search(r'"number":\s*(\d+)', create_result)
                 if match:
-                    issue_number = int(match.group(1))
+                    issue_number = match.group(1)
         elif isinstance(create_result, dict):
-            issue_number = create_result.get('number')
+            issue_number = str(create_result.get('number', ''))
 
-        {"issue_number": issue_number, "validation_results": {"issue_created": issue_number is not None}}
+        {"issue_number": issue_number, "validation_results": {"issue_created": bool(issue_number)}}
     input:
       - tool_result
     output:
