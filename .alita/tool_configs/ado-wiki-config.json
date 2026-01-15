@@ -1,0 +1,23 @@
+{
+  "type": "ado_wiki",
+  "toolkit_name": "ADO_WIKI",
+  "limit": 5,
+  "selected_tools": [
+    "get_wiki_page",
+    "get_wiki_page_by_name",
+    "list_wikis",
+    "get_wiki",
+    "get_all_wiki_pages",
+    "create_page_with_content",
+    "index_data",
+    "search_index",
+    "remove_index",
+    "list_collections"
+  ],
+  "ado_configuration": {
+    "token": "${ADO_TOKEN}",
+    "project": "${ADO_PROJECT}",
+    "organization_url": "${ADO_ORGANIZATION_URL}"
+  }
+}
+

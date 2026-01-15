@@ -693,8 +693,18 @@ class ReposApiWrapper(CodeIndexerToolkit):
 
         return dumps(data)
 
-    def download_file(self, path):
-        return b"".join(self._client.get_item_content(self.repository_id, path=path, project=self.project, download=True))
+    def download_file(self, path: str, branch: str = None):
+        branch = branch or self.active_branch or self.base_branch
+        version_descriptor = GitVersionDescriptor(
+            version=branch, version_type="branch"
+        )
+        return b"".join(self._client.get_item_content(
+            self.repository_id,
+            path=path,
+            project=self.project,
+            download=True,
+            version_descriptor=version_descriptor
+        ))
 
     def get_file_content(self, commit_id, path):
         version_descriptor = GitVersionDescriptor(

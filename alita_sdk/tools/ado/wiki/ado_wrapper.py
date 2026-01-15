@@ -3,6 +3,7 @@ import logging
 import re
 import requests
 from typing import Generator, Literal, Optional
+from urllib.parse import unquote
 
 from azure.devops.connection import Connection
 from azure.devops.exceptions import AzureDevOpsServiceError
@@ -222,7 +223,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         try:
             return self._process_images(self._client.get_page(project=self.project, wiki_identifier=wiki_identified, path=page_name,
                                          include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt)
+                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_identified)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
@@ -232,7 +233,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         try:
             return self._process_images(self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_identified, id=page_id,
                                                 include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt)
+                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_identified)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
@@ -298,7 +299,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             if include_content and result.get('page', {}).get('content'):
                 processed_content = self._process_images(
                     result['page']['content'],
-                    image_description_prompt=image_description_prompt
+                    image_description_prompt=image_description_prompt,
+                    wiki_identified=wiki_identified
                 )
                 result['page']['content'] = processed_content
 
@@ -366,17 +368,41 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Unexpected error during wiki page retrieval: {str(e)}")
             return ToolException(f"Unexpected error during wiki page retrieval: {str(e)}")
 
-    def _process_images(self, page_content: str, image_description_prompt=None):
+    def _process_images(self, page_content: str, wiki_identified: str, image_description_prompt=None):
 
         image_pattern = r"!\[(.*?)\]\((.*?)\)"
         matches = re.findall(image_pattern, page_content)
 
+        # Initialize repos_wrapper once for all attachments in this page
+        repos_wrapper = None
+        has_attachments = any(url.startswith("/.attachments/") for _, url in matches)
+        
+        if has_attachments:
+            try:
+                wiki_master_branch = "wikiMaster"
+                wiki = self._client.get_wiki(project=self.project, wiki_identifier=wiki_identified)
+                repository_id = wiki.repository_id
+                repos_wrapper = ReposApiWrapper(
+                    organization_url=self.organization_url,
+                    project=self.project,
+                    token=self.token.get_secret_value(),
+                    repository_id=repository_id,
+                    base_branch=wiki_master_branch,
+                    active_branch=wiki_master_branch,
+                    llm=self.llm
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize repos wrapper for wiki '{wiki_identified}': {str(e)}")
+
         for image_name, image_url in matches:
             if image_url.startswith("/.attachments/"):
                 try:
+                    if repos_wrapper is None:
+                        raise Exception("Repos wrapper not initialized")
                     description = self.process_attachment(attachment_url=image_url,
                                                           attachment_name=image_name,
-                                                          image_description_prompt=image_description_prompt)
+                                                          image_description_prompt=image_description_prompt,
+                                                          repos_wrapper=repos_wrapper)
                 except Exception as e:
                     logger.error(f"Error parsing attachment: {str(e)}")
                     description = f"Error parsing attachment: {image_url}"
@@ -399,15 +425,9 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             page_content = page_content.replace(f"![{image_name}]({image_url})", new_image_markdown)
         return page_content
 
-    def process_attachment(self, attachment_url, attachment_name, image_description_prompt):
-        wiki_master_branch = "wikiMaster"
-        repos_wrapper = ReposApiWrapper(organization_url=self.organization_url,
-                                        project=self.project,
-                                        token=self.token.get_secret_value(),
-                                        repository_id="Test_agent.wiki",
-                                        base_branch=wiki_master_branch,
-                                        active_branch=wiki_master_branch)
-        attachment_content = repos_wrapper.download_file(path=attachment_url)
+    def process_attachment(self, attachment_url, attachment_name, repos_wrapper, image_description_prompt):
+        file_path = unquote(attachment_url.lstrip('/'))
+        attachment_content = repos_wrapper.download_file(path=file_path)
         return parse_file_content(
             file_content=attachment_content,
             file_name=attachment_name,
