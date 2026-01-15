@@ -19,6 +19,7 @@ from .schemas import (
     NoInput,
     BranchName,
     CreateBranchName,
+    DeleteBranchName,
     DirectoryPath,
     ReadFile,
     UpdateFile,
@@ -47,6 +48,7 @@ from .tool_prompts import (
     CREATE_FILE_PROMPT,
     CREATE_ISSUE_PROMPT,
     UPDATE_ISSUE_PROMPT,
+    DELETE_BRANCH_PROMPT,
 )
 
 from langchain_community.tools.github.prompt import (
@@ -1080,6 +1082,73 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"Failed to create branch: {str(e)}"
 
+    def delete_branch(self, branch_name: str, force: bool = False) -> str:
+        """
+        Delete a branch from the GitHub repository.
+
+        Protected branches that cannot be deleted:
+        - 'main' and 'master' branches are always protected
+        - The configured base branch (github_base_branch) is protected
+        - The currently active branch is protected (unless force=True)
+
+        Parameters:
+            branch_name (str): Name of the branch to delete
+            force (bool): If True, allows deletion of the current active branch
+
+        Returns:
+            str: A success or error message.
+        """
+        from github import GithubException
+
+        try:
+            # Protected branch names that should never be deleted
+            protected_branches = {'main', 'master'}
+
+            # Add base branch to protected list
+            if self.github_base_branch:
+                protected_branches.add(self.github_base_branch)
+
+            # Check if trying to delete a protected branch
+            if branch_name.lower() in {b.lower() for b in protected_branches}:
+                return (
+                    f"Cannot delete branch '{branch_name}': "
+                    f"It is a protected branch (main, master, or base branch). "
+                    f"Protected branches: {', '.join(sorted(protected_branches))}"
+                )
+
+            # Check if trying to delete the active branch without force
+            if branch_name == self.active_branch and not force:
+                return (
+                    f"Cannot delete branch '{branch_name}': "
+                    f"It is currently the active branch. "
+                    f"Use force=True to delete it anyway, or switch to a different branch first."
+                )
+
+            # Delete the branch
+            repo = self.github_repo_instance
+            ref = repo.get_git_ref(f"heads/{branch_name}")
+            ref.delete()
+
+            # If we deleted the active branch, reset to base branch
+            if branch_name == self.active_branch:
+                self.active_branch = self.github_base_branch
+                return (
+                    f"Branch '{branch_name}' deleted successfully. "
+                    f"Active branch has been reset to '{self.github_base_branch}'."
+                )
+
+            return f"Branch '{branch_name}' deleted successfully."
+
+        except GithubException as e:
+            if e.status == 422:
+                return f"Cannot delete branch '{branch_name}': {e.data.get('message', str(e))}"
+            elif e.status == 404:
+                return f"Branch '{branch_name}' not found in the repository."
+            else:
+                return f"Failed to delete branch '{branch_name}': {str(e)}"
+        except Exception as e:
+            return f"Failed to delete branch '{branch_name}': {str(e)}"
+
     def create_file(self, file_path: str, file_contents: str, repo_name: Optional[str] = None) -> str:
         """
         Creates a new file on the GitHub repo
@@ -2038,6 +2107,13 @@ class GitHubClient(BaseModel):
                 "mode": "create_branch",
                 "description": CREATE_BRANCH_PROMPT,
                 "args_schema": CreateBranchName,
+            },
+            {
+                "ref": self.delete_branch,
+                "name": "delete_branch",
+                "mode": "delete_branch",
+                "description": DELETE_BRANCH_PROMPT,
+                "args_schema": DeleteBranchName,
             },
             {
                 "ref": self.get_files_from_directory,

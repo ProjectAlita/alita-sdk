@@ -7,6 +7,15 @@ Comprehensive test automation framework for Alita SDK toolkits and features usin
 ```
 test_pipelines/
 ├── README.md                    # This file
+├── run_all_suites.sh           # Automated execution of all suites (recommended)
+├── run_test.sh                 # Run individual tests (development)
+├── .env                        # Environment configuration (generated)
+├── scripts/                    # Python implementation scripts
+│   ├── setup.py               # Setup test environments
+│   ├── seed_pipelines.py      # Seed test pipelines to platform
+│   ├── run_suite.py           # Execute test suites
+│   ├── cleanup.py             # Clean up test artifacts
+│   └── delete_pipelines.py    # Delete pipelines utility
 ├── composable/                  # Shared reusable pipeline components
 │   ├── README.md               # Composable pipelines documentation
 │   └── rca_on_failure.yaml     # RCA with SDK code search
@@ -23,14 +32,9 @@ test_pipelines/
 ├── state_retrieval/            # Pipeline state management tests
 │   ├── pipeline.yaml
 │   └── tests/
-├── structured_output/          # LLM structured output tests
-│   ├── pipeline.yaml
-│   └── tests/
-├── run_all_suites.sh           # Automated execution of all suites (recommended)
-├── setup.py                    # Setup test environments
-├── seed_pipelines.py           # Seed test pipelines to platform
-├── run_suite.py               # Execute test suites
-└── cleanup.py                 # Clean up test artifacts
+└── structured_output/          # LLM structured output tests
+    ├── pipeline.yaml
+    └── tests/
 ```
 
 ## Test Suites
@@ -354,13 +358,13 @@ Executes setup steps from `pipeline.yaml` to prepare the test environment.
 
 ```bash
 # Run setup for a specific suite
-python setup.py github_toolkit
+python scripts/setup.py github_toolkit
 
 # With verbose output
-python setup.py github_toolkit --verbose
+python scripts/setup.py github_toolkit --verbose
 
 # Save environment to file
-python setup.py github_toolkit --output-env .env
+python scripts/setup.py github_toolkit --output-env .env
 ```
 
 **What it does**:
@@ -375,16 +379,16 @@ Seeds test pipelines and composables to the platform.
 
 ```bash
 # Seed all tests for a suite
-python seed_pipelines.py github_toolkit
+python scripts/seed_pipelines.py github_toolkit
 
 # Seed with GitHub toolkit ID
-python seed_pipelines.py github_toolkit --github-toolkit-id 123
+python scripts/seed_pipelines.py github_toolkit --github-toolkit-id 123
 
 # Verbose output
-python seed_pipelines.py github_toolkit --verbose
+python scripts/seed_pipelines.py github_toolkit --verbose
 
 # Dry run (validate only)
-python seed_pipelines.py github_toolkit --dry-run
+python scripts/seed_pipelines.py github_toolkit --dry-run
 ```
 
 **What it does**:
@@ -407,22 +411,22 @@ Executes test suite and generates results.
 
 ```bash
 # Run entire suite
-python run_suite.py github_toolkit
+python scripts/run_suite.py github_toolkit
 
 # Run specific test
-python run_suite.py github_toolkit --pattern "test_case_1_*"
+python scripts/run_suite.py github_toolkit --pattern "test_case_1_*"
 
 # With verbose output
-python run_suite.py github_toolkit --verbose
+python scripts/run_suite.py github_toolkit --verbose
 
 # JSON output
-python run_suite.py github_toolkit --json
+python scripts/run_suite.py github_toolkit --json
 
 # Save results to file
-python run_suite.py github_toolkit --json > results.json
+python scripts/run_suite.py github_toolkit --json > results.json
 
 # Stop on first failure
-python run_suite.py github_toolkit --fail-fast
+python scripts/run_suite.py github_toolkit --fail-fast
 ```
 
 **What it does**:
@@ -468,16 +472,16 @@ Removes test artifacts after execution.
 
 ```bash
 # Run cleanup for a suite (will prompt for confirmation)
-python cleanup.py github_toolkit
+python scripts/cleanup.py github_toolkit
 
 # Skip confirmation prompt
-python cleanup.py github_toolkit --yes
+python scripts/cleanup.py github_toolkit --yes
 
 # With verbose output
-python cleanup.py github_toolkit --verbose --yes
+python scripts/cleanup.py github_toolkit --verbose --yes
 
 # Dry run to see what would be deleted
-python cleanup.py github_toolkit --dry-run
+python scripts/cleanup.py github_toolkit --dry-run
 ```
 
 **What it does**:
@@ -641,7 +645,7 @@ cp .env.example .env
 # Edit .env with your values
 
 # Run setup and save environment variables
-python setup.py github_toolkit --output-env .env
+python scripts/setup.py github_toolkit --output-env .env
 
 # Verify toolkit IDs are saved
 cat .env | grep TOOLKIT_ID
@@ -651,7 +655,7 @@ cat .env | grep TOOLKIT_ID
 
 ```bash
 # Seed all test pipelines
-python seed_pipelines.py github_toolkit
+python scripts/seed_pipelines.py github_toolkit
 
 # Verify pipelines on platform UI
 # Check that composable pipelines have toolkits linked
@@ -661,26 +665,26 @@ python seed_pipelines.py github_toolkit
 
 ```bash
 # Execute test suite
-python run_suite.py github_toolkit --verbose
+python scripts/run_suite.py github_toolkit --verbose
 
 # Save results to JSON file
-python run_suite.py github_toolkit --json > test_results.json
+python scripts/run_suite.py github_toolkit --json > test_results.json
 
 # Review results
 cat test_results.json
 
 # Check RCA for failures (with JSON output)
-python run_suite.py github_toolkit --json | python -c "import sys,json; data=json.load(sys.stdin); [print(f'{t[\"name\"]}: {t.get(\"rca_summary\", \"no RCA\")}') for t in data.get('tests', []) if not t.get('test_passed')]"
+python scripts/run_suite.py github_toolkit --json | python -c "import sys,json; data=json.load(sys.stdin); [print(f'{t[\"name\"]}: {t.get(\"rca_summary\", \"no RCA\")}') for t in data.get('tests', []) if not t.get('test_passed')]"
 ```
 
 #### 4. Cleanup
 
 ```bash
 # Remove test artifacts (with confirmation)
-python cleanup.py github_toolkit
+python scripts/cleanup.py github_toolkit
 
 # Remove test artifacts (skip confirmation)
-python cleanup.py github_toolkit --yes
+python scripts/cleanup.py github_toolkit --yes
 
 # Verify cleanup
 # - Test branches deleted
@@ -777,16 +781,16 @@ nodes:
 
 ```bash
 # Run setup
-python ../setup.py my_new_suite --save-env
+python ../scripts/setup.py my_new_suite --save-env
 
 # Seed pipelines
-python ../seed_pipelines.py my_new_suite
+python ../scripts/seed_pipelines.py my_new_suite
 
 # Run tests
-python ../run_suite.py my_new_suite --verbose
+python ../scripts/run_suite.py my_new_suite --verbose
 
 # Cleanup
-python ../cleanup.py my_new_suite
+python ../scripts/cleanup.py my_new_suite
 ```
 
 ### 5. Document
@@ -855,7 +859,7 @@ Solution: Check save_to_env mappings use correct JSON paths ($.id, $.result.name
 **Problem**: Environment variables not substituted
 ```
 Solution: Verify variables exist in .env or are passed via command line
-Check: python seed_pipelines.py --verbose to see substitution values
+Check: python scripts/seed_pipelines.py --verbose to see substitution values
 ```
 
 **Problem**: Composable pipeline not linked to toolkit

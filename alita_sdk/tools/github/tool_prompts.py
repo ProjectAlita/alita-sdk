@@ -1,6 +1,19 @@
 CREATE_FILE_PROMPT = """Create new file in your github repository."""
 
 
+DELETE_BRANCH_PROMPT = """Delete a branch from the GitHub repository.
+
+IMPORTANT: This tool will NOT delete protected branches:
+- 'main' and 'master' branches are always protected
+- The configured base branch is protected
+- The currently active branch is protected (unless force=True)
+
+Parameters:
+- branch_name: The name of the branch to delete (e.g., 'feature-branch')
+- force: Set to True to delete even if it's the current active branch (default: False)
+
+Returns a success or error message."""
+
 CREATE_ISSUE_PROMPT = """
 Tool allows to create a new issue in a GitHub repository.
 **IMPORTANT**: Input to this tool MUST strictly follow these rules:

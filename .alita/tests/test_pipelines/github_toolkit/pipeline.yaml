@@ -145,7 +145,7 @@ execution:
     - test_case_11_*.yaml
     - test_case_12_*.yaml
     - test_case_13_*.yaml
-    - test_case_14_*.yaml  # Update file (single line)
+    - test_case_14_*.yaml  # Comprehensive update_file tests (multiple scenarios)
     - test_case_15_*.yaml
     - test_case_16_*.yaml
     - test_case_17_*.yaml
@@ -157,7 +157,6 @@ execution:
     - test_case_23_*.yaml
     - test_case_24_*.yaml
     - test_case_25_*.yaml
-    - test_case_26_*.yaml  # Update file (multiline)
 
   # Variables to substitute in test YAML files
   substitutions:

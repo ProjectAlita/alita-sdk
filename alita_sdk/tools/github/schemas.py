@@ -31,6 +31,12 @@ CreateBranchName = create_model(
     proposed_branch_name=(str, Field(description="The name of the new branch to create, e.g. `feature-branch`"))
 )
 
+DeleteBranchName = create_model(
+    "DeleteBranchName",
+    branch_name=(str, Field(description="The name of the branch to delete, e.g. `feature-branch`")),
+    force=(Optional[bool], Field(default=False, description="Force deletion even if branch is the current active branch"))
+)
+
 DirectoryPath = create_model(
     "DirectoryPath",
     directory_path=(str, Field(description="The path of the directory, e.g. `src/my_dir`"))

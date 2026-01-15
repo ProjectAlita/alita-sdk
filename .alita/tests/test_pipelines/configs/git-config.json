@@ -6,12 +6,6 @@
   "active_branch": "main",
   "base_branch": "main",
   "selected_tools": [
-      "index_data",
-      "search_index",
-      "stepback_search_index",
-      "stepback_summary_index",
-      "remove_index",
-      "list_collections",
       "get_issues",
       "get_issue",
       "comment_on_issue",
@@ -28,10 +22,12 @@
       "list_branches_in_repo",
       "set_active_branch",
       "create_branch",
+      "delete_branch",
       "get_files_from_directory",
       "search_issues",
       "create_issue",
       "update_issue",
+      "get_commits",
       "get_commit_changes",
       "get_commits_diff",
       "apply_git_patch",
@@ -40,10 +36,13 @@
       "get_workflow_status",
       "get_workflow_logs",
       "generic_github_api_call",
+      "read_file_chunk",
+      "read_multiple_files",
+      "search_file",
+      "edit_file",
       "create_issue_on_project",
       "update_issue_on_project",
       "list_project_issues",
-      "search_project_issues",
-      "get_commits"
+      "search_project_issues"
   ]
 }

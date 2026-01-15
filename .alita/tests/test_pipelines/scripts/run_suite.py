@@ -532,15 +532,18 @@ def get_pipelines_from_folder(
     return matched
 
 
+def normalize_for_matching(s: str) -> str:
+    """Normalize string for flexible matching (underscore/space/hyphen agnostic)."""
+    return s.lower().replace("_", " ").replace("-", " ")
+
+
 def get_pipelines_by_pattern(
     base_url: str,
     project_id: int,
     patterns: List[str],
     headers: dict
 ) -> List[dict]:
-    """Get pipelines matching name patterns."""
-    import fnmatch
-
+    """Get pipelines matching name patterns (substring match, case-insensitive, underscore/space agnostic)."""
     url = f"{base_url}/api/v2/elitea_core/applications/prompt_lib/{project_id}?limit=500"
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
@@ -550,9 +553,11 @@ def get_pipelines_by_pattern(
     matched = []
 
     for p in all_pipelines:
-        name = p.get("name", "")
+        name = normalize_for_matching(p.get("name", ""))
         for pattern in patterns:
-            if fnmatch.fnmatch(name, pattern):
+            # Use flexible substring matching (underscore/space agnostic)
+            normalized_pattern = normalize_for_matching(pattern)
+            if normalized_pattern in name:
                 full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
                 if full:
                     matched.append(full)

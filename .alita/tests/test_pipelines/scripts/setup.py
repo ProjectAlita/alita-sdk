@@ -347,12 +347,34 @@ def update_configuration(ctx: SetupContext, config_id: int, data: dict) -> dict:
         return {"success": False, "error": response.text[:200]}
 
 
+def _is_valid_config_value(value: Any) -> bool:
+    """Check if a configuration value is valid (not empty, not unresolved variable)."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        # Empty or whitespace-only
+        if not value.strip():
+            return False
+        # Unresolved environment variable (e.g., ${VAR_NAME})
+        if value.startswith("${") and value.endswith("}"):
+            return False
+        # Partial unresolved (e.g., contains ${)
+        if "${" in value:
+            return False
+    return True
+
+
 def ensure_configuration(ctx: SetupContext, config_type: str, alita_title: str, data: dict) -> dict:
     """
     Ensure a configuration exists with the specified data.
 
     This is generic and works with any configuration type (github, jira, etc.).
     The data dict should contain all the fields needed for that configuration type.
+
+    Smart update behavior:
+    - If configuration doesn't exist, creates it (requires all data to be valid)
+    - If configuration exists, only updates with fields that have valid (resolved) values
+    - If existing config has secrets but new data has unresolved vars, preserves existing
     """
     existing = find_configuration_by_title(ctx, alita_title, config_type)
 
@@ -364,9 +386,33 @@ def ensure_configuration(ctx: SetupContext, config_type: str, alita_title: str, 
         return {"success": True, "dry_run": True}
 
     if existing:
-        ctx.log(f"Configuration '{alita_title}' exists (ID: {existing['id']}), updating...", "info")
-        return update_configuration(ctx, existing["id"], data)
+        # Smart update: only include fields with valid (resolved) values
+        # This prevents overwriting existing secrets with unresolved ${VAR} placeholders
+        update_data = {}
+        skipped_fields = []
+
+        for key, value in data.items():
+            if _is_valid_config_value(value):
+                update_data[key] = value
+            else:
+                skipped_fields.append(key)
+
+        if skipped_fields:
+            ctx.log(f"Skipping unresolved fields: {', '.join(skipped_fields)}", "info")
+
+        if not update_data:
+            ctx.log(f"Configuration '{alita_title}' exists, no valid updates to apply", "info")
+            return {"success": True, "skipped": True, "reason": "no valid update data"}
+
+        ctx.log(f"Configuration '{alita_title}' exists (ID: {existing['id']}), updating fields: {list(update_data.keys())}", "info")
+        return update_configuration(ctx, existing["id"], update_data)
     else:
+        # For new configurations, check if we have the minimum required data
+        invalid_fields = [k for k, v in data.items() if not _is_valid_config_value(v)]
+        if invalid_fields:
+            ctx.log(f"Cannot create configuration - unresolved fields: {', '.join(invalid_fields)}", "warning")
+            return {"success": False, "error": f"Unresolved environment variables: {', '.join(invalid_fields)}"}
+
         ctx.log(f"Creating configuration '{alita_title}'...", "info")
         return create_configuration(ctx, config_type, alita_title.title(), alita_title, data)
 
@@ -661,7 +707,8 @@ def main():
     # Parse suite specification and resolve paths
     folder_name, pipeline_file = parse_suite_spec(args.folder)
     script_dir = Path(__file__).parent
-    suite_folder = script_dir / folder_name
+    base_dir = script_dir.parent  # Go up from scripts/ to test_pipelines/
+    suite_folder = base_dir / folder_name
 
     if not suite_folder.exists():
         print(f"Error: Suite folder not found: {suite_folder}", file=sys.stderr)

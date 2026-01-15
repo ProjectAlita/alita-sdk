@@ -182,7 +182,7 @@ run_suite() {
     # Step 1: Setup
     if [ "$SKIP_SETUP" = false ]; then
         print_step "Step 1/4: Running setup for $suite_spec"
-        if python setup.py "$suite_spec" $VERBOSE --output-env .env > "$suite_output_dir/setup.log" 2>&1; then
+        if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env > "$suite_output_dir/setup.log" 2>&1; then
             print_success "Setup completed"
         else
             print_error "Setup failed - see $suite_output_dir/setup.log"
@@ -196,7 +196,7 @@ run_suite() {
 
     # Step 2: Seed pipelines
     print_step "Step 2/4: Seeding pipelines for $suite_spec"
-    if python seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
+    if python scripts/seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
         print_success "Pipelines seeded"
     else
         print_error "Seeding failed - see $suite_output_dir/seed.log"
@@ -210,7 +210,7 @@ run_suite() {
     local results_file="$suite_output_dir/results.json"
 
     # Run tests with JSON output redirected to results file
-    if python run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
+    if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
         print_success "Tests completed"
 
         # Parse results
@@ -241,7 +241,7 @@ run_suite() {
     # Step 4: Cleanup
     if [ "$SKIP_CLEANUP" = false ]; then
         print_step "Step 4/4: Cleaning up $suite_spec"
-        if python cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/cleanup.log" 2>&1; then
+        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/cleanup.log" 2>&1; then
             print_success "Cleanup completed"
         else
             print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
@@ -284,7 +284,7 @@ if [ "$SKIP_INITIAL_CLEANUP" = false ]; then
 
         if [ -d "$suite_dir" ] && [ -f "$suite_dir/pipeline.yaml" ]; then
             echo "  Cleaning up $suite_spec..."
-            if python cleanup.py "$suite_spec" --yes $VERBOSE > "$OUTPUT_DIR/${log_name}_initial_cleanup.log" 2>&1; then
+            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$OUTPUT_DIR/${log_name}_initial_cleanup.log" 2>&1; then
                 echo "    ✓ Cleaned"
             else
                 echo "    ⚠ Cleanup had issues (see $OUTPUT_DIR/${log_name}_initial_cleanup.log)"

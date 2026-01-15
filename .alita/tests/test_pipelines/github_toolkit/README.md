@@ -141,6 +141,7 @@ This removes all created pipelines, branches, and test data.
 | GH6 | Get Commits | Verify `get_commits` returns commit history | Read |
 | GH7 | List Pull Requests | Verify `list_pull_requests` returns PR list | Read |
 | GH8 | Create Branch | Verify `create_branch` creates new feature branch | Write |
+| GH8b | Delete Branch | Verify `delete_branch` removes branch with protections | Write |
 | GH9 | Create File | Verify `create_file` creates file in branch | Write |
 | GH10 | Create PR | Verify `create_pull_request` creates pull request | Write |
 
@@ -198,6 +199,7 @@ These tests are safe to run repeatedly without side effects:
 These tests modify the repository:
 - **GH2**: Sets active branch
 - **GH8**: Creates a new branch with timestamp suffix
+- **GH8b**: Deletes a branch (with protection for main/master/base branches)
 - **GH9**: Creates a file in the `tc-file-ops-2025-12-08` branch
 - **GH10**: Creates a PR from feature branch to main
 - **GH13**: Comments on an issue
@@ -217,10 +219,13 @@ GH1 → GH2 → GH3 → ... → GH25
 Or for specific workflows:
 ```
 # File operations workflow
-GH8 (create branch) → GH2 (set branch) → GH9 (create file) → GH14 (update) → GH15 (delete)
+GH8 (create branch) → GH2 (set branch) → GH9 (create file) → GH14 (update) → GH15 (delete) → GH8b (cleanup branch)
 
 # PR workflow
 GH8 (create branch) → GH9 (create file) → GH10 (create PR) → GH11 (get PR) → GH12 (diffs)
+
+# Branch lifecycle workflow
+GH8 (create branch) → GH2 (set branch) → ... operations ... → GH8b (delete branch)
 
 # Project board workflow
 GH22 (create item) → GH23 (list) → GH24 (update) → GH25 (search)

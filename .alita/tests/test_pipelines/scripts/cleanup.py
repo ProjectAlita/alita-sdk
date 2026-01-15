@@ -560,7 +560,8 @@ def main():
     # Parse suite specification and resolve paths
     folder_name, pipeline_file = parse_suite_spec(args.folder)
     script_dir = Path(__file__).parent
-    suite_folder = script_dir / folder_name
+    base_dir = script_dir.parent  # Go up from scripts/ to test_pipelines/
+    suite_folder = base_dir / folder_name
 
     if not suite_folder.exists():
         print(f"Error: Suite folder not found: {suite_folder}", file=sys.stderr)
