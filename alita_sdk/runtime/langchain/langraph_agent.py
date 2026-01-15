@@ -519,13 +519,25 @@ def create_graph(
 ):
     """ Create a message graph from a yaml schema """
 
+    # TODO: deprecate next release (1/15/2026)
     # For top-level graphs (not subgraphs), detect and flatten any subgraphs
-    if not for_subgraph:
-        flattened_yaml, additional_tools = detect_and_flatten_subgraphs(yaml_schema)
-        # Add collected tools from subgraphs to the tools list
-        tools = list(tools) + additional_tools
-        # Use the flattened YAML for building the graph
-        yaml_schema = flattened_yaml
+    # if not for_subgraph:
+    #     flattened_yaml, additional_tools = detect_and_flatten_subgraphs(yaml_schema)
+    #     # Add collected tools from subgraphs to the tools list
+    #     tools = list(tools) + additional_tools
+    #     # Use the flattened YAML for building the graph
+    #     yaml_schema = flattened_yaml
+    # else:
+    #     # For subgraphs, filter out PrinterNodes from YAML
+    #     from ..toolkits.subgraph import _filter_printer_nodes_from_yaml
+    #     yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
+    #     logger.info("Filtered PrinterNodes from subgraph YAML in create_graph")
+
+    if for_subgraph:
+        # Sanitization for sub-graphs
+        from ..toolkits.subgraph import _filter_printer_nodes_from_yaml
+        yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
+        logger.info("Filtered PrinterNodes from subgraph YAML in create_graph")
 
     schema = yaml.safe_load(yaml_schema)
     logger.debug(f"Schema: {schema}")

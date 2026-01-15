@@ -408,7 +408,8 @@ class AlitaClient:
                     application_variables: Optional[dict] = None,
                     version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
                     llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
-                    conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None):
+                    conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None,
+                    is_subgraph: bool = False):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -457,12 +458,14 @@ class AlitaClient:
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
-                                      conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers)
+                                      conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers,
+                                      is_subgraph=is_subgraph)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
-                                      conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers).runnable()
+                                      conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers,
+                                      is_subgraph=is_subgraph).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 

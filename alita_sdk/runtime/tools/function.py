@@ -149,14 +149,18 @@ alita_state = json.loads(_state_json)
                 return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
             else:
                 if "messages" in self.output_variables:
-                    messages_dict = {
-                        "messages": [{
-                            "role": "assistant",
-                            "content": dumps(tool_result)
-                            if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
-                            else str(tool_result)
-                        }]
-                    }
+                    if 'messages' in tool_result:
+                        # case when the sub-graph has been executed
+                        messages_dict = {"messages": tool_result['messages']}
+                    else:
+                        messages_dict = {
+                            "messages": [{
+                                "role": "assistant",
+                                "content": dumps(tool_result)
+                                if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
+                                else str(tool_result)
+                            }]
+                        }
                     for var in self.output_variables:
                         if var != "messages":
                             if isinstance(tool_result, dict) and var in tool_result:
