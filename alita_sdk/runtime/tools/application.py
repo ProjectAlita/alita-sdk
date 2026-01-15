@@ -52,6 +52,7 @@ class Application(BaseTool):
     return_type: str = "str"
     client: Any
     args_runnable: dict = {}
+    metadata: dict = {}
     
     @field_validator('name', mode='before')
     @classmethod
