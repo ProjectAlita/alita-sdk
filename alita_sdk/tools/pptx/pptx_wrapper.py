@@ -547,7 +547,7 @@ class PPTXWrapper(BaseToolApiWrapper):
                 file_name=(str, Field(description="PPTX file name in the bucket")),
                 output_file_name=(str, Field(description="Output PPTX file name to save in the bucket")),
                 content_description=(str, Field(description="Detailed description of what content to put where in the template")),
-                pdf_file_name=(str, Field(description="Optional PDF file name in the bucket that matches the PPTX template 1:1", default=None))
+                pdf_file_name=(Optional[str], Field(description="Optional PDF file name in the bucket that matches the PPTX template 1:1", default=None))
             )
         },{
             "name": "translate_presentation",

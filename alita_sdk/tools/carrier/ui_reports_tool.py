@@ -2,7 +2,7 @@ import logging
 import json
 import traceback
 import datetime
-from typing import Type
+from typing import Optional, Type
 from langchain_core.tools import BaseTool, ToolException
 from pydantic.fields import Field
 from pydantic import create_model, BaseModel
@@ -19,9 +19,9 @@ class GetUIReportsTool(BaseTool):
         report_id=(str, Field(description="UI Report id to retrieve")),
         current_date=(str, Field(default=datetime.datetime.now().strftime("%Y-%m-%d"), description="Current date in YYYY-MM-DD format (auto-filled)")),
         **{
-            "name": (str, Field(default=None, description="Optional. Filter reports by name (case-insensitive, partial match)")),
-            "start_time": (str, Field(default=None, description="Start date/time for filtering reports (YYYY-MM-DD or ISO format)")),
-            "end_time": (str, Field(default=None, description="End date/time for filtering reports (YYYY-MM-DD or ISO format)")),
+            "name": (Optional[str], Field(default=None, description="Optional. Filter reports by name (case-insensitive, partial match)")),
+            "start_time": (Optional[str], Field(default=None, description="Start date/time for filtering reports (YYYY-MM-DD or ISO format)")),
+            "end_time": (Optional[str], Field(default=None, description="End date/time for filtering reports (YYYY-MM-DD or ISO format)")),
         }
     )
 
@@ -178,7 +178,7 @@ class GetUITestsTool(BaseTool):
     args_schema: Type[BaseModel] = create_model(
         "GetUITestsInput",
         **{
-            "name": (str, Field(default=None, description="Optional. Filter tests by name (case-insensitive, partial match)")),
+            "name": (Optional[str], Field(default=None, description="Optional. Filter tests by name (case-insensitive, partial match)")),
             "include_schedules": (bool, Field(default=False, description="Optional. Include test schedules in the response")),
             "include_config": (bool, Field(default=False, description="Optional. Include detailed configuration in the response")),
         }

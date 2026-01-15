@@ -104,7 +104,7 @@ class GooglePlacesAPIWrapper(BaseToolApiWrapper):
                     "GooglePlacesFindNearSchema",
                     current_location_query=(
                     str, Field(description="Detailed user query of current user location or where to start from")),
-                    target=(str, Field(description="The target location or query which user wants to find", default=None)),
+                    target=(Optional[str], Field(description="The target location or query which user wants to find", default=None)),
                     radius=(Optional[int], Field(description="The radius of the search. This is optional field", default=3000))
                 ),
             }
