@@ -1326,6 +1326,74 @@ class GraphQLClientWrapper(BaseModel):
         except Exception as e:
             raise ValueError(f"'{repo}' repo format is invalid. It should be like 'org-name/repo-name'. Error: {str(e)}")
 
+    def _format_project_error(self, error_message: str) -> str:
+        """
+        Format project access errors with user-friendly guidance.
+
+        Detects permission-related errors and provides actionable guidance for users
+        to fix token permission issues.
+
+        Args:
+            error_message: The original error message from get_project() or get_issue_repo()
+
+        Returns:
+            str: A user-friendly error message with guidance on how to fix the issue
+        """
+        # Detect permission-related errors
+        permission_indicators = [
+            "Resource not accessible",
+            "INSUFFICIENT_SCOPES",
+            "not accessible by personal access token",
+            "requires authentication",
+            "Bad credentials",
+            "401",
+            "403"
+        ]
+
+        is_permission_error = any(
+            indicator.lower() in error_message.lower()
+            for indicator in permission_indicators
+        )
+
+        if is_permission_error:
+            return (
+                "GitHub Token Permission Error\n\n"
+                "Your GitHub token does not have the required 'project' permission "
+                "to access GitHub Projects (ProjectsV2).\n\n"
+                "To fix this:\n"
+                "1. Go to GitHub Settings > Developer settings > Personal access tokens\n"
+                "2. Edit your token and enable the 'project' scope (read/write access to projects)\n"
+                "3. Update your toolkit configuration with the new token\n\n"
+                f"Technical details: {error_message}"
+            )
+
+        # For other errors (not found, network issues, etc.), return with clearer context
+        if "not found" in error_message.lower():
+            return f"Project not found. Please verify the project title exists and is accessible. {error_message}"
+
+        if "No repository data found" in error_message:
+            return (
+                "Repository not found or not accessible. Please verify:\n"
+                "1. The repository name is correct (format: owner/repo-name)\n"
+                "2. Your token has access to this repository\n\n"
+                f"Technical details: {error_message}"
+            )
+
+        return f"Failed to access GitHub project. {error_message}"
+
+    def _format_repo_error(self, error_message: str) -> str:
+        """
+        Format repository access errors with user-friendly guidance.
+
+        Args:
+            error_message: The original error message from get_issue_repo()
+
+        Returns:
+            str: A user-friendly error message with guidance
+        """
+        # Reuse the project error formatting logic as the errors are similar
+        return self._format_project_error(error_message)
+
     def _get_repo_extra_info(self, repository: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
         """Helper to extract repository ID, labels and assignable users of the repository."""
         repository_id = repository.get("repositoryId")
@@ -1356,22 +1424,31 @@ class GraphQLClientWrapper(BaseModel):
         except ValueError as e:
             return str(e)
 
-        try:
-            result = self.get_project(owner=owner_name, repo_name=repo_name, project_title=project_title)
-            project = result.get("project")
-            project_id = result.get("projectId")
-            if issue_repo:
-                try:
-                    issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
-                except ValueError as e:
-                    return str(e)
+        # Get project data with type safety check
+        result = self.get_project(owner=owner_name, repo_name=repo_name, project_title=project_title)
 
-                issue_repo_result = self.get_issue_repo(owner=issue_owner_name, repo_name=issue_repo_name)
-                repository_id, labels, assignable_users = self._get_repo_extra_info(issue_repo_result)
-            else:
-                repository_id, labels, assignable_users = self._get_repo_extra_info(result)
-        except Exception as e:
-            return f"Project has not been found. Error: {str(e)}"
+        # Type check: get_project() returns str on error, dict on success
+        if isinstance(result, str):
+            return self._format_project_error(result)
+
+        project = result.get("project")
+        project_id = result.get("projectId")
+
+        if issue_repo:
+            try:
+                issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
+            except ValueError as e:
+                return str(e)
+
+            issue_repo_result = self.get_issue_repo(owner=issue_owner_name, repo_name=issue_repo_name)
+
+            # Type check: get_issue_repo() returns str on error, dict on success
+            if isinstance(issue_repo_result, str):
+                return self._format_repo_error(issue_repo_result)
+
+            repository_id, labels, assignable_users = self._get_repo_extra_info(issue_repo_result)
+        else:
+            repository_id, labels, assignable_users = self._get_repo_extra_info(result)
 
         missing_fields = []
         updated_fields = []
@@ -1444,23 +1521,31 @@ class GraphQLClientWrapper(BaseModel):
         except Exception as e:
             return str(e)
 
-        try:
-            result = self.get_project(owner=owner_name, repo_name=repo_name, project_title=project_title)
-            project = result.get("project")
-            project_id = result.get("projectId")
+        # Get project data with type safety check
+        result = self.get_project(owner=owner_name, repo_name=repo_name, project_title=project_title)
 
-            if issue_repo:
-                try:
-                    issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
-                except ValueError as e:
-                    return str(e)
+        # Type check: get_project() returns str on error, dict on success
+        if isinstance(result, str):
+            return self._format_project_error(result)
 
-                issue_repo_result = self.get_issue_repo(owner=issue_owner_name, repo_name=issue_repo_name)
-                repository_id, labels, assignable_users = self._get_repo_extra_info(issue_repo_result)
-            else:
-                repository_id, labels, assignable_users = self._get_repo_extra_info(result)
-        except Exception as e:
-            return f"Project has not been found. Error: {str(e)}"
+        project = result.get("project")
+        project_id = result.get("projectId")
+
+        if issue_repo:
+            try:
+                issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
+            except ValueError as e:
+                return str(e)
+
+            issue_repo_result = self.get_issue_repo(owner=issue_owner_name, repo_name=issue_repo_name)
+
+            # Type check: get_issue_repo() returns str on error, dict on success
+            if isinstance(issue_repo_result, str):
+                return self._format_repo_error(issue_repo_result)
+
+            repository_id, labels, assignable_users = self._get_repo_extra_info(issue_repo_result)
+        else:
+            repository_id, labels, assignable_users = self._get_repo_extra_info(result)
 
         missing_fields = []
         fields_to_update = []
