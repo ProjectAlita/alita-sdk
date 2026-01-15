@@ -529,9 +529,21 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def delete_file(self, filename: str, bucket_name = None):
+        # Check if file exists before attempting deletion
+        # S3/MinIO delete is idempotent and won't fail for non-existing files
+        try:
+            files = self.list_files(bucket_name, return_as_string=False)
+            file_names = [f['name'] for f in files.get('rows', [])]
+            if filename not in file_names:
+                raise ToolException(f'Error (deleteFile): ENOENT: no such file or directory: \'{filename}\'')
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(f'Error (deleteFile): Unable to verify file existence for \'{filename}\': {str(e)}')
+
         result = self.artifact.delete(filename, bucket_name)
         if result and isinstance(result, dict) and result.get('error'):
-            raise ToolException(f'Error (deleteFile): {result.get("error")}')
+            raise ToolException(f'Error (deleteFile): {result.get("error")} for file \'{filename}\'')
         return f'File "{filename}" deleted successfully.'
 
     def append_data(self, filename: str, filedata: str, bucket_name = None):
