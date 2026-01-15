@@ -55,6 +55,7 @@ class GetPageInput(BaseModel):
     page_id: Optional[int] = Field(default=None, description="Wiki page ID")
     include_content: Optional[bool] = Field(default=False, description="Whether to include page content in the response. If True, content will be processed for image descriptions.")
     image_description_prompt: Optional[str] = Field(default=None, description="Prompt which is used for image description when include_content is True")
+    recursion_level: Optional[str] = Field(default="oneLevel", description="Level of recursion to retrieve sub-pages. Options: 'none' (no subpages), 'oneLevel' (direct children only), 'full' (all descendants). Defaults to 'oneLevel'.")
 
     @model_validator(mode='before')
     @classmethod
@@ -102,6 +103,31 @@ def _format_wiki_page_response(wiki_page_response, expanded: bool = False, inclu
         if expanded:
             # Comprehensive metadata format
             page = wiki_page_response.page
+
+            # Process sub_pages if present
+            sub_pages = []
+            if page and hasattr(page, 'sub_pages') and page.sub_pages:
+                for sub_page in page.sub_pages:
+                    sub_page_dict = {
+                        'id': sub_page.id if hasattr(sub_page, 'id') else None,
+                        'path': sub_page.path if hasattr(sub_page, 'path') else None,
+                        'order': sub_page.order if hasattr(sub_page, 'order') else None,
+                        'git_item_path': sub_page.git_item_path if hasattr(sub_page, 'git_item_path') else None,
+                        'url': sub_page.url if hasattr(sub_page, 'url') else None,
+                        'remote_url': sub_page.remote_url if hasattr(sub_page, 'remote_url') else None,
+                    }
+                    # Recursively process nested sub_pages if present
+                    if hasattr(sub_page, 'sub_pages') and sub_page.sub_pages:
+                        sub_page_dict['sub_pages'] = [
+                            {
+                                'id': sp.id if hasattr(sp, 'id') else None,
+                                'path': sp.path if hasattr(sp, 'path') else None,
+                                'order': sp.order if hasattr(sp, 'order') else None,
+                            }
+                            for sp in sub_page.sub_pages
+                        ]
+                    sub_pages.append(sub_page_dict)
+
             result = {
                 'eTag': wiki_page_response.eTag,
                 'page': {
@@ -113,7 +139,7 @@ def _format_wiki_page_response(wiki_page_response, expanded: bool = False, inclu
                     'order': page.order if page and hasattr(page, 'order') else None,
                     'is_parent_page': page.is_parent_page if page and hasattr(page, 'is_parent_page') else None,
                     'is_non_conformant': page.is_non_conformant if page and hasattr(page, 'is_non_conformant') else None,
-                    'sub_pages': page.sub_pages if page and hasattr(page, 'sub_pages') else [],
+                    'sub_pages': sub_pages,
                 }
             }
             # Include content if requested
@@ -212,7 +238,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
     def get_wiki_page(self, wiki_identified: str, page_path: Optional[str] = None, page_id: Optional[int] = None,
-                      include_content: bool = False, image_description_prompt: Optional[str] = None):
+                      include_content: bool = False, image_description_prompt: Optional[str] = None,
+                      recursion_level: str = "oneLevel"):
         """Get wiki page metadata and optionally content.
 
         Retrieves comprehensive metadata for a wiki page including eTag, id, path, git_item_path,
@@ -225,6 +252,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             page_id: Wiki page ID. Optional if page_path is provided. Takes precedence over page_path.
             include_content: Whether to include page content in response. Defaults to False (metadata only).
             image_description_prompt: Optional prompt for image description when include_content is True.
+            recursion_level: Level of recursion to retrieve sub-pages. Options: 'none' (no subpages),
+                           'oneLevel' (direct children only), 'full' (all descendants). Defaults to 'oneLevel'.
 
         Returns:
             Dictionary containing eTag and comprehensive page metadata including id, path, git_item_path,
@@ -245,7 +274,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                     project=self.project,
                     wiki_identifier=wiki_identified,
                     id=page_id,
-                    include_content=include_content
+                    include_content=include_content,
+                    recursion_level=recursion_level
                 )
             else:
                 logger.info(f"Fetching wiki page by path: {page_path} from wiki: {wiki_identified}")
@@ -253,7 +283,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                     project=self.project,
                     wiki_identifier=wiki_identified,
                     path=page_path,
-                    include_content=include_content
+                    include_content=include_content,
+                    recursion_level=recursion_level
                 )
 
             # Format response with comprehensive metadata
