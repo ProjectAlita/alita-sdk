@@ -13,6 +13,45 @@ from ..utils.utils import clean_string
 logger = logging.getLogger(__name__)
 
 
+def _resolve_bypass_chain(target: str, bypass_mapping: dict, all_printer_related: set, max_depth: int = 100) -> str:
+    """
+    Recursively follow bypass mapping chain to find the first non-printer target.
+
+    Args:
+        target: Starting target node ID
+        bypass_mapping: Mapping of printer_id -> successor_id
+        all_printer_related: Set of all printer and reset node IDs
+        max_depth: Maximum chain depth to prevent infinite loops
+
+    Returns:
+        Final non-printer target node ID
+    """
+    visited = set()
+    depth = 0
+
+    while target in all_printer_related or target in bypass_mapping:
+        if depth >= max_depth:
+            logger.error(f"Maximum bypass chain depth ({max_depth}) exceeded for target '{target}'")
+            break
+
+        if target in visited:
+            logger.error(f"Circular reference detected in bypass chain starting from '{target}'")
+            break
+
+        visited.add(target)
+
+        if target in bypass_mapping:
+            target = bypass_mapping[target]
+            depth += 1
+            logger.debug(f"Following bypass chain: depth={depth}, target={target}")
+        else:
+            # Target is in all_printer_related but not in bypass mapping
+            logger.warning(f"Target '{target}' is a printer node without bypass mapping")
+            break
+
+    return target
+
+
 def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
     """
     Filter out PrinterNodes and their reset nodes from a YAML schema.
@@ -85,6 +124,9 @@ def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
                     printer_bypass_mapping[node_id] = direct_transition
                     logger.debug(f"Printer bypass mapping (direct): {node_id} -> {direct_transition}")
 
+        # Create the set of all printer-related nodes early so it can be used in rewiring
+        all_printer_related = printer_nodes | printer_reset_nodes
+
         # Step 2: Filter out printer nodes and reset nodes
         filtered_nodes = []
         for node in nodes:
@@ -102,11 +144,14 @@ def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
                 continue
 
             # Step 3: Rewire transitions in remaining nodes to bypass printer nodes
+            # Use recursive resolution to handle chains of printers
             if 'transition' in node:
                 transition = node['transition']
-                if transition in printer_bypass_mapping:
-                    node['transition'] = printer_bypass_mapping[transition]
-                    logger.debug(f"Rewired transition in node '{node_id}': {transition} -> {printer_bypass_mapping[transition]}")
+                if transition in printer_bypass_mapping or transition in all_printer_related:
+                    new_transition = _resolve_bypass_chain(transition, printer_bypass_mapping, all_printer_related)
+                    if new_transition != transition:
+                        node['transition'] = new_transition
+                        logger.debug(f"Rewired transition in node '{node_id}': {transition} -> {new_transition}")
 
             # Handle conditional outputs
             if 'condition' in node:
@@ -114,16 +159,17 @@ def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
                 if 'conditional_outputs' in condition:
                     new_outputs = []
                     for output in condition['conditional_outputs']:
-                        if output in printer_bypass_mapping:
-                            new_outputs.append(printer_bypass_mapping[output])
+                        if output in printer_bypass_mapping or output in all_printer_related:
+                            resolved_output = _resolve_bypass_chain(output, printer_bypass_mapping, all_printer_related)
+                            new_outputs.append(resolved_output)
                         else:
                             new_outputs.append(output)
                     condition['conditional_outputs'] = new_outputs
 
                 if 'default_output' in condition:
                     default = condition['default_output']
-                    if default in printer_bypass_mapping:
-                        condition['default_output'] = printer_bypass_mapping[default]
+                    if default in printer_bypass_mapping or default in all_printer_related:
+                        condition['default_output'] = _resolve_bypass_chain(default, printer_bypass_mapping, all_printer_related)
 
             # Handle decision nodes
             if 'decision' in node:
@@ -131,8 +177,9 @@ def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
                 if 'nodes' in decision:
                     new_nodes = []
                     for decision_node in decision['nodes']:
-                        if decision_node in printer_bypass_mapping:
-                            new_nodes.append(printer_bypass_mapping[decision_node])
+                        if decision_node in printer_bypass_mapping or decision_node in all_printer_related:
+                            resolved_node = _resolve_bypass_chain(decision_node, printer_bypass_mapping, all_printer_related)
+                            new_nodes.append(resolved_node)
                         else:
                             new_nodes.append(decision_node)
                     decision['nodes'] = new_nodes
@@ -145,8 +192,8 @@ def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
                     for route in routes:
                         if isinstance(route, dict) and 'target' in route:
                             target = route['target']
-                            if target in printer_bypass_mapping:
-                                route['target'] = printer_bypass_mapping[target]
+                            if target in printer_bypass_mapping or target in all_printer_related:
+                                route['target'] = _resolve_bypass_chain(target, printer_bypass_mapping, all_printer_related)
                         new_routes.append(route)
                     node['routes'] = new_routes
 
@@ -156,8 +203,6 @@ def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
         schema_dict['nodes'] = filtered_nodes
 
         # Step 4: Filter printer nodes from interrupt configurations
-        all_printer_related = printer_nodes | printer_reset_nodes
-
         if 'interrupt_before' in schema_dict:
             schema_dict['interrupt_before'] = [
                 i for i in schema_dict['interrupt_before']
@@ -171,34 +216,20 @@ def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
             ]
 
         # Update entry point if it points to a printer node
-        # Need to recursively follow bypass mapping in case of chained printer nodes
+        # Use helper function to recursively resolve the chain
         if 'entry_point' in schema_dict:
             entry_point = schema_dict['entry_point']
             original_entry = entry_point
 
             # Check if entry point is a printer node (directly or in bypass mapping)
             if entry_point in all_printer_related or entry_point in printer_bypass_mapping:
-                # Follow the chain of printer nodes to find the first non-printer
-                visited = set()
-                while entry_point in all_printer_related or entry_point in printer_bypass_mapping:
-                    # Prevent infinite loops
-                    if entry_point in visited:
-                        logger.error(f"Circular reference detected in printer node chain starting from entry_point '{original_entry}'")
-                        break
-                    visited.add(entry_point)
+                # Use helper function to resolve the chain
+                resolved_entry = _resolve_bypass_chain(entry_point, printer_bypass_mapping, all_printer_related)
 
-                    # If this is a printer node, try to bypass it
-                    if entry_point in printer_bypass_mapping:
-                        entry_point = printer_bypass_mapping[entry_point]
-                        logger.debug(f"Following bypass mapping: {list(visited)[-1]} -> {entry_point}")
-                    else:
-                        # Entry point is in all_printer_related but not in bypass mapping
-                        # This means it's a printer without a proper reset node
-                        logger.warning(f"Entry point '{entry_point}' is a printer node without bypass mapping")
-                        break
+                if resolved_entry != original_entry:
+                    schema_dict['entry_point'] = resolved_entry
+                    logger.info(f"Updated entry point: {original_entry} -> {resolved_entry}")
 
-                schema_dict['entry_point'] = entry_point
-                logger.info(f"Updated entry point: {original_entry} -> {entry_point} (traversed {len(visited)} printer node(s))")
 
         # Convert back to YAML
         filtered_yaml = yaml.dump(schema_dict, default_flow_style=False, sort_keys=False)
