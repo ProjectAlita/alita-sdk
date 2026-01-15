@@ -1,7 +1,10 @@
 import base64
 import json
 import logging
+import os
 import re
+import tempfile
+from io import BytesIO
 from traceback import format_exc
 from typing import Any, Optional, Generator, Literal
 
@@ -239,6 +242,17 @@ FindDefectsByTestRunId = create_model(
     test_run_id=(str, Field(description="Test run ID in format TR-123. This will find all defects associated with this test run.")),
 )
 
+addFileToTestCase = create_model(
+    "addFileToTestCase",
+    test_case_id=(str, Field(description="Test case ID in format TC-123 or QTest numeric ID")),
+    artifact_id=(str, Field(description="Artifact ID of file from artifact storage")),
+    filename=(str, Field(description="Name of the file to upload")),
+    test_step_number=(Optional[int], Field(
+        default=None,
+        description="Optional: Test step number (e.g., 1, 2, 3) to attach file to specific step. If not provided, file will be attached to test case level."
+    )),
+)
+
 # Generic search model for any entity type
 GenericDqlSearch = create_model(
     "GenericDqlSearch",
@@ -266,6 +280,8 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
     _client: Any = PrivateAttr()
     _field_definitions_cache: Optional[dict] = PrivateAttr(default=None)
     _modules_cache: Optional[list] = PrivateAttr(default=None)
+    llm: Any
+    alita: Any = None
     _chunking_tool: Optional[str] = PrivateAttr(default=None)
     _extract_images: bool = PrivateAttr(default=False)
     _image_prompt: Optional[str] = PrivateAttr(default=None)
@@ -1922,6 +1938,113 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
             raise ToolException(
                 f"""Unable to delete test case in project with id - {self.qtest_project_id} and qtest_id - {qtest_id}. \n Exception: \n {stacktrace}""") from e
 
+    def _upload_binary_file_to_qtest(self, object_type: str, object_id: int, file_bytes: bytes, filename: str, mime_type: str) -> str:
+        """Internal method to upload binary file to QTest.
+        
+        Args:
+            object_type: QTest object type ('test-cases' or 'test-steps')
+            object_id: QTest numeric ID of the object
+            file_bytes: Raw file bytes to upload
+            filename: Name of the file
+            mime_type: MIME type of the file
+            
+        Returns:
+            str: Attachment ID from QTest
+        """
+        # Build upload URL
+        upload_url = f"{self.base_url.rstrip('/')}/api/v3/projects/{self.qtest_project_id}/{object_type}/{object_id}/blob-handles"
+        
+        # Prepare headers
+        headers = {
+            'Authorization': f'Bearer {self.qtest_api_token.get_secret_value()}',
+            'File-Name': filename,
+            'Content-Type': mime_type
+        }
+        
+        # Upload file using requests with raw binary data
+        response = requests.post(
+            upload_url,
+            data=file_bytes,  # Send raw bytes in body, not multipart
+            headers=headers,
+            verify=False
+        )
+        
+        # Check response
+        response.raise_for_status()
+        result = response.json()
+        attachment_id = result.get('id', 'unknown')
+        
+        return attachment_id
+
+    def add_file_to_test_case(self, test_case_id: str, artifact_id: str, filename: str, 
+                               test_step_number: Optional[int] = None) -> str:
+        """Upload file from artifact and attach to QTest test case or test step."""
+        try:
+            # Resolve test case ID to QTest numeric ID
+            if test_case_id.startswith('TC-'):
+                search_result = self.__perform_search_by_dql(f"Id = '{test_case_id}'")
+                if not search_result:
+                    raise ToolException(f"Test case {test_case_id} not found")
+                qtest_id = search_result[0].get(QTEST_ID)
+            else:
+                qtest_id = int(test_case_id)
+            
+            # Download file from artifact storage
+            artifact_client = self.alita.artifact('__temp__')
+            file_bytes = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            
+            if not file_bytes:
+                raise ToolException(f"Failed to download artifact {artifact_id}")
+            
+            # Detect MIME type
+            try:
+                import filetype
+                kind = filetype.guess(file_bytes)
+                mime_type = kind.mime if kind else 'application/octet-stream'
+            except ImportError:
+                # Fallback if filetype not available
+                mime_type = 'application/octet-stream'
+            
+            # Determine object type and ID based on whether step is specified
+            if test_step_number is None:
+                # Upload to test case level
+                object_type = 'test-cases'
+                object_id = qtest_id
+                location_msg = f"test case {test_case_id}"
+            else:
+                # Get test case to find step ID
+                test_api = self.__instantiate_test_api_instance()
+                test_case = test_api.get_test_case(self.qtest_project_id, qtest_id, expand='teststep')
+                
+                # Find the step with matching order
+                steps = test_case.test_steps or []
+                matching_step = None
+                for step in steps:
+                    if hasattr(step, 'order') and step.order == test_step_number:
+                        matching_step = step
+                        break
+                
+                if not matching_step:
+                    raise ToolException(f"Test step {test_step_number} not found in test case {test_case_id}")
+                
+                object_type = 'test-steps'
+                object_id = matching_step.id
+                location_msg = f"test case {test_case_id}, step {test_step_number}"
+            
+            # Upload file to QTest
+            attachment_id = self._upload_binary_file_to_qtest(object_type, object_id, file_bytes, filename, mime_type)
+            
+            return f"File '{filename}' successfully uploaded to {location_msg}. Attachment ID: {attachment_id}"
+            
+        except ApiException as e:
+            stacktrace = format_exc()
+            logger.error(f"Exception when uploading file to QTest: \n {stacktrace}")
+            raise ToolException(f"Failed to upload file to test case {test_case_id}: {e}") from e
+        except Exception as e:
+            stacktrace = format_exc()
+            logger.error(f"Error uploading file: \n {stacktrace}")
+            raise ToolException(f"Error uploading file to test case {test_case_id}: {str(e)}") from e
+
     def get_modules(self, parent_id: int = None, search: str = None):
         """
         :param int project_id: ID of the project (required)
@@ -1989,6 +2112,13 @@ EXAMPLES:
                 "description": "Update, change or replace data in the test case.",
                 "args_schema": UpdateTestCase,
                 "ref": self.update_test_case,
+            },
+            {
+                "name": "add_file_to_test_case",
+                "mode": "add_file_to_test_case",
+                "description": "Upload file from artifact storage to QTest test case or specific test step.",
+                "args_schema": addFileToTestCase,
+                "ref": self.add_file_to_test_case,
             },
             {
                 "name": "find_test_case_by_id",

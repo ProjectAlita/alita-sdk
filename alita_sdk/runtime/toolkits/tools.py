@@ -18,7 +18,6 @@ from .mcp_config import McpConfigToolkit, get_mcp_config_toolkit_schemas
 from .skill_router import SkillRouterToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
-from ..tools.image_generation import ImageGenerationToolkit
 from ..tools.data_analysis import DataAnalysisToolkit
 # Import community tools
 from ...community import get_toolkits as community_toolkits, get_tools as community_tools
@@ -37,7 +36,6 @@ def get_toolkits():
         PlanningToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
-        ImageGenerationToolkit.toolkit_config_schema(),
         DataAnalysisToolkit.toolkit_config_schema(),
         McpToolkit.toolkit_config_schema(),
         McpConfigToolkit.toolkit_config_schema(),
@@ -129,14 +127,6 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         allow_net=True,
                         alita_client=alita_client,
                     ).get_tools()
-                elif tool['name'] == 'image_generation':
-                    if alita_client and alita_client.model_image_generation:
-                        tools += ImageGenerationToolkit.get_toolkit(
-                            client=alita_client,
-                        ).get_tools()
-                    else:
-                        logger.warning("Image generation internal tool requested "
-                                       "but no image generation model configured")
                 elif tool['name'] == 'planner':
                     tools += PlanningToolkit.get_toolkit(
                         pgvector_configuration=tool.get('settings', {}).get('pgvector_configuration'),
