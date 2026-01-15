@@ -1,4 +1,6 @@
 from typing import List, Any
+import logging
+import yaml
 
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
@@ -8,7 +10,207 @@ from ..langchain.langraph_agent import create_graph, SUBGRAPH_REGISTRY
 from ..tools.graph import GraphTool
 from ..utils.utils import clean_string
 
+logger = logging.getLogger(__name__)
 
+
+def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
+    """
+    Filter out PrinterNodes and their reset nodes from a YAML schema.
+
+    This function removes:
+    1. Nodes with type='printer'
+    2. Reset nodes (pattern: {node_id}_reset)
+    3. Rewires transitions to bypass removed printer nodes
+    4. Removes printer nodes from interrupt configurations
+
+    Args:
+        yaml_schema: Original YAML schema string
+
+    Returns:
+        Filtered YAML schema string without PrinterNodes
+    """
+    try:
+        schema_dict = yaml.safe_load(yaml_schema)
+
+        if not schema_dict or 'nodes' not in schema_dict:
+            return yaml_schema
+
+        nodes = schema_dict.get('nodes', [])
+
+        # Step 1: Identify printer nodes and build bypass mapping
+        printer_nodes = set()
+        printer_reset_nodes = set()
+        printer_bypass_mapping = {}  # printer_node_id -> actual_successor_id
+
+        # First pass: Identify all printer nodes and reset nodes
+        for node in nodes:
+            node_id = node.get('id')
+            node_type = node.get('type')
+
+            if not node_id:
+                continue
+
+            # Identify reset nodes by naming pattern
+            if node_id.endswith('_reset'):
+                printer_reset_nodes.add(node_id)
+                continue
+
+            # Identify main printer nodes
+            if node_type == 'printer':
+                printer_nodes.add(node_id)
+
+        # Second pass: Build bypass mapping for printer nodes
+        for node in nodes:
+            node_id = node.get('id')
+            node_type = node.get('type')
+
+            if not node_id or node_type != 'printer':
+                continue
+
+            # Try standard pattern first: Printer -> Printer_reset -> NextNode
+            reset_node_id = f"{node_id}_reset"
+            reset_node = next((n for n in nodes if n.get('id') == reset_node_id), None)
+
+            if reset_node:
+                # Standard pattern with reset node
+                actual_successor = reset_node.get('transition')
+                if actual_successor:
+                    printer_bypass_mapping[node_id] = actual_successor
+                    logger.debug(f"Printer bypass mapping (standard): {node_id} -> {actual_successor}")
+            else:
+                # Direct transition pattern: Printer -> NextNode (no reset node)
+                # Get the direct transition from the printer node
+                direct_transition = node.get('transition')
+                if direct_transition:
+                    printer_bypass_mapping[node_id] = direct_transition
+                    logger.debug(f"Printer bypass mapping (direct): {node_id} -> {direct_transition}")
+
+        # Step 2: Filter out printer nodes and reset nodes
+        filtered_nodes = []
+        for node in nodes:
+            node_id = node.get('id')
+            node_type = node.get('type')
+
+            # Skip printer nodes
+            if node_type == 'printer':
+                logger.debug(f"Filtering out printer node: {node_id}")
+                continue
+
+            # Skip reset nodes
+            if node_id in printer_reset_nodes:
+                logger.debug(f"Filtering out printer reset node: {node_id}")
+                continue
+
+            # Step 3: Rewire transitions in remaining nodes to bypass printer nodes
+            if 'transition' in node:
+                transition = node['transition']
+                if transition in printer_bypass_mapping:
+                    node['transition'] = printer_bypass_mapping[transition]
+                    logger.debug(f"Rewired transition in node '{node_id}': {transition} -> {printer_bypass_mapping[transition]}")
+
+            # Handle conditional outputs
+            if 'condition' in node:
+                condition = node['condition']
+                if 'conditional_outputs' in condition:
+                    new_outputs = []
+                    for output in condition['conditional_outputs']:
+                        if output in printer_bypass_mapping:
+                            new_outputs.append(printer_bypass_mapping[output])
+                        else:
+                            new_outputs.append(output)
+                    condition['conditional_outputs'] = new_outputs
+
+                if 'default_output' in condition:
+                    default = condition['default_output']
+                    if default in printer_bypass_mapping:
+                        condition['default_output'] = printer_bypass_mapping[default]
+
+            # Handle decision nodes
+            if 'decision' in node:
+                decision = node['decision']
+                if 'nodes' in decision:
+                    new_nodes = []
+                    for decision_node in decision['nodes']:
+                        if decision_node in printer_bypass_mapping:
+                            new_nodes.append(printer_bypass_mapping[decision_node])
+                        else:
+                            new_nodes.append(decision_node)
+                    decision['nodes'] = new_nodes
+
+            # Handle routes (for router nodes)
+            if 'routes' in node:
+                routes = node['routes']
+                if isinstance(routes, list):
+                    new_routes = []
+                    for route in routes:
+                        if isinstance(route, dict) and 'target' in route:
+                            target = route['target']
+                            if target in printer_bypass_mapping:
+                                route['target'] = printer_bypass_mapping[target]
+                        new_routes.append(route)
+                    node['routes'] = new_routes
+
+            filtered_nodes.append(node)
+
+        # Update the nodes in schema
+        schema_dict['nodes'] = filtered_nodes
+
+        # Step 4: Filter printer nodes from interrupt configurations
+        all_printer_related = printer_nodes | printer_reset_nodes
+
+        if 'interrupt_before' in schema_dict:
+            schema_dict['interrupt_before'] = [
+                i for i in schema_dict['interrupt_before']
+                if i not in all_printer_related
+            ]
+
+        if 'interrupt_after' in schema_dict:
+            schema_dict['interrupt_after'] = [
+                i for i in schema_dict['interrupt_after']
+                if i not in all_printer_related
+            ]
+
+        # Update entry point if it points to a printer node
+        # Need to recursively follow bypass mapping in case of chained printer nodes
+        if 'entry_point' in schema_dict:
+            entry_point = schema_dict['entry_point']
+            original_entry = entry_point
+
+            # Check if entry point is a printer node (directly or in bypass mapping)
+            if entry_point in all_printer_related or entry_point in printer_bypass_mapping:
+                # Follow the chain of printer nodes to find the first non-printer
+                visited = set()
+                while entry_point in all_printer_related or entry_point in printer_bypass_mapping:
+                    # Prevent infinite loops
+                    if entry_point in visited:
+                        logger.error(f"Circular reference detected in printer node chain starting from entry_point '{original_entry}'")
+                        break
+                    visited.add(entry_point)
+
+                    # If this is a printer node, try to bypass it
+                    if entry_point in printer_bypass_mapping:
+                        entry_point = printer_bypass_mapping[entry_point]
+                        logger.debug(f"Following bypass mapping: {list(visited)[-1]} -> {entry_point}")
+                    else:
+                        # Entry point is in all_printer_related but not in bypass mapping
+                        # This means it's a printer without a proper reset node
+                        logger.warning(f"Entry point '{entry_point}' is a printer node without bypass mapping")
+                        break
+
+                schema_dict['entry_point'] = entry_point
+                logger.info(f"Updated entry point: {original_entry} -> {entry_point} (traversed {len(visited)} printer node(s))")
+
+        # Convert back to YAML
+        filtered_yaml = yaml.dump(schema_dict, default_flow_style=False, sort_keys=False)
+        return filtered_yaml
+
+    except Exception as e:
+        logger.error(f"Error filtering PrinterNodes from YAML: {e}", exc_info=True)
+        # Return original YAML if filtering fails
+        return yaml_schema
+
+
+# TODO: deprecate next release (1/15/2026)
 class SubgraphToolkit:
 
     @staticmethod
@@ -18,7 +220,8 @@ class SubgraphToolkit:
         application_version_id: int,
         llm,
         app_api_key: str,
-        selected_tools: list[str] = []
+        selected_tools: list[str] = [],
+        is_subgraph: bool = True
     ) -> List[BaseTool]:
         from .tools import get_tools
         # from langgraph.checkpoint.memory import MemorySaver
@@ -30,9 +233,17 @@ class SubgraphToolkit:
         # Get the subgraph name
         subgraph_name = app_details.get("name")
         
+        # Get the original YAML
+        yaml_schema = version_details['instructions']
+
+        # Filter PrinterNodes from YAML if this is a subgraph
+        if is_subgraph:
+            yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
+            logger.info(f"Filtered PrinterNodes from subgraph pipeline '{subgraph_name}'")
+
         # Populate the registry for flattening approach
         SUBGRAPH_REGISTRY[subgraph_name] = {
-            'yaml': version_details['instructions'],
+            'yaml': yaml_schema,  # Use filtered YAML
             'tools': tools,
             'flattened': False
         }
@@ -43,11 +254,11 @@ class SubgraphToolkit:
         graph = create_graph(
             client=llm,
             tools=tools,
-            yaml_schema=version_details['instructions'],
+            yaml_schema=yaml_schema,  # Use filtered YAML
             debug=False,
             store=None,
             memory=MemorySaver(),
-            # for_subgraph=True,  # compile as raw subgraph
+            for_subgraph=is_subgraph,  # Pass flag to create_graph
         )
 
         cleaned_subgraph_name = clean_string(subgraph_name)

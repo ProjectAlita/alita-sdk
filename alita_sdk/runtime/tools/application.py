@@ -52,7 +52,8 @@ class Application(BaseTool):
     client: Any
     args_runnable: dict = {}
     metadata: dict = {}
-
+    is_subgraph: Optional[bool] = False
+    
     @model_validator(mode='before')
     @classmethod
     def preserve_original_name(cls, data: Any) -> Any:
@@ -85,6 +86,8 @@ class Application(BaseTool):
             application_variables = {k: {"name": k, "value": v} for k, v in kwargs.items()}
             self.application = self.client.application(**self.args_runnable, application_variables=application_variables)
         response = self.application.invoke(formulate_query(kwargs))
+        if self.is_subgraph:
+            return response
         if self.return_type == "str":
             return response["output"]
         else:

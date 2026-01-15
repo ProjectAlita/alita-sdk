@@ -38,13 +38,15 @@ class Assistant:
                  mcp_tokens: Optional[dict] = None,
                  conversation_id: Optional[str] = None,
                  ignored_mcp_servers: Optional[list] = None,
-                 persona: Optional[str] = "generic"):
+                 persona: Optional[str] = "generic",
+                 is_subgraph: bool = False):
 
         self.app_type = app_type
         self.memory = memory
         self.store = store
         self.persona = persona
         self.max_iterations = data.get('meta', {}).get('step_limit', 25)
+        self.is_subgraph = is_subgraph  # Store is_subgraph flag
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
@@ -435,7 +437,8 @@ class Assistant:
             client=self.client, tools=self.tools,
             yaml_schema=self.prompt, memory=memory,
             alita_client=self.alita_client,
-            steps_limit=self.max_iterations
+            steps_limit=self.max_iterations,
+            for_subgraph=self.is_subgraph  # Pass for_subgraph flag to filter PrinterNodes
         )
         #
         return agent
