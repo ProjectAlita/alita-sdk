@@ -28,7 +28,7 @@ class PandasToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in PandasWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
-            bucket_name=(str, Field(default=None, title="Bucket name", description="Bucket where the content file is stored")),
+            bucket_name=(Optional[str], Field(default=None, title="Bucket name", description="Bucket where the content file is stored")),
             selected_tools=(List[Literal[tuple(selected_tools)]], Field(default=[], json_schema_extra={'args_schemas': selected_tools})),
             __config__=ConfigDict(json_schema_extra={'metadata': {
                 "label": "Pandas (Deprecated)",

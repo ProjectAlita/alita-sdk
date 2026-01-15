@@ -23,7 +23,7 @@ DeleteFileModel = create_model(
     "DeleteFileModel",
     file_path=(str, Field(description="The path of the file")),
     branch=(str, Field(description="The branch to delete the file from")),
-    commit_message=(str, Field(default=None, description="Commit message for deleting the file. Optional.")),
+    commit_message=(Optional[str], Field(default=None, description="Commit message for deleting the file. Optional.")),
 )
 CreateFileModel = create_model(
     "CreateFileModel",
