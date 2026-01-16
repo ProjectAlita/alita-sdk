@@ -45,11 +45,12 @@ class FunctionTool(BaseTool):
         """Prepare input for PyodideSandboxTool by injecting state into the code block.
 
         Uses base64 encoding to avoid string escaping issues when passing JSON
-        through multiple layers of parsing (Python -> Deno -> Pyodide).
+        through multiple layers of parsing (Python -> Deno -> Pyodide) and compression to minimize args list
         """
-        state_copy = replace_escaped_newlines(deepcopy(state))
+        import base64
+        import zlib
 
-        # remove messages to avoid issues with pickling without langchain-core
+        state_copy = replace_escaped_newlines(deepcopy(state))
         if 'messages' in state_copy:
             del state_copy['messages']
 
@@ -58,15 +59,18 @@ class FunctionTool(BaseTool):
 
         # Use base64 encoding to avoid all string escaping issues
         # This is more robust than repr() when the code passes through multiple parsers
-        state_json_b64 = base64.b64encode(state_json.encode('utf-8')).decode('ascii')
+        # use compression to avoid issue with `{"error": "Error executing code: [Errno 7] Argument list too long: 'deno'"}`
+        compressed = zlib.compress(state_json.encode('utf-8'))
+        encoded = base64.b64encode(compressed).decode('ascii')
 
-        # Generate code that decodes base64 and parses JSON inside Pyodide
         pyodide_predata = f'''#state dict
 import json
 import base64
-_state_json_b64 = "{state_json_b64}"
-_state_json = base64.b64decode(_state_json_b64).decode('utf-8')
-alita_state = json.loads(_state_json)
+import zlib
+
+compressed_state = base64.b64decode('{encoded}')
+state_json = zlib.decompress(compressed_state).decode('utf-8')
+alita_state = json.loads(state_json)
 '''
         return pyodide_predata
 
