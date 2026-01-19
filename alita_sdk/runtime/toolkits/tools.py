@@ -104,7 +104,8 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     application_version_id=int(tool['settings']['application_version_id']),
                     selected_tools=[],
                     ignored_mcp_servers=ignored_mcp_servers,
-                    is_subgraph=is_pipeline_subgraph  # Pass is_subgraph for pipelines
+                    is_subgraph=is_pipeline_subgraph,  # Pass is_subgraph for pipelines
+                    mcp_tokens=mcp_tokens
                 ).get_tools())
                 # TODO: deprecate next release (1/15/2026)
                 # if is_pipeline_subgraph:
