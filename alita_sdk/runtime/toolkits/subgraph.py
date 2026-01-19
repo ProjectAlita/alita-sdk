@@ -1,4 +1,4 @@
-from typing import List, Any
+from typing import List, Any,  Optional
 import logging
 import yaml
 
@@ -252,14 +252,17 @@ class SubgraphToolkit:
         llm,
         app_api_key: str,
         selected_tools: list[str] = [],
-        is_subgraph: bool = True
+        is_subgraph: bool = True,
+        mcp_tokens: Optional[dict] = None,
+        ignored_mcp_servers: Optional[list] = None
     ) -> List[BaseTool]:
         from .tools import get_tools
         # from langgraph.checkpoint.memory import MemorySaver
 
         app_details = client.get_app_details(application_id)
         version_details = client.get_app_version_details(application_id, application_version_id)
-        tools = get_tools(version_details['tools'], alita_client=client, llm=llm)
+        tools = get_tools(version_details['tools'], alita_client=client, llm=llm,
+                          mcp_tokens=mcp_tokens, ignored_mcp_servers=ignored_mcp_servers)
 
         # Get the subgraph name
         subgraph_name = app_details.get("name")

@@ -23,7 +23,7 @@ class ApplicationToolkit(BaseToolkit):
     @classmethod
     def get_toolkit(cls, client: 'AlitaClient', application_id: int, application_version_id: int,
                     selected_tools: list[str] = [], store: Optional[BaseStore] = None,
-                    ignored_mcp_servers: Optional[list] = None, is_subgraph: bool = False):
+                    ignored_mcp_servers: Optional[list] = None, is_subgraph: bool = False, mcp_tokens: Optional[dict] = None):
 
         app_details = client.get_app_details(application_id)
         version_details = client.get_app_version_details(application_id, application_version_id)
@@ -33,17 +33,18 @@ class ApplicationToolkit(BaseToolkit):
             "temperature": version_details['llm_settings']['temperature'],
         }
 
-        app = client.application(application_id, application_version_id, store=store, 
-                                 llm=client.get_llm(version_details['llm_settings']['model_name'], 
+        app = client.application(application_id, application_version_id, store=store,
+                                 llm=client.get_llm(version_details['llm_settings']['model_name'],
                                                     model_settings),
-                                 ignored_mcp_servers=ignored_mcp_servers)
-        
+                                 ignored_mcp_servers=ignored_mcp_servers,
+                                 mcp_tokens=mcp_tokens)
+
         # Extract icon_meta from version_details meta field
         icon_meta = version_details.get('meta', {}).get('icon_meta', {})
-        
-        return cls(tools=[Application(name=app_details.get("name"), 
-                                      description=app_details.get("description"), 
-                                      application=app, 
+
+        return cls(tools=[Application(name=app_details.get("name"),
+                                      description=app_details.get("description"),
+                                      application=app,
                                       args_schema=applicationToolSchema,
                                       return_type='str',
                                       client=client,
@@ -56,6 +57,7 @@ class ApplicationToolkit(BaseToolkit):
                                           "llm": client.get_llm(version_details['llm_settings']['model_name'], model_settings),
                                           "ignored_mcp_servers": ignored_mcp_servers,
                                           "is_subgraph": is_subgraph,  # Pass is_subgraph flag
+                                          "mcp_tokens": mcp_tokens,
                                       })])
             
     def get_tools(self):
