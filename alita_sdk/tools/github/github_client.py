@@ -1,9 +1,12 @@
 from __future__ import annotations
+import logging
 import re
 import fnmatch
 import tiktoken
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -40,7 +43,9 @@ from .schemas import (
     TriggerWorkflow,
     GetWorkflowStatus,
     GetWorkflowLogs,
-    GenericGithubAPICall
+    GenericGithubAPICall,
+    GetMe,
+    SearchCode,
 )
 
 # Import prompts for tools
@@ -117,31 +122,61 @@ class GitHubClient(BaseModel):
     @model_validator(mode='before')
     def initialize_github_client(cls, values):
         """
-        Initialize the GitHub client after the model is created.
-        This replaces the need for a custom __init__ method.
+        Validate and normalize configuration values.
+        Client creation is deferred to model_post_init for registry-based sharing.
 
         Returns:
             The initialized values dictionary
         """
-
         if values.get("repo_config"):
             values["github_repository"] = values["repo_config"].github_repository
             values["active_branch"] = values["repo_config"].active_branch
             values["github_base_branch"] = values["repo_config"].github_base_branch
 
-        # If auth_config is provided, update base URL and set up authentication
+        # If auth_config is provided, update base URL
         if values.get("auth_config"):
             values["github_base_url"] = values["auth_config"].github_base_url or DEFAULT_BASE_URL
 
-            # Set up authentication
+        return values
+
+    def model_post_init(self, __context) -> None:
+        """Initialize the GitHub client using the shared ClientRegistry."""
+        # Skip client initialization if this is a schema discovery call (model_construct)
+        # Use getattr for safe access since model_construct() may not set all attributes
+        auth_config = getattr(self, 'auth_config', None)
+        if not auth_config:
+            return
+
+        from ..client_registry import get_client_registry
+
+        # Build auth config dict for registry lookup (used for cache key)
+        auth_dict = {
+            'github_base_url': self.github_base_url,
+            'github_access_token': auth_config.github_access_token,
+            'github_username': auth_config.github_username,
+            'github_password': auth_config.github_password,
+            'github_app_id': auth_config.github_app_id,
+            'github_app_private_key': auth_config.github_app_private_key,
+        }
+
+        # Factory function to create GitHub client (only called if not cached)
+        def create_github_client():
             auth = None
-            if values["auth_config"].github_access_token:
-                auth = Auth.Token(values["auth_config"].github_access_token.get_secret_value())
-            elif values["auth_config"].github_username and values["auth_config"].github_password:
-                auth = Auth.Login(values["auth_config"].github_username, values["auth_config"].github_password.get_secret_value())
-            elif values["auth_config"].github_app_id and values["auth_config"].github_app_private_key:
+            if auth_config.github_access_token:
+                token = auth_config.github_access_token
+                if hasattr(token, 'get_secret_value'):
+                    token = token.get_secret_value()
+                auth = Auth.Token(token)
+            elif auth_config.github_username and auth_config.github_password:
+                password = auth_config.github_password
+                if hasattr(password, 'get_secret_value'):
+                    password = password.get_secret_value()
+                auth = Auth.Login(auth_config.github_username, password)
+            elif auth_config.github_app_id and auth_config.github_app_private_key:
                 # Format the private key correctly
-                private_key = values["auth_config"].github_app_private_key.get_secret_value()
+                private_key = auth_config.github_app_private_key
+                if hasattr(private_key, 'get_secret_value'):
+                    private_key = private_key.get_secret_value()
                 header = "-----BEGIN RSA PRIVATE KEY-----"
                 footer = "-----END RSA PRIVATE KEY-----"
 
@@ -150,19 +185,26 @@ class GitHubClient(BaseModel):
                     body = key_body.replace(" ", "\n")
                     private_key = f"{header}\n{body}\n{footer}"
 
-                auth = Auth.AppAuth(values["auth_config"].github_app_id, private_key)
+                auth = Auth.AppAuth(auth_config.github_app_id, private_key)
 
-            # Initialize GitHub client
+            # Create GitHub client
             if auth is None:
-                values["github_api"] = Github(base_url=values["github_base_url"])
-            elif values["auth_config"].github_app_id and values["auth_config"].github_app_private_key:
-                gi = GithubIntegration(base_url=values["github_base_url"], auth=auth)
+                return Github(base_url=self.github_base_url)
+            elif auth_config.github_app_id and auth_config.github_app_private_key:
+                gi = GithubIntegration(base_url=self.github_base_url, auth=auth)
                 installation = gi.get_installations()[0]
-                values["github_api"] = installation.get_github_for_installation()
+                return installation.get_github_for_installation()
             else:
-                values["github_api"] = Github(base_url=values["github_base_url"], auth=auth)
+                return Github(base_url=self.github_base_url, auth=auth)
 
-        return values
+        # Get shared client from registry (or create new one)
+        registry = get_client_registry()
+        self.github_api = registry.get_client(
+            service_type='github',
+            base_url=self.github_base_url,
+            auth_config=auth_dict,
+            factory=create_github_client
+        )
 
     @staticmethod
     def clean_repository_name(repo_link: str) -> str:
@@ -1993,6 +2035,205 @@ class GitHubClient(BaseModel):
             import traceback
             return f"API call failed: {traceback.format_exc()}"
 
+    def get_me(self) -> str:
+        """
+        Get details of the authenticated GitHub user.
+
+        Use this when you need to:
+        - Identify the current user's GitHub username/login
+        - Get user profile information (email, bio, company, location)
+        - Understand current user permissions and context
+        - Build other tool calls that require the current user's information
+
+        Returns:
+            str: JSON string containing user details including:
+                - login: GitHub username
+                - id: User ID
+                - name: Display name
+                - email: Email address
+                - bio: User biography
+                - company: Company name
+                - location: User location
+                - public_repos: Number of public repositories
+                - followers/following: Follower counts
+                - created_at/updated_at: Account timestamps
+        """
+        try:
+            user = self.github_api.get_user()
+
+            user_data = {
+                "login": user.login,
+                "id": user.id,
+                "name": user.name,
+                "email": user.email,
+                "bio": user.bio,
+                "company": user.company,
+                "location": user.location,
+                "blog": user.blog,
+                "twitter_username": user.twitter_username,
+                "public_repos": user.public_repos,
+                "public_gists": user.public_gists,
+                "followers": user.followers,
+                "following": user.following,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+                "html_url": user.html_url,
+                "avatar_url": user.avatar_url,
+                "type": user.type,
+                "hireable": user.hireable,
+                "private_gists": user.private_gists,
+                "total_private_repos": user.total_private_repos,
+                "owned_private_repos": user.owned_private_repos,
+            }
+            import json
+            return json.dumps(user_data, indent=2)
+        except Exception as e:
+            raise ToolException(f"Failed to get authenticated user: {str(e)}")
+
+    def search_code(
+        self,
+        query: str,
+        sort: Optional[str] = None,
+        order: Optional[str] = None,
+        per_page: Optional[int] = 30,
+        page: Optional[int] = 1
+    ) -> str:
+        """
+        Search for code in the configured repository using GitHub's code search.
+
+        NOTE: Searches are automatically scoped to this toolkit's repository.
+        You don't need to add repo: filter - it's added automatically.
+
+        Use this for finding:
+        - Exact symbols, functions, or class names
+        - Specific code patterns or implementations
+        - Files containing specific content
+
+        Query syntax supports additional filters:
+        - language:python - Filter by programming language
+        - path:src/utils - Filter by file path
+        - filename:test.py - Filter by filename
+        - extension:py - Filter by file extension
+
+        Examples:
+        - "class MyClass" - Find class definitions
+        - "def authenticate" - Find function definitions
+        - "import pandas path:src" - Find imports in src directory
+        - "TODO language:python" - Find TODOs in Python files
+
+        Parameters:
+            query: Search query (repo filter added automatically)
+            sort: Sort field - only 'indexed' is supported
+            order: Sort order - 'asc' or 'desc' (default: 'desc')
+            per_page: Results per page (1-100, default: 30)
+            page: Page number for pagination (default: 1)
+
+        Returns:
+            str: JSON with total_count and items (file info, repo, matched content)
+        """
+        # Validate query is not empty
+        if not query or not query.strip():
+            raise ToolException(
+                "Search query cannot be empty. Provide a search term. "
+                "Examples: 'class MyClass language:python', 'def authenticate repo:owner/repo'"
+            )
+
+        # Debug: log repository config
+        logger.info(f"[search_code] self.github_repository='{self.github_repository}', query='{query}'")
+
+        # Auto-scope to configured repository if not already specified
+        query_lower = query.lower()
+        has_scope = any(s in query_lower for s in ['repo:', 'org:', 'user:'])
+        has_repo = bool(self.github_repository and self.github_repository.strip())
+
+        if has_repo and not has_scope:
+            query = f"{query} repo:{self.github_repository}"
+            logger.info(f"[search_code] Auto-added repo filter, final query: '{query}'")
+        elif not has_repo and not has_scope:
+            # GitHub code search requires a scope qualifier
+            raise ToolException(
+                f"GitHub code search requires a scope. This toolkit's repository='{self.github_repository}'. "
+                "Add repo:owner/repo, org:orgname, or user:username to your query. "
+                f"Example: '{query} repo:owner/repo'"
+            )
+
+        try:
+            from github import GithubException
+
+            # Build search options - only pass sort/order if explicitly provided
+            search_kwargs = {"query": query}
+            if sort:
+                search_kwargs["sort"] = sort
+            if order:
+                search_kwargs["order"] = order
+
+            logger.info(f"[search_code] Calling github_api.search_code with: {search_kwargs}")
+            results = self.github_api.search_code(**search_kwargs)
+
+            # Paginate results
+            code_results = []
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+
+            for idx, code_item in enumerate(results):
+                if idx < start_idx:
+                    continue
+                if idx >= end_idx:
+                    break
+
+                item_data = {
+                    "name": code_item.name,
+                    "path": code_item.path,
+                    "sha": code_item.sha,
+                    "html_url": code_item.html_url,
+                    "repository": {
+                        "full_name": code_item.repository.full_name,
+                        "html_url": code_item.repository.html_url,
+                        "description": code_item.repository.description,
+                        "private": code_item.repository.private,
+                    },
+                }
+                # Include text matches if available
+                if hasattr(code_item, 'text_matches') and code_item.text_matches:
+                    item_data["text_matches"] = [
+                        {
+                            "fragment": match.get("fragment", ""),
+                            "matches": match.get("matches", [])
+                        }
+                        for match in code_item.text_matches
+                    ]
+                code_results.append(item_data)
+
+            response = {
+                "total_count": results.totalCount,
+                "incomplete_results": False,
+                "items": code_results,
+                "page": page,
+                "per_page": per_page,
+            }
+            import json
+            return json.dumps(response, indent=2)
+
+        except GithubException as e:
+            # Provide helpful error messages based on status code
+            status = e.status if hasattr(e, 'status') else None
+            if status == 403:
+                raise ToolException(
+                    f"GitHub API rate limit exceeded or access forbidden. "
+                    f"Try reducing search scope with repo: or org: filters. Error: {str(e)}"
+                )
+            elif status == 422:
+                raise ToolException(
+                    f"Invalid search query syntax. Check query format. "
+                    f"Supported filters: language:, repo:, org:, path:, filename:, extension:. Error: {str(e)}"
+                )
+            elif status == 401:
+                raise ToolException(f"Authentication failed. Check your GitHub token. Error: {str(e)}")
+            else:
+                raise ToolException(f"GitHub search failed (HTTP {status}): {str(e)}")
+        except Exception as e:
+            raise ToolException(f"Failed to search code: {str(e)}")
+
     @extend_with_file_operations
     def get_available_tools(self) -> List[Dict[str, Any]]:
         return [
@@ -2212,6 +2453,20 @@ class GitHubClient(BaseModel):
                 "mode": "generic_github_api_call",
                 "description": self.generic_github_api_call.__doc__,
                 "args_schema": GenericGithubAPICall,
+            },
+            {
+                "ref": self.get_me,
+                "name": "get_me",
+                "mode": "get_me",
+                "description": self.get_me.__doc__,
+                "args_schema": GetMe,
+            },
+            {
+                "ref": self.search_code,
+                "name": "search_code",
+                "mode": "search_code",
+                "description": self.search_code.__doc__,
+                "args_schema": SearchCode,
             },
 
         ]

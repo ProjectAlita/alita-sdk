@@ -99,29 +99,72 @@ CommentOnIssue = create_model(
 
 SearchIssues = create_model(
     "SearchIssues",
-    search_query=(str, Field(description="Keywords or query for searching issues and PRs in Github")),
-    repo_name=(Optional[str], Field(description="Name of the repository to search issues in", default=None)),
-    max_count=(Optional[int], Field(description="Maximum number of issues to return", default=30, gt=0))
+    search_query=(str, Field(
+        description="Search query using GitHub's issue search syntax. Examples: 'is:open bug', 'author:username', 'label:enhancement', 'milestone:v1.0', 'state:closed assignee:user'. Supports: is:open/closed, is:issue/pr, author:, assignee:, label:, milestone:, created:, updated: filters."
+    )),
+    repo_name=(Optional[str], Field(
+        description="Repository to search in. Format: 'owner/repo'. Example: 'microsoft/vscode'. If None, searches across all accessible repositories.",
+        default=None
+    )),
+    max_count=(Optional[int], Field(
+        description="Maximum number of issues to return (default: 30)",
+        default=30,
+        gt=0
+    ))
 )
 
 CreateIssue = create_model(
     "CreateIssue",
-    title=(str, Field(description="The title of the issue")),
-    body=(Optional[str], Field(description="The detailed description of the issue", default=None)),
-    repo_name=(Optional[str], Field(description="Name of the repository to create the issue in", default=None)),
-    labels=(Optional[List[str]], Field(description="An optional list of labels to attach to the issue", default=None)),
-    assignees=(Optional[List[str]], Field(description="An optional list of GitHub usernames to assign the issue to", default=None))
+    title=(str, Field(
+        description="The title of the issue. Example: 'Fix authentication bug in login flow'"
+    )),
+    body=(Optional[str], Field(
+        description="The detailed description of the issue in Markdown format. Example: '## Description\\nUsers cannot log in...\\n\\n## Steps to reproduce\\n1. Go to login page\\n2. Enter credentials'",
+        default=None
+    )),
+    repo_name=(Optional[str], Field(
+        description="Repository to create the issue in. Format: 'owner/repo'. Example: 'microsoft/vscode'. If None, uses the default repository.",
+        default=None
+    )),
+    labels=(Optional[List[str]], Field(
+        description="Labels to attach to the issue. Example: ['bug', 'high-priority']. Must be existing labels in the repository.",
+        default=None
+    )),
+    assignees=(Optional[List[str]], Field(
+        description="GitHub usernames to assign the issue to. Example: ['octocat', 'hubot']. Users must have repository access.",
+        default=None
+    ))
 )
 
 UpdateIssue = create_model(
     "UpdateIssue",
-    issue_id=(int, Field(description="ID of the issue to update")),
-    title=(Optional[str], Field(description="New title of the issue", default=None)),
-    body=(Optional[str], Field(description="New detailed description of the issue", default=None)),
-    labels=(Optional[List[str]], Field(description="New list of labels to apply to the issue", default=None)),
-    assignees=(Optional[List[str]], Field(description="New list of GitHub usernames to assign to the issue", default=None)),
-    state=(Optional[str], Field(description="New state of the issue ('open' or 'closed')", default=None)),
-    repo_name=(Optional[str], Field(description="Name of the repository where the issue exists", default=None))
+    issue_id=(int, Field(
+        description="Issue number to update. Example: 42. This is the issue number shown in the URL, not the internal ID."
+    )),
+    title=(Optional[str], Field(
+        description="New title for the issue. Example: '[FIXED] Authentication bug in login flow'",
+        default=None
+    )),
+    body=(Optional[str], Field(
+        description="New description in Markdown format. Set to update the full issue body.",
+        default=None
+    )),
+    labels=(Optional[List[str]], Field(
+        description="Replace all labels with this list. Example: ['bug', 'wontfix']. Pass empty list [] to remove all labels.",
+        default=None
+    )),
+    assignees=(Optional[List[str]], Field(
+        description="Replace all assignees with this list. Example: ['octocat']. Pass empty list [] to unassign everyone.",
+        default=None
+    )),
+    state=(Optional[str], Field(
+        description="Set issue state. Must be 'open' or 'closed'. Example: 'closed' to close the issue.",
+        default=None
+    )),
+    repo_name=(Optional[str], Field(
+        description="Repository containing the issue. Format: 'owner/repo'. Example: 'microsoft/vscode'.",
+        default=None
+    ))
 )
 
 LoaderSchema = create_model(
@@ -155,13 +198,35 @@ UpdateIssueOnProject = create_model(
 
 GetCommits = create_model(
     "GetCommits",
-    repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository.")),
-    sha=(Optional[str], Field(description="The commit SHA or branch name to start listing commits from", default=None)),
-    path=(Optional[str], Field(description="The file path to filter commits by", default=None)),
-    since=(Optional[str], Field(description="Only commits after this date will be returned (ISO format)", default=None)),
-    until=(Optional[str], Field(description="Only commits before this date will be returned (ISO format)", default=None)),
-    author=(Optional[str], Field(description="The author of the commits", default=None)),
-    max_count=(Optional[int], Field(description="Maximum number of commits to return (default: 30)", default=30, gt=0))
+    repo_name=(Optional[str], Field(
+        default=None,
+        description="Repository to get commits from. Format: 'owner/repo'. Example: 'microsoft/vscode'. If None, uses the default repository."
+    )),
+    sha=(Optional[str], Field(
+        description="Commit SHA or branch name to start listing from. Example: 'main', 'abc123def'. Lists commits reachable from this ref.",
+        default=None
+    )),
+    path=(Optional[str], Field(
+        description="Filter commits that affect this file/directory path. Example: 'src/main.py', 'docs/'. Shows only commits touching these files.",
+        default=None
+    )),
+    since=(Optional[str], Field(
+        description="Return commits after this date (ISO 8601 format). Example: '2024-01-01T00:00:00Z', '2024-01-01'.",
+        default=None
+    )),
+    until=(Optional[str], Field(
+        description="Return commits before this date (ISO 8601 format). Example: '2024-12-31T23:59:59Z', '2024-12-31'.",
+        default=None
+    )),
+    author=(Optional[str], Field(
+        description="Filter by commit author. Can be GitHub username or email. Example: 'octocat', 'user@example.com'.",
+        default=None
+    )),
+    max_count=(Optional[int], Field(
+        description="Maximum number of commits to return (default: 30, max recommended: 100 for performance).",
+        default=30,
+        gt=0
+    ))
 )
 
 GetCommitChanges = create_model(
@@ -216,6 +281,36 @@ GenericGithubAPICall = create_model(
     "GenericGithubAPICall",
     method=(str, Field(description="The GitHub API method to call (e.g., 'get_repo', 'get_user')")),
     method_kwargs=(Optional[Dict[str, Any]], Field(description="Keyword arguments for the API method as a dictionary"))
+)
+
+# Schema for get_me - no input required
+GetMe = create_model("GetMe")
+
+# Schema for search_code - search code across GitHub repositories
+SearchCode = create_model(
+    "SearchCode",
+    query=(str, Field(
+        description="Search query using GitHub's code search syntax. Examples: 'content:Skill language:Java org:github', 'NOT is:archived language:Python', 'repo:owner/repo class MyClass'. Supports: language:, repo:, org:, path:, filename:, extension:, content: filters."
+    )),
+    sort=(Optional[str], Field(
+        default=None,
+        description="Sort field. Only 'indexed' is supported for code search (sorts by last indexed time)"
+    )),
+    order=(Optional[str], Field(
+        default=None,
+        description="Sort order: 'asc' or 'desc'. Default is 'desc'"
+    )),
+    per_page=(Optional[int], Field(
+        default=30,
+        description="Number of results per page (max 100)",
+        gt=0,
+        le=100
+    )),
+    page=(Optional[int], Field(
+        default=1,
+        description="Page number for pagination",
+        gt=0
+    ))
 )
 
 ListProjectIssues = create_model(

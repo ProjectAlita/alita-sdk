@@ -1,66 +1,3 @@
-REACT_ADDON = """
-TOOLS
-------
-Assistant can ask the user to use tools to look up information that may be helpful in answering the users original question. The tools the human can use are:
-
-{{tools}}
-
-RESPONSE FORMAT INSTRUCTIONS
-----------------------------
-
-When responding to me, please output a response in one of two formats:
-
-**Option 1:**
-Use this if you want the human to use a tool.
-Markdown code snippet formatted in the following schema:
-
-```json
-{
-    "action": string, // The action to take. Must be one of {{tool_names}}
-    "action_input": string // The input to the action
-}
-```
-
-**Option #2:**
-Use this if you want to respond directly to the human. Markdown code snippet formatted in the following schema:
-
-```json
-{
-    "action": "Final Answer",
-    "action_input": string // You should put what you want to return to use here
-}
-```
-
-USER'S INPUT
---------------------
-Here is the user's input (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else):
-
-{{input}}
-"""
-
-XML_ADDON = """You have access to the following tools:
-
-{{tools}}
-
-In order to use a tool, you can use <tool></tool> and <tool_input></tool_input> tags. You will then get back a response in the form <observation></observation>
-For example, if you have a tool called 'search' that could run a google search, in order to search for the weather in SF you would respond:
-
-<tool>search</tool><tool_input>weather in SF</tool_input>
-<observation>64 degrees</observation>
-
-When you are done, respond with a final answer between <final_answer></final_answer>. For example:
-
-<final_answer>The weather in SF is 64 degrees</final_answer>
-
-
-
-User's input
---------------------
-{{input}}
-"""
-
-REACT_VARS = ["tool_names", "tools", "agent_scratchpad", "chat_history", "input"]
-
 DEFAULT_MULTIMODAL_PROMPT = """
 ## Image Type: Diagrams (e.g., Sequence Diagram, Context Diagram, Component Diagram)
 **Prompt**:
@@ -91,24 +28,27 @@ LOADER_MAX_TOKENS_DEFAULT = 512
 FILE_HANDLING_INSTRUCTIONS = """
 ## Handling files
 
-### CRITICAL: File creation and modification rules
+### File creation and modification rules
 
 **NEVER output entire file contents in your response.**
 
-When creating or modifying files:
+When creating files:
 
 1. **Use incremental writes for new files**: Create files in logical sections using multiple tool calls:
    - First call: Create file with initial structure (imports, class definition header, TOC, etc.)
    - Subsequent calls: Add methods, functions, or sections one at a time using edit/append
    - This prevents context overflow and ensures each part is properly written
 
-2. **Use edit tools for modifications**: It allows precise text replacement instead of rewriting entire files
+When modifying files, especially large ones:
+- **Never dump code in chat**: If you find yourself about to write a large code block in your response, STOP and use a file tool instead
+- **Use edit tools for modifications**: It allows precise text replacement instead of rewriting entire files
+- **Update in pieces**: Make targeted edits to specific sections, paragraphs, or functions rather than rewriting entire files
+- **Use precise replacements**: Replace exact strings with sufficient context (3-5 lines before/after) to ensure unique matches
+- **Batch related changes**: Group logically related edits together, but keep each edit focused and minimal
+- **Preserve structure**: Maintain existing formatting, indentation, and file organization
+- **Avoid full rewrites**: Never regenerate an entire file when only a portion needs changes
 
-3. **Never dump code in chat**: If you find yourself about to write a large code block in your response, STOP and use a file tool instead
-
-**Why this matters**: Large file outputs can exceed token limits, cause truncation, or fail silently. Incremental writes are reliable and verifiable.
-
-### Reading large files
+## Reading large files
 
 When working with large files (logs, test reports, data files, source code):
 
@@ -122,15 +62,7 @@ Example approach:
 2. Search for relevant patterns to locate target sections
 3. Read specific line ranges where issues or relevant code exist
 
-### Writing and updating files
-
-When modifying files, especially large ones:
-
-- **Update in pieces**: Make targeted edits to specific sections, paragraphs, or functions rather than rewriting entire files
-- **Use precise replacements**: Replace exact strings with sufficient context (3-5 lines before/after) to ensure unique matches
-- **Batch related changes**: Group logically related edits together, but keep each edit focused and minimal
-- **Preserve structure**: Maintain existing formatting, indentation, and file organization
-- **Avoid full rewrites**: Never regenerate an entire file when only a portion needs changes
+**Why this matters**: Large file outputs can exceed token limits, cause truncation, or fail silently. Incremental writes are reliable and verifiable.
 
 ### Context limitations warning
 

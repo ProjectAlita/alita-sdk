@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from traceback import format_exc
-from typing import Any, Optional, List, Union, Literal, Dict
+from typing import Any, Optional, List, Union, Literal, Dict, TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -11,6 +11,9 @@ from pydantic import Field
 
 from ..langchain.constants import ELITEA_RS
 from ..langchain.utils import create_pydantic_model, propagate_the_input_mapping
+
+if TYPE_CHECKING:
+    from .lazy_tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +79,21 @@ class LLMNode(BaseTool):
     tool_names: Optional[List[str]] = Field(default=None, description='Specific tool names to filter')
     steps_limit: Optional[int] = Field(default=25, description='Maximum steps for tool execution')
     tool_execution_timeout: Optional[int] = Field(default=900, description='Timeout (seconds) for tool execution. Default is 15 minutes.')
+
+    # Lazy tools mode - reduces token usage by not binding all tools upfront
+    lazy_tools_mode: Optional[bool] = Field(
+        default=True,
+        description='Enable lazy tools mode. When True, only meta-tools (list_toolkits, get_toolkit_tools, invoke_tool) '
+                    'are bound to the LLM. The model uses these to discover and invoke any tool from the registry. '
+                    'This dramatically reduces token usage for agents with many toolkits (30-100+).'
+    )
+    tool_registry: Optional[Any] = Field(
+        default=None,
+        exclude=True,
+        description='ToolRegistry instance containing all tools organized by toolkit. '
+                    'Required when lazy_tools_mode is True.'
+    )
+    _meta_tools: Optional[List[BaseTool]] = None  # Cached meta-tools
 
     def _prepare_structured_output_params(self) -> dict:
         """
@@ -312,32 +330,128 @@ class LLMNode(BaseTool):
 
         return result
 
-    def get_filtered_tools(self) -> List[BaseTool]:
+    def get_filtered_tools(self, config: Optional[Any] = None) -> List[BaseTool]:
         """
-        Filter available tools based on tool_names list.
-        
+        Filter available tools based on tool_names list or return meta-tools in lazy mode.
+
+        In lazy_tools_mode (default), returns only meta-tools that allow the model
+        to discover and invoke any tool from the registry. This reduces token usage
+        from potentially 100k+ tokens to ~2k tokens for agents with many toolkits.
+
+        If dynamic tool selection was performed (selected_tools in config), those
+        tools are returned directly instead of meta-tools.
+
+        Args:
+            config: Optional runnable config that may contain selected_tools from
+                    dynamic tool selection
+
         Returns:
-            List of filtered tools
+            List of filtered tools (or meta-tools in lazy mode)
         """
+        # Check for dynamically selected tools from pre-LLM selection
+        if config is not None:
+            configurable = config.get('configurable', {}) if isinstance(config, dict) else {}
+            selected_tools = configurable.get('selected_tools')
+            if selected_tools:
+                logger.info(f"[DynamicToolSelection] Using {len(selected_tools)} pre-selected tools")
+                return selected_tools
+
+        # Check if lazy tools mode is enabled and we have a registry
+        if self.lazy_tools_mode and self.tool_registry is not None:
+            return self._get_meta_tools()
+
+        # Traditional mode - bind actual tools
         if not self.available_tools:
             return []
-            
+
         if not self.tool_names:
             # If no specific tool names provided, return all available tools
             return self.available_tools
-            
+
         # Filter tools by name
         filtered_tools = []
         available_tool_names = {tool.name: tool for tool in self.available_tools}
-        
+
         for tool_name in self.tool_names:
             if tool_name in available_tool_names:
                 filtered_tools.append(available_tool_names[tool_name])
                 logger.debug(f"Added tool '{tool_name}' to LLM node")
             else:
                 logger.warning(f"Tool '{tool_name}' not found in available tools: {list(available_tool_names.keys())}")
-        
+
         return filtered_tools
+
+    def _get_meta_tools(self) -> List[BaseTool]:
+        """
+        Get or create meta-tools for lazy loading.
+
+        Meta-tools are cached on first creation to avoid recreating them
+        on every tool access.
+
+        Returns:
+            List of meta-tools [list_toolkits, get_toolkit_tools, invoke_tool]
+        """
+        if self._meta_tools is None:
+            from .lazy_tools import create_meta_tools
+            self._meta_tools = create_meta_tools(self.tool_registry)
+            logger.info(
+                f"[LazyTools] Created {len(self._meta_tools)} meta-tools for "
+                f"{len(self.tool_registry.get_toolkit_names())} toolkits, "
+                f"{sum(len(self.tool_registry.get_toolkit_tools(t)) for t in self.tool_registry.get_toolkit_names())} tools"
+            )
+        return self._meta_tools
+
+    def get_tool_index(self) -> str:
+        """
+        Generate a compressed tool index for inclusion in system prompt.
+
+        This is only meaningful in lazy_tools_mode when a tool_registry is available.
+
+        Returns:
+            Formatted string with toolkit/tool index, or empty string if not applicable
+        """
+        if self.tool_registry is not None:
+            return self.tool_registry.generate_index()
+        return ""
+
+    def _inject_tool_index_into_messages(self, messages: List) -> List:
+        """
+        Inject tool index into the system message for chat-based interactions.
+
+        For lazy tools mode, the model needs to see what tools are available.
+        This method finds the first SystemMessage and appends the tool index.
+
+        Args:
+            messages: List of messages from state
+
+        Returns:
+            Modified messages list with tool index injected into system message
+        """
+        if not self.tool_registry:
+            return messages
+
+        tool_index = self.tool_registry.generate_index()
+
+        # Find and modify the system message
+        modified_messages = []
+        index_injected = False
+
+        for msg in messages:
+            if isinstance(msg, SystemMessage) and not index_injected:
+                # Append tool index to system message
+                new_content = f"{msg.content}\n\n{tool_index}"
+                modified_messages.append(SystemMessage(content=new_content))
+                index_injected = True
+                logger.debug("[LazyTools] Injected tool index into existing system message")
+            else:
+                modified_messages.append(msg)
+
+        # If no system message found, prepend one with just the tool index
+        if not index_injected:
+            modified_messages.insert(0, SystemMessage(content=tool_index))
+            logger.debug("[LazyTools] Added new system message with tool index")
+
+        return modified_messages
 
     def _get_tool_truncation_suggestions(self, tool_name: Optional[str]) -> str:
         """
@@ -402,6 +516,10 @@ class LLMNode(BaseTool):
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
 
+        # Check if dynamic tool selection was performed (affects tool index injection)
+        configurable = config.get('configurable', {}) if isinstance(config, dict) and config else {}
+        has_selected_tools = bool(configurable.get('selected_tools'))
+
         # there are 2 possible flows here: LLM node from pipeline (with prompt and task)
         # or standalone LLM node for chat (with messages only)
         if 'system' in func_args.keys():
@@ -410,7 +528,16 @@ class LLMNode(BaseTool):
                 raise ToolException(f"LLMNode requires 'system' and 'task' parameters in input mapping. "
                                     f"Actual params: {func_args}")
             # cast to str in case user passes variable different from str
-            messages = [SystemMessage(content=str(func_args.get('system'))), *func_args.get('chat_history', []), HumanMessage(content=str(func_args.get('task')))]
+            system_content = str(func_args.get('system'))
+
+            # Inject tool index into system prompt if lazy tools mode is enabled
+            # Skip injection if dynamic tool selection provided actual tools
+            if self.lazy_tools_mode and self.tool_registry is not None and not has_selected_tools:
+                tool_index = self.tool_registry.generate_index()
+                system_content = f"{system_content}\n\n{tool_index}"
+                logger.debug("[LazyTools] Injected tool index into system prompt")
+
+            messages = [SystemMessage(content=system_content), *func_args.get('chat_history', []), HumanMessage(content=str(func_args.get('task')))]
             # Remove pre-last item if last two messages are same type and content
             if len(messages) >= 2 and type(messages[-1]) == type(messages[-2]) and messages[-1].content == messages[
                 -2].content:
@@ -423,14 +550,27 @@ class LLMNode(BaseTool):
                 # the last message has to be HumanMessage
                 if not isinstance(messages[-1], HumanMessage):
                     raise ToolException("LLMNode requires the last message to be a HumanMessage")
+
+                # Inject tool index into system message if lazy tools mode is enabled
+                # Skip injection if dynamic tool selection provided actual tools
+                if self.lazy_tools_mode and self.tool_registry is not None and not has_selected_tools:
+                    messages = self._inject_tool_index_into_messages(messages)
             else:
                 raise ToolException("LLMNode requires 'messages' in state for chat-based interaction")
 
         # Get the LLM client, potentially with tools bound
         llm_client = self.client
 
-        if len(self.tool_names or []) > 0:
-            filtered_tools = self.get_filtered_tools()
+        # Bind tools when:
+        # 1. Traditional mode: specific tool_names are provided, OR
+        # 2. Lazy mode: tool_registry exists (meta-tools will be bound)
+        should_bind_tools = (
+            len(self.tool_names or []) > 0 or
+            (self.lazy_tools_mode and self.tool_registry is not None)
+        )
+
+        if should_bind_tools:
+            filtered_tools = self.get_filtered_tools(config=config)
             if filtered_tools:
                 logger.info(f"Binding {len(filtered_tools)} tools to LLM: {[t.name for t in filtered_tools]}")
                 llm_client = self.client.bind_tools(filtered_tools)

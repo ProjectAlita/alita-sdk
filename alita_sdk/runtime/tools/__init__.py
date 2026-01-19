@@ -11,6 +11,14 @@ from .image_generation import (
     ImageGenerationToolkit
 )
 from .skill_router import SkillRouterWrapper
+from .lazy_tools import (
+    ToolRegistry,
+    create_meta_tools,
+    ListToolkitsTool,
+    GetToolkitToolsTool,
+    InvokeToolTool,
+    estimate_token_savings,
+)
 
 __all__ = [
     "PyodideSandboxTool",
@@ -20,5 +28,12 @@ __all__ = [
     "ImageGenerationTool",
     "ImageGenerationToolkit",
     "create_image_generation_tool",
-    "SkillRouterWrapper"
+    "SkillRouterWrapper",
+    # Lazy tools
+    "ToolRegistry",
+    "create_meta_tools",
+    "ListToolkitsTool",
+    "GetToolkitToolsTool",
+    "InvokeToolTool",
+    "estimate_token_savings",
 ]

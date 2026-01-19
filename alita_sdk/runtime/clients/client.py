@@ -16,9 +16,6 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 
 from ..langchain.assistant import Assistant as LangChainAssistant
-# from ..llamaindex.assistant import Assistant as LLamaAssistant
-from .prompt import AlitaPrompt
-from .datasource import AlitaDataSource
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
 from ..utils.mcp_oauth import McpAuthorizationRequired
@@ -26,6 +23,47 @@ from ...tools import get_available_toolkit_models, instantiate_toolkit
 from ...tools.base_indexer_toolkit import IndexTools
 
 logger = logging.getLogger(__name__)
+
+
+# Canonical app_type values
+APP_TYPE_AGENT = "agent"      # Standard LangGraph react agent with tools
+APP_TYPE_PIPELINE = "pipeline"  # Graph-based workflow agent
+APP_TYPE_PREDICT = "predict"    # Special agent without memory store
+
+# Legacy app_type mappings for backwards compatibility
+_APP_TYPE_ALIASES = {
+    "react": APP_TYPE_AGENT,
+    "openai": APP_TYPE_AGENT,
+    "alita": APP_TYPE_AGENT,
+    "llama": APP_TYPE_AGENT,
+    "dial": APP_TYPE_AGENT,
+    "autogen": APP_TYPE_AGENT,
+    # Canonical types map to themselves
+    "agent": APP_TYPE_AGENT,
+    "pipeline": APP_TYPE_PIPELINE,
+    "predict": APP_TYPE_PREDICT,
+}
+
+
+def normalize_app_type(app_type: str) -> str:
+    """
+    Normalize app_type to canonical value.
+
+    Canonical types:
+    - 'agent': Standard LangGraph react agent (replaces react, openai, alita, llama, dial, autogen)
+    - 'pipeline': Graph-based workflow agent
+    - 'predict': Special agent without memory store
+
+    Args:
+        app_type: Raw app_type string from API or config
+
+    Returns:
+        Normalized canonical app_type
+    """
+    normalized = _APP_TYPE_ALIASES.get(app_type, APP_TYPE_AGENT)
+    if app_type and app_type != normalized:
+        logger.debug(f"Normalized app_type '{app_type}' -> '{normalized}'")
+    return normalized
 
 
 class ApiDetailsRequestError(Exception):
@@ -54,11 +92,6 @@ class AlitaClient:
         if api_extra_headers is not None:
             self.headers.update(api_extra_headers)
         self.predict_url = f"{self.base_url}{self.api_path}/prompt_lib/predict/prompt_lib/{self.project_id}"
-        self.prompt_versions = f"{self.base_url}{self.api_path}/prompt_lib/version/prompt_lib/{self.project_id}"
-        self.prompts = f"{self.base_url}{self.api_path}/prompt_lib/prompt/prompt_lib/{self.project_id}"
-        self.datasources = f"{self.base_url}{self.api_path}/datasources/datasource/prompt_lib/{self.project_id}"
-        self.datasources_predict = f"{self.base_url}{self.api_path}/datasources/predict/prompt_lib/{self.project_id}"
-        self.datasources_search = f"{self.base_url}{self.api_path}/datasources/search/prompt_lib/{self.project_id}"
         self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
         self.mcp_tools_list = f"{self.base_url}{self.api_path}/mcp_sse/tools_list/{self.project_id}"
         self.mcp_tools_call = f"{self.base_url}{self.api_path}/mcp_sse/tools_call/{self.project_id}"
@@ -111,40 +144,6 @@ class AlitaClient:
                 return response.text
         else:
             return f"Error: Could not determine user ID for MCP tool call"
-
-    def prompt(self, prompt_id, prompt_version_id, chat_history=None, return_tool=False):
-        url = f"{self.prompt_versions}/{prompt_id}/{prompt_version_id}"
-        data = requests.get(url, headers=self.headers, verify=False).json()
-        model_settings = data['model_settings']
-        messages = [SystemMessage(content=data['context'])]
-        variables = {}
-        if data['messages']:
-            for message in data['messages']:
-                if message.get('role') == 'assistant':
-                    messages.append(AIMessage(content=message['content']))
-                elif message.get('role') == 'user':
-                    messages.append(HumanMessage(content=message['content']))
-                else:
-                    messages.append(SystemMessage(content=message['content']))
-        if chat_history and isinstance(chat_history, list):
-            messages.extend(chat_history)
-        input_variables = []
-        for variable in data['variables']:
-            if variable['value']:
-                variables[variable['name']] = variable['value']
-            else:
-                input_variables.append(variable['name'])
-        template = Jinja2TemplatedChatMessagesTemplate(messages=messages)
-        if input_variables and not variables:
-            template.input_variables = input_variables
-        if variables:
-            template.partial_variables = variables
-        if not return_tool:
-            return template
-        else:
-            url = f"{self.prompts}/{prompt_id}"
-            data = requests.get(url, headers=self.headers, verify=False).json()
-            return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
 
     def get_app_details(self, application_id: int):
         url = f"{self.app}/{application_id}"
@@ -442,16 +441,10 @@ class AlitaClient:
                     "model_project_id": data['llm_settings'].get('model_project_id'),
                 }
             )
+        # Normalize app_type to canonical value (agent, pipeline, or predict)
         if not app_type:
-            app_type = data.get("agent_type", "react")
-        if app_type == "alita":
-            app_type = "react"
-        elif app_type == "llama":
-            app_type = "react"
-        elif app_type == "dial":
-            app_type = "react"
-        elif app_type == 'autogen':
-            app_type = "react"
+            app_type = data.get("agent_type", "agent")
+        app_type = normalize_app_type(app_type)
 
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler
@@ -468,26 +461,6 @@ class AlitaClient:
                                       is_subgraph=is_subgraph).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
-
-    def datasource(self, datasource_id: int) -> AlitaDataSource:
-        url = f"{self.datasources}/{datasource_id}"
-        response = requests.get(url, headers=self.headers, verify=False)
-        if not response.ok:
-            raise Exception(f'Datasource request failed with code {response.status_code}\n{response.content}')
-        data = response.json()
-        ds_chat = data['version_details']['datasource_settings']['chat']
-        if not ds_chat:
-            raise Exception(f'Datasource with id {datasource_id} has missing model settings')
-        datasource_model = ds_chat['chat_settings_embedding']
-        chat_model = ds_chat['chat_settings_ai']
-        return AlitaDataSource(self, datasource_id, data["name"], data["description"],
-                               datasource_model, chat_model)
-
-    def assistant(self, prompt_id: int, prompt_version_id: int,
-                  tools: list, openai_tools: Optional[Dict] = None,
-                  client: Optional[Any] = None, chat_history: Optional[list] = None):
-        prompt = self.prompt(prompt_id=prompt_id, prompt_version_id=prompt_version_id, chat_history=chat_history)
-        return LangChainAssistant(client, prompt, tools, openai_tools)
 
     def artifact(self, bucket_name):
         return Artifact(self, bucket_name)
@@ -657,54 +630,6 @@ class AlitaClient:
         except TypeError:
             logger.error(f"TypeError in response of predict: {response.content}")
             raise
-
-    def rag(self, datasource_id: int,
-            user_input: Optional[str] = '',
-            context: Optional[str] = None,
-            chat_history: Optional[list] = None,
-            datasource_settings: Optional[dict] = None,
-            datasource_predict_settings: Optional[dict] = None):
-        data = {
-            "input": user_input,
-            "chat_history": chat_history,
-        }
-        if context is not None:
-            data["context"] = context
-        if datasource_settings is not None:
-            data["chat_settings_embedding"] = datasource_settings
-        if datasource_predict_settings is not None:
-            data["datasource_predict_settings"] = datasource_predict_settings
-        headers = self.headers | {"Content-Type": "application/json"}
-        response = requests.post(f"{self.datasources_predict}/{datasource_id}", headers=headers, json=data,
-                                 verify=False).json()
-        return AIMessage(content=response['response'], additional_kwargs={"references": response['references']})
-
-    def search(self, datasource_id: int, messages: list[BaseMessage], datasource_settings: dict) -> AIMessage:
-        chat_history = self._prepare_messages(messages)
-        user_input = ''
-        for message in chat_history[::-1]:
-            if message['role'] == 'user':
-                user_input = message['content']
-                break
-        data = {
-            "chat_history": [
-                {
-                    "role": "user",
-                    "content": user_input
-                }
-            ],
-            "chat_settings_embedding": datasource_settings,
-            "str_content": True
-        }
-        headers = self.headers | {"Content-Type": "application/json"}
-        response = requests.post(f"{self.datasources_search}/{datasource_id}", headers=headers, json=data, verify=False)
-        if not response.ok:
-            raise Exception(f'Search request failed with code {response.status_code}\n{response.content}')
-        resp_data = response.json()
-        # content = "\n\n".join([finding["page_content"] for finding in response["findings"]])
-        content = resp_data["findings"]
-        references = resp_data['references']
-        return AIMessage(content=content, additional_kwargs={"references": references})
 
     def _get_real_user_id(self):
         try:
