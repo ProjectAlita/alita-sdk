@@ -14,18 +14,20 @@ Example:
 
 import argparse
 import sys
-from pathlib import Path
 
 import requests
 
-# Import shared functions from seed_pipelines
-from seed_pipelines import (
-    DEFAULT_BASE_URL,
-    DEFAULT_PROJECT_ID,
+# Import shared utilities
+from utils_common import (
     load_token_from_env,
     load_session_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
+)
+
+from seed_pipelines import (
+    DEFAULT_BASE_URL,
+    DEFAULT_PROJECT_ID,
 )
 
 
