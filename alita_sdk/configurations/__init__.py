@@ -53,6 +53,7 @@ _safe_import_configuration('carrier', 'carrier', 'CarrierConfiguration')
 _safe_import_configuration('report_portal', 'report_portal', 'ReportPortalConfiguration')
 _safe_import_configuration('testio', 'testio', 'TestIOConfiguration')
 _safe_import_configuration('openapi', 'openapi', 'OpenApiConfiguration')
+_safe_import_configuration('langfuse', 'langfuse', 'LangfuseConfiguration')
 
 # Log import summary
 available_count = len(AVAILABLE_CONFIGURATIONS)
