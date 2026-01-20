@@ -380,16 +380,17 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         except Exception as e:
             return ToolException(f"Can't add comment to pull request `{pr_id}` due to error:\n{str(e)}")
 
-    def _get_files(self, path: str, branch: str) -> str:
+    def _get_files(self, path: str, branch: str, recursive: bool = True) -> str:
         """
         Get files from the bitbucket repo
         Parameters:
             path(str): the file path
             branch(str): branch name (by default: active_branch)
+            recursive(bool): whether to list files recursively
         Returns:
             str: List of the files
         """
-        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self._active_branch))
+        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self._active_branch, recursive=recursive))
 
     # TODO: review this method, it may not work as expected
     # def _file_commit_hash(self, file_path: str, branch: str):
@@ -427,7 +428,7 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         """List files in the repository with optional path, recursive search, and branch."""
         branch = branch if branch else self._active_branch
         try:
-            files_str = self._get_files(path, branch)
+            files_str = self._get_files(path, branch, recursive)
             # Parse the string response to extract file paths
             # This is a simplified implementation - might need adjustment based on actual response format
             import ast
