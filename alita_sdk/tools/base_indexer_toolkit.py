@@ -674,14 +674,16 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         except Exception as e:
             logger.warning(f"Failed to emit index_data_removed event: {e}")
 
-    def get_available_tools(self):
+    def get_available_tools(self, filter_by_collections: bool = False):
         """
         Returns the standardized vector search tools.
 
-        All indexer tools are only included if the toolkit has indexed collections.
-        This reduces token usage and prevents agents from seeing tools that can't do anything useful.
+        Args:
+            filter_by_collections: When True, only return indexer tools if the toolkit has indexed collections.
+                                   This reduces token usage for agents with lazy_tools_mode enabled.
+                                   Default is False (always return all indexer tools for UI display).
 
-        When collections exist, the following tools are available:
+        When collections exist (or filter_by_collections=False), the following tools are available:
         - index_data: Load data to index
         - list_collections: List available collections
         - search_index: Search indexed documents
@@ -695,14 +697,16 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         Returns:
             list: List of tool dictionaries with name, ref, description, and args_schema.
         """
-        # Only return indexer tools if collections exist
-        # This reduces token usage for toolkits without indexed data
-        has_collections = self._has_collections()
-        if not has_collections:
-            logger.debug(f"Toolkit has no collections, skipping all indexer tools")
-            return []
-
-        logger.debug(f"Toolkit has collections, adding all indexer tools")
+        # Only filter by collections when explicitly requested (lazy_tools_mode optimization)
+        # By default, always show all tools for UI display
+        if filter_by_collections:
+            has_collections = self._has_collections()
+            if not has_collections:
+                logger.debug(f"Toolkit has no collections and filter_by_collections=True, skipping all indexer tools")
+                return []
+            logger.debug(f"Toolkit has collections, adding all indexer tools")
+        else:
+            logger.debug(f"filter_by_collections=False, returning all indexer tools")
 
         index_params = {
             "index_name": (

@@ -12,7 +12,6 @@ from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from .mcp import McpToolkit
 from .mcp_config import McpConfigToolkit, get_mcp_config_toolkit_schemas
-from .skill_router import SkillRouterToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
 from ..tools.image_generation import ImageGenerationToolkit
@@ -39,7 +38,6 @@ def get_toolkits():
         DataAnalysisToolkit.toolkit_config_schema(),
         McpToolkit.toolkit_config_schema(),
         McpConfigToolkit.toolkit_config_schema(),
-        SkillRouterToolkit.toolkit_config_schema()
     ]
 
     # Add configured MCP servers (stdio and http) as available toolkits
@@ -235,28 +233,6 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     toolkit_name=tool.get('toolkit_name', ''),
                     client=alita_client,
                     **settings).get_tools())
-            elif tool['type'] == 'skill_router':
-                tool_handled = True
-                # Skills Registry Router Toolkit
-                logger.info(f"Processing skill_router toolkit: {tool}")
-                try:
-                    settings = tool.get('settings', {})
-                    toolkit_name = tool.get('toolkit_name', '')
-                    selected_tools = settings.get('selected_tools', [])
-
-                    toolkit_tools = SkillRouterToolkit.get_toolkit(
-                        client=alita_client,
-                        llm=llm,
-                        toolkit_name=toolkit_name,
-                        selected_tools=selected_tools,
-                        **settings
-                    ).get_tools()
-
-                    tools.extend(toolkit_tools)
-                    logger.info(f"✅ Successfully added {len(toolkit_tools)} tools from SkillRouterToolkit")
-                except Exception as e:
-                    logger.error(f"❌ Failed to initialize SkillRouterToolkit: {e}")
-                    raise
             elif tool['type'] == 'mcp_config' or tool['type'].startswith('mcp_'):
                 tool_handled = True
                 # MCP Config toolkit - pre-configured MCP servers (stdio or http)

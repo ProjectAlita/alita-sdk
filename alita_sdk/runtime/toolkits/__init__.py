@@ -12,7 +12,6 @@ from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from .mcp import McpToolkit
 from .mcp_config import McpConfigToolkit, get_session_manager as get_mcp_session_manager
-from .skill_router import SkillRouterToolkit
 from ...tools.memory import MemoryToolkit
 
 __all__ = [
@@ -23,6 +22,5 @@ __all__ = [
     "McpToolkit",
     "McpConfigToolkit",
     "get_mcp_session_manager",
-    "SkillRouterToolkit",
     "MemoryToolkit"
 ]
