@@ -9,9 +9,10 @@ UPDATE_FILE_MARKERS_DESCRIPTION = """
 **Marker format:**
 - OLD block: starts with `OLD <<<<` and ends with `>>>> OLD`
 - NEW block: starts with `NEW <<<<` and ends with `>>>> NEW`
+- **IMPORTANT:** Markers must be on their own dedicated line (not inline with other content)
 - Content must be on separate lines between opening and closing markers
 - Leading/trailing whitespace in content is stripped
-- Only the first OLD/NEW pair is processed
+- Multiple OLD/NEW pairs are supported for multiple edits in a single request
 
 **Examples:**
 
@@ -46,6 +47,22 @@ NEW <<<<
 new line 1
 new line 2
 new line 3
+>>>> NEW
+```
+
+Example 4 - Multiple edits in one request:
+```
+OLD <<<<
+first old content
+>>>> OLD
+NEW <<<<
+first new content
+>>>> NEW
+OLD <<<<
+second old content
+>>>> OLD
+NEW <<<<
+second new content
 >>>> NEW
 ```"""
 
