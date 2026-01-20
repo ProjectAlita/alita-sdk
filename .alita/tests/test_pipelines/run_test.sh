@@ -23,6 +23,7 @@ VERBOSE=""
 DO_SETUP=false
 DO_SEED=false
 DO_CLEANUP=false
+LOCAL_MODE=false
 ENV_FILE=".env"
 TIMEOUT=120
 
@@ -40,6 +41,7 @@ print_usage() {
     echo "  --seed             Seed pipelines before running (required first time)"
     echo "  --cleanup          Run cleanup after testing"
     echo "  --all              Equivalent to --setup --seed --cleanup (full workflow)"
+    echo "  --local            Run tests locally without backend (isolated mode)"
     echo "  --env-file FILE    Environment file to use (default: .env)"
     echo "  --timeout SEC      Execution timeout per pipeline (default: 120)"
     echo "  -v, --verbose      Enable verbose output"
@@ -62,6 +64,9 @@ print_usage() {
     echo ""
     echo "  # Re-seed and run (after modifying test YAML)"
     echo "  $0 --seed github_toolkit update_file"
+    echo ""
+    echo "  # Run locally without backend"
+    echo "  $0 --local github_toolkit update_file"
     echo ""
     echo "Workflow:"
     echo "  1. First run:  $0 --setup --seed <suite> <pattern>"
@@ -90,6 +95,10 @@ while [[ $# -gt 0 ]]; do
             DO_SETUP=true
             DO_SEED=true
             DO_CLEANUP=true
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=true
             shift
             ;;
         --env-file)
@@ -148,13 +157,24 @@ fi
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${BLUE}  Running Test: $PATTERN${NC}"
 echo -e "${BLUE}  Suite: $SUITE${NC}"
+if [ "$LOCAL_MODE" = true ]; then
+    echo -e "${BLUE}  Mode: LOCAL (no backend)${NC}"
+else
+    echo -e "${BLUE}  Mode: REMOTE (backend API)${NC}"
+fi
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo ""
+
+# Build local flag for scripts
+LOCAL_FLAG=""
+if [ "$LOCAL_MODE" = true ]; then
+    LOCAL_FLAG="--local"
+fi
 
 # Step 1: Setup (optional)
 if [ "$DO_SETUP" = true ]; then
     echo -e "${YELLOW}▶ Running setup...${NC}"
-    if python scripts/setup.py "$SUITE" $VERBOSE --output-env "$ENV_FILE"; then
+    if python scripts/setup.py "$SUITE" $VERBOSE --output-env "$ENV_FILE" $LOCAL_FLAG; then
         echo -e "${GREEN}✓ Setup completed${NC}"
     else
         echo -e "${RED}✗ Setup failed${NC}"
@@ -173,7 +193,7 @@ fi
 # Step 2: Seed (optional)
 if [ "$DO_SEED" = true ]; then
     echo -e "${YELLOW}▶ Seeding pipelines matching: '$PATTERN'${NC}"
-    if python scripts/seed_pipelines.py "$SUITE" --env-file "$ENV_FILE" --pattern "$PATTERN" $VERBOSE; then
+    if python scripts/seed_pipelines.py "$SUITE" --env-file "$ENV_FILE" --pattern "$PATTERN" $VERBOSE $LOCAL_FLAG; then
         echo -e "${GREEN}✓ Pipelines seeded${NC}"
     else
         echo -e "${RED}✗ Seeding failed${NC}"
@@ -196,7 +216,8 @@ if python scripts/run_suite.py "$SUITE" \
     --pattern "$PATTERN" \
     --timeout "$TIMEOUT" \
     --env-file "$ENV_FILE" \
-    $VERBOSE; then
+    $VERBOSE \
+    $LOCAL_FLAG; then
 
     RUN_STATUS=0
     echo ""
@@ -211,7 +232,7 @@ fi
 if [ "$DO_CLEANUP" = true ]; then
     echo ""
     echo -e "${YELLOW}▶ Running cleanup...${NC}"
-    if python scripts/cleanup.py "$SUITE" --yes $VERBOSE; then
+    if python scripts/cleanup.py "$SUITE" --yes $VERBOSE $LOCAL_FLAG; then
         echo -e "${GREEN}✓ Cleanup completed${NC}"
     else
         echo -e "${RED}✗ Cleanup failed (continuing)${NC}"

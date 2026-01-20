@@ -41,11 +41,19 @@ import yaml
 from seed_pipelines import (
     DEFAULT_BASE_URL,
     DEFAULT_PROJECT_ID,
+)
+
+# Import shared utilities
+from utils_common import (
+    load_config,
+    load_toolkit_config,
+    parse_suite_spec,
+    resolve_env_value,
+    set_env_file,
     load_from_env,
     load_token_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
-    set_env_file,
 )
 
 
@@ -78,33 +86,6 @@ class SetupContext:
             headers["Content-Type"] = "application/json"
         return headers
 
-    def resolve_env(self, value: Any) -> Any:
-        """Resolve environment variable references in a value."""
-        if isinstance(value, str):
-            # Handle ${VAR} and ${VAR:default} patterns
-            pattern = r'\$\{([^}:]+)(?::([^}]*))?\}'
-
-            def replacer(match):
-                var_name = match.group(1)
-                default = match.group(2)
-
-                # Check context env_vars first, then os.environ, then .env
-                if var_name in self.env_vars:
-                    return str(self.env_vars[var_name])
-                env_value = load_from_env(var_name)
-                if env_value:
-                    return env_value
-                if default is not None:
-                    return default
-                return match.group(0)  # Return original if not found
-
-            return re.sub(pattern, replacer, value)
-        elif isinstance(value, dict):
-            return {k: self.resolve_env(v) for k, v in value.items()}
-        elif isinstance(value, list):
-            return [self.resolve_env(v) for v in value]
-        return value
-
     def log(self, message: str, level: str = "info"):
         """Log a message if verbose mode is enabled."""
         if self.verbose or level in ("error", "warning"):
@@ -115,62 +96,6 @@ class SetupContext:
         """Save a value to the context environment."""
         self.env_vars[key] = value
         self.log(f"Saved {key}={value}", "info")
-
-
-def parse_suite_spec(suite_spec: str) -> tuple[str, str | None]:
-    """Parse suite specification into folder and optional pipeline file.
-
-    Format: 'suite_name' or 'suite_name:pipeline_file.yaml'
-
-    Examples:
-        'github_toolkit' -> ('github_toolkit', None)
-        'github_toolkit_negative:pipeline_validation.yaml' -> ('github_toolkit_negative', 'pipeline_validation.yaml')
-
-    Returns:
-        Tuple of (folder_name, pipeline_file or None)
-    """
-    if ':' in suite_spec:
-        folder, pipeline_file = suite_spec.split(':', 1)
-        return folder, pipeline_file
-    return suite_spec, None
-
-
-def load_config(suite_folder: Path, pipeline_file: str | None = None) -> dict:
-    """Load pipeline config from a suite folder.
-
-    Args:
-        suite_folder: Path to the suite directory
-        pipeline_file: Optional specific pipeline file name (e.g., 'pipeline_validation.yaml').
-                      If None, uses 'pipeline.yaml' or 'config.yaml' as fallback.
-
-    Returns:
-        Parsed YAML config dict.
-    """
-    if pipeline_file:
-        config_path = suite_folder / pipeline_file
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-    else:
-        # Try pipeline.yaml first (new convention)
-        config_path = suite_folder / "pipeline.yaml"
-        if not config_path.exists():
-            # Fall back to config.yaml for backwards compatibility
-            config_path = suite_folder / "config.yaml"
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_path) as f:
-        return yaml.safe_load(f)
-
-
-def load_toolkit_config(config_file: str, base_path: Path) -> dict:
-    """Load a toolkit configuration file."""
-    # Resolve relative path
-    if not os.path.isabs(config_file):
-        config_file = str(base_path / config_file)
-
-    with open(config_file) as f:
-        return json.load(f)
 
 
 def extract_json_path(data: Any, path: str) -> Any:
@@ -208,7 +133,7 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
     Configuration management (credentials) should be handled as separate
     'configuration' steps before toolkit creation.
     """
-    config = ctx.resolve_env(step.get("config", {}))
+    config = resolve_env_value(step.get("config", {}), ctx.env_vars, env_loader=load_from_env)
 
     # Load base config from file if specified
     file_config = {}
@@ -429,7 +354,7 @@ def handle_configuration(step: dict, ctx: SetupContext) -> dict:
       - alita_title: The configuration title/name
       - data: The configuration data (fields depend on config_type)
     """
-    config = ctx.resolve_env(step.get("config", {}))
+    config = resolve_env_value(step.get("config", {}), ctx.env_vars, env_loader=load_from_env)
 
     config_type = config.get("config_type")
     alita_title = config.get("alita_title")
@@ -507,7 +432,7 @@ def handle_toolkit_invoke(step: dict, ctx: SetupContext) -> dict:
       - tool_name: The tool to call
       - tool_params: Parameters to pass to the tool (optional)
     """
-    config = ctx.resolve_env(step.get("config", {}))
+    config = resolve_env_value(step.get("config", {}), ctx.env_vars, env_loader=load_from_env)
 
     toolkit_id = config.get("toolkit_id") or config.get("toolkit_ref")
     tool_name = config.get("tool_name")
@@ -587,9 +512,37 @@ def invoke_toolkit_tool(ctx: SetupContext, toolkit_id: int, tool_name: str, para
 # Main Setup Execution
 # =============================================================================
 
+# Import strategy classes
+from setup_strategy import (
+    SetupStrategy,
+    RemoteSetupStrategy,
+    LocalSetupStrategy,
+    get_default_strategy,
+)
 
-def execute_setup(config: dict, ctx: SetupContext, base_path: Path) -> dict:
-    """Execute all setup steps from config."""
+
+def execute_setup(
+    config: dict,
+    ctx: SetupContext,
+    base_path: Path,
+    strategy: SetupStrategy = None
+) -> dict:
+    """Execute all setup steps from config.
+    
+    Args:
+        config: Suite configuration dict containing 'setup' steps
+        ctx: SetupContext with environment and authentication
+        base_path: Base path for resolving relative file paths
+        strategy: SetupStrategy to use for step execution.
+                 Defaults to RemoteSetupStrategy if not provided.
+    
+    Returns:
+        Dict with 'success', 'steps', and 'env_vars' keys
+    """
+    # Use default strategy (Remote) if none provided
+    if strategy is None:
+        strategy = get_default_strategy()
+    
     setup_steps = config.get("setup", [])
     results = {"success": True, "steps": [], "env_vars": {}}
 
@@ -614,22 +567,22 @@ def execute_setup(config: dict, ctx: SetupContext, base_path: Path) -> dict:
             results["steps"].append({"name": step_name, "skipped": True})
             continue
 
-        # Execute step based on type
+        # Execute step based on type using strategy
         step_result = {"success": False, "error": "Unknown step type"}
 
         try:
             if step_type == "toolkit":
-                # Create or update toolkit entity on the platform
+                # Create or update toolkit entity
                 if action == "create_or_update":
-                    step_result = handle_toolkit_create(step, ctx, base_path)
+                    step_result = strategy.handle_toolkit_create(step, ctx, base_path)
                 else:
                     step_result = {"success": False, "error": f"Unknown toolkit action: {action}"}
             elif step_type == "toolkit_invoke":
-                # Generic toolkit tool invocation (toolkit-agnostic)
-                step_result = handle_toolkit_invoke(step, ctx)
+                # Generic toolkit tool invocation
+                step_result = strategy.handle_toolkit_invoke(step, ctx)
             elif step_type == "configuration":
                 # Create or ensure configurations exist
-                step_result = handle_configuration(step, ctx)
+                step_result = strategy.handle_configuration(step, ctx)
             else:
                 step_result = {"success": False, "error": f"Unknown step type: {step_type}"}
         except Exception as e:
@@ -687,8 +640,29 @@ def run(
     dry_run: bool = False,
     verbose: bool = False,
     quiet: bool = False,
+    local: bool = False,
 ) -> dict:
-    """Run set up programmatically."""
+    """Run set up programmatically.
+    
+    Args:
+        folder: Suite folder name
+        env_file: Path to env file to load
+        output_env: Path to write generated env vars
+        base_url: Platform base URL
+        project_id: Project ID
+        token: Bearer token for authentication
+        dry_run: Show what would be done without executing
+        verbose: Enable verbose output
+        quiet: Suppress non-error output
+        local: Local mode - prepare environment without backend calls
+    """
+    # In local mode, we prepare environment but skip backend calls
+    # This essentially acts like dry_run but still writes env file
+    if local:
+        dry_run = True  # Skip backend calls
+        if verbose:
+            print("[LOCAL MODE] Skipping backend calls, preparing local environment")
+    
     # Load environment file if provided
     if env_file:
         env_file_path = Path(env_file)
@@ -769,6 +743,8 @@ def main():
         "--env-file",
         help="Load environment variables from a specific file (e.g., existing .env)",
     )
+    parser.add_argument("--local", action="store_true", 
+                        help="Local mode: prepare environment without backend calls")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without executing")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--output-env", "-o", help="Write generated env vars to file")
@@ -786,7 +762,8 @@ def main():
             token=args.token,
             dry_run=args.dry_run,
             verbose=args.verbose,
-            quiet=args.json
+            quiet=args.json,
+            local=args.local,
         )
     except Exception as e:
         if args.json:

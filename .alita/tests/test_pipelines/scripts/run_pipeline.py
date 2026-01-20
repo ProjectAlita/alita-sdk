@@ -35,6 +35,9 @@ from typing import Optional, Any
 
 import requests
 
+# Import shared utilities
+from utils_common import load_from_env, load_token_from_env, load_base_url_from_env, load_project_id_from_env
+
 
 @dataclass
 class PipelineResult:
@@ -53,28 +56,6 @@ class PipelineResult:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, default=str)
-
-
-def load_from_env(var_name: str) -> Optional[str]:
-    """Load value from environment variable or .env file."""
-    value = os.environ.get(var_name)
-    if value:
-        return value
-
-    env_paths = [
-        Path(__file__).parent / ".env",
-        Path(__file__).parent.parent.parent.parent / ".env",  # alita-sdk root
-        Path(__file__).parent.parent.parent.parent.parent / ".env",  # elitea root
-    ]
-
-    for env_path in env_paths:
-        if env_path.exists():
-            with open(env_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith(f"{var_name}="):
-                        return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return None
 
 
 def get_auth_headers(include_content_type: bool = False) -> dict:
@@ -111,107 +92,32 @@ def get_pipeline_by_name(base_url: str, project_id: int, name: str, headers: dic
     return None
 
 
-def execute_pipeline(
-    base_url: str,
-    project_id: int,
-    pipeline: dict,
-    input_message: str = "",
-    timeout: int = 120,
-    verbose: bool = False
+def process_pipeline_result(
+    result_data: Any,
+    pipeline_id: int = 0,
+    pipeline_name: str = "Unknown",
+    version_id: Optional[int] = None,
+    execution_time: float = 0.0,
+    verbose: bool = False,
 ) -> PipelineResult:
-    """Execute a pipeline using the v2 predict API (synchronous)."""
-    start_time = time.time()
-    headers = get_auth_headers(include_content_type=True)
-
-    pipeline_id = pipeline["id"]
-    pipeline_name = pipeline.get("name", f"Pipeline {pipeline_id}")
-
-    # Get the latest version
-    versions = pipeline.get("versions", [])
-    if not versions:
-        return PipelineResult(
-            success=False,
-            pipeline_id=pipeline_id,
-            pipeline_name=pipeline_name,
-            error="No versions found for pipeline"
-        )
-
-    version = versions[0]  # Latest version
-    version_id = version.get("id")
-
-    if verbose:
-        print(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})")
-
-    # Use v2 predict API for synchronous execution
-    predict_url = f"{base_url}/api/v2/elitea_core/predict/prompt_lib/{project_id}/{version_id}"
-    payload = {
-        "chat_history": [],
-        "user_input": input_message or "execute"
-    }
-
-    if verbose:
-        print(f"  POST {predict_url}")
-        print(f"  Payload: {json.dumps(payload)}")
-
-    try:
-        response = requests.post(
-            predict_url,
-            headers=headers,
-            json=payload,
-            timeout=timeout
-        )
-    except requests.exceptions.Timeout:
-        execution_time = time.time() - start_time
-        return PipelineResult(
-            success=False,
-            pipeline_id=pipeline_id,
-            pipeline_name=pipeline_name,
-            version_id=version_id,
-            execution_time=execution_time,
-            error=f"Request timed out after {timeout}s"
-        )
-    except Exception as e:
-        execution_time = time.time() - start_time
-        return PipelineResult(
-            success=False,
-            pipeline_id=pipeline_id,
-            pipeline_name=pipeline_name,
-            version_id=version_id,
-            execution_time=execution_time,
-            error=f"Request failed: {e}"
-        )
-
-    execution_time = time.time() - start_time
-
-    if verbose:
-        print(f"  Response: {response.status_code}")
-
-    # Handle HTTP errors
-    if response.status_code not in (200, 201):
-        error_text = response.text[:500] if response.text else "No response body"
-        return PipelineResult(
-            success=False,
-            pipeline_id=pipeline_id,
-            pipeline_name=pipeline_name,
-            version_id=version_id,
-            execution_time=execution_time,
-            error=f"HTTP {response.status_code}: {error_text}"
-        )
-
-    # Parse response
-    try:
-        result_data = response.json()
-    except json.JSONDecodeError:
-        return PipelineResult(
-            success=False,
-            pipeline_id=pipeline_id,
-            pipeline_name=pipeline_name,
-            version_id=version_id,
-            execution_time=execution_time,
-            output=response.text,
-            error="Response is not valid JSON"
-        )
-
+    """
+    Process raw pipeline output into a structured PipelineResult.
+    
+    This function handles output from both:
+    - Remote execution: /predict API response
+    - Local execution: graph.invoke() result
+    
+    Args:
+        result_data: The raw output from pipeline execution (dict or response data)
+        pipeline_id: ID of the pipeline (0 for local execution)
+        pipeline_name: Name of the pipeline
+        version_id: Optional version ID
+        execution_time: Time taken for execution
+        verbose: Enable verbose logging
+        
+    Returns:
+        PipelineResult with extracted test results and metadata
+    """
     # Check for error in response (only if error is non-null)
     if isinstance(result_data, dict) and result_data.get("error"):
         return PipelineResult(
@@ -351,6 +257,9 @@ def execute_pipeline(
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+    if verbose:
+        print(f"  Processed result - test_passed: {test_passed}")
+
     return PipelineResult(
         success=True,
         pipeline_id=pipeline_id,
@@ -360,6 +269,118 @@ def execute_pipeline(
         execution_time=execution_time,
         output=output,
         error=detected_error
+    )
+
+
+def execute_pipeline(
+    base_url: str,
+    project_id: int,
+    pipeline: dict,
+    input_message: str = "",
+    timeout: int = 120,
+    verbose: bool = False
+) -> PipelineResult:
+    """Execute a pipeline using the v2 predict API (synchronous)."""
+    start_time = time.time()
+    headers = get_auth_headers(include_content_type=True)
+
+    pipeline_id = pipeline["id"]
+    pipeline_name = pipeline.get("name", f"Pipeline {pipeline_id}")
+
+    # Get the latest version
+    versions = pipeline.get("versions", [])
+    if not versions:
+        return PipelineResult(
+            success=False,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
+            error="No versions found for pipeline"
+        )
+
+    version = versions[0]  # Latest version
+    version_id = version.get("id")
+
+    if verbose:
+        print(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})")
+
+    # Use v2 predict API for synchronous execution
+    predict_url = f"{base_url}/api/v2/elitea_core/predict/prompt_lib/{project_id}/{version_id}"
+    payload = {
+        "chat_history": [],
+        "user_input": input_message or "execute"
+    }
+
+    if verbose:
+        print(f"  POST {predict_url}")
+        print(f"  Payload: {json.dumps(payload)}")
+
+    try:
+        response = requests.post(
+            predict_url,
+            headers=headers,
+            json=payload,
+            timeout=timeout
+        )
+    except requests.exceptions.Timeout:
+        execution_time = time.time() - start_time
+        return PipelineResult(
+            success=False,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
+            version_id=version_id,
+            execution_time=execution_time,
+            error=f"Request timed out after {timeout}s"
+        )
+    except Exception as e:
+        execution_time = time.time() - start_time
+        return PipelineResult(
+            success=False,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
+            version_id=version_id,
+            execution_time=execution_time,
+            error=f"Request failed: {e}"
+        )
+
+    execution_time = time.time() - start_time
+
+    if verbose:
+        print(f"  Response: {response.status_code}")
+
+    # Handle HTTP errors
+    if response.status_code not in (200, 201):
+        error_text = response.text[:500] if response.text else "No response body"
+        return PipelineResult(
+            success=False,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
+            version_id=version_id,
+            execution_time=execution_time,
+            error=f"HTTP {response.status_code}: {error_text}"
+        )
+
+    # Parse response
+    try:
+        result_data = response.json()
+    except json.JSONDecodeError:
+        return PipelineResult(
+            success=False,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
+            version_id=version_id,
+            execution_time=execution_time,
+            output=response.text,
+            error="Response is not valid JSON"
+        )
+
+    # Process the result using shared function
+    return process_pipeline_result(
+        result_data=result_data,
+        pipeline_id=pipeline_id,
+        pipeline_name=pipeline_name,
+        version_id=version_id,
+        execution_time=execution_time,
+        verbose=verbose,
     )
 
 

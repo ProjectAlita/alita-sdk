@@ -1,0 +1,23 @@
+{
+  "type": "jira",
+  "toolkit_name": "jira",
+  "id": 1,
+  "base_url": "https://epamelitea.atlassian.net/",
+  "cloud": true,
+  "api_version": "3",
+  "limit": 10,
+  "verify_ssl": true,
+  "selected_tools": [
+    "search_using_jql",
+    "create_issue",
+    "update_issue",
+    "add_comments",
+    "list_comments",
+    "set_issue_status",
+    "list_projects",
+    "execute_generic_rq",
+    "modify_labels",
+    "get_specific_field_info",
+    "link_issues"
+  ]
+}
