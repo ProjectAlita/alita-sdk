@@ -26,7 +26,7 @@ class LangfuseConfiguration(BaseModel):
     )
     secret_key: SecretStr = Field(
         description="Langfuse secret API key",
-        json_schema_extra={"title": "Secret Key"}
+        json_schema_extra={"title": "Secret Key", "format": "password"}
     )
 
     @staticmethod

@@ -460,6 +460,10 @@ class AlitaClient:
             middleware_list.append(planning_middleware)
             logger.info(f"Auto-created PlanningMiddleware for conversation_id={conversation_id}")
 
+        # Extract lazy_tools_mode from internal_tools (it's a mode flag, not an actual tool)
+        # UI stores it in meta.internal_tools array, not as meta.lazy_tools_mode boolean
+        lazy_tools_mode = 'lazy_tools_mode' in internal_tools
+
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler
         if runtime == 'nonrunnable':
@@ -467,14 +471,16 @@ class AlitaClient:
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
                                       conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers,
                                       is_subgraph=is_subgraph,
-                                      middleware=middleware_list if middleware_list else None)
+                                      middleware=middleware_list if middleware_list else None,
+                                      lazy_tools_mode=lazy_tools_mode)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
                                       conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers,
                                       is_subgraph=is_subgraph,
-                                      middleware=middleware_list if middleware_list else None).runnable()
+                                      middleware=middleware_list if middleware_list else None,
+                                      lazy_tools_mode=lazy_tools_mode).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 
