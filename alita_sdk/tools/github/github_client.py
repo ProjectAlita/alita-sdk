@@ -1356,7 +1356,7 @@ class GitHubClient(BaseModel):
                     "description": issue.body,
                     "status": issue.state,
                     "url": issue.html_url,
-                    "type": "PR" if issue.pull_request else "Issue"
+                    "entity_type": "PR" if issue.pull_request else "Issue"
                 }
                 matching_issues.append(issue_details)
 
