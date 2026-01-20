@@ -27,17 +27,21 @@ def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
     """
     Parse OLD/NEW marker-based edit instructions.
     
-    Extracts the first pair of old and new content from a file query using markers:
+    Extracts all pairs of old and new content from a file query using markers:
     - OLD <<<< ... >>>> OLD
     - NEW <<<< ... >>>> NEW
     
+    Markers must be on their own dedicated line (with optional surrounding whitespace).
+    This prevents literal marker strings within file content from being interpreted
+    as actual delimiters.
+
     Args:
         file_query: String containing marked old and new content sections
         
     Returns:
-        List with at most one tuple (old_content, new_content) for the first edit pair.
-        Returns empty list if no valid OLD/NEW pair is found.
-        
+        List of tuples (old_content, new_content) for all valid edit pairs found.
+        Returns empty list if no valid OLD/NEW pairs are found.
+
     Example:
         >>> query = '''
         ... OLD <<<<
@@ -49,7 +53,32 @@ def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
         ... '''
         >>> parse_old_new_markers(query)
         [('Hello World', 'Hello Mars')]
+
+        Multiple pairs are supported:
+        >>> query = '''
+        ... OLD <<<<
+        ... first old
+        ... >>>> OLD
+        ... NEW <<<<
+        ... first new
+        ... >>>> NEW
+        ... OLD <<<<
+        ... second old
+        ... >>>> OLD
+        ... NEW <<<<
+        ... second new
+        ... >>>> NEW
+        ... '''
+        >>> parse_old_new_markers(query)
+        [('first old', 'first new'), ('second old', 'second new')]
     """
+    # Compile regex patterns for strict line-only marker matching
+    # Markers must be alone on their line (with optional whitespace)
+    old_start_pattern = re.compile(r'^\s*OLD\s*<<<<\s*$')
+    old_end_pattern = re.compile(r'^\s*>>>>\s*OLD\s*$')
+    new_start_pattern = re.compile(r'^\s*NEW\s*<<<<\s*$')
+    new_end_pattern = re.compile(r'^\s*>>>>\s*NEW\s*$')
+
     # Split the file content by lines
     code_lines = file_query.split("\n")
 
@@ -62,34 +91,40 @@ def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
     # Temporary storage for the current section's content
     current_section_content = []
 
+    # List to collect all found edit pairs
+    edit_pairs = []
+
     # Iterate through each line in the file content
     for line in code_lines:
-        # Check for OLD section start
-        if "OLD <<<" in line:
+        # Check for OLD section start (strict line match)
+        if old_start_pattern.match(line):
             in_old_section = True
             current_section_content = []  # Reset current section content
             continue  # Skip the line with the marker
 
-        # Check for OLD section end
-        if ">>>> OLD" in line:
+        # Check for OLD section end (strict line match)
+        if old_end_pattern.match(line):
             in_old_section = False
             old_content = "\n".join(current_section_content).strip()
             current_section_content = []  # Reset current section content
             continue  # Skip the line with the marker
 
-        # Check for NEW section start
-        if "NEW <<<" in line:
+        # Check for NEW section start (strict line match)
+        if new_start_pattern.match(line):
             in_new_section = True
             current_section_content = []  # Reset current section content
             continue  # Skip the line with the marker
 
-        # Check for NEW section end
-        if ">>>> NEW" in line:
+        # Check for NEW section end (strict line match)
+        if new_end_pattern.match(line):
             in_new_section = False
             new_content = "\n".join(current_section_content).strip()
-            # Return immediately after finding the first complete pair
+            # Add the completed pair to the list
             if old_content is not None and new_content is not None:
-                return [(old_content, new_content)]
+                edit_pairs.append((old_content, new_content))
+                # Reset for next potential pair
+                old_content = None
+                new_content = None
             current_section_content = []  # Reset current section content
             continue  # Skip the line with the marker
 
@@ -97,8 +132,7 @@ def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
         if in_old_section or in_new_section:
             current_section_content.append(line)
 
-    # Return empty list if no complete pair found
-    return []
+    return edit_pairs
 
 
 def is_text_editable(filename: str) -> bool:
