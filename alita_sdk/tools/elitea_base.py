@@ -18,93 +18,7 @@ logger = logging.getLogger(__name__)
 
 INDEX_TOOL_NAMES = ['index_data', 'remove_index', 'list_collections', 'search_index', 'stepback_search_index',
                             'stepback_summary_index']
-TEST_STR = '''# TC-29: Test file with OLD/NEW keywords in content
-# This file tests edge cases where content contains marker-like strings
 
-class MarkerDocumentation:
-    """
-    Documentation class explaining the update file syntax.
-
-    The update_file tool uses special markers for replacements:
-    - OLD <<<< marks the start of old content
-    - >>>> OLD marks the end of old content
-    - NEW <<<< marks the start of new content
-    - >>>> NEW marks the end of new content
-    """
-
-    def __init__(self):
-        self.version = "2.0.0"
-        self.status = "RELEASED"
-
-    def get_syntax_example(self):
-        """Returns example syntax for documentation."""
-        example = """
-        To replace content, use this format:
-
-        OLD <<<<
-        old content here
-        >>>> OLD
-        NEW <<<<
-        new content here
-        >>>> NEW
-
-        Multiple replacements are supported.
-        """
-        return example
-
-    def get_marker_definitions(self):
-        """Returns marker definitions."""
-        markers = {
-            "old_start": "OLD <<<<",
-            "old_end": ">>>> OLD",
-            "new_start": "NEW <<<<",
-            "new_end": ">>>> NEW"
-        }
-        return markers
-
-    def validate_markers(self, content):
-        """Check if content has balanced markers."""
-        old_starts = content.count("OLD <<<<")
-        old_ends = content.count(">>>> OLD")
-        new_starts = content.count("NEW <<<<")
-        new_ends = content.count(">>>> NEW")
-
-        if old_starts != old_ends:
-            return False, "Unbalanced OLD markers"
-        if new_starts != new_ends:
-            return False, "Unbalanced NEW markers"
-        return True, "Markers are balanced"
-
-    def process_update(self, file_content, update_query):
-        """Process an update query on file content."""
-        # This is a placeholder implementation
-        result = "Processing complete"
-        return result
-
-
-class TestRunner:
-    """Runs tests for the marker system."""
-
-    def __init__(self):
-        self.test_count = 0
-        self.passed = 0
-        self.failed = 0
-
-    def run_all_tests(self):
-        """Execute all marker tests."""
-        print("Starting marker tests...")
-        self.test_count = 10
-        self.passed = 10
-        self.failed = 0
-        print(f"Results: {self.passed}/{self.test_count} passed")
-        return self.failed == 0
-
-
-if __name__ == "__main__":
-    doc = MarkerDocumentation()
-    print(doc.get_syntax_example())
-    print(doc.get_marker_definitions())
-'''
 LoaderSchema = create_model(
     "LoaderSchema",
     branch=(Optional[str], Field(
@@ -967,8 +881,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         
         # Read current file content
         try:
-            # current_content = self._read_file(file_path, branch)
-            current_content = TEST_STR
+            current_content = self._read_file(file_path, branch)
             if not isinstance(current_content, str):
                 # If current_content is a ToolException or any non-str, raise or return it
                 raise current_content if isinstance(current_content, Exception) else ToolException(str(current_content))
