@@ -173,7 +173,15 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
             logger.debug(f"Skipping planning toolkit '{tool.get('toolkit_name')}' - handled by runtime toolkit system")
         elif tool_type in AVAILABLE_TOOLS and 'get_tools' in AVAILABLE_TOOLS[tool_type]:
             try:
-                toolkit_tools.extend(AVAILABLE_TOOLS[tool_type]['get_tools'](tool))
+                loaded_tools = AVAILABLE_TOOLS[tool_type]['get_tools'](tool)
+                toolkit_tools.extend(loaded_tools)
+                # Detailed logging for debugging tool loading
+                tool_names = [t.name for t in loaded_tools if hasattr(t, 'name')]
+                logger.info(f"[TOOLS_LOAD] Loaded {len(loaded_tools)} tools for {tool_type}: {tool_names}")
+                # Check for indexer tools specifically
+                indexer_tools = [n for n in tool_names if 'index' in n.lower() or 'search_index' in n.lower()]
+                if indexer_tools:
+                    logger.warning(f"[TOOLS_LOAD] Indexer tools present in {tool_type}: {indexer_tools}")
             except Exception as e:
                 logger.error(f"Error getting tools for {tool_type}: {e}")
                 raise ToolException(f"Error getting tools for {tool_type}: {e}")

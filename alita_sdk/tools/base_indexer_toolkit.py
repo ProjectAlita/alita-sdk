@@ -125,6 +125,21 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         """
         return {}
 
+    def _has_collections(self) -> bool:
+        """
+        Safely check if there are any indexed collections for this toolkit.
+
+        Returns:
+            bool: True if collections exist, False otherwise.
+        """
+        try:
+            self._ensure_vectorstore_initialized()
+            collections = self.vector_adapter.list_collections(self)
+            return bool(collections and len(collections) > 0)
+        except Exception as e:
+            logger.debug(f"Could not check collections (vectorstore may not be configured): {e}")
+            return False
+
     def _remove_metadata_keys(self) -> List[str]:
         """ Returns a list of metadata keys to be removed from documents before indexing.
         Override this method in subclasses to provide specific keys to remove."""
@@ -661,8 +676,18 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     def get_available_tools(self):
         """
-        Returns the standardized vector search tools (search operations only).
-        Index operations are toolkit-specific and should be added manually to each toolkit.
+        Returns the standardized vector search tools.
+
+        All indexer tools are only included if the toolkit has indexed collections.
+        This reduces token usage and prevents agents from seeing tools that can't do anything useful.
+
+        When collections exist, the following tools are available:
+        - index_data: Load data to index
+        - list_collections: List available collections
+        - search_index: Search indexed documents
+        - stepback_search_index: Search with stepback technique
+        - stepback_summary_index: Generate summary using stepback
+        - remove_index: Remove indexed data
 
         This method constructs the argument schemas for each tool, merging base parameters with any extra parameters
         defined in the subclass. It also handles the special case for chunking tools and their configuration.
@@ -670,6 +695,15 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         Returns:
             list: List of tool dictionaries with name, ref, description, and args_schema.
         """
+        # Only return indexer tools if collections exist
+        # This reduces token usage for toolkits without indexed data
+        has_collections = self._has_collections()
+        if not has_collections:
+            logger.debug(f"Toolkit has no collections, skipping all indexer tools")
+            return []
+
+        logger.debug(f"Toolkit has collections, adding all indexer tools")
+
         index_params = {
             "index_name": (
                 str,
@@ -699,13 +733,20 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         index_params["chunking_config"] = chunking_config
         index_args_schema = create_model("IndexData", **index_params, **index_extra_params)
 
-        return [
+        tools = [
             {
                 "name": IndexTools.INDEX_DATA.value,
                 "mode": IndexTools.INDEX_DATA.value,
                 "ref": self.index_data,
                 "description": "Loads data to index.",
                 "args_schema": index_args_schema,
+            },
+            {
+                "name": IndexTools.LIST_COLLECTIONS.value,
+                "mode": IndexTools.LIST_COLLECTIONS.value,
+                "ref": self.list_collections,
+                "description": self.list_collections.__doc__,
+                "args_schema": create_model("ListCollectionsParams")
             },
             {
                 "name": IndexTools.SEARCH_INDEX.value,
@@ -735,12 +776,6 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                 "description": self.remove_index.__doc__,
                 "args_schema": RemoveIndexParams
             },
-            {
-                "name": IndexTools.LIST_COLLECTIONS.value,
-                "mode": IndexTools.LIST_COLLECTIONS.value,
-                "ref": self.list_collections,
-                "description": self.list_collections.__doc__,
-                # No parameters
-                "args_schema": create_model("ListCollectionsParams")
-            },
         ]
+
+        return tools

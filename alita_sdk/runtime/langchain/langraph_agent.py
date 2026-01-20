@@ -518,6 +518,7 @@ def create_graph(
         debug: bool = False,
         for_subgraph: bool = False,
         lazy_tools_mode: bool = False,
+        always_bind_tools: Optional[list[BaseTool]] = None,
         **kwargs
 ):
     """
@@ -535,6 +536,9 @@ def create_graph(
             When enabled, only meta-tools are bound to LLM nodes, and the model
             uses these to discover and invoke any tool from the registry.
             This dramatically reduces token usage for agents with many toolkits.
+        always_bind_tools: Optional list of tools that should always be bound directly
+            to the LLM (e.g., middleware tools like planning). These bypass the
+            ToolRegistry and are bound alongside meta-tools in lazy mode.
         **kwargs: Additional keyword arguments
     """
 
@@ -546,8 +550,16 @@ def create_graph(
     tool_registry = None
     effective_lazy_mode = lazy_tools_mode
 
+    # Normalize always_bind_tools
+    always_bind_tools = always_bind_tools or []
+    always_bind_tool_names = {t.name for t in always_bind_tools if hasattr(t, 'name')}
+
     if lazy_tools_mode:
-        base_tools = [t for t in tools if isinstance(t, BaseTool)]
+        # Exclude always_bind_tools from the registry - they'll be bound directly
+        base_tools = [
+            t for t in tools
+            if isinstance(t, BaseTool) and t.name not in always_bind_tool_names
+        ]
         tool_count = len(base_tools)
 
         if tool_count < LAZY_TOOLS_MIN_THRESHOLD:
@@ -564,6 +576,11 @@ def create_graph(
                 f"[LazyTools] Enabled with {toolkit_count} toolkits, {tool_count} tools. "
                 f"Estimated token savings: ~{(tool_count - 3) * 300:,} tokens"
             )
+            if always_bind_tools:
+                logger.info(
+                    f"[LazyTools] Always-bind tools ({len(always_bind_tools)}): "
+                    f"{[t.name for t in always_bind_tools]}"
+                )
 
     # Update lazy_tools_mode to effective value for use in LLMNode creation
     lazy_tools_mode = effective_lazy_mode
@@ -792,6 +809,8 @@ def create_graph(
                     # Lazy tools mode parameters
                     lazy_tools_mode=use_lazy_for_node,
                     tool_registry=tool_registry if use_lazy_for_node else None,
+                    # Always-bind tools (e.g., middleware/planning tools)
+                    always_bind_tools=always_bind_tools if use_lazy_for_node else None,
                 ))
             elif node_type in ['router', 'decision']:
                 if node_type == 'router':

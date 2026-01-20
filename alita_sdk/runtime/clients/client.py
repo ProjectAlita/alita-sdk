@@ -408,7 +408,7 @@ class AlitaClient:
                     version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
                     llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
                     conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None,
-                    is_subgraph: bool = False):
+                    is_subgraph: bool = False, middleware: Optional[list] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -446,19 +446,35 @@ class AlitaClient:
             app_type = data.get("agent_type", "agent")
         app_type = normalize_app_type(app_type)
 
+        # Auto-create middleware based on internal_tools configuration
+        # This bridges the UI's internal_tools toggles to the middleware system
+        middleware_list = list(middleware) if middleware else []
+        internal_tools = data.get('meta', {}).get('internal_tools', [])
+        if 'planner' in internal_tools:
+            # Create PlanningMiddleware when planner is enabled in internal_tools
+            from ..middleware.planning import PlanningMiddleware
+            planning_middleware = PlanningMiddleware(
+                conversation_id=conversation_id,
+                connection_string=None,  # Uses filesystem storage by default
+            )
+            middleware_list.append(planning_middleware)
+            logger.info(f"Auto-created PlanningMiddleware for conversation_id={conversation_id}")
+
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler
         if runtime == 'nonrunnable':
             return LangChainAssistant(self, data, llm, chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
                                       conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers,
-                                      is_subgraph=is_subgraph)
+                                      is_subgraph=is_subgraph,
+                                      middleware=middleware_list if middleware_list else None)
         if runtime == 'langchain':
             return LangChainAssistant(self, data, llm,
                                       chat_history, app_type,
                                       tools=tools, memory=memory, store=store, mcp_tokens=mcp_tokens,
                                       conversation_id=conversation_id, ignored_mcp_servers=ignored_mcp_servers,
-                                      is_subgraph=is_subgraph).runnable()
+                                      is_subgraph=is_subgraph,
+                                      middleware=middleware_list if middleware_list else None).runnable()
         elif runtime == 'llama':
             raise NotImplementedError("LLama runtime is not supported")
 
@@ -684,6 +700,22 @@ class AlitaClient:
             'variables': variables
         }
 
+        # Auto-create middleware based on internal_tools in the tools list
+        # Check if any tool config is an internal_tool with name='planner'
+        middleware_list = []
+        has_planner = any(
+            t.get('type') == 'internal_tool' and t.get('name') == 'planner'
+            for t in tools
+        )
+        if has_planner:
+            from ..middleware.planning import PlanningMiddleware
+            planning_middleware = PlanningMiddleware(
+                conversation_id=conversation_id,
+                connection_string=None,  # Uses filesystem storage by default
+            )
+            middleware_list.append(planning_middleware)
+            logger.info(f"Auto-created PlanningMiddleware for predict agent (conversation_id={conversation_id})")
+
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler
         return LangChainAssistant(
@@ -698,7 +730,8 @@ class AlitaClient:
             mcp_tokens=mcp_tokens,
             conversation_id=conversation_id,
             ignored_mcp_servers=ignored_mcp_servers,
-            persona=persona
+            persona=persona,
+            middleware=middleware_list if middleware_list else None
         ).runnable()
 
     def test_toolkit_tool(self, toolkit_config: dict, tool_name: str, tool_params: dict = None,

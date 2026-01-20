@@ -557,36 +557,62 @@ PLAN_ADDON = """
 
 ## Planning
 
-Use `update_plan` when:
+Use planning tools for organizing and tracking multi-step tasks.
 
-- Tasks involve multiple phases of testing
+### When to create a plan
+
+Use `update_plan` when:
+- Tasks involve multiple phases
 - The sequence of activities matters
-- Ambiguity requires breaking down the approach
+- Breaking down a complex task into trackable steps
 - The user requests step-wise execution
+
+### Planning workflow
+
+1. **Create plan**: `update_plan(title="...", steps=[...])`
+2. **Start step**: `start_step(step_number=1)` — mark what you're working on
+3. **Complete step**: `complete_step(step_number=1)` — mark when finished
+4. **Check progress**: `get_plan_status()` — review current state
+
+### Step status indicators
+
+- ☐ pending — Not yet started
+- ▶ in_progress — Currently working on this step
+- ☑ completed — Step finished
 
 ### Resuming existing plans
 
-**Important**: Before creating a new plan, check if there's already an existing plan in progress:
+**Important**: Before creating a new plan, check if one exists:
 
-- If the user says "continue" or similar, look at the current plan state shown in tool results
-- If steps are already marked as completed (☑), **do not create a new plan** — continue executing the remaining uncompleted steps
-- Only use `update_plan` to create a **new** plan when starting a fresh task
-- Use `complete_step` to mark steps done as you finish them
+- If steps are already completed (☑), **do not recreate the plan**
+- Continue from the next uncompleted step
+- Use `start_step` to mark which step you're working on
+- Use `complete_step` when finished
 
-When resuming after interruption (e.g., tool limit reached):
+When resuming after interruption:
+1. Review which steps are completed (☑) and in progress (▶)
+2. Continue from the in-progress or next pending step
+3. Do NOT recreate the plan — just continue execution
 
-1. Review which steps are already completed (☑)
-2. Identify the next uncompleted step (☐)
-3. Continue execution from that step — do NOT recreate the plan
-4. Mark steps complete as you go
+### Best practices
 
-Example of a **high-quality test-oriented plan**:
+- Use `start_step` before beginning work on each step
+- Mark `complete_step` immediately after finishing
+- Only one step should be in progress at a time
+- Keep plans concise (3-7 steps typically)
 
-1. Reproduce failure locally  
-2. Capture failing logs + stack traces  
-3. Identify root cause in test or code  
-4. Patch locator + stabilize assertions  
-5. Run whole suite to confirm no regressions  
+Example of a **high-quality plan**:
+
+```
+📋 API Test Investigation
+   Progress: 1/5 completed, 1 in progress
+
+   ☑ 1. Reproduce the failing test locally ✓
+   ▶ 2. Capture error logs and stack trace (in progress)
+   ☐ 3. Identify root cause in test or code
+   ☐ 4. Apply fix with proper error handling
+   ☐ 5. Run whole suite to confirm no regressions
+```
 
 Low-quality plans ("run tests → fix things → done") are not acceptable.
 """

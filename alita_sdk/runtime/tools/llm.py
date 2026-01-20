@@ -93,6 +93,12 @@ class LLMNode(BaseTool):
         description='ToolRegistry instance containing all tools organized by toolkit. '
                     'Required when lazy_tools_mode is True.'
     )
+    always_bind_tools: Optional[List[BaseTool]] = Field(
+        default=None,
+        description='Tools that should always be bound directly to the LLM, even in lazy mode. '
+                    'Used for middleware tools like planning that need immediate access. '
+                    'These are bound alongside meta-tools, not through the registry.'
+    )
     _meta_tools: Optional[List[BaseTool]] = None  # Cached meta-tools
 
     def _prepare_structured_output_params(self) -> dict:
@@ -341,12 +347,15 @@ class LLMNode(BaseTool):
         If dynamic tool selection was performed (selected_tools in config), those
         tools are returned directly instead of meta-tools.
 
+        Always-bind tools (e.g., middleware/planning tools) are included alongside
+        meta-tools in lazy mode, giving the model immediate access to these tools.
+
         Args:
             config: Optional runnable config that may contain selected_tools from
                     dynamic tool selection
 
         Returns:
-            List of filtered tools (or meta-tools in lazy mode)
+            List of filtered tools (or meta-tools + always-bind tools in lazy mode)
         """
         # Check for dynamically selected tools from pre-LLM selection
         if config is not None:
@@ -354,11 +363,24 @@ class LLMNode(BaseTool):
             selected_tools = configurable.get('selected_tools')
             if selected_tools:
                 logger.info(f"[DynamicToolSelection] Using {len(selected_tools)} pre-selected tools")
+                # Include always_bind_tools with dynamically selected tools
+                if self.always_bind_tools:
+                    return list(selected_tools) + list(self.always_bind_tools)
                 return selected_tools
 
         # Check if lazy tools mode is enabled and we have a registry
         if self.lazy_tools_mode and self.tool_registry is not None:
-            return self._get_meta_tools()
+            meta_tools = self._get_meta_tools()
+            # Include always-bind tools (e.g., planning tools) alongside meta-tools
+            if self.always_bind_tools:
+                combined_tools = list(meta_tools) + list(self.always_bind_tools)
+                logger.info(
+                    f"[LazyTools] Binding {len(meta_tools)} meta-tools + "
+                    f"{len(self.always_bind_tools)} always-bind tools: "
+                    f"{[t.name for t in self.always_bind_tools]}"
+                )
+                return combined_tools
+            return meta_tools
 
         # Traditional mode - bind actual tools
         if not self.available_tools:
