@@ -288,9 +288,11 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         Updates file on the bitbucket repo
         Parameters:
             file_path(str): a string which contains the file path (example: "hello_world.md").
-            update_query(str): Contains the file contents requried to be updated.
+            update_query(str): Contains the file contents required to be updated.
                 The old file contents is wrapped in OLD <<<< and >>>> OLD
                 The new file contents is wrapped in NEW <<<< and >>>> NEW
+                IMPORTANT: Markers must be on their own dedicated line (not inline with content).
+                Multiple OLD/NEW pairs are supported for multiple edits.
                 For example:
                 OLD <<<<
                 Hello Earth!

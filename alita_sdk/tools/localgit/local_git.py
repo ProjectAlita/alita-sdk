@@ -18,9 +18,11 @@ UPDATE_FILE_PROMPT = """
 Updates the contents of a file in a GitHub repository. **VERY IMPORTANT**: Your input to this tool MUST strictly follow these rules:
 
 - First you must specify which file to modify by passing a full file path (**IMPORTANT**: the path must not start with a slash)
-- Then you must specify at lest 2 lines of the old contents which you would like to replace wrapped in OLD <<<< and >>>> OLD
+- Then you must specify at least 2 lines of the old contents which you would like to replace wrapped in OLD <<<< and >>>> OLD
 - Then you must specify the new contents which you would like to replace the old contents with wrapped in NEW <<<< and >>>> NEW
+- **IMPORTANT**: Markers (OLD <<<<, >>>> OLD, NEW <<<<, >>>> NEW) must be on their own dedicated line (not inline with content)
 - **VERY IMPORTANT**: NEW content may contain lines from OLD content in case you want to add content without removing the old content.
+- Multiple OLD/NEW pairs are supported for multiple edits in a single request.
 
 Example 1: you would like to replace the contents of the file /test/test.txt from "old contents" to "new contents", you would pass in the following string:
 
@@ -45,6 +47,22 @@ existing contents
 NEW <<<<
 existing contents
 new contents
+>>>> NEW
+
+Example 3: multiple edits in one request:
+
+test/test.txt
+OLD <<<<
+first old content
+>>>> OLD
+NEW <<<<
+first new content
+>>>> NEW
+OLD <<<<
+second old content
+>>>> OLD
+NEW <<<<
+second new content
 >>>> NEW
 
 """

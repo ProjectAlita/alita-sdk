@@ -159,7 +159,10 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         # Parse edit instructions
         edits = parse_old_new_markers(file_query)
         if not edits:
-            raise ToolException("No valid OLD/NEW marker pairs found in edit instructions")
+            raise ToolException(
+                "No valid OLD/NEW marker pairs found in edit instructions. "
+                "Markers must be on their own dedicated line."
+            )
 
         # Apply edits
         updated_content = content
