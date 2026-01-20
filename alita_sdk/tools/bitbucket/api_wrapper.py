@@ -177,9 +177,40 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         return super().validate_toolkit(values)
 
     def set_active_branch(self, branch_name: str) -> str:
-        """Set the active branch for the bot."""
-        self._active_branch = branch_name
-        return f"Active branch set to `{branch_name}`"
+        """
+        Switches the active branch to the specified branch.
+
+        Parameters:
+            branch_name (str): The name of the branch to be the current branch
+
+        Returns:
+            str: Success message if branch exists, or ToolException if branch doesn't exist
+        """
+        try:
+            # Fetch all branches from the repository (no caching)
+            branches = self._bitbucket.list_branches()
+
+            # Check if the requested branch exists
+            if branch_name in branches:
+                self._active_branch = branch_name
+                return f"Switched to branch `{branch_name}`"
+            else:
+                # Format branch list for error message
+                if len(branches) <= 30:
+                    branch_list = str(branches)
+                else:
+                    # Show first 30 branches and indicate there are more
+                    remaining_count = len(branches) - 30
+                    branch_list = str(branches[:30])[:-1] + f", and {remaining_count} more]"
+
+                msg = (
+                    f"Error branch `{branch_name}` does not exist, "
+                    f"in repo with current branches: {branch_list}"
+                )
+                return ToolException(msg)
+        except Exception as e:
+            # Handle unexpected errors during branch fetching
+            return ToolException(f"Failed to validate branch '{branch_name}': {str(e)}")
 
     def list_branches_in_repo(self, limit: Optional[int] = 20, branch_wildcard: Optional[str] = None) -> List[str]:
         """
