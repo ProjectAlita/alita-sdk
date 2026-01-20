@@ -177,3 +177,5 @@ node_modules/
 .alita/tests/results/*
 !.alita/tests/results/.gitkeep
 .alita/plans/*
+.alita/**/.env.*
+.alita/**/test_results

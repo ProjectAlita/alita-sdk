@@ -1,0 +1,101 @@
+name: "TC8 - Implicit Output"
+description: "Verify structured_output: true works without explicit structured_output_dict - type inference from state"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  title:
+    type: str
+  items:
+    type: list
+  count:
+    type: int
+  test_results:
+    type: dict
+
+entry_point: generate_implicit_output
+
+nodes:
+  - id: generate_implicit_output
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data in JSON format."
+      task:
+        type: fixed
+        value: |
+          Generate the following information as a JSON object:
+          1. A title string: "Implicit Output Test"
+          2. A list of 3 items: ["apple", "banana", "cherry"]
+          3. A count number: 3
+
+          Return a JSON object with keys: title, items, count
+    output:
+      - title
+      - items
+      - count
+    structured_output: true
+    # NOTE: No structured_output_dict specified - tests implicit type inference
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify implicit structured output works correctly
+        # When structured_output_dict is not provided, types should be inferred from state
+        title = alita_state.get('title')
+        items = alita_state.get('items', [])
+        count = alita_state.get('count')
+
+        type_checks = {
+            "title_is_str": isinstance(title, str),
+            "items_is_list": isinstance(items, list),
+            "count_is_int": isinstance(count, int)
+        }
+
+        value_checks = {
+            "title_not_empty": bool(title),
+            "items_not_empty": len(items) > 0 if isinstance(items, list) else False,
+            "count_positive": count is not None and count > 0
+        }
+
+        all_types_ok = all(type_checks.values())
+        all_values_ok = all(value_checks.values())
+
+        result = {
+            "test_passed": all_types_ok and all_values_ok,
+            "implicit_output_working": all_types_ok,
+            "type_checks": type_checks,
+            "value_checks": value_checks,
+            "actual_values": {
+                "title": title,
+                "items": items,
+                "count": count
+            },
+            "actual_types": {
+                "title": type(title).__name__ if title is not None else "NoneType",
+                "items": type(items).__name__,
+                "count": type(count).__name__ if count is not None else "NoneType"
+            },
+            "test_description": "structured_output: true without structured_output_dict"
+        }
+        test_results = result
+        test_results
+
+    input:
+      - title
+      - items
+      - count
+    output:
+
+      - messages
+    structured_output: false
+    transition: END

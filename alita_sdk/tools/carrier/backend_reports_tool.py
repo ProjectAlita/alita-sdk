@@ -4,7 +4,7 @@ import json
 import zipfile
 from itertools import islice
 import traceback
-from typing import Type
+from typing import Optional, Type
 from langchain_core.tools import BaseTool, ToolException
 from pydantic.fields import Field
 from pydantic import create_model, BaseModel
@@ -145,12 +145,12 @@ class CreateExcelReportTool(BaseTool):
     description: str = "Create excel report by report ID from Carrier."
     args_schema: Type[BaseModel] = create_model(
         "CreateExcelReportInput",
-        report_id=(str, Field(default=None, description="Report ID to retrieve")),
-        bucket=(str, Field(default=None, description="Bucket with jtl/log file")),
-        file_name=(str, Field(default=None, description="File name for .jtl or .log report")),
+        report_id=(Optional[str], Field(default=None, description="Report ID to retrieve")),
+        bucket=(Optional[str], Field(default=None, description="Bucket with jtl/log file")),
+        file_name=(Optional[str], Field(default=None, description="File name for .jtl or .log report")),
         **{
-            "think_time": (str, Field(default=None, description="Think time parameter")),
-            "pct": (str, Field(default=None, description="Percentile parameter")),
+            "think_time": (Optional[str], Field(default=None, description="Think time parameter")),
+            "pct": (Optional[str], Field(default=None, description="Percentile parameter")),
             "tp_threshold": (int, Field(default=None, description="Throughput threshold")),
             "rt_threshold": (int, Field(default=None, description="Response time threshold")),
             "er_threshold": (int, Field(default=None, description="Error rate threshold")),

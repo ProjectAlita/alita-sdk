@@ -1,0 +1,76 @@
+name: "SR11 - alita_client Access"
+description: "Verify alita_client is accessible from code nodes for unsecret and other operations"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  secret_name:
+    type: str
+    value: "test_secret_name"
+  test_results:
+    type: dict
+
+entry_point: test_client_access
+
+nodes:
+  - id: test_client_access
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Test that alita_client is available in the code execution context
+        client_available = 'alita_client' in dir() or 'alita_client' in globals()
+
+        # Check if alita_client has expected methods
+        has_unsecret = False
+        has_get_prompt = False
+        client_type = None
+
+        try:
+            if client_available and alita_client is not None:
+                client_type = type(alita_client).__name__
+                has_unsecret = hasattr(alita_client, 'unsecret')
+                has_get_prompt = hasattr(alita_client, 'get_prompt')
+        except NameError:
+            client_available = False
+
+        # Get secret name from state to verify state access works
+        secret_name = alita_state.get('secret_name', '')
+        secret_name_correct = secret_name == "test_secret_name"
+
+        # Try to call unsecret (will return None for non-existent secret, but shouldn't error)
+        unsecret_callable = False
+        unsecret_result = None
+        try:
+            if has_unsecret:
+                # This will likely return None for a test secret, but verifies the method is callable
+                unsecret_result = alita_client.unsecret(secret_name='nonexistent_test_secret')
+                unsecret_callable = True
+        except Exception as e:
+            unsecret_result = f"Error: {str(e)}"
+
+        # Overall test - client should be available with expected methods
+        all_passed = client_available and has_unsecret and secret_name_correct
+
+        result = {
+            "test_passed": all_passed,
+            "client_available": client_available,
+            "client_type": client_type,
+            "has_unsecret_method": has_unsecret,
+            "has_get_prompt_method": has_get_prompt,
+            "unsecret_callable": unsecret_callable,
+            "unsecret_result": str(unsecret_result) if unsecret_result else None,
+            "secret_name_from_state": secret_name,
+            "secret_name_correct": secret_name_correct
+        }
+        test_results = result
+
+        test_results
+    input:
+      - secret_name
+    output:
+      - messages
+    structured_output: false
+    transition: END

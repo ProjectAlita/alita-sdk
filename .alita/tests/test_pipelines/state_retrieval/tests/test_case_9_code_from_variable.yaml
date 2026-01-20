@@ -1,0 +1,81 @@
+name: "SR9 - Code from Variable"
+description: "Verify code stored in state variable can be executed (code.type: variable)"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  code_to_execute:
+    type: str
+    value: |-
+      # This code is stored in state and executed dynamically
+      x = 10
+      y = 20
+      sum_result = x + y
+
+      message = f"The sum of {x} and {y} is {sum_result}"
+
+      result = {
+          "x": x,
+          "y": y,
+          "sum": sum_result,
+          "message": message,
+          "code_executed": True
+      }
+      result
+  html_content:
+    type: str
+    value: "<ul>\n\t<li>Item 1</li>\n\t<li>Item 2</li>\n</ul>"
+  test_results:
+    type: dict
+
+entry_point: execute_dynamic_code
+
+nodes:
+  - id: execute_dynamic_code
+    type: code
+    code:
+      type: variable
+      value: code_to_execute
+    input:
+      - code_to_execute
+    output:
+      - test_results
+    structured_output: false
+    transition: verify_results
+
+  - id: verify_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        results = alita_state.get('test_results', {})
+        html = alita_state.get('html_content', '')
+
+        code_executed = results.get('code_executed', False)
+        sum_correct = results.get('sum') == 30
+        message_correct = "sum of 10 and 20 is 30" in results.get('message', '')
+        html_has_tags = "<ul>" in html and "<li>" in html
+        html_has_newlines = "\n" in html
+
+        all_passed = code_executed and sum_correct and message_correct and html_has_tags
+
+        final_result = {
+            "test_passed": all_passed,
+            "code_executed": code_executed,
+            "sum_correct": sum_correct,
+            "message_correct": message_correct,
+            "html_has_tags": html_has_tags,
+            "html_has_newlines": html_has_newlines,
+            "computed_sum": results.get('sum'),
+            "computed_message": results.get('message')
+        }
+        test_results = final_result
+        test_results
+    input:
+      - html_content
+    output:
+      - messages
+    structured_output: false
+    transition: END

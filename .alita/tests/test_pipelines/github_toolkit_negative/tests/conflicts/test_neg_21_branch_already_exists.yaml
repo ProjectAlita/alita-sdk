@@ -1,0 +1,92 @@
+# NEG_21: Create Branch That Already Exists
+# Verifies that creating a duplicate branch returns actionable error
+# Expected: Clear error message about branch already existing
+
+name: "NEG21 - Create Branch That Already Exists"
+description: "Verify create_branch returns actionable error when branch already exists"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  existing_branch:
+    type: str
+    value: "main"  # Main branch always exists
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_existing
+
+nodes:
+  - id: invoke_create_existing
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - existing_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: existing_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_error
+
+  - id: validate_error
+    type: code
+    code:
+      type: fixed
+      value: |
+        result = alita_state.get('tool_result')
+        existing_branch = alita_state.get('existing_branch')
+        result_str = str(result).lower() if result else ''
+
+        # Error quality checks
+        has_exists_error = any(term in result_str for term in [
+            'already exists', 'exists', 'duplicate', 'reference already',
+            '422', 'conflict', 'cannot create'
+        ])
+
+        references_branch = 'branch' in result_str or 'ref' in result_str
+
+        no_traceback = 'traceback' not in result_str
+
+        # Should not indicate success
+        not_success = 'successfully created' not in result_str or 'error' in result_str
+
+        test_passed = has_exists_error and not_success and no_traceback
+
+        test_results = {
+            "test_passed": test_passed,
+            "error_quality": {
+                "indicates_already_exists": has_exists_error,
+                "references_branch": references_branch,
+                "no_raw_traceback": no_traceback,
+                "not_success_response": not_success
+            },
+            "existing_branch": existing_branch,
+            "actual_response": result_str[:500],
+            "improvement_needed": [] if test_passed else [
+                "Missing 'already exists' indicator" if not has_exists_error else None,
+                "Does not reference branch" if not references_branch else None,
+                "Contains raw traceback" if not no_traceback else None,
+                "Incorrectly indicates success" if not not_success else None
+            ]
+        }
+        test_results["improvement_needed"] = [x for x in test_results["improvement_needed"] if x]
+        test_results
+    input:
+      - tool_result
+      - existing_branch
+    output:
+      - messages
+    structured_output: false
+    transition: END

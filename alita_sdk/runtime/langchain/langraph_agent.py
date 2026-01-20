@@ -30,6 +30,7 @@ from ..tools.llm import LLMNode
 from ..tools.loop import LoopNode
 from ..tools.loop_output import LoopToolNode
 from ..tools.tool import ToolNode
+from ..tools.lazy_tools import ToolRegistry
 from ..utils.evaluate import EvaluateTemplate
 from ..utils.utils import clean_string
 from ..tools.router import RouterNode
@@ -230,18 +231,32 @@ class StateDefaultNode(Runnable):
         for key, value in self.default_vars.items():
             if isinstance(value, dict) and 'value' in value:
                 temp_value = value['value']
-                try:
-                    result[key] = ast.literal_eval(temp_value)
-                except:
-                    logger.debug("Unable to evaluate value, using as is")
+                declared_type = value.get('type', '').lower()
+
+                # If the declared type is 'str' or 'string', preserve the string value
+                # Don't auto-convert even if it looks like a valid Python literal
+                if declared_type in ('str', 'string'):
                     result[key] = temp_value
+                else:
+                    # For other types, try to evaluate as Python literal
+                    try:
+                        result[key] = ast.literal_eval(temp_value)
+                    except:
+                        logger.debug("Unable to evaluate value, using as is")
+                        result[key] = temp_value
         return result
 
 class PrinterNode(Runnable):
     name = "PrinterNode"
+    DEFAULT_FINAL_MSG = "How to proceed? To resume the pipeline - type anything..."
 
-    def __init__(self, input_mapping: Optional[dict[str, dict]]):
+    def __init__(self, input_mapping: Optional[dict[str, dict]], final_message: Optional[str] = None):
         self.input_mapping = input_mapping
+        # Apply fallback logic for empty/None values
+        if final_message and final_message.strip():
+            self.final_message = final_message.strip()
+        else:
+            self.final_message = self.DEFAULT_FINAL_MSG
 
     def invoke(self, state: BaseStore, config: Optional[RunnableConfig] = None) -> dict:
         logger.info(f"Printer Node - Current state variables: {state}")
@@ -261,7 +276,7 @@ class PrinterNode(Runnable):
             # convert formatted output to string if it's not
             if not isinstance(formatted_output, str):
                 formatted_output = str(formatted_output)
-            formatted_output += f"\n\n-----\n*How to proceed?*\n* *to resume the pipeline - type anything...*"
+            formatted_output += f"\n\n-----\n*{self.final_message}*"
         logger.debug(f"Formatted output: {formatted_output}")
         result[PRINTER_NODE_RS] = formatted_output
         return result
@@ -383,7 +398,7 @@ class StateModifierNode(Runnable):
 
 
 def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None,
-                          state_class=None, output_variables=None):
+                          state_class=None, output_variables=None, tool_registry=None):
     # prepare output channels
     if interrupt_after is None:
         interrupt_after = []
@@ -427,7 +442,8 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         debug=debug,
         store=store,
         schema_to_mapper=state_class,
-        output_variables=output_variables
+        output_variables=output_variables,
+        tool_registry=tool_registry
     )
 
     compiled.attach_node(START, None)
@@ -501,17 +517,76 @@ def create_graph(
         store: Optional[BaseStore] = None,
         debug: bool = False,
         for_subgraph: bool = False,
+        lazy_tools_mode: bool = False,
         **kwargs
 ):
-    """ Create a message graph from a yaml schema """
+    """
+    Create a message graph from a yaml schema.
 
+    Args:
+        client: LLM client instance
+        yaml_schema: YAML schema defining the graph structure
+        tools: List of tools available to the graph
+        memory: Optional memory instance
+        store: Optional store instance
+        debug: Enable debug mode
+        for_subgraph: Whether this graph is being created as a subgraph
+        lazy_tools_mode: Enable lazy tools mode (default: False).
+            When enabled, only meta-tools are bound to LLM nodes, and the model
+            uses these to discover and invoke any tool from the registry.
+            This dramatically reduces token usage for agents with many toolkits.
+        **kwargs: Additional keyword arguments
+    """
+
+    # Create ToolRegistry for lazy tools mode
+    # This organizes all tools by toolkit for efficient lookup and lazy loading
+    # Auto-disable for small tool sets where overhead exceeds savings
+    LAZY_TOOLS_MIN_THRESHOLD = 20  # Minimum tools to enable lazy mode
+
+    tool_registry = None
+    effective_lazy_mode = lazy_tools_mode
+
+    if lazy_tools_mode:
+        base_tools = [t for t in tools if isinstance(t, BaseTool)]
+        tool_count = len(base_tools)
+
+        if tool_count < LAZY_TOOLS_MIN_THRESHOLD:
+            # Auto-disable for small tool sets - overhead exceeds savings
+            effective_lazy_mode = False
+            logger.info(
+                f"[LazyTools] Auto-disabled: only {tool_count} tools "
+                f"(threshold: {LAZY_TOOLS_MIN_THRESHOLD}). Using direct binding."
+            )
+        elif base_tools:
+            tool_registry = ToolRegistry.from_tools(base_tools)
+            toolkit_count = len(tool_registry.get_toolkit_names())
+            logger.info(
+                f"[LazyTools] Enabled with {toolkit_count} toolkits, {tool_count} tools. "
+                f"Estimated token savings: ~{(tool_count - 3) * 300:,} tokens"
+            )
+
+    # Update lazy_tools_mode to effective value for use in LLMNode creation
+    lazy_tools_mode = effective_lazy_mode
+
+    # TODO: deprecate next release (1/15/2026)
     # For top-level graphs (not subgraphs), detect and flatten any subgraphs
-    if not for_subgraph:
-        flattened_yaml, additional_tools = detect_and_flatten_subgraphs(yaml_schema)
-        # Add collected tools from subgraphs to the tools list
-        tools = list(tools) + additional_tools
-        # Use the flattened YAML for building the graph
-        yaml_schema = flattened_yaml
+    # if not for_subgraph:
+    #     flattened_yaml, additional_tools = detect_and_flatten_subgraphs(yaml_schema)
+    #     # Add collected tools from subgraphs to the tools list
+    #     tools = list(tools) + additional_tools
+    #     # Use the flattened YAML for building the graph
+    #     yaml_schema = flattened_yaml
+    # else:
+    #     # For subgraphs, filter out PrinterNodes from YAML
+    #     from ..toolkits.subgraph import _filter_printer_nodes_from_yaml
+    #     yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
+    #     logger.info("Filtered PrinterNodes from subgraph YAML in create_graph")
+
+    if for_subgraph:
+        # Sanitization for sub-graphs
+        from ..toolkits.subgraph import _filter_printer_nodes_from_yaml
+        yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
+        logger.info("Filtered PrinterNodes from subgraph YAML in create_graph")
 
     schema = yaml.safe_load(yaml_schema)
     logger.debug(f"Schema: {schema}")
@@ -687,6 +762,20 @@ def create_graph(
                     # Use all available tools
                     available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
 
+                # Determine if we should use lazy tools mode for this LLM node
+                # Use lazy mode when:
+                # 1. lazy_tools_mode is enabled globally
+                # 2. We have a tool_registry
+                # 3. No specific tool_names are requested (indicating "use all tools")
+                use_lazy_for_node = (
+                    lazy_tools_mode and
+                    tool_registry is not None and
+                    not tool_names  # If specific tools requested, use direct binding
+                )
+
+                if use_lazy_for_node:
+                    logger.info(f"[LazyTools] LLM node '{node_id}' using lazy tools mode")
+
                 lg_builder.add_node(node_id, LLMNode(
                     client=client,
                     input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
@@ -699,7 +788,10 @@ def create_graph(
                     tool_execution_timeout=node.get('tool_execution_timeout', 900),
                     available_tools=available_tools,
                     tool_names=tool_names,
-                    steps_limit=kwargs.get('steps_limit', 25)
+                    steps_limit=kwargs.get('steps_limit', 25),
+                    # Lazy tools mode parameters
+                    lazy_tools_mode=use_lazy_for_node,
+                    tool_registry=tool_registry if use_lazy_for_node else None,
                 ))
             elif node_type in ['router', 'decision']:
                 if node_type == 'router':
@@ -745,6 +837,7 @@ def create_graph(
             elif node_type == 'printer':
                 lg_builder.add_node(node_id, PrinterNode(
                     input_mapping=node.get('input_mapping', {'printer': {'type': 'fixed', 'value': ''}}),
+                    final_message=node.get('final_message'),
                 ))
 
                 # add interrupts after printer node if specified
@@ -837,7 +930,8 @@ def create_graph(
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
         state_class={state_class: None},
-        output_variables=node.get('output', [])
+        output_variables=node.get('output', []),
+        tool_registry=tool_registry
     )
     return compiled.validate()
 
@@ -906,14 +1000,68 @@ def convert_dict_to_message(msg_dict):
 
 
 class LangGraphAgentRunnable(CompiledStateGraph):
-    def __init__(self, *args, output_variables=None, **kwargs):
+    def __init__(self, *args, output_variables=None, tool_registry=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.output_variables = output_variables
+        self.tool_registry = tool_registry
 
     def invoke(self, input: Union[dict[str, Any], Any],
                config: Optional[RunnableConfig] = None,
                *args, **kwargs):
         logger.info(f"Incoming Input: {input}")
+
+        # Dynamic tool selection based on user query
+        if self.tool_registry is not None:
+            # Extract query from input
+            query = None
+            if isinstance(input.get('input'), str):
+                query = input['input']
+            elif input.get('input') and isinstance(input['input'], list):
+                # Get text from last message
+                last_msg = input['input'][-1] if input['input'] else None
+                if hasattr(last_msg, 'content'):
+                    content = last_msg.content
+                    if isinstance(content, str):
+                        query = content
+                    elif isinstance(content, list):
+                        # Extract text parts
+                        query = ' '.join(
+                            item.get('text', '') if isinstance(item, dict) else str(item)
+                            for item in content
+                        )
+            elif input.get('messages'):
+                # Find last human message
+                for msg in reversed(input['messages']):
+                    if isinstance(msg, HumanMessage):
+                        content = msg.content
+                        if isinstance(content, str):
+                            query = content
+                        elif isinstance(content, list):
+                            query = ' '.join(
+                                item.get('text', '') if isinstance(item, dict) else str(item)
+                                for item in content
+                            )
+                        break
+
+            if query:
+                # Select relevant toolkits (returns empty if no matches or too many tools)
+                selected_toolkits = self.tool_registry.select_toolkits_for_query(query)
+
+                # Only store selection if we have a targeted selection
+                # Empty list means "use meta-tools"
+                if selected_toolkits:
+                    selected_tools = self.tool_registry.get_tools_for_toolkits(selected_toolkits)
+                    logger.info(f"[DynamicToolSelection] Query: '{query[:100]}...' -> Binding {len(selected_toolkits)} toolkits, {len(selected_tools)} tools directly")
+
+                    # Store selection in config for LLMNode to use
+                    if config is None:
+                        config = RunnableConfig()
+                    if 'configurable' not in config:
+                        config['configurable'] = {}
+                    config['configurable']['selected_tools'] = selected_tools
+                    config['configurable']['selected_toolkits'] = selected_toolkits
+                else:
+                    logger.info(f"[DynamicToolSelection] Query: '{query[:100]}...' -> Using meta-tools (no targeted selection)")
         if config is None:
             config = RunnableConfig()
         if not config.get("configurable", {}).get("thread_id", ""):

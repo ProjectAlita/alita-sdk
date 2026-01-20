@@ -1,0 +1,111 @@
+name: "GH10 - Generic API Call"
+description: "Verify generic_github_api_call tool calls supported methods like get_repo"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  method_name:
+    type: str
+    value: "get_repo"
+  method_kwargs:
+    type: dict
+    value: {}
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_api
+
+nodes:
+  - id: invoke_api
+    type: toolkit
+    tool: generic_github_api_call
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - method_name
+      - method_kwargs
+    input_mapping:
+      method:
+        type: variable
+        value: method_name
+      method_kwargs:
+        type: variable
+        value: method_kwargs
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        api_result = alita_state.get('tool_result')
+        method_name = alita_state.get('method_name', 'get_repo')
+
+        tool_executed = api_result is not None
+        error_message = None
+        repo_data = {}
+
+        try:
+            # Parse result
+            if isinstance(api_result, dict):
+                repo_data = api_result
+            elif isinstance(api_result, str):
+                import json
+                try:
+                    repo_data = json.loads(api_result)
+                except:
+                    repo_data = {'raw': api_result}
+        except Exception as e:
+            error_message = str(e)
+
+        # Check for expected repository fields
+        has_id = 'id' in repo_data
+        has_name = 'name' in repo_data
+        has_full_name = 'full_name' in repo_data
+        has_owner = 'owner' in repo_data
+        has_private = 'private' in repo_data
+
+        # Check owner structure
+        owner = repo_data.get('owner', {})
+        owner_has_login = 'login' in owner if isinstance(owner, dict) else False
+
+        test_results = {
+            "test_passed": tool_executed and (has_id or has_name or has_full_name),
+            "tool_executed": tool_executed,
+            "method_name": method_name,
+            "repo_info": {
+                "id": repo_data.get('id'),
+                "name": repo_data.get('name'),
+                "full_name": repo_data.get('full_name'),
+                "owner_login": owner.get('login') if isinstance(owner, dict) else None,
+                "private": repo_data.get('private')
+            },
+            "structure_check": {
+                "has_id": has_id,
+                "has_name": has_name,
+                "has_full_name": has_full_name,
+                "has_owner": has_owner,
+                "has_private": has_private,
+                "owner_has_login": owner_has_login
+            },
+            "error": error_message
+        }
+        test_results
+    input:
+      - method_name
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

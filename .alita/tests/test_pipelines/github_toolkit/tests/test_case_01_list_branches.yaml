@@ -1,0 +1,80 @@
+name: "GH01 - List Branches"
+description: "Verify list_branches_in_repo tool returns branches including expected branch names"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_branches
+
+nodes:
+  - id: invoke_list_branches
+    type: toolkit
+    tool: list_branches_in_repo
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        tool_result = alita_state.get('tool_result')
+
+        tool_executed = tool_result is not None
+        error_message = None
+        branches_found = []
+
+        try:
+            if tool_result:
+                # Parse branches from result
+                if isinstance(tool_result, str):
+                    branches_found = [b.strip() for b in tool_result.split('\n') if b.strip()]
+                elif isinstance(tool_result, list):
+                    branches_found = tool_result
+        except Exception as e:
+            error_message = str(e)
+
+        # Extract branch names - handle both string list and dict list formats
+        branch_names = []
+        for b in branches_found:
+            if isinstance(b, dict):
+                branch_names.append(b.get('name', ''))
+            else:
+                branch_names.append(str(b))
+
+        # Verify expected branches exist
+        has_main = 'main' in branch_names or 'master' in branch_names
+        has_branches = len(branches_found) > 0
+
+        test_results = {
+            "test_passed": tool_executed and has_branches and has_main,
+            "tool_executed": tool_executed,
+            "branches_count": len(branches_found),
+            "has_main_branch": has_main,
+            "branches_sample": branches_found[:10] if branches_found else [],
+            "error": error_message,
+            "raw_result_type": type(tool_result).__name__ if tool_result else None
+        }
+        test_results
+        # Add results to messages
+    output:
+      - messages
+    structured_output: false
+    transition: END

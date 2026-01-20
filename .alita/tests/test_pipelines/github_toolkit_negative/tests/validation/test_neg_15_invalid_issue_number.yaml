@@ -1,0 +1,115 @@
+# NEG_15: Invalid Issue Number
+# Verifies that invalid issue number (negative, zero, string) returns actionable error
+# Expected: Clear error message about invalid issue number
+
+name: "NEG15 - Invalid Issue Number"
+description: "Verify get_issue returns actionable error for invalid issue numbers"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  negative_result:
+    type: str
+  zero_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: test_negative_number
+
+nodes:
+  # Test negative issue number
+  - id: test_negative_number
+    type: toolkit
+    tool: get_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      issue_number:
+        type: fixed
+        value: -1
+    output:
+      - negative_result
+    structured_output: true
+    transition: test_zero_number
+
+  # Test zero issue number
+  - id: test_zero_number
+    type: toolkit
+    tool: get_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      issue_number:
+        type: fixed
+        value: 0
+    output:
+      - zero_result
+    structured_output: true
+    transition: validate_errors
+
+  - id: validate_errors
+    type: code
+    code:
+      type: fixed
+      value: |
+        negative_result = alita_state.get('negative_result')
+        zero_result = alita_state.get('zero_result')
+
+        neg_str = str(negative_result).lower() if negative_result else ''
+        zero_str = str(zero_result).lower() if zero_result else ''
+
+        # Check negative number handling
+        neg_has_error = any(term in neg_str for term in ['invalid', 'error', 'failed', 'not found', '404', 'must be'])
+        neg_no_traceback = 'traceback' not in neg_str
+        neg_not_success = 'title' not in neg_str or 'error' in neg_str
+
+        # Check zero handling
+        zero_has_error = any(term in zero_str for term in ['invalid', 'error', 'failed', 'not found', '404', 'must be'])
+        zero_no_traceback = 'traceback' not in zero_str
+        zero_not_success = 'title' not in zero_str or 'error' in zero_str
+
+        # Both should fail gracefully
+        test_passed = (neg_has_error and neg_not_success and neg_no_traceback and
+                       zero_has_error and zero_not_success and zero_no_traceback)
+
+        test_results = {
+            "test_passed": test_passed,
+            "negative_number_test": {
+                "indicates_error": neg_has_error,
+                "no_traceback": neg_no_traceback,
+                "not_success": neg_not_success,
+                "response": neg_str[:300]
+            },
+            "zero_number_test": {
+                "indicates_error": zero_has_error,
+                "no_traceback": zero_no_traceback,
+                "not_success": zero_not_success,
+                "response": zero_str[:300]
+            },
+            "improvement_needed": []
+        }
+
+        if not neg_has_error:
+            test_results["improvement_needed"].append("Negative number: missing error indicator")
+        if not neg_no_traceback:
+            test_results["improvement_needed"].append("Negative number: contains traceback")
+        if not zero_has_error:
+            test_results["improvement_needed"].append("Zero: missing error indicator")
+        if not zero_no_traceback:
+            test_results["improvement_needed"].append("Zero: contains traceback")
+
+        test_results
+    input:
+      - negative_result
+      - zero_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

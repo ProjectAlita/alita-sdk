@@ -1,0 +1,205 @@
+name: "GH04 - Commits Workflow"
+description: "Test commit operations: get_commits to retrieve history, then get_commits_diff to compare adjacent commits"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  max_count:
+    type: int
+    value: 3
+  sha:
+    type: str
+    value: "main"
+  tool_result:
+    type: str
+  commits_list:
+    type: list
+  base_sha:
+    type: str
+  head_sha:
+    type: str
+  diff_result:
+    type: str
+  validation_results:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: get_commits
+
+nodes:
+  # Step 1: Get commits from main branch
+  - id: get_commits
+    type: toolkit
+    tool: get_commits
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - max_count
+      - sha
+    input_mapping:
+      max_count:
+        type: variable
+        value: max_count
+      sha:
+        type: variable
+        value: sha
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_commits
+
+  # Step 2: Validate commits and extract SHAs for diff
+  - id: validate_commits
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        commits_result = alita_state.get('tool_result')
+        max_count = alita_state.get('max_count', 3)
+
+        commits_list = []
+        try:
+            if isinstance(commits_result, list):
+                commits_list = commits_result
+            elif isinstance(commits_result, str):
+                try:
+                    commits_list = json.loads(commits_result)
+                except:
+                    pass
+        except:
+            pass
+
+        # Validate commits structure
+        has_commits = len(commits_list) > 0 if isinstance(commits_list, list) else False
+        within_limit = len(commits_list) <= max_count if isinstance(commits_list, list) else False
+        commits_have_sha = all('sha' in c for c in commits_list) if commits_list else False
+
+        # Extract adjacent commit SHAs for diff comparison (smaller diff)
+        base_sha = None
+        head_sha = None
+        if commits_list and len(commits_list) >= 2:
+            head_sha = commits_list[0].get('sha') if isinstance(commits_list[0], dict) else None
+            base_sha = commits_list[1].get('sha') if isinstance(commits_list[1], dict) else None
+
+        # Build compact sample for output
+        commits_sample = []
+        for commit in commits_list[:3]:
+            if isinstance(commit, dict):
+                commits_sample.append({
+                    "sha": commit.get('sha', '')[:8] if commit.get('sha') else None,
+                    "author": commit.get('author'),
+                    "message": (commit.get('message', '') or '')[:40]
+                })
+
+        validation_results = {
+            "get_commits_ok": has_commits and within_limit and commits_have_sha,
+            "commits_count": len(commits_list) if isinstance(commits_list, list) else 0,
+            "commits_sample": commits_sample
+        }
+
+        # Return only what's needed, clear tool_result to free memory
+        {"base_sha": base_sha, "head_sha": head_sha, "validation_results": validation_results, "tool_result": None}
+    input:
+      - tool_result
+      - max_count
+    output:
+      - base_sha
+      - head_sha
+      - validation_results
+      - tool_result
+    structured_output: true
+    transition: get_commits_diff
+
+  # Step 3: Get diff between two adjacent commits
+  - id: get_commits_diff
+    type: toolkit
+    tool: get_commits_diff
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - base_sha
+      - head_sha
+    input_mapping:
+      base_sha:
+        type: variable
+        value: base_sha
+      head_sha:
+        type: variable
+        value: head_sha
+    output:
+      - diff_result
+    structured_output: true
+    transition: process_results
+
+  # Step 4: Process and validate all results
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        diff_result = alita_state.get('diff_result')
+        base_sha = alita_state.get('base_sha')
+        head_sha = alita_state.get('head_sha')
+        validation_results = alita_state.get('validation_results', {})
+
+        # Parse diff result - extract only metadata, not full content
+        diff_meta = {}
+        try:
+            if isinstance(diff_result, dict):
+                diff_meta = {
+                    "status": diff_result.get('status'),
+                    "files_count": len(diff_result.get('files', [])) if isinstance(diff_result.get('files'), list) else 0,
+                    "has_commits": 'commits' in diff_result or 'total_commits' in diff_result
+                }
+            elif isinstance(diff_result, str):
+                diff_meta = {"raw_length": len(diff_result)}
+        except:
+            pass
+
+        # Validate diff result
+        diff_executed = diff_result is not None
+        has_status = bool(diff_meta.get('status'))
+        has_files = diff_meta.get('files_count', 0) > 0
+        has_commits = bool(diff_meta.get('has_commits'))
+        diff_valid = diff_executed and (has_status or has_files or has_commits)
+
+        # Overall test pass (ensure boolean result)
+        get_commits_ok = bool(validation_results.get('get_commits_ok', False))
+        all_ok = bool(get_commits_ok and diff_valid)
+
+        test_results = {
+            "test_passed": all_ok,
+            "operations": {
+                "get_commits": get_commits_ok,
+                "get_commits_diff": diff_valid
+            },
+            "details": {
+                "commits_count": validation_results.get('commits_count', 0),
+                "base_sha": base_sha[:8] if base_sha and len(base_sha) > 8 else base_sha,
+                "head_sha": head_sha[:8] if head_sha and len(head_sha) > 8 else head_sha,
+                "diff_files_count": diff_meta.get('files_count', 0),
+                "commits_sample": validation_results.get('commits_sample', [])
+            }
+        }
+        # Clear diff_result to avoid passing large data to sandbox
+        {"test_results": test_results, "diff_result": None, "validation_results": None}
+    input:
+      - diff_result
+      - base_sha
+      - head_sha
+      - validation_results
+    output:
+      - test_results
+      - diff_result
+      - validation_results
+    structured_output: true
+    transition: END

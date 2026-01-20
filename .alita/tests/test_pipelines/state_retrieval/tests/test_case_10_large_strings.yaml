@@ -1,0 +1,147 @@
+name: "SR10 - Large Strings"
+description: "Stress test with large string payloads (simulating API responses)"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  large_json_response:
+    type: str
+    value: |
+      {"status":"success","data":{"users":[{"id":1,"name":"Alice Johnson","email":"alice@example.com","metadata":{"created":"2024-01-15T10:30:00Z","updated":"2024-06-20T14:45:00Z","preferences":{"theme":"dark","notifications":true,"language":"en"}}},{"id":2,"name":"Bob Smith","email":"bob@example.com","metadata":{"created":"2024-02-20T08:15:00Z","updated":"2024-07-10T09:30:00Z","preferences":{"theme":"light","notifications":false,"language":"es"}}},{"id":3,"name":"Carol Williams","email":"carol@example.com","metadata":{"created":"2024-03-05T16:00:00Z","updated":"2024-08-01T11:20:00Z","preferences":{"theme":"auto","notifications":true,"language":"fr"}}}],"pagination":{"total":3,"page":1,"per_page":10,"total_pages":1},"meta":{"request_id":"abc123-def456-ghi789","timestamp":"2024-09-15T12:00:00Z","version":"2.0"}}}
+  large_html_content:
+    type: str
+    value: |
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <title>Test Document</title>
+          <style>
+              body { font-family: Arial, sans-serif; }
+              .container { max-width: 1200px; margin: 0 auto; }
+              .header { background: #333; color: white; padding: 20px; }
+              .content { padding: 20px; }
+              .footer { background: #f5f5f5; padding: 10px; text-align: center; }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <header class="header">
+                  <h1>Welcome to the Test Page</h1>
+                  <nav>
+                      <a href="#home">Home</a>
+                      <a href="#about">About</a>
+                      <a href="#contact">Contact</a>
+                  </nav>
+              </header>
+              <main class="content">
+                  <section id="home">
+                      <h2>Home Section</h2>
+                      <p>This is a paragraph with some <strong>bold text</strong> and <em>italic text</em>.</p>
+                      <ul>
+                          <li>List item 1</li>
+                          <li>List item 2</li>
+                          <li>List item 3</li>
+                      </ul>
+                  </section>
+                  <section id="about">
+                      <h2>About Section</h2>
+                      <p>More content here with special characters: &amp; &lt; &gt; &quot;</p>
+                  </section>
+              </main>
+              <footer class="footer">
+                  <p>&copy; 2024 Test Company. All rights reserved.</p>
+              </footer>
+          </div>
+      </body>
+      </html>
+  repeated_pattern:
+    type: str
+    value: "ABCDEFGHIJ0123456789abcdefghij!@#$%^&*()_+-=[]{}|;':\",./<>?ABCDEFGHIJ0123456789abcdefghij!@#$%^&*()_+-=[]{}|;':\",./<>?ABCDEFGHIJ0123456789abcdefghij!@#$%^&*()_+-=[]{}|;':\",./<>?ABCDEFGHIJ0123456789abcdefghij!@#$%^&*()_+-=[]{}|;':\",./<>?"
+  test_results:
+    type: dict
+
+entry_point: verify_large_strings
+
+nodes:
+  - id: verify_large_strings
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        json_str = alita_state.get('large_json_response', '')
+        html_str = alita_state.get('large_html_content', '')
+        pattern_str = alita_state.get('repeated_pattern', '')
+
+        # Verify JSON string
+        json_is_string = isinstance(json_str, str)
+        json_length = len(json_str) if json_is_string else 0
+        json_parseable = False
+        json_data = None
+        try:
+            if json_is_string:
+                json_data = json.loads(json_str)
+                json_parseable = True
+        except:
+            pass
+
+        # Verify HTML string
+        html_is_string = isinstance(html_str, str)
+        html_length = len(html_str) if html_is_string else 0
+        html_has_doctype = "<!DOCTYPE" in html_str if html_is_string else False
+        html_has_tags = "<html" in html_str and "</html>" in html_str if html_is_string else False
+        html_newline_count = html_str.count('\n') if html_is_string else 0
+
+        # Verify pattern string
+        pattern_is_string = isinstance(pattern_str, str)
+        pattern_length = len(pattern_str) if pattern_is_string else 0
+        pattern_has_special = "@#$%" in pattern_str if pattern_is_string else False
+
+        # Check parsed JSON structure
+        users_count = 0
+        if json_data and isinstance(json_data, dict):
+            users = json_data.get('data', {}).get('users', [])
+            users_count = len(users)
+
+        all_passed = (
+            json_is_string and
+            json_parseable and
+            users_count == 3 and
+            html_is_string and
+            html_has_doctype and
+            html_has_tags and
+            html_newline_count > 30 and
+            pattern_is_string and
+            pattern_has_special
+        )
+
+        result = {
+            "test_passed": all_passed,
+            "json_is_string": json_is_string,
+            "json_length": json_length,
+            "json_parseable": json_parseable,
+            "json_users_count": users_count,
+            "html_is_string": html_is_string,
+            "html_length": html_length,
+            "html_has_doctype": html_has_doctype,
+            "html_has_tags": html_has_tags,
+            "html_newline_count": html_newline_count,
+            "pattern_is_string": pattern_is_string,
+            "pattern_length": pattern_length,
+            "pattern_has_special": pattern_has_special
+        }
+        test_results = result
+
+        test_results
+    input:
+      - large_json_response
+      - large_html_content
+      - repeated_pattern
+    output:
+      - messages
+    structured_output: false
+    transition: END

@@ -1,0 +1,181 @@
+# Root Cause Analysis Pipeline
+# Invoked as post-test hook when a test fails
+#
+# Provides intelligent failure analysis with access to SDK codebase for deep inspection.
+# Uses GitHub toolkit to search and read code, enabling accurate root cause identification.
+#
+# Future enhancement: Can run failing tools with different params via code node for deeper insights.
+
+name: "RCA-${SUITE_NAME}"
+description: "Root cause analysis for failed tests in ${SUITE_NAME}"
+
+# Toolkit participants - allows LLM nodes to use toolkit tools
+# SDK toolkit enables searching/reading code from alita-sdk repo
+toolkits:
+  - id: ${SDK_TOOLKIT_ID}
+    name: ${SDK_TOOLKIT_NAME:sdk-analysis}
+
+# NO input_schema - receives raw JSON string via user_input
+# Parsing happens in parse_input node below
+
+state:
+  failure_details:
+    type: str
+    default: ''
+  rca_result:
+    type: dict
+  rca_summary:
+    type: str
+  messages:
+    type: list
+    default: []
+  input:
+    type: str
+    default: ''
+
+entry_point: analyze_failure
+
+nodes:
+  # Parse raw JSON input and extract failure details
+  - id: analyze_failure
+    type: llm
+    model: ${RCA_MODEL:gpt-5-mini}
+    input:
+      - input
+      - messages
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a test failure analyst specializing in API and toolkit integration tests.
+          Your job is to analyze test failures and provide actionable root cause analysis.
+
+          You have access to GitHub tools that allow you to search and read code from the
+          alita-sdk repository. Use these tools to:
+          - Search for relevant code when error messages mention specific functions/classes
+          - Read source files to understand the implementation
+          - Look for related tests or examples
+
+          Be concise and focus on:
+          1. What specifically failed
+          2. Why it likely failed (root cause) - use code search to verify
+          3. How to fix it - reference specific files/lines when possible
+      task:
+        type: fstring
+        value: |
+          ## Test Failure Analysis
+
+          {input}
+
+          ---
+
+          ## Instructions
+
+          1. First, analyze the test failure details above to identify key terms (function names, class names, error types)
+          2. Use the GitHub tools to search for relevant code in the alita-sdk repository:
+             - Use `search_code` to find where the error originates
+             - Use `get_file_contents` to read the relevant source files
+          3. Based on your code analysis, determine the root cause
+
+          Provide your analysis as JSON:
+          ```json
+          {{
+            "root_cause": "Clear explanation of what caused the failure",
+            "category": "tool_error|assertion_failed|timeout|config_issue|auth_error|network_error|external_dependency|test_bug|code_bug",
+            "severity": "critical|high|medium|low",
+            "suggested_fix": ["Step 1...", "Step 2..."],
+            "code_references": ["path/to/file.py:123", "..."],
+            "additional_context": "Any relevant observations from code analysis",
+            "confidence": "high|medium|low"
+          }}
+          ```
+    output:
+      - rca_result
+    structured_output: true
+    # Enable GitHub tools from the SDK analysis toolkit
+    tool_names:
+      ${SDK_TOOLKIT_NAME:sdk-analysis}:
+        - search_code
+        - get_file_contents
+        - list_repo_tree
+        - search_issues
+    transition: format_output
+
+  - id: format_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        rca = alita_state.get('rca_result', {})
+
+        # Parse RCA result if it's a string
+        if isinstance(rca, str):
+            try:
+                # Try to extract JSON from markdown code block
+                if '```json' in rca:
+                    json_str = rca.split('```json')[1].split('```')[0].strip()
+                    rca = json.loads(json_str)
+                elif '```' in rca:
+                    json_str = rca.split('```')[1].split('```')[0].strip()
+                    rca = json.loads(json_str)
+                else:
+                    rca = json.loads(rca)
+            except (json.JSONDecodeError, IndexError):
+                rca = {
+                    'root_cause': rca[:500] if rca else 'Analysis failed',
+                    'category': 'unknown',
+                    'severity': 'medium',
+                    'suggested_fix': [],
+                    'code_references': [],
+                    'confidence': 'low'
+                }
+
+        # Build summary string
+        category = rca.get('category', 'unknown')
+        severity = rca.get('severity', 'medium')
+        root_cause = rca.get('root_cause', 'Unknown')[:100]
+
+        rca_summary = f"[{severity.upper()}] {category}: {root_cause}"
+
+        # Add code references to summary if present
+        code_refs = rca.get('code_references', [])
+        if code_refs:
+            rca_summary += f" (see: {', '.join(code_refs[:2])})"
+
+        # Build output dict that will be added to messages
+        # This will be accessible from pipeline.output when invoked as a hook
+        output_result = {
+            'rca_result': {
+                'root_cause': rca.get('root_cause', 'Unknown'),
+                'category': rca.get('category', 'unknown'),
+                'severity': rca.get('severity', 'medium'),
+                'suggested_fix': rca.get('suggested_fix', []),
+                'code_references': rca.get('code_references', []),
+                'additional_context': rca.get('additional_context', ''),
+                'confidence': rca.get('confidence', 'medium')
+            },
+            'rca_summary': rca_summary
+        }
+
+        # Return as last expression - gets added to messages
+        output_result
+    input:
+      - rca_result
+    output:
+      - messages
+    structured_output: false
+    transition: END
+
+# Output schema - what gets returned and can be merged back to test result
+output_schema:
+  rca_result:
+    type: dict
+    description: "Structured RCA analysis"
+  rca_summary:
+    type: str
+    description: "One-line summary of RCA"

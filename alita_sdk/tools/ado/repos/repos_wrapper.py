@@ -27,6 +27,7 @@ from ...elitea_base import BaseCodeToolApiWrapper
 from ..utils import generate_diff, get_content_from_generator
 from ...code_indexer_toolkit import CodeIndexerToolkit
 from ...utils.available_tools_decorator import extend_with_parent_available_tools
+from ...utils.tool_prompts import EDIT_FILE_DESCRIPTION, UPDATE_FILE_PROMPT_NO_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -140,19 +141,7 @@ class ArgsSchema(Enum):
         ),
         update_query=(
             str,
-            Field(
-                description=(
-                    "The exact OLD text to be replaced and the NEW "
-                    "text to insert, using one or more block pairs like:"
-                    "OLD <<<<Hello Earth!>>>> OLD NEW <<<<Hello Mars!>>>> NEW"
-                    "Each OLD block must contain the exact text that will be replaced "
-                    "via string replacement (exact full match including non-written characters). Each corresponding NEW "
-                    "block contains the replacement text. For multi-line changes, it is "
-                    "preferred to provide several smaller OLD/NEW pairs rather than one "
-                    "large block, so that each OLD block closely matches a contiguous "
-                    "snippet from the file."
-                )
-            ),
+            Field(description=UPDATE_FILE_PROMPT_NO_PATH),
         ),
     )
     DeleteFile = create_model(
@@ -265,14 +254,21 @@ class ArgsSchema(Enum):
 
 
 class ReposApiWrapper(CodeIndexerToolkit):
-    # TODO use ado_repos_configuration fields
-    organization_url: Optional[str]
-    project: Optional[str]
-    repository_id: Optional[str]
-    base_branch: Optional[str]
-    active_branch: Optional[str]
-    token: Optional[SecretStr]
-    _client: Optional[GitClient] = PrivateAttr()
+    # ADO Configuration fields (from AdoConfiguration)
+    organization_url: Optional[str] = None
+    project: Optional[str] = None
+    token: Optional[SecretStr] = None
+
+    # Repository-specific fields (toolkit level)
+    repository_id: Optional[str] = None
+    base_branch: Optional[str] = None
+    active_branch: Optional[str] = None
+
+    # Alita instance
+    alita: Optional[Any] = None
+
+    # Client instance - marked as exclude=True
+    ado_client_instance: Optional[GitClient] = Field(default=None, exclude=True)
 
     # Reuse common file helpers from BaseCodeToolApiWrapper
     edit_file = BaseCodeToolApiWrapper.edit_file
@@ -283,42 +279,70 @@ class ReposApiWrapper(CodeIndexerToolkit):
     @model_validator(mode="before")
     @classmethod
     def validate_toolkit(cls, values):
-        project = values["project"]
-        organization_url = values["organization_url"]
-        repository_id = values["repository_id"]
-        base_branch = values["base_branch"]
-        active_branch = values["active_branch"]
-        credentials = BasicAuthentication("", values["token"])
+        from langchain.utils import get_from_dict_or_env
+
+        # Get ADO configuration values
+        organization_url = get_from_dict_or_env(values, ["organization_url"], "ADO_ORGANIZATION_URL", default=None)
+        project = get_from_dict_or_env(values, ["project"], "ADO_PROJECT", default=None)
+        token = get_from_dict_or_env(values, ["token"], "ADO_TOKEN", default=None)
+
+        # Get repository-specific values
+        repository_id = get_from_dict_or_env(values, ["repository_id"], "ADO_REPOSITORY_ID", default=None)
+        base_branch = get_from_dict_or_env(values, ["base_branch"], "ADO_BASE_BRANCH", default="main")
+        active_branch = get_from_dict_or_env(values, ["active_branch"], "ADO_ACTIVE_BRANCH", default="main")
 
         if not organization_url or not project or not repository_id:
             raise ToolException(
                 "Parameters: organization_url, project, and repository_id are required."
             )
 
+        credentials = BasicAuthentication("", token)
+
         try:
-            cls._client = GitClient(base_url=organization_url, creds=credentials)
-            # workaround to check if user is authorized to access ADO Git
-            cls._client.get_repository(repository_id, project=project)
+            # Initialize ADO Git client
+            ado_client = GitClient(base_url=organization_url, creds=credentials)
+            # Verify access to repository
+            ado_client.get_repository(repository_id, project=project)
+
+            # Store client instance
+            values["ado_client_instance"] = ado_client
+
+            def branch_exists(branch_name):
+                try:
+                    branch = ado_client.get_branch(
+                        repository_id=repository_id, name=branch_name, project=project
+                    )
+                    return branch is not None
+                except Exception:
+                    return False
+
+            if base_branch:
+                if not branch_exists(base_branch):
+                    raise ToolException(f"The base branch '{base_branch}' does not exist.")
+            if active_branch:
+                if not branch_exists(active_branch):
+                    raise ToolException(f"The active branch '{active_branch}' does not exist.")
+
         except Exception as e:
+            if isinstance(e, ToolException):
+                raise
             raise ToolException(f"Failed to connect to Azure DevOps: {e}")
 
-        def branch_exists(branch_name):
-            try:
-                branch = cls._client.get_branch(
-                    repository_id=repository_id, name=branch_name, project=project
-                )
-                return branch is not None
-            except Exception:
-                return False
-
-        if base_branch:
-            if not branch_exists(base_branch):
-                raise ToolException(f"The base branch '{base_branch}' does not exist.")
-        if active_branch:
-            if not branch_exists(active_branch):
-                raise ToolException(f"The active branch '{active_branch}' does not exist.")
+        # Update values with configuration
+        values["organization_url"] = organization_url
+        values["project"] = project
+        values["token"] = token
+        values["repository_id"] = repository_id
+        values["base_branch"] = base_branch
+        values["active_branch"] = active_branch
 
         return super().validate_toolkit(values)
+
+    # Expose ADO Git client via property
+    @property
+    def _client(self) -> GitClient:
+        """Access to ADO Git client methods"""
+        return self.ado_client_instance
 
     def _get_commits(self, file_path: str, branch: str, top: int = None) -> List[GitCommitRef]:
         """
@@ -669,8 +693,18 @@ class ReposApiWrapper(CodeIndexerToolkit):
 
         return dumps(data)
 
-    def download_file(self, path):
-        return b"".join(self._client.get_item_content(self.repository_id, path=path, project=self.project, download=True))
+    def download_file(self, path: str, branch: str = None):
+        branch = branch or self.active_branch or self.base_branch
+        version_descriptor = GitVersionDescriptor(
+            version=branch, version_type="branch"
+        )
+        return b"".join(self._client.get_item_content(
+            self.repository_id,
+            path=path,
+            project=self.project,
+            download=True,
+            version_descriptor=version_descriptor
+        ))
 
     def get_file_content(self, commit_id, path):
         version_descriptor = GitVersionDescriptor(
@@ -1261,7 +1295,7 @@ class ReposApiWrapper(CodeIndexerToolkit):
             {
                 "ref": self.update_file,
                 "name": "update_file",
-                "description": self.update_file.__doc__,
+                "description": EDIT_FILE_DESCRIPTION,
                 "args_schema": ArgsSchema.UpdateFile.value,
             },
             {

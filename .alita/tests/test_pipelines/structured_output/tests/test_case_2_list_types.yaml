@@ -1,0 +1,117 @@
+name: "TC2 - List Types"
+description: "Verify list types work correctly: list, list[str], list[int], list[bool]"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  color_names:
+    type: list
+  numbers:
+    type: list
+  flags:
+    type: list
+  mixed_items:
+    type: list
+  test_results:
+    type: dict
+
+entry_point: generate_list_output
+
+nodes:
+  - id: generate_list_output
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data. Always return arrays/lists as requested."
+      task:
+        type: fixed
+        value: |
+          Generate the following lists:
+          1. A list of 3 color names (strings): red, green, blue
+          2. A list of 3 numbers (integers): 1, 2, 3
+          3. A list of 3 boolean values: true, false, true
+          4. A generic list with mixed content: ["hello", 42, true]
+    output:
+      - color_names
+      - numbers
+      - flags
+      - mixed_items
+    structured_output: true
+    structured_output_dict:
+      color_names: "list[str]"
+      numbers: "list[int]"
+      flags: "list[bool]"
+      mixed_items: "list"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify the list types from structured output
+        color_names = alita_state.get('color_names', [])
+        numbers = alita_state.get('numbers', [])
+        flags = alita_state.get('flags', [])
+        mixed_items = alita_state.get('mixed_items', [])
+
+        type_checks = {
+            "color_names_is_list": isinstance(color_names, list),
+            "numbers_is_list": isinstance(numbers, list),
+            "flags_is_list": isinstance(flags, list),
+            "mixed_items_is_list": isinstance(mixed_items, list)
+        }
+
+        element_checks = {
+            "color_names_all_strings": all(isinstance(x, str) for x in color_names) if color_names else False,
+            "numbers_all_ints": all(isinstance(x, int) for x in numbers) if numbers else False,
+            "flags_all_bools": all(isinstance(x, bool) for x in flags) if flags else False,
+            "mixed_items_has_elements": len(mixed_items) > 0 if mixed_items else False
+        }
+
+        length_checks = {
+            "color_names_length": len(color_names) >= 3,
+            "numbers_length": len(numbers) >= 3,
+            "flags_length": len(flags) >= 3
+        }
+
+        all_types_ok = all(type_checks.values())
+        all_elements_ok = all(element_checks.values())
+
+        result = {
+            "test_passed": all_types_ok and all_elements_ok,
+            "type_checks": type_checks,
+            "element_type_checks": element_checks,
+            "length_checks": length_checks,
+            "actual_values": {
+                "color_names": color_names,
+                "numbers": numbers,
+                "flags": flags,
+                "mixed_items": mixed_items
+            },
+            "actual_types": {
+                "color_names": type(color_names).__name__,
+                "numbers": type(numbers).__name__,
+                "flags": type(flags).__name__,
+                "mixed_items": type(mixed_items).__name__
+            }
+        }
+        test_results = result
+        test_results
+
+    input:
+      - color_names
+      - numbers
+      - flags
+      - mixed_items
+    output:
+
+      - messages
+    structured_output: false
+    transition: END

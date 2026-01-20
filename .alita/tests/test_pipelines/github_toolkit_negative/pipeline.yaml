@@ -1,0 +1,314 @@
+# GitHub Toolkit Negative Test Suite Configuration
+# Tests error handling, edge cases, and graceful failure scenarios
+#
+# Purpose: Verify that the GitHub toolkit returns actionable error messages
+# that allow LLM agents to understand what went wrong and how to recover.
+#
+# ============================================================================
+# RUNNING TESTS BY CATEGORY
+# ============================================================================
+#
+# Run ALL negative tests:
+#   alita agent execute-test-cases --suite github_toolkit_negative
+#
+# Run only 404/Not Found tests:
+#   alita agent execute-test-cases --suite github_toolkit_negative_not_found
+#   (uses pipeline_not_found.yaml)
+#
+# Run only validation tests:
+#   alita agent execute-test-cases --suite github_toolkit_negative_validation
+#   (uses pipeline_validation.yaml)
+#
+# Run only conflict tests:
+#   alita agent execute-test-cases --suite github_toolkit_negative_conflicts
+#   (uses pipeline_conflicts.yaml)
+#
+# ============================================================================
+
+name: github_toolkit_negative
+description: GitHub toolkit negative/error handling tests (all categories)
+
+# Environment variable mappings
+env_mapping:
+  toolkit_config: ${GIT_CONFIG_PATH:../../../tool_configs/git-config.json}
+  access_token: ${GIT_TOOL_ACCESS_TOKEN}
+  repository: ${GITHUB_TEST_REPO:ProjectAlita/elitea-testing}
+  base_branch: ${GITHUB_BASE_BRANCH:main}
+
+# Setup steps executed before running tests
+setup:
+  # Step 1: Ensure GitHub credentials configuration exists
+  - name: Setup GitHub Configuration
+    type: configuration
+    config:
+      config_type: github
+      alita_title: ${GITHUB_SECRET_NAME:github}
+      data:
+        access_token: ${GIT_TOOL_ACCESS_TOKEN}
+        base_url: "https://api.github.com"
+
+  # Step 2: Create the primary GitHub toolkit (valid credentials)
+  - name: Create GitHub Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../configs/git-config.json
+      toolkit_type: github
+      overrides:
+        github_configuration:
+          private: true
+          alita_title: ${GITHUB_SECRET_NAME:github}
+        repository: ${GITHUB_TEST_REPO:ProjectAlita/elitea-testing}
+        active_branch: ${GITHUB_BASE_BRANCH:main}
+        base_branch: ${GITHUB_BASE_BRANCH:main}
+      toolkit_name: ${GITHUB_TOOLKIT_NAME:testing-negative}
+    save_to_env:
+      - key: GITHUB_TOOLKIT_ID
+        value: $.id
+      - key: GITHUB_TOOLKIT_NAME
+        value: $.name
+
+  # Step 3: Create toolkit pointing to non-existent repository (for NEG_06)
+  - name: Create Invalid Repo Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../configs/git-config.json
+      toolkit_type: github
+      overrides:
+        github_configuration:
+          private: true
+          alita_title: ${GITHUB_SECRET_NAME:github}
+        repository: "nonexistent-org-12345/nonexistent-repo-67890"
+        active_branch: main
+        base_branch: main
+      toolkit_name: invalid-repo-toolkit
+    save_to_env:
+      - key: INVALID_REPO_TOOLKIT_ID
+        value: $.id
+      - key: INVALID_REPO_TOOLKIT_NAME
+        value: $.name
+    continue_on_error: true
+
+  # Step 4: Create a test branch for conflict tests
+  - name: Create Test Branch for Conflicts
+    type: toolkit_invoke
+    enabled: true
+    config:
+      toolkit_id: ${GITHUB_TOOLKIT_ID}
+      tool_name: create_branch
+      tool_params:
+        branch_name: neg-test-existing-branch
+        from_branch: ${GITHUB_BASE_BRANCH:main}
+    continue_on_error: true
+    save_to_env:
+      - key: EXISTING_BRANCH_NAME
+        value: neg-test-existing-branch
+
+  # Step 5: Create a test file for conflict tests
+  - name: Create Test File for Conflicts
+    type: toolkit_invoke
+    enabled: true
+    config:
+      toolkit_id: ${GITHUB_TOOLKIT_ID}
+      tool_name: create_file
+      tool_params:
+        file_path: "test-data/negative-tests/existing-file.md"
+        file_contents: "This file exists for negative testing"
+    continue_on_error: true
+    save_to_env:
+      - key: EXISTING_FILE_PATH
+        value: test-data/negative-tests/existing-file.md
+
+  # Step 6: Create SDK analysis toolkit for RCA pipeline
+  # This toolkit points to alita-sdk repo so RCA can search/read code
+  - name: Create SDK Analysis Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../configs/git-config.json
+      toolkit_type: github
+      overrides:
+        github_configuration:
+          private: true
+          alita_title: ${GITHUB_SECRET_NAME:github}
+        repository: ${SDK_REPO:ProjectAlita/alita-sdk}
+        active_branch: ${SDK_BRANCH:main}
+        base_branch: ${SDK_BRANCH:main}
+      toolkit_name: sdk-analysis-negative
+    save_to_env:
+      - key: SDK_TOOLKIT_ID
+        value: $.id
+      - key: SDK_TOOLKIT_NAME
+        value: $.name
+
+# Composable pipelines - seeded alongside test pipelines
+composable_pipelines:
+  # RCA pipeline for negative test failures - suggests error handling improvements
+  - file: ../composable/rca_negative_test.yaml
+    env:
+      SUITE_NAME: github_toolkit_negative
+      RCA_MODEL: ${RCA_MODEL:gpt-5-mini}
+      SDK_TOOLKIT_ID: ${SDK_TOOLKIT_ID}
+      SDK_TOOLKIT_NAME: ${SDK_TOOLKIT_NAME:sdk-analysis-negative}
+    save_to_env:
+      - key: RCA_PIPELINE_ID
+        value: $.id
+      - key: RCA_PIPELINE_VERSION_ID
+        value: $.versions.0.id
+
+# Test execution configuration
+execution:
+  test_directory: tests
+
+  # Test order - grouped by category
+  order:
+    # Not Found errors (most common)
+    - not_found/test_neg_05_*.yaml
+    - not_found/test_neg_06_*.yaml
+    - not_found/test_neg_07_*.yaml
+    - not_found/test_neg_08_*.yaml
+    - not_found/test_neg_09_*.yaml
+    - not_found/test_neg_10_*.yaml
+    # Input validation errors
+    - validation/test_neg_14_*.yaml
+    - validation/test_neg_15_*.yaml
+    - validation/test_neg_16_*.yaml
+    - validation/test_neg_17_*.yaml
+    - validation/test_neg_18_*.yaml
+    # update_file validation errors
+    - validation/test_neg_30_*.yaml  # Missing OLD marker
+    - validation/test_neg_31_*.yaml  # Missing NEW marker
+    - validation/test_neg_32_*.yaml  # OLD content not found
+    - validation/test_neg_33_*.yaml  # Empty query
+    - validation/test_neg_34_*.yaml  # No newline in query
+    # Conflict errors
+    - conflicts/test_neg_21_*.yaml
+    - conflicts/test_neg_22_*.yaml
+    - conflicts/test_neg_24_*.yaml
+    - conflicts/test_neg_25_*.yaml
+
+  # Variables to substitute in test YAML files
+  substitutions:
+    GITHUB_TOOLKIT_ID: ${GITHUB_TOOLKIT_ID}
+    GITHUB_TOOLKIT_NAME: ${GITHUB_TOOLKIT_NAME}
+    INVALID_REPO_TOOLKIT_ID: ${INVALID_REPO_TOOLKIT_ID}
+    INVALID_REPO_TOOLKIT_NAME: ${INVALID_REPO_TOOLKIT_NAME}
+    EXISTING_BRANCH_NAME: ${EXISTING_BRANCH_NAME}
+    EXISTING_FILE_PATH: ${EXISTING_FILE_PATH}
+
+  # Execution settings
+  settings:
+    timeout: 60
+    parallel: 1
+    stop_on_failure: false
+
+# Cleanup steps
+cleanup:
+  # Delete test branch created for conflict tests
+  - name: Delete Conflict Test Branch
+    type: toolkit_invoke
+    config:
+      toolkit_id: ${GITHUB_TOOLKIT_ID}
+      tool_name: delete_branch
+      tool_params:
+        branch_name: neg-test-existing-branch
+    continue_on_error: true
+
+  # Delete test pipelines
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "NEG*"
+    continue_on_error: true
+
+  # Delete the test toolkit
+  - name: Delete Test Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${GITHUB_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  # Delete the invalid repo toolkit
+  - name: Delete Invalid Repo Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${INVALID_REPO_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  # Delete the SDK analysis toolkit (used by RCA)
+  - name: Delete SDK Analysis Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${SDK_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  # Delete the RCA pipeline
+  - name: Delete RCA Pipeline
+    type: pipeline
+    config:
+      pattern: "RCA-Negative-*"
+    continue_on_error: true
+
+# Hooks for analysis
+hooks:
+  pre_setup: []
+  post_setup: []
+
+  # RCA on failed negative tests - suggests error handling improvements
+  post_test:
+    - name: rca_error_handling
+      pipeline_id: ${RCA_PIPELINE_ID}
+      # Only run RCA when test fails (error message wasn't good enough)
+      condition: "result.get('test_passed') is False"
+      input_mapping:
+        failure_details: |
+          f"""## Negative Test Failure Analysis
+
+          **Test Name:** {result.get('pipeline_name', 'Unknown')}
+          **Test Category:** Negative/Error Handling Test
+          **Status:** FAILED - Error message quality insufficient
+
+          ## What This Test Checks
+          This negative test intentionally triggers an error condition to verify
+          that the error message returned is actionable for LLM agents.
+
+          ## Test Result Details
+          - **Test Passed:** {result.get('test_passed', False)}
+          - **Pipeline ID:** {result.get('pipeline_id', 'N/A')}
+          - **Execution Time:** {result.get('execution_time', 'N/A')}s
+
+          ## Error Quality Analysis
+          {result.get('output', {}).get('result', {}).get('error_quality', {})}
+
+          ## Actual Response Received
+          ```
+          {result.get('output', {}).get('result', {}).get('actual_response', 'N/A')}
+          ```
+
+          ## Improvements Needed
+          {result.get('output', {}).get('result', {}).get('improvement_needed', [])}
+
+          ## Task
+          Find where this error is generated in alita_sdk/tools/ and suggest
+          how to improve the error message to be more actionable.
+          """
+      output_mapping:
+        "result['rca']": "rca_result"
+        "result['rca_summary']": "rca_summary"
+
+  pre_cleanup: []
+  post_cleanup: []
+
+# Metadata for reporting
+metadata:
+  category: error_handling
+  priority: high
+  tags:
+    - negative_tests
+    - error_handling
+    - graceful_failure
+    - agent_recovery

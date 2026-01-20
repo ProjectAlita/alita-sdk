@@ -36,438 +36,43 @@ from .callbacks import create_cli_callback, CLICallbackHandler
 from .input_handler import get_input_handler, styled_input, styled_selection_input
 # Context management for chat history
 from .context import CLIContextManager, CLIMessage, purge_old_sessions as purge_context_sessions
+# Test execution utilities
+from .testcases import (
+    parse_test_case,
+    resolve_toolkit_config_path,
+    build_bulk_data_gen_prompt,
+    build_single_test_execution_prompt,
+    build_single_test_validation_prompt,
+    extract_json_from_text,
+    create_fallback_result_for_test,
+    print_validation_diagnostics,
+    TestLogCapture,
+    create_executor_from_cache,
+    cleanup_executor_cache,
+    extract_toolkit_name,
+    # New helper functions
+    load_test_runner_agent,
+    load_data_generator_agent,
+    load_validator_agent,
+    discover_test_case_files,
+    validate_test_case_files,
+    print_test_execution_header,
+    execute_bulk_data_generation,
+    execute_single_test_case,
+    validate_single_test_case,
+    generate_summary_report,
+    save_structured_report,
+    print_test_execution_summary,
+    # Workflow orchestration
+    parse_all_test_cases,
+    filter_test_cases_needing_data_gen,
+    execute_all_test_cases,
+)
 
 logger = logging.getLogger(__name__)
 
 # Create a rich console for beautiful output
 console = Console()
-
-
-def resolve_toolkit_config_path(config_path_str: str, test_file: Path, test_cases_dir: Path) -> Optional[str]:
-    """
-    Resolve toolkit configuration file path from test case.
-    
-    Tries multiple locations in order:
-    1. Absolute path
-    2. Relative to test case file directory
-    3. Relative to test cases directory
-    4. Relative to workspace root
-    
-    Args:
-        config_path_str: Config path from test case
-        test_file: Path to the test case file
-        test_cases_dir: Path to test cases directory
-        
-    Returns:
-        Absolute path to config file if found, None otherwise
-    """
-    if not config_path_str:
-        return None
-    
-    # Normalize path separators
-    config_path_str = config_path_str.replace('\\', '/')
-    
-    # Try absolute path first
-    config_path = Path(config_path_str)
-    if config_path.is_absolute() and config_path.exists():
-        return str(config_path)
-    
-    # Try relative to test case file directory
-    config_path = test_file.parent / config_path_str
-    if config_path.exists():
-        return str(config_path)
-    
-    # Try relative to test_cases_dir
-    config_path = test_cases_dir / config_path_str
-    if config_path.exists():
-        return str(config_path)
-    
-    # Try relative to workspace root
-    workspace_root = Path.cwd()
-    config_path = workspace_root / config_path_str
-    if config_path.exists():
-        return str(config_path)
-    
-    return None
-
-
-def parse_test_case(test_case_path: str) -> Dict[str, Any]:
-    """
-    Parse a test case markdown file to extract configuration, steps, and expectations.
-    
-    Args:
-        test_case_path: Path to the test case markdown file
-        
-    Returns:
-        Dictionary containing:
-        - name: Test case name
-        - objective: Test objective
-        - config_path: Path to toolkit config file
-        - generate_test_data: Boolean flag indicating if test data generation is needed (default: True)
-        - test_data_config: Dictionary of test data configuration from table
-        - prerequisites: Pre-requisites section text
-        - variables: List of variable placeholders found (e.g., {{TEST_PR_NUMBER}})
-        - steps: List of test steps with their descriptions
-        - expectations: List of expectations/assertions
-    """
-    path = Path(test_case_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Test case not found: {test_case_path}")
-    
-    content = path.read_text(encoding='utf-8')
-    
-    # Extract test case name from the first heading
-    name_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-    name = name_match.group(1) if name_match else path.stem
-    
-    # Extract objective
-    objective_match = re.search(r'##\s+Objective\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
-    objective = objective_match.group(1).strip() if objective_match else ""
-    
-    # Extract config path and generateTestData flag
-    config_section_match = re.search(r'##\s+Config\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
-    config_path = None
-    generate_test_data = True  # Default to True if not specified
-    
-    if config_section_match:
-        config_section = config_section_match.group(1)
-        # Extract path
-        path_match = re.search(r'path:\s*(.+?)(?=\n|$)', config_section, re.MULTILINE)
-        if path_match:
-            config_path = path_match.group(1).strip()
-        
-        # Extract generateTestData flag
-        gen_data_match = re.search(r'generateTestData\s*:\s*(true|false)', config_section, re.IGNORECASE)
-        if gen_data_match:
-            generate_test_data = gen_data_match.group(1).lower() == 'true'
-    
-    # Extract Test Data Configuration section as a raw fenced code block string
-    # NOTE: We intentionally store the entire section as a single string rather than parsing
-    # individual table rows. This preserves the original formatting for downstream tools
-    # which may prefer the raw markdown block.
-    test_data_config = None
-    config_section_match = re.search(r'##\s+Test Data Configuration\s*\n(.+?)(?=\n##|\Z)', content, re.DOTALL)
-    if config_section_match:
-        config_section = config_section_match.group(1).strip()
-        # Store as a fenced code block to make it clear this is a raw block of text
-        test_data_config = f"\n{config_section}\n"
-    
-    # Extract Pre-requisites section
-    prerequisites = ""
-    prereq_match = re.search(r'##\s+Pre-requisites\s*\n\n(.+?)(?=\n\n##|\Z)', content, re.DOTALL)
-    if prereq_match:
-        prerequisites = prereq_match.group(1).strip()
-    
-    # Find all variable placeholders ({{VARIABLE_NAME}})
-    variables = list(set(re.findall(r'\{\{([A-Z_]+)\}\}', content)))
-    
-    # Extract test steps and expectations
-    steps = []
-    expectations = []
-    
-    # Find all Step sections
-    step_pattern = r'###\s+Step\s+(\d+):\s+(.+?)\n\n(.+?)(?=\n\n###|\n\n##|\Z)'
-    for step_match in re.finditer(step_pattern, content, re.DOTALL):
-        step_num = step_match.group(1)
-        step_title = step_match.group(2).strip()
-        step_content = step_match.group(3).strip()
-        
-        # Extract the actual instruction (first paragraph before "Expectation:")
-        instruction_match = re.search(r'(.+?)(?=\n\n\*\*Expectation:\*\*|\Z)', step_content, re.DOTALL)
-        instruction = instruction_match.group(1).strip() if instruction_match else step_content
-        
-        # Extract expectation if present
-        expectation_match = re.search(r'\*\*Expectation:\*\*\s+(.+)', step_content, re.DOTALL)
-        expectation = expectation_match.group(1).strip() if expectation_match else None
-        
-        steps.append({
-            'number': int(step_num),
-            'title': step_title,
-            'instruction': instruction,
-            'expectation': expectation
-        })
-        
-        if expectation:
-            expectations.append({
-                'step': int(step_num),
-                'description': expectation
-            })
-    
-    return {
-        'name': name,
-        'objective': objective,
-        'config_path': config_path,
-        'generate_test_data': generate_test_data,
-        'test_data_config': test_data_config,
-        'prerequisites': prerequisites,
-        'variables': variables,
-        'steps': steps,
-        'expectations': expectations
-    }
-
-
-def validate_test_output(output: str, expectation: str) -> tuple[bool, str]:
-    """
-    Validate test output against expectations.
-    
-    Args:
-        output: The actual output from the agent
-        expectation: The expected result description
-        
-    Returns:
-        Tuple of (passed: bool, details: str)
-    """
-    # Simple keyword-based validation
-    # Extract key phrases from expectation
-    
-    # Common patterns in expectations
-    if "contains" in expectation.lower():
-        # Extract what should be contained
-        contains_match = re.search(r'contains.*?["`]([^"`]+)["`]', expectation, re.IGNORECASE)
-        if contains_match:
-            expected_text = contains_match.group(1)
-            if expected_text in output:
-                return True, f"Output contains expected text: '{expected_text}'"
-            else:
-                return False, f"Output does not contain expected text: '{expected_text}'"
-    
-    if "without errors" in expectation.lower() or "runs without errors" in expectation.lower():
-        # Check for common error indicators
-        error_indicators = ['error', 'exception', 'failed', 'traceback']
-        has_error = any(indicator in output.lower() for indicator in error_indicators)
-        if not has_error:
-            return True, "Execution completed without errors"
-        else:
-            return False, "Execution encountered errors"
-    
-    # Default: assume pass if output is non-empty
-    if output and len(output.strip()) > 0:
-        return True, "Output generated successfully"
-    
-    return False, "No output generated"
-
-
-def _build_bulk_data_gen_prompt(parsed_test_cases: list) -> str:
-    """Build consolidated requirements text for bulk test data generation."""
-    requirements = []
-    for idx, tc in enumerate(parsed_test_cases, 1):
-        test_case = tc['data']
-        test_file = tc['file']
-        # Build parts for this test case (do not include separator lines here;
-        # the entire block is wrapped with separators at the top-level)
-        parts = [f"Test Case #{idx}: {test_case['name']}", f"File: {test_file.name}", ""]
-        
-        if test_case.get('test_data_config'):
-            parts.append("Test Data Configuration:")
-            td = test_case['test_data_config']
-            raw_lines = str(td).splitlines()
-            for line in raw_lines:
-                parts.append(f"{line}")
-    
-        if test_case.get('prerequisites'):
-            parts.append(f"\nPre-requisites:\n{test_case['prerequisites']}")
-        
-        requirements.append("\n".join(parts))
-    
-    # If no requirements were collected, return an empty string to avoid
-    # producing a prompt with only separator lines.
-    if not requirements:
-        return ""
-
-    # Use a visible divider between test cases so each entry is clearly separated
-    divider = '-' * 40
-    body = f"\n\n{divider}\n\n".join(requirements)
-    return f"{('='*60)}\n\n{body}\n\n{('='*60)}"
-
-
-def _build_single_test_execution_prompt(test_case_info: dict, test_number: int) -> str:
-    """Build execution prompt for a single test case."""
-    test_case = test_case_info['data']
-    test_file = test_case_info['file']
-    
-    parts = [
-        f"\n{'='*80}",
-        f"TEST CASE #{test_number}: {test_case['name']}",
-        f"File: {test_file.name}",
-        f"{'='*80}"
-    ]
-    
-    if test_case['steps']:
-        for step in test_case['steps']:
-            parts.append(f"\nStep {step['number']}: {step['title']}")
-            parts.append(step['instruction'])
-    else:
-        parts.append("\n(No steps defined)")
-    
-    return "\n".join(parts)
-
-
-def _build_single_test_validation_prompt(test_case_info: dict, test_number: int, execution_output: str) -> str:
-    """Build validation prompt for a single test case."""
-    test_case = test_case_info['data']
-    
-    parts = [
-        f"\nTest Case #{test_number}: {test_case['name']}"
-    ]
-    
-    if test_case['steps']:
-        for step in test_case['steps']:
-            parts.append(f"  Step {step['number']}: {step['title']}")
-            if step['expectation']:
-                parts.append(f"    Expected: {step['expectation']}")
-    
-    parts.append(f"\n\nActual Execution Results:\n{execution_output}\n")
-    
-    # Escape quotes in test name for valid JSON in prompt
-    escaped_test_name = test_case['name'].replace('"', '\\"')
-    
-    parts.append(f"""\nBased on the execution results above, validate this test case.
-        {{
-          "test_number": {test_number},
-          "test_name": "{escaped_test_name}"
-        }}
-    """)
-    
-    return "\n".join(parts)
-
-
-def _extract_json_from_text(text: str) -> dict:
-    """Extract JSON object from text using brace counting."""
-    start_idx = text.find('{')
-    if start_idx == -1:
-        raise ValueError("No JSON found in text")
-    
-    brace_count = 0
-    end_idx = -1
-    for i, char in enumerate(text[start_idx:], start=start_idx):
-        if char == '{':
-            brace_count += 1
-        elif char == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                end_idx = i + 1
-                break
-    
-    if end_idx == -1:
-        raise ValueError("Could not find matching closing brace")
-    
-    return json.loads(text[start_idx:end_idx])
-
-
-def _create_fallback_result_for_test(test_case: dict, test_file: Path, reason: str = 'Validation failed') -> dict:
-    """Create a fallback result for a single test case with detailed step information.
-    
-    Args:
-        test_case: Parsed test case data
-        test_file: Path to test case file
-        reason: Reason for fallback
-        
-    Returns:
-        Fallback test result dict with step details
-    """
-    fallback_steps = []
-    for step_info in test_case.get('steps', []):
-        fallback_steps.append({
-            'step_number': step_info['number'],
-            'title': step_info['title'],
-            'passed': False,
-            'details': reason
-        })
-    
-    return {
-        'title': test_case['name'],
-        'passed': False,
-        'file': test_file.name,
-        'step_results': fallback_steps,
-        'validation_error': reason
-    }
-
-
-def _cleanup_executor_cache(cache: Dict[str, tuple], cache_name: str = "executor") -> None:
-    """Clean up executor cache resources.
-    
-    Args:
-        cache: Dictionary of cached executors
-        cache_name: Name of cache for logging
-    """
-    console.print(f"[dim]Cleaning up {cache_name} cache...[/dim]")
-    for cache_key, cached_items in cache.items():
-        try:
-            # Extract memory from tuple (second element)
-            memory = cached_items[1] if len(cached_items) > 1 else None
-            
-            # Close SQLite memory connection
-            if memory and hasattr(memory, 'conn') and memory.conn:
-                memory.conn.close()
-        except Exception as e:
-            logger.debug(f"Error cleaning up {cache_name} cache for {cache_key}: {e}")
-
-
-def _create_executor_from_cache(cache: Dict[str, tuple], cache_key: str, 
-                                client, agent_def: Dict, toolkit_config_path: Optional[str],
-                                config, model: Optional[str], temperature: Optional[float],
-                                max_tokens: Optional[int], work_dir: Optional[str]) -> tuple:
-    """Get or create executor from cache.
-    
-    Args:
-        cache: Executor cache dictionary
-        cache_key: Key for caching
-        client: API client
-        agent_def: Agent definition
-        toolkit_config_path: Path to toolkit config
-        config: CLI configuration
-        model: Model override
-        temperature: Temperature override
-        max_tokens: Max tokens override
-        work_dir: Working directory
-        
-    Returns:
-        Tuple of (agent_executor, memory, mcp_session_manager)
-    """
-    if cache_key in cache:
-        return cache[cache_key]
-    
-    # Create new executor
-    from langgraph.checkpoint.sqlite import SqliteSaver
-    import sqlite3
-    
-    memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
-    toolkit_config_tuple = (toolkit_config_path,) if toolkit_config_path else ()
-    
-    agent_executor, mcp_session_manager, _, _, _, _, _ = _setup_local_agent_executor(
-        client, agent_def, toolkit_config_tuple, config, model, temperature, 
-        max_tokens, memory, work_dir
-    )
-    
-    # Cache the executor
-    cached_tuple = (agent_executor, memory, mcp_session_manager)
-    cache[cache_key] = cached_tuple
-    return cached_tuple
-
-
-def _print_validation_diagnostics(validation_output: str) -> None:
-    """Print diagnostic information for validation output.
-    
-    Args:
-        validation_output: The validation output to diagnose
-    """
-    console.print(f"\n[bold red]🔍 Diagnostic Information:[/bold red]")
-    console.print(f"[dim]Output length: {len(validation_output)} characters[/dim]")
-    
-    # Check for key JSON elements
-    has_json = '{' in validation_output and '}' in validation_output
-    has_fields = 'test_number' in validation_output and 'steps' in validation_output
-    
-    console.print(f"[dim]Has JSON structure: {has_json}[/dim]")
-    console.print(f"[dim]Has required fields: {has_fields}[/dim]")
-    
-    # Show relevant excerpt
-    if len(validation_output) > 400:
-        console.print(f"\n[red]First 200 chars:[/red] [dim]{validation_output[:200]}[/dim]")
-        console.print(f"[red]Last 200 chars:[/red] [dim]{validation_output[-200:]}[/dim]")
-    else:
-        console.print(f"\n[red]Full output:[/red] [dim]{validation_output}[/dim]")
-
 
 def _get_alita_system_prompt(config) -> str:
     """
@@ -3343,12 +2948,15 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
               help='Path to test validator agent definition file (default: .alita/agents/test-validator.agent.md)')
 @click.option('--skip-data-generation', is_flag=True,
               help='Skip test data generation step')
+@click.option('--verbose', '-v', type=click.Choice(['quiet', 'default', 'debug']), default='default',
+          help='Output verbosity level: quiet (final output only), default (tool calls + outputs), debug (all including LLM calls)')
 @click.pass_context
 def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir: str,
                       test_case_files: tuple, model: Optional[str], temperature: Optional[float], 
                       max_tokens: Optional[int], work_dir: str,
                       data_generator: str, validator: Optional[str], 
-                      skip_data_generation: bool):
+              skip_data_generation: bool,
+              verbose: str):
     """
     Execute test cases from a directory and save results.
     
@@ -3383,6 +2991,10 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
     config = ctx.obj['config']
     client = get_client(ctx)
 
+    # Setup verbose level
+    show_verbose = verbose != 'quiet'
+    debug_mode = verbose == 'debug'
+
     # Sanity-check committed defaults (should exist; fail early with a clear message if not)
     if results_dir and not Path(results_dir).exists():
         raise click.ClickException(
@@ -3391,428 +3003,98 @@ def execute_test_cases(ctx, agent_source: str, test_cases_dir: str, results_dir:
         )
     
     try:        
-        # Load agent definition
-        agent_source_path = Path(agent_source)
-        if not agent_source_path.exists():
-            default_path = Path('.alita') / 'agents' / 'test-runner.agent.md'
-            if agent_source_path == default_path:
-                raise click.ClickException(
-                    f"Default agent definition not found: {agent_source}. "
-                    f"Run this command from the repo root (so {default_path} resolves correctly) "
-                    f"or pass --agent_source explicitly."
-                )
-            raise click.ClickException(f"Agent definition not found: {agent_source}")
+        # Load test runner agent
+        agent_def, agent_name = load_test_runner_agent(agent_source)
         
-        agent_def = load_agent_definition(agent_source)
-        agent_name = agent_def.get('name', Path(agent_source).stem)
-        
-        # Find all test case files (recursively search subdirectories)
+        # Find and filter test case files
         test_cases_path = Path(test_cases_dir)
+        test_case_files_list = discover_test_case_files(test_cases_dir, test_case_files)
         
-        # Filter test cases based on --test-case options
-        if test_case_files:
-            # User specified specific test case files
-            test_case_files_set = set(test_case_files)
-            all_test_cases = sorted(test_cases_path.rglob('TC-*.md'))
-            test_case_files_list = [
-                tc for tc in all_test_cases 
-                if tc.name in test_case_files_set
-            ]
-            
-            # Check if all specified files were found
-            found_names = {tc.name for tc in test_case_files_list}
-            not_found = test_case_files_set - found_names
-            if not_found:
-                console.print(f"[yellow]⚠ Warning: Test case files not found: {', '.join(not_found)}[/yellow]")
-        else:
-            # Execute all test cases
-            test_case_files_list = sorted(test_cases_path.rglob('TC-*.md'))
-        
-        if not test_case_files_list:
-            if test_case_files:
-                console.print(f"[yellow]No matching test case files found in {test_cases_dir}[/yellow]")
-            else:
-                console.print(f"[yellow]No test case files found in {test_cases_dir}[/yellow]")
+        # Validate that test cases were found
+        if not validate_test_case_files(test_case_files_list, test_cases_dir, test_case_files):
             return
         
-        console.print(f"\n[bold cyan]🧪 Test Execution Started[/bold cyan]")
-        console.print(f"Agent: [bold]{agent_name}[/bold]")
-        console.print(f"Test Cases: {len(test_case_files_list)}")
-        if test_case_files:
-            console.print(f"Selected: [cyan]{', '.join(test_case_files)}[/cyan]")
-        console.print(f"Results Directory: {results_dir}\n")
+        # Print execution header
+        print_test_execution_header(agent_name, test_case_files_list, test_case_files, results_dir)
         
-        data_gen_def = None
-        if data_generator and not skip_data_generation:
-            try:
-                data_gen_def = load_agent_definition(data_generator)
-                data_gen_name = data_gen_def.get('name', Path(data_generator).stem)
-                console.print(f"Data Generator Agent: [bold]{data_gen_name}[/bold]\n")
-            except Exception as e:
-                console.print(f"[yellow]⚠ Warning: Failed to setup data generator: {e}[/yellow]")
-                console.print("[yellow]Continuing with test execution...[/yellow]\n")
-                logger.debug(f"Data generator setup error: {e}", exc_info=True)
+        # Load data generator agent (if applicable)
+        data_gen_def = load_data_generator_agent(data_generator, skip_data_generation)
         
-        # Load validator agent definition
-        validator_def = None
-        validator_agent_name = "Default Validator"
-        
-        # Try to load validator from specified path or default location
-        validator_path = validator
-        if not validator_path:
-            # Default to .alita/agents/test-validator.agent.md
-            default_validator = Path.cwd() / '.alita' / 'agents' / 'test-validator.agent.md'
-            if default_validator.exists():
-                validator_path = str(default_validator)
-        
-        if validator_path and Path(validator_path).exists():
-            try:
-                validator_def = load_agent_definition(validator_path)
-                validator_agent_name = validator_def.get('name', Path(validator_path).stem)
-                console.print(f"Validator Agent: [bold]{validator_agent_name}[/bold]")
-                console.print(f"[dim]Using: {validator_path}[/dim]\n")
-            except Exception as e:
-                console.print(f"[yellow]⚠ Warning: Failed to load validator agent: {e}[/yellow]")
-                console.print(f"[yellow]Will use test runner agent for validation[/yellow]\n")
-                logger.debug(f"Validator load error: {e}", exc_info=True)
-        else:
-            console.print(f"[dim]No validator agent specified, using test runner agent for validation[/dim]\n")
+        # Load validator agent
+        validator_def, validator_agent_name, validator_path = load_validator_agent(validator)
         
         # Store bulk data generation chat history to pass to test executors
         bulk_gen_chat_history = []
         
-        # Parse all test cases upfront for bulk data generation
+        # Parse all test cases upfront
         parsed_test_cases = []
-        for test_file in test_case_files_list:
-            try:
-                test_case = parse_test_case(str(test_file))
-                parsed_test_cases.append({
-                    'file': test_file,
-                    'data': test_case
-                })
-            except Exception as e:
-                console.print(f"[yellow]⚠ Warning: Failed to parse {test_file.name}: {e}[/yellow]")
-                logger.debug(f"Parse error for {test_file.name}: {e}", exc_info=True)
+        test_cases_needing_data_gen = []
         
-        # Filter test cases that need data generation
-        test_cases_needing_data_gen = [
-            tc for tc in parsed_test_cases 
-            if tc['data'].get('generate_test_data', True)
-        ]
-        
-        # Bulk test data generation (if enabled)
-        if data_gen_def and not skip_data_generation and test_cases_needing_data_gen:
-            console.print(f"\n[bold yellow]🔧 Bulk Test Data Generation[/bold yellow]")
-            console.print(f"Generating test data for {len(test_cases_needing_data_gen)} test cases...\n")
-            console.print(f"[dim]Skipping {len(parsed_test_cases) - len(test_cases_needing_data_gen)} test cases with generateTestData: false[/dim]\n")
-            
-            bulk_data_gen_prompt = _build_bulk_data_gen_prompt(test_cases_needing_data_gen)
-            
-            console.print(f"Executing test data generation prompt \n{bulk_data_gen_prompt}\n")
-
-            try:
-                # Setup data generator agent
-                bulk_memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
-                
-                # Use first test case's config or empty tuple
-                first_config_path = None
-                if parsed_test_cases:
-                    first_tc = parsed_test_cases[0]
-                    first_config_path = resolve_toolkit_config_path(
-                        first_tc['data'].get('config_path', ''),
-                        first_tc['file'],
-                        test_cases_path
-                    )
-                
-                data_gen_config_tuple = (first_config_path,) if first_config_path else ()
-                data_gen_executor, _, _, _, _, _, _ = _setup_local_agent_executor(
-                    client, data_gen_def, data_gen_config_tuple, config,
-                    model, temperature, max_tokens, bulk_memory, work_dir
-                )
-                
-                if data_gen_executor:
-                    with console.status("[yellow]Generating test data for all test cases...[/yellow]", spinner="dots"):
-                        bulk_gen_result = data_gen_executor.invoke({
-                            "input": bulk_data_gen_prompt,
-                            "chat_history": []
-                        })
-                    bulk_gen_output = extract_output_from_result(bulk_gen_result)
-                    console.print(f"[green]✓ Bulk test data generation completed[/green]")
-                    console.print(f"[dim]{bulk_gen_output}...[/dim]\n")
-                    
-                    # Store chat history from data generation to pass to test executors
-                    bulk_gen_chat_history = [
-                        {"role": "user", "content": bulk_data_gen_prompt},
-                        {"role": "assistant", "content": bulk_gen_output}
-                    ]
-                else:
-                    console.print(f"[yellow]⚠ Warning: Data generator has no executor[/yellow]\n")
-            except Exception as e:
-                console.print(f"[yellow]⚠ Warning: Bulk data generation failed: {e}[/yellow]")
-                console.print("[yellow]Continuing with test execution...[/yellow]\n")
-                logger.debug(f"Bulk data generation error: {e}", exc_info=True)
-        
-        # Execute test cases sequentially with executor caching
-        if not parsed_test_cases:
-            console.print("[yellow]No test cases to execute[/yellow]")
-            return
-        
-        console.print(f"\n[bold yellow]📋 Executing test cases sequentially...[/bold yellow]\n")
-        
-        # Show data generation context availability
-        if bulk_gen_chat_history:
-            console.print(f"[dim]✓ Data generation history available ({len(bulk_gen_chat_history)} messages) - shared with all test cases[/dim]\n")
-        else:
-            console.print(f"[dim]ℹ No data generation history (skipped or disabled)[/dim]\n")
-        
-        # Executor cache: key = toolkit_config_path, value = (agent_executor, memory, mcp_session_manager)
-        executor_cache = {}
-        
-        # Validation executor cache: separate isolated executors for validation
-        # key = toolkit_config_path, value = (agent_executor, memory, mcp_session_manager)
-        validation_executor_cache = {}
-        
-        # Execute each test case sequentially
-        test_results = []
-        total_tests = len(parsed_test_cases)
-        
-        for idx, tc_info in enumerate(parsed_test_cases, 1):
-            test_case = tc_info['data']
-            test_file = tc_info['file']
-            test_name = test_case['name']
-            
-            # Display progress
-            console.print(f"[bold cyan]Test Case {idx}/{total_tests} - {test_name}[/bold cyan]")
-            
-            try:
-                # Resolve toolkit config path for this test case
-                toolkit_config_path = resolve_toolkit_config_path(
-                    test_case.get('config_path', ''),
-                    test_file,
-                    test_cases_path
-                )
-                
-                # Use cache key (None if no config)
-                cache_key = toolkit_config_path if toolkit_config_path else '__no_config__'
-                thread_id = f"test_case_{idx}_{uuid.uuid4().hex[:8]}"
-                
-                # Get or create executor from cache
-                agent_executor, memory, mcp_session_manager = _create_executor_from_cache(
-                    executor_cache, cache_key, client, agent_def, toolkit_config_path,
-                    config, model, temperature, max_tokens, work_dir
-                )
-                
-                # Build execution prompt for single test case
-                execution_prompt = _build_single_test_execution_prompt(tc_info, idx)
-                console.print(f"[dim]Executing with {len(bulk_gen_chat_history)} history messages[/dim]")
-                console.print(f"[dim]Executing test case with the prompt {execution_prompt}[/dim]")
-                
-                # Execute test case
-                execution_output = ""
-                if agent_executor:
-                    with console.status(f"[yellow]Executing test case...[/yellow]", spinner="dots"):
-                        exec_result = agent_executor.invoke({
-                            "input": execution_prompt,
-                            "chat_history": bulk_gen_chat_history  # ONLY data gen history, no accumulation
-                        }, config={"configurable": {"thread_id": thread_id}})
-                    execution_output = extract_output_from_result(exec_result)
-                    
-                    console.print(f"[green]✓ Test case executed[/green]")
-                    console.print(f"[dim]{execution_output}[/dim]\n")
-                    
-                    # Append execution to bulk gen chat history for validation
-                    test_case_history_start = len(bulk_gen_chat_history)
-                    bulk_gen_chat_history.extend([
-                        {"role": "user", "content": execution_prompt},
-                        {"role": "assistant", "content": execution_output}
-                    ])
-                    
-                    # No history accumulation - each test case is independent
-                else:
-                    console.print(f"[red]✗ No agent executor available[/red]")
-                    # Create fallback result for this test
-                    test_results.append({
-                        'title': test_name,
-                        'passed': False,
-                        'file': test_file.name,
-                        'step_results': []
-                    })
-                    continue
-                
-                # Validate test case using validation executor with accumulated history
-                validation_prompt = _build_single_test_validation_prompt(tc_info, idx, execution_output)
-                
-                console.print(f"[bold yellow]🔍 Validating test case (with execution history)...[/bold yellow]")
-                console.print(f"[dim]{validation_prompt}[/dim]\n")
-
-                # Create or retrieve isolated validation executor
-                validation_cache_key = f"{cache_key}_validation"
-                validation_agent_def = validator_def if validator_def else agent_def
-                
-                validation_executor, validation_memory, validation_mcp_session = _create_executor_from_cache(
-                    validation_executor_cache, validation_cache_key, client, validation_agent_def,
-                    toolkit_config_path, config, model, temperature, max_tokens, work_dir
-                )
-                
-                if validation_cache_key not in validation_executor_cache:
-                    console.print(f"[dim]Created new isolated validation executor[/dim]")
-                else:
-                    console.print(f"[dim]Using cached validation executor[/dim]")
-                
-                # For validation, use a separate thread with accumulated chat history (data gen + execution)
-                # This provides context to the validator about the test execution
-                validation_thread_id = f"validation_{idx}_{uuid.uuid4().hex[:8]}"
-                
-                validation_output = ""
-                if validation_executor:
-                    with console.status(f"[yellow]Validating test case...[/yellow]", spinner="dots"):
-                        validation_result = validation_executor.invoke({
-                            "input": validation_prompt,
-                            "chat_history": bulk_gen_chat_history  # Includes data gen and execution history
-                        }, {"configurable": {"thread_id": validation_thread_id}})
-                    
-                    validation_output = extract_output_from_result(validation_result)
-                else:
-                    console.print(f"[red]✗ No validation executor available[/red]")
-                    validation_output = "{}"
-                    
-                # No further history update - validation completes the cycle
-                
-                # Parse validation JSON
-                try:
-                    validation_json = _extract_json_from_text(validation_output)
-                    step_results = validation_json.get('steps', [])
-                    
-                    # Determine if test passed (all steps must pass)
-                    test_passed = all(step.get('passed', False) for step in step_results) if step_results else False
-                    
-                    if test_passed:
-                        console.print(f"[bold green]✅ Test PASSED: {test_name}[/bold green]")
-                    else:
-                        console.print(f"[bold red]❌ Test FAILED: {test_name}[/bold red]")
-                    
-                    # Display individual step results
-                    for step_result in step_results:
-                        step_num = step_result.get('step_number')
-                        step_title = step_result.get('title', '')
-                        passed = step_result.get('passed', False)
-                        details = step_result.get('details', '')
-                        
-                        if passed:
-                            console.print(f"  [green]✓ Step {step_num}: {step_title}[/green]")
-                            console.print(f"  [dim]{details}[/dim]")
-                        else:
-                            console.print(f"  [red]✗ Step {step_num}: {step_title}[/red]")
-                            console.print(f"  [dim]{details}[/dim]")
-                    
-                    console.print()
-                    
-                    # Store result
-                    test_results.append({
-                        'title': test_name,
-                        'passed': test_passed,
-                        'file': test_file.name,
-                        'step_results': step_results
-                    })
-                    
-                except Exception as e:
-                    logger.debug(f"Validation parsing failed for {test_name}: {e}", exc_info=True)
-                    console.print(f"[yellow]⚠ Warning: Could not parse validation results for {test_name}[/yellow]")
-                    console.print(f"[yellow]Error: {str(e)}[/yellow]")
-                    
-                    # Enhanced diagnostic output
-                    _print_validation_diagnostics(validation_output)
-                    
-                    # Generate fallback result using helper function
-                    console.print(f"\n[yellow]🔄 Generating fallback validation result...[/yellow]")
-                    fallback_result = _create_fallback_result_for_test(
-                        test_case,
-                        test_file,
-                        f'Validation failed - could not parse validator output: {str(e)}'
-                    )
-                    console.print(f"[dim]Created {len(fallback_result['step_results'])} fallback step results[/dim]\n")
-                    
-                    test_results.append(fallback_result)
-                    console.print()
-                
-                # After validation, remove the test case execution from history to prevent accumulation
-                # Remove the entries added for this test case
-                del bulk_gen_chat_history[test_case_history_start:]
-                    
-            except Exception as e:
-                logger.debug(f"Test execution failed for {test_name}: {e}", exc_info=True)
-                console.print(f"[red]✗ Test execution failed: {e}[/red]")
-                
-                # Create fallback result using helper function
-                fallback_result = _create_fallback_result_for_test(
-                    test_case,
-                    test_file,
-                    f'Test execution failed: {str(e)}'
-                )
-                test_results.append(fallback_result)
-                console.print()
-        
-        # Cleanup: Close executor cache resources
-        _cleanup_executor_cache(executor_cache, "executor")
-        _cleanup_executor_cache(validation_executor_cache, "validation executor")
-        
-        # Calculate totals
-        total_tests = len(test_results)
-        passed_tests = sum(1 for r in test_results if r['passed'])
-        failed_tests = total_tests - passed_tests
-                
-        # Generate summary report
-        console.print(f"\n[bold]{'='*60}[/bold]")
-        console.print(f"[bold cyan]📊 Test Execution Summary[/bold cyan]")
-        console.print(f"[bold]{'='*60}[/bold]\n")
-        
-        summary_table = Table(box=box.ROUNDED, border_style="cyan")
-        summary_table.add_column("Metric", style="bold")
-        summary_table.add_column("Value", justify="right")
-        
-        summary_table.add_row("Total Tests", str(total_tests))
-        summary_table.add_row("Passed", f"[green]{passed_tests}[/green]")
-        summary_table.add_row("Failed", f"[red]{failed_tests}[/red]")
-        
-        if total_tests > 0:
-            pass_rate = (passed_tests / total_tests) * 100
-            summary_table.add_row("Pass Rate", f"{pass_rate:.1f}%")
-        
-        console.print(summary_table)
-        
-        # Generate structured JSON report
-        overall_result = "pass" if failed_tests == 0 else "fail"
-        
-        structured_report = {
-            "test_cases": [
-                {
-                    "title": r['title'], 
-                    "passed": r['passed'],
-                    "steps": r.get('step_results', [])
-                } 
-                for r in test_results
-            ],
-            "overall_result": overall_result,
-            "summary": {
-                "total_tests": total_tests,
-                "passed": passed_tests,
-                "failed": failed_tests,
-                "pass_rate": f"{pass_rate:.1f}%" if total_tests > 0 else "0%"
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Save structured report
+        # Create master log for entire test execution session
         results_path = Path(results_dir)
-        results_path.mkdir(parents=True, exist_ok=True)
-        summary_file = results_path / "test_execution_summary.json"
+        session_name = f"test-execution-{test_cases_path.name}"
         
-        console.print(f"\n[bold yellow]💾 Saving test execution summary...[/bold yellow]")
-        with open(summary_file, 'w') as f:
-            json.dump(structured_report, f, indent=2)
-        console.print(f"[green]✓ Summary saved to {summary_file}[/green]\n")
+        # Use the callbacks module console so tool-call panels are printed and captured.
+        from .callbacks import console as callbacks_console
+        with TestLogCapture(results_path, session_name, console=callbacks_console) as master_log:
+            # Write header information to log
+            master_log.print(f"\n[bold cyan]🧪 Test Execution Started[/bold cyan]")
+            master_log.print(f"Agent: [bold]{agent_name}[/bold]")
+            master_log.print(f"Test Cases: {len(test_case_files_list)}")
+            if test_case_files:
+                master_log.print(f"Selected: [cyan]{', '.join(test_case_files)}[/cyan]")
+            master_log.print(f"Results Directory: {results_dir}\n")
+            
+            if data_gen_def:
+                data_gen_name = data_gen_def.get('name', Path(data_generator).stem if data_generator else 'Data Generator')
+                master_log.print(f"Data Generator Agent: [bold]{data_gen_name}[/bold]\n")
+            
+            if validator_def:
+                master_log.print(f"Validator Agent: [bold]{validator_agent_name}[/bold]")
+                master_log.print(f"[dim]Using: {validator_path}[/dim]\n")
+            else:
+                master_log.print(f"[dim]No validator agent specified, using test runner agent for validation[/dim]\n")
+            
+            # Parse all test cases
+            parsed_test_cases = parse_all_test_cases(test_case_files_list, master_log)
+            test_cases_needing_data_gen = filter_test_cases_needing_data_gen(parsed_test_cases)
+            
+            # Bulk test data generation (if enabled)
+            if data_gen_def and not skip_data_generation and test_cases_needing_data_gen:
+                bulk_gen_chat_history = execute_bulk_data_generation(
+                    data_gen_def, test_cases_needing_data_gen, parsed_test_cases,
+                    test_cases_path, client, config, model, temperature, max_tokens,
+                    work_dir, master_log, _setup_local_agent_executor,
+                    verbose=show_verbose,
+                    debug=debug_mode,
+                )
+            
+            # Execute all test cases
+            test_results = execute_all_test_cases(
+                parsed_test_cases, bulk_gen_chat_history, test_cases_path,
+                agent_def, validator_def, client, config, model, temperature,
+                max_tokens, work_dir, master_log, _setup_local_agent_executor,
+                verbose=show_verbose,
+                debug=debug_mode,
+            )
+        
+        # End of master_log context - log file saved automatically
+        
+        # Print test execution summary
+        print_test_execution_summary(test_results, results_dir, session_name)
+        
+        # Save structured JSON report
+        log_file = None
+        toolkit_name = session_name.replace('test-execution-', '')
+        toolkit_dir = results_path / toolkit_name
+        log_files = sorted(toolkit_dir.glob(f"*{session_name}.txt")) if toolkit_dir.exists() else []
+        if log_files:
+            log_file = log_files[0]
+        
+        save_structured_report(test_results, results_dir, log_file)
         
         # Exit with error code if any tests failed
+        failed_tests = sum(1 for r in test_results if not r['passed'])
         if failed_tests > 0:
             sys.exit(1)
     

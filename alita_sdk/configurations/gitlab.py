@@ -44,18 +44,28 @@ class GitlabConfiguration(BaseModel):
             None if connection successful, error message string if failed
         """
         import requests
+        from urllib.parse import urlparse
         
         # Validate url
         url = settings.get("url", "").strip()
         if not url:
             return "GitLab URL is required"
         
-        # Normalize URL - remove trailing slashes
-        url = url.rstrip("/")
-        
-        # Basic URL validation
-        if not url.startswith(("http://", "https://")):
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in {"http", "https"}:
             return "GitLab URL must start with http:// or https://"
+
+        if not parsed_url.netloc:
+            return "GitLab URL is invalid"
+
+        # Reject non-base URLs (project/file links), and require a clean base URL.
+        # Expected format: <http/https>://<domain>[/]
+        if parsed_url.query or parsed_url.fragment or (parsed_url.path not in {"", "/"}):
+            base_suggestion = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+            return f"GitLab URL must be a base URL like {base_suggestion}"
+
+        # Normalize URL - ensure no trailing slash
+        url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         
         # Validate private_token
         private_token = settings.get("private_token")

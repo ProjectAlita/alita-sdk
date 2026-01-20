@@ -1,0 +1,61 @@
+name: "SR2 - Multiline Strings"
+description: "Verify newlines in strings are preserved"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  code_snippet:
+    type: str
+    value: |-
+      def hello():
+          print('Hello')
+          return 42
+  multiline_text:
+    type: str
+    value: |-
+      Line 1
+      Line 2
+      Line 3
+  simple_newline:
+    type: str
+    value: |-
+      Hello
+      World
+  test_results:
+    type: dict
+
+entry_point: verify_newlines
+
+nodes:
+  - id: verify_newlines
+    type: code
+    code:
+      type: fixed
+      value: |
+        is_dict = isinstance(alita_state, dict)
+        code = alita_state.get("code_snippet", "")
+        text = alita_state.get("multiline_text", "")
+        simple = alita_state.get("simple_newline", "")
+        nl = chr(10)
+        result = {
+            "test_passed": is_dict and nl in code and nl in text and nl in simple,
+            "state_is_dict": is_dict,
+            "code_lines": len(code.split(nl)),
+            "text_lines": len(text.split(nl)),
+            "simple_lines": len(simple.split(nl)),
+            "code_preview": code[:30],
+            "text_preview": text[:30]
+        }
+        test_results = result
+
+        test_results
+    input:
+      - code_snippet
+      - multiline_text
+      - simple_newline
+    output:
+      - messages
+    structured_output: false
+    transition: END

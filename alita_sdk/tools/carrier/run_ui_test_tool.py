@@ -1,7 +1,7 @@
 import logging
 import json
 import traceback
-from typing import Type
+from typing import Optional, Type
 from langchain_core.tools import BaseTool, ToolException
 from pydantic.fields import Field
 from pydantic import create_model, BaseModel
@@ -23,11 +23,11 @@ class RunUITestTool(BaseTool):
         "RunUITestInput",
         test_id=(str, Field(default="", description="Test ID to execute")),
         test_name=(str, Field(default="", description="Test name to execute")),
-        cpu_quota=(str, Field(default=None, description="CPU quota for the test runner")),
-        memory_quota=(str, Field(default=None, description="Memory quota for the test runner")),
-        cloud_settings=(str, Field(default=None, description="Cloud settings name for the test runner")),
-        custom_cmd=(str, Field(default=None, description="Custom command to run with the test")),
-        loops=(str, Field(default=None, description="Number of loops to run the test")),
+        cpu_quota=(Optional[str], Field(default=None, description="CPU quota for the test runner")),
+        memory_quota=(Optional[str], Field(default=None, description="Memory quota for the test runner")),
+        cloud_settings=(Optional[str], Field(default=None, description="Cloud settings name for the test runner")),
+        custom_cmd=(Optional[str], Field(default=None, description="Custom command to run with the test")),
+        loops=(Optional[str], Field(default=None, description="Number of loops to run the test")),
         proceed_with_defaults=(bool, Field(default=False, description="Proceed with default configuration. True ONLY when user directly wants to run the test with default parameters." \
         " If cpu_quota, memory_quota, cloud_settings, custom_cmd, or loops are provided, proceed_with_defaults must be False")),
     )

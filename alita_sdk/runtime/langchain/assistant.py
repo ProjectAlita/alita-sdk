@@ -1,28 +1,27 @@
 import logging
-import importlib
-from copy import deepcopy as copy
+from datetime import datetime
 from typing import Any, Optional
-from langchain.agents import (
-    AgentExecutor, create_openai_tools_agent,
-    create_json_chat_agent)
+
+from jinja2 import Environment, DebugUndefined
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.base import BaseStore
-from .agents.xml_chat import create_xml_chat_agent
-from .langraph_agent import create_graph
-from langchain_core.messages import (
-    BaseMessage, SystemMessage, HumanMessage
-)
-from langchain_core.prompts import MessagesPlaceholder
-from .constants import (REACT_ADDON, REACT_VARS, XML_ADDON, USER_ADDON,
-                        QA_ASSISTANT, NERDY_ASSISTANT, QUIRKY_ASSISTANT, CYNICAL_ASSISTANT,
-                        DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
-                        SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS)
-from .chat_message_template import Jinja2TemplatedChatMessagesTemplate
-from ..tools.echo import EchoTool
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.tools import BaseTool, ToolException
-from jinja2 import Environment, DebugUndefined
+
+from .langraph_agent import create_graph
+from .constants import (
+    USER_ADDON, QA_ASSISTANT, NERDY_ASSISTANT, QUIRKY_ASSISTANT, CYNICAL_ASSISTANT,
+    DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
+    SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS
+)
 
 logger = logging.getLogger(__name__)
+
+# Canonical app_type values (imported from clients.client for reference)
+APP_TYPE_AGENT = "agent"      # Standard LangGraph react agent with tools
+APP_TYPE_PIPELINE = "pipeline"  # Graph-based workflow agent
+APP_TYPE_PREDICT = "predict"    # Special agent without memory store
+
 
 class Assistant:
     def __init__(self,
@@ -30,7 +29,7 @@ class Assistant:
                  data: dict,
                  client: 'LLMLikeObject',
                  chat_history: list[BaseMessage] = [],
-                 app_type: str = "openai",
+                 app_type: str = APP_TYPE_AGENT,
                  tools: Optional[list] = [],
                  memory: Optional[Any] = None,
                  store: Optional[BaseStore] = None,
@@ -38,13 +37,23 @@ class Assistant:
                  mcp_tokens: Optional[dict] = None,
                  conversation_id: Optional[str] = None,
                  ignored_mcp_servers: Optional[list] = None,
-                 persona: Optional[str] = "generic"):
+                 persona: Optional[str] = "generic",
+                 is_subgraph: bool = False,
+                 lazy_tools_mode: Optional[bool] = None):
 
         self.app_type = app_type
         self.memory = memory
         self.store = store
         self.persona = persona
         self.max_iterations = data.get('meta', {}).get('step_limit', 25)
+        self.is_subgraph = is_subgraph  # Store is_subgraph flag
+
+        # Lazy tools mode - reduces token usage by using meta-tools instead of binding all tools
+        # Can be set via: 1) constructor param, 2) data['meta']['lazy_tools_mode'], 3) default False
+        if lazy_tools_mode is not None:
+            self.lazy_tools_mode = lazy_tools_mode
+        else:
+            self.lazy_tools_mode = data.get('meta', {}).get('lazy_tools_mode', False)
 
         logger.debug("Data for agent creation: %s", data)
         logger.info("App type: %s", app_type)
@@ -81,7 +90,7 @@ class Assistant:
         #                             "Review toolkits configuration or use pipeline as master agent.")
 
         # configure memory store if memory tool is defined (not needed for predict agents)
-        if app_type != "predict":
+        if app_type != APP_TYPE_PREDICT:
             memory_tool = next((tool for tool in data.get('tools', []) if tool['type'] == 'memory'), None)
             self._configure_store(memory_tool)
         else:
@@ -125,89 +134,54 @@ class Assistant:
         )
         if tools:
             self.tools += tools
-        
-        # Create ToolRegistry to track tool metadata and handle name collisions
-        self.tool_registry = {}
-        tool_name_counts = {}  # Track how many times each base name appears
-        
-        for tool in self.tools:
-            if hasattr(tool, 'name'):
-                original_name = tool.name
-                base_name = original_name
-                
-                # Extract toolkit metadata from tool configuration
-                toolkit_name = ""
-                toolkit_type = ""
-                
-                # Find matching tool config to extract metadata
-                for tool_config in version_tools:
-                    # Try to match by toolkit_name or name field
-                    config_toolkit_name = tool_config.get('toolkit_name', tool_config.get('name', ''))
-                    # Simple heuristic: toolkit info should be accessible from tool config
-                    # For now, use toolkit_name and type from config
-                    toolkit_name = config_toolkit_name
-                    toolkit_type = tool_config.get('type', '')
-                    break  # Use first match for now; will refine with better matching
-                
-                # Handle duplicate tool names by appending numeric suffix
-                if base_name in tool_name_counts:
-                    tool_name_counts[base_name] += 1
-                    # Append suffix to make unique
-                    new_name = f"{base_name}_{tool_name_counts[base_name]}"
-                    tool.name = new_name
-                    logger.info(f"Tool name collision detected: '{base_name}' -> '{new_name}'")
-                else:
-                    tool_name_counts[base_name] = 0
-                    new_name = base_name
-                
-                # Store in registry
-                self.tool_registry[tool.name] = {
-                    'toolkit_name': toolkit_name,
-                    'toolkit_type': toolkit_type,
-                    'original_tool_name': base_name
-                }
-                
-        logger.info(f"ToolRegistry initialized with {len(self.tool_registry)} tools")
-        
-        # Handle prompt setup
-        if app_type in ["pipeline", "predict", "react"]:
-            self.prompt = data['instructions']
-        else:
-            messages = [SystemMessage(content=data['instructions'])]
-            messages.append(MessagesPlaceholder("chat_history"))
-            if app_type == "react":
-                messages.append(HumanMessage(REACT_ADDON))
-            elif app_type == "xml":
-                messages.append(HumanMessage(XML_ADDON))
-            elif app_type in ['openai', 'dial']:
-                messages.append(MessagesPlaceholder("input"))
-            messages.append(MessagesPlaceholder("agent_scratchpad"))
-            variables = {}
-            input_variables = []
-            for variable in data['variables']:
-                if variable['value'] != "":
-                    variables[variable['name']] = variable['value']
-                else:
-                    input_variables.append(variable['name'])
-            if app_type in ["react", "xml"]:
-                input_variables = list(set(input_variables + REACT_VARS))
 
-            if chat_history and isinstance(chat_history, list):
-                messages.extend(chat_history)
-            self.prompt = Jinja2TemplatedChatMessagesTemplate(messages=messages)
-            if input_variables:
-                if hasattr(self.prompt, 'input_variables') and self.prompt.input_variables is not None:
-                    self.prompt.input_variables.extend(input_variables)
-                else:
-                    self.prompt.input_variables = input_variables
-            if variables:
-                self.prompt.partial_variables = variables
-            try:
-                logger.info(
-                    f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
-            except Exception as e:
-                logger.info(
-                    f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
+        # In lazy tools mode, don't rename tools - ToolRegistry handles namespacing by toolkit
+        # Only add suffixes in non-lazy mode where tools are bound directly to LLM
+        if not self.lazy_tools_mode:
+            tool_name_counts = {}
+            for tool in self.tools:
+                if hasattr(tool, 'name'):
+                    base_name = tool.name
+                    if base_name in tool_name_counts:
+                        tool_name_counts[base_name] += 1
+                        new_name = f"{base_name}_{tool_name_counts[base_name]}"
+                        tool.name = new_name
+                        logger.info(f"Tool name collision (non-lazy mode): '{base_name}' -> '{new_name}'")
+                    else:
+                        tool_name_counts[base_name] = 0
+
+        logger.info(f"Tools initialized: {len(self.tools)} tools (lazy_mode={self.lazy_tools_mode})")
+
+        # All supported agent types (agent, pipeline, predict) use instructions directly
+        # LangGraph handles message construction internally
+        self.prompt = data['instructions']
+
+        # Store variables for Jinja2 template resolution
+        # Variables come from data['variables'] (list of {name, value} dicts from API)
+        # These are merged with application_variables in client.application() before reaching here
+        self.prompt_variables = {}
+        variables_list = data.get('variables', [])
+        if variables_list:
+            for var in variables_list:
+                if isinstance(var, dict) and var.get('name'):
+                    # Capture variables with non-empty values (empty values are runtime placeholders)
+                    value = var.get('value')
+                    if value is not None and value != '':
+                        self.prompt_variables[var['name']] = value
+            if self.prompt_variables:
+                logger.info(f"Captured {len(self.prompt_variables)} Jinja2 variables: {list(self.prompt_variables.keys())}")
+
+        # Also support variables from meta (dict format) for flexibility
+        if meta.get('variables') and isinstance(meta['variables'], dict):
+            self.prompt_variables.update(meta['variables'])
+            logger.debug(f"Added meta variables: {list(meta['variables'].keys())}")
+
+        try:
+            logger.info(
+                f"Client was created with client setting: temperature - {self.client._get_model_default_parameters}")
+        except Exception:
+            logger.info(
+                f"Client was created with client setting: temperature - {self.client.temperature} : {self.client.max_tokens}")
 
     def _configure_store(self, memory_tool: dict | None) -> None:
         """
@@ -221,40 +195,77 @@ class Assistant:
         store = get_manager().get_store(conn_str)
         self.store = store
 
+    def _resolve_jinja2_variables(self, template_str: str, extra_context: Optional[dict] = None) -> str:
+        """
+        Resolve Jinja2 variables in a template string.
+
+        This method processes Jinja2 templates ({{variable}}) with available context.
+        Uses DebugUndefined to leave unresolved variables as-is rather than failing.
+
+        Available context variables:
+        - current_date: Current date (YYYY-MM-DD)
+        - current_time: Current time (HH:MM:SS)
+        - current_datetime: Current datetime (YYYY-MM-DD HH:MM:SS)
+        - Any variables from self.prompt_variables
+        - Any variables passed via extra_context
+
+        Args:
+            template_str: String that may contain Jinja2 template variables
+            extra_context: Optional dict of additional context variables
+
+        Returns:
+            String with resolved Jinja2 variables
+        """
+        if not template_str or '{{' not in template_str:
+            # Fast path: no Jinja2 syntax detected
+            return template_str
+
+        try:
+            # Build context with system variables
+            now = datetime.now()
+            context = {
+                'current_date': now.strftime('%Y-%m-%d'),
+                'current_time': now.strftime('%H:%M:%S'),
+                'current_datetime': now.strftime('%Y-%m-%d %H:%M:%S'),
+            }
+
+            # Add variables from prompt configuration
+            if hasattr(self, 'prompt_variables') and self.prompt_variables:
+                context.update(self.prompt_variables)
+
+            # Add any extra context
+            if extra_context:
+                context.update(extra_context)
+
+            # Process template with Jinja2
+            # DebugUndefined leaves unresolved variables as {{variable}} rather than failing
+            environment = Environment(undefined=DebugUndefined)
+            template = environment.from_string(template_str)
+            resolved = template.render(context)
+
+            logger.debug(f"Jinja2 template resolved with context keys: {list(context.keys())}")
+            return resolved
+
+        except Exception as e:
+            logger.warning(f"Failed to resolve Jinja2 variables in template: {e}")
+            return template_str
+
     def runnable(self):
-        if self.app_type == 'pipeline':
+        """
+        Create and return the appropriate agent based on app_type.
+
+        Supported app_types:
+        - 'pipeline': Graph-based workflow agent
+        - 'agent', 'predict': LangGraph react agent with tool calling
+        """
+        if self.app_type == APP_TYPE_PIPELINE:
             return self.pipeline()
-        elif self.app_type == 'xml':
-            return self.getXMLAgentExecutor()
-        elif self.app_type in ['predict', 'react', 'openai']:
+        elif self.app_type in [APP_TYPE_AGENT, APP_TYPE_PREDICT]:
             return self.getLangGraphReactAgent()
         else:
-            self.tools = [EchoTool()] + self.tools
-            return self.getAgentExecutor()
-
-    def _agent_executor(self, agent: Any):
-        return AgentExecutor.from_agent_and_tools(agent=agent, tools=self.tools,
-                                                  verbose=True, handle_parsing_errors=True,
-                                                  max_execution_time=None, return_intermediate_steps=True,
-                                                  max_iterations=self.max_iterations)
-
-    def getAgentExecutor(self):
-        # Exclude compiled graph runnables from simple tool agents
-        simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        agent = create_json_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
-        return self._agent_executor(agent)
-
-    def getXMLAgentExecutor(self):
-        # Exclude compiled graph runnables from simple tool agents
-        simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        agent = create_xml_chat_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
-        return self._agent_executor(agent)
-
-    def getOpenAIToolsAgentExecutor(self):
-        # Exclude compiled graph runnables from simple tool agents
-        simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        agent = create_openai_tools_agent(llm=self.client, tools=simple_tools, prompt=self.prompt)
-        return self._agent_executor(agent)
+            # Unsupported app_type - fall back to agent
+            logger.warning(f"Unsupported app_type '{self.app_type}', falling back to LangGraph agent")
+            return self.getLangGraphReactAgent()
 
     def getLangGraphReactAgent(self):
         """
@@ -263,7 +274,7 @@ class Assistant:
         """
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
-        
+
         # Set up memory/checkpointer if available
         checkpointer = None
         if self.memory is not None:
@@ -277,37 +288,22 @@ class Assistant:
             from langgraph.checkpoint.memory import MemorySaver
             checkpointer = MemorySaver()
             logger.info("Using default MemorySaver for conversation persistence")
-        
-        # Extract all messages from prompt/chat history for LangGraph
-        chat_history_messages = []
-        prompt_instructions = None
-        
-        if hasattr(self.prompt, 'messages') and self.prompt.messages:
-            # Extract all messages from the prompt to use as chat history
-            for message in self.prompt.messages:
-                # Skip placeholders (MessagesPlaceholder instances) as they are not actual messages
-                if hasattr(message, 'variable_name'):  # MessagesPlaceholder has variable_name attribute
-                    continue
-                # Skip template messages (contains {{variable}} patterns)
-                if hasattr(message, 'content') and isinstance(message.content, str) and '{{' in message.content and '}}' in message.content:
-                    continue
-                # Include actual chat history messages
-                chat_history_messages.append(message)
-        
-        # Only use prompt_instructions if explicitly specified (for predict app_type)
-        if self.app_type in ["predict", "react"] and isinstance(self.prompt, str):
-            prompt_instructions = self.prompt
-        
+
+        # Resolve Jinja2 variables in prompt instructions
+        # Variables from data['variables'] (via get_app_version_details API) and system variables are processed here
+        prompt_instructions = self._resolve_jinja2_variables(self.prompt)
+        if prompt_instructions != self.prompt:
+            logger.info(f"Jinja2 variables resolved in prompt (changed from {len(self.prompt)} to {len(prompt_instructions)} chars)")
+
         # Add tool binding only if tools are present
         tool_names = []
         if simple_tools:
             tool_names = [tool.name for tool in simple_tools]
-            logger.info("Binding tools: %s", tool_names)
-        
-        # take the system message from the openai prompt as a prompt instructions
-        if self.app_type == "openai" and hasattr(self.prompt, 'messages'):
-            prompt_instructions = self.__take_prompt_from_openai_messages()
-        
+            if self.lazy_tools_mode:
+                logger.info(f"Available tools: {len(tool_names)} (lazy mode - will use meta-tools)")
+            else:
+                logger.info("Binding tools: %s", tool_names)
+
         user_addon = USER_ADDON.format(prompt=str(prompt_instructions)) if prompt_instructions else ""
         plan_addon = PLAN_ADDON if 'update_plan' in tool_names else ""
         data_analysis_addon = DATA_ANALYSIS_ADDON if 'pandas_analyze_data' in tool_names else ""
@@ -322,9 +318,9 @@ class Assistant:
             "cynical": CYNICAL_ASSISTANT,
         }
 
-        # For predict agents with their own instructions, use those directly
-        # instead of wrapping in DEFAULT_ASSISTANT
-        if self.app_type == "openai" and prompt_instructions:
+        # For agent/predict types, use instructions directly without wrapping
+        # Persona templates (DEFAULT_ASSISTANT, etc.) are only used when persona is specified
+        if self.app_type in [APP_TYPE_AGENT, APP_TYPE_PREDICT] and prompt_instructions:
             # Use agent's own instructions as the base system prompt
             # Append addons only when their corresponding tools are present
             addons = "\n\n---\n\n".join(filter(None, [
@@ -335,8 +331,9 @@ class Assistant:
                 data_analysis_addon
             ]))
             escaped_prompt = f"{prompt_instructions}\n\n---\n\n{addons}" if addons else str(prompt_instructions)
-            logger.info("Using agent's own instructions directly (app_type=predict)")
+            logger.info(f"Using agent's own instructions directly (app_type={self.app_type})")
         else:
+            # Fallback to persona-based template wrapping
             base_assistant = persona_templates.get(self.persona, DEFAULT_ASSISTANT)
             escaped_prompt = base_assistant.format(
                 users_instructions=user_addon,
@@ -349,20 +346,9 @@ class Assistant:
 
         # Properly setup the prompt for YAML
         import yaml
-        
-        
+
         # Create the schema as a dictionary first, then convert to YAML
         state_messages_config = {'type': 'list'}
-        
-        # Only set initial messages if there's actual conversation history (not just system prompts)
-        actual_conversation_messages = [
-            msg for msg in chat_history_messages 
-            if not isinstance(msg, SystemMessage)  # Exclude system messages as they're handled by prompt template
-        ]
-        
-        if actual_conversation_messages:
-            state_messages_config['value'] = actual_conversation_messages
-            logger.info(f"Setting initial conversation history with {len(actual_conversation_messages)} messages")
         
         schema_dict = {
             'name': 'react_agent',
@@ -400,8 +386,9 @@ class Assistant:
             'entry_point': 'agent'
         }
         
-        # Add tool-specific parameters only if tools exist
-        if simple_tools:
+        # Add tool-specific parameters only if tools exist and NOT in lazy mode
+        # In lazy mode, we don't bind tool_names so the LLMNode uses meta-tools instead
+        if simple_tools and not self.lazy_tools_mode:
             schema_dict['nodes'][0]['tool_names'] = tool_names
         
         # Convert to YAML string
@@ -418,6 +405,7 @@ class Assistant:
             store=self.store,
             debug=False,
             for_subgraph=False,
+            lazy_tools_mode=self.lazy_tools_mode,
             alita_client=self.alita_client,
             steps_limit=self.max_iterations
         )
@@ -435,7 +423,9 @@ class Assistant:
             client=self.client, tools=self.tools,
             yaml_schema=self.prompt, memory=memory,
             alita_client=self.alita_client,
-            steps_limit=self.max_iterations
+            steps_limit=self.max_iterations,
+            for_subgraph=self.is_subgraph,  # Pass for_subgraph flag to filter PrinterNodes
+            lazy_tools_mode=self.lazy_tools_mode
         )
         #
         return agent
@@ -446,16 +436,3 @@ class Assistant:
 
     def predict(self, messages: list[BaseMessage]):
         return self.client.invoke(messages)
-
-    def __take_prompt_from_openai_messages(self):
-        if self.prompt and self.prompt.messages:
-            for message in self.prompt.messages:
-                # we don't need any message placeholder from the openai agent prompt
-                if hasattr(message, 'variable_name'):
-                    continue
-                # take only the content of the system message from the openai prompt
-                if isinstance(message, SystemMessage):
-                    environment = Environment(undefined=DebugUndefined)
-                    template = environment.from_string(message.content)
-                    return template.render(self.prompt.partial_variables)
-        return None

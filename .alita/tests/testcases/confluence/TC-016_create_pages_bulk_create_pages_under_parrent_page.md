@@ -28,7 +28,7 @@ generateTestData: true
 - Valid toolkit config for `confluence`
 - Confluence credentials via env vars
 - Space `{{SPACE}}` exists and accessible
-- Parent page with ID `{{TC_16_PARENT_ID}}` exists in the space
+- Create page with ID `{{TC_16_PARENT_ID}}` to serve as parent
 - All titles are unique in the space
 
 ## Test Steps & Expectations

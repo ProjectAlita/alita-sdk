@@ -6,32 +6,19 @@ IMPORTANT: Provide EITHER 'file_contents' OR 'artifact_id', never both or neithe
 Use artifact_id when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
 The artifact_id can be found in previous file_modified events in the conversation history."""
 
-UPDATE_FILE_PROMPT = """Updates the contents of a file in repository. Input MUST strictly follow these rules:
-Specify the file to modify by passing a full file path (the path must not start with a slash); Specify at lest 2 lines of the old contents which you would like to replace wrapped in OLD <<<< and >>>> OLD; Specify the new contents which you would like to replace the old contents with wrapped in NEW <<<< and >>>> NEW; NEW content may contain lines from OLD content in case you want to add content without removing the old content
 
-Example 1: Replace "old contents" to "new contents" in the file /test/test.txt from , pass in the following string:
+DELETE_BRANCH_PROMPT = """Delete a branch from the GitHub repository.
 
-test/test.txt
+IMPORTANT: This tool will NOT delete protected branches:
+- 'main' and 'master' branches are always protected
+- The configured base branch is protected
+- The currently active branch is protected (unless force=True)
 
-This is text that will not be changed
-OLD <<<<
-old contents
->>>> OLD
-NEW <<<<
-new contents
->>>> NEW
+Parameters:
+- branch_name: The name of the branch to delete (e.g., 'feature-branch')
+- force: Set to True to delete even if it's the current active branch (default: False)
 
-Example 2: Extend "existing contents" with new contents" in the file /test/test.txt, pass in the following string:
-
-test/test.txt
-
-OLD <<<<
-existing contents
->>>> OLD
-NEW <<<<
-existing contents
-new contents
->>>> NEW"""
+Returns a success or error message."""
 
 CREATE_ISSUE_PROMPT = """
 Tool allows to create a new issue in a GitHub repository.

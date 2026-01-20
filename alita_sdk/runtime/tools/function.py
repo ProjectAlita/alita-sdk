@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from copy import deepcopy
@@ -12,6 +13,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
 from ..langchain.utils import propagate_the_input_mapping
+from ..utils.serialization import safe_serialize
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +42,36 @@ class FunctionTool(BaseTool):
     alita_client: Optional[Any] = None
 
     def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> str:
-        """Prepare input for PyodideSandboxTool by injecting state into the code block."""
-        # add state into the code block here since it might be changed during the execution of the code
+        """Prepare input for PyodideSandboxTool by injecting state into the code block.
+
+        Uses base64 encoding to avoid string escaping issues when passing JSON
+        through multiple layers of parsing (Python -> Deno -> Pyodide) and compression to minimize args list
+        """
+        import base64
+        import zlib
+
         state_copy = replace_escaped_newlines(deepcopy(state))
+        if 'messages' in state_copy:
+            del state_copy['messages']
 
-        del state_copy['messages']  # remove messages to avoid issues with pickling without langchain-core
-        # inject state into the code block as alita_state variable
-        state_json = json.dumps(state_copy, ensure_ascii=False)
-        pyodide_predata = f'#state dict\nimport json\nalita_state = json.loads({json.dumps(state_json)})\n'
+        # Use safe_serialize to handle Pydantic models, datetime, and other non-JSON types
+        state_json = safe_serialize(state_copy)
 
+        # Use base64 encoding to avoid all string escaping issues
+        # This is more robust than repr() when the code passes through multiple parsers
+        # use compression to avoid issue with `{"error": "Error executing code: [Errno 7] Argument list too long: 'deno'"}`
+        compressed = zlib.compress(state_json.encode('utf-8'))
+        encoded = base64.b64encode(compressed).decode('ascii')
+
+        pyodide_predata = f'''#state dict
+import json
+import base64
+import zlib
+
+compressed_state = base64.b64decode('{encoded}')
+state_json = zlib.decompress(compressed_state).decode('utf-8')
+alita_state = json.loads(state_json)
+'''
         return pyodide_predata
 
     def _handle_pyodide_output(self, tool_result: Any) -> dict:
@@ -130,14 +153,18 @@ class FunctionTool(BaseTool):
                 return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
             else:
                 if "messages" in self.output_variables:
-                    messages_dict = {
-                        "messages": [{
-                            "role": "assistant",
-                            "content": dumps(tool_result)
-                            if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
-                            else str(tool_result)
-                        }]
-                    }
+                    if 'messages' in tool_result:
+                        # case when the sub-graph has been executed
+                        messages_dict = {"messages": tool_result['messages']}
+                    else:
+                        messages_dict = {
+                            "messages": [{
+                                "role": "assistant",
+                                "content": dumps(tool_result)
+                                if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
+                                else str(tool_result)
+                            }]
+                        }
                     for var in self.output_variables:
                         if var != "messages":
                             if isinstance(tool_result, dict) and var in tool_result:

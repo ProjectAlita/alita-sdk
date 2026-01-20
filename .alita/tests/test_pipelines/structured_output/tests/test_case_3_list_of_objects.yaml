@@ -1,0 +1,144 @@
+name: "TC3 - List of Objects"
+description: "Verify list[dict] works correctly - this is the primary fix in commit e45a9003"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  users:
+    type: list
+  summary:
+    type: str
+  total_count:
+    type: int
+  test_results:
+    type: dict
+
+entry_point: generate_list_of_objects
+
+nodes:
+  - id: generate_list_of_objects
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data. Return data exactly as requested."
+      task:
+        type: fixed
+        value: |
+          Generate the following structured data:
+
+          1. A list of 3 user objects, each with:
+             - name (string)
+             - age (number)
+             - active (boolean)
+
+          Example users:
+          - Alice, 30, active
+          - Bob, 25, inactive
+          - Carol, 35, active
+
+          2. A summary string describing the users
+
+          3. The total count as an integer (3)
+    output:
+      - users
+      - summary
+      - total_count
+    structured_output: true
+    structured_output_dict:
+      users: "list[dict]"
+      summary: "str"
+      total_count: "int"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # PRIMARY FIX VERIFICATION: list[dict] should work correctly
+        # Before the fix, "list" was auto-converted to "list[str]" which
+        # prevented returning list of objects
+
+        users = alita_state.get('users', [])
+        summary = alita_state.get('summary', '')
+        total_count = alita_state.get('total_count', 0)
+
+        # Critical checks for the fix
+        type_checks = {
+            "users_is_list": isinstance(users, list),
+            "users_not_empty": len(users) > 0 if isinstance(users, list) else False,
+            "summary_is_str": isinstance(summary, str),
+            "total_count_is_int": isinstance(total_count, int)
+        }
+
+        # Verify each user is a dict with expected keys
+        user_structure_valid = False
+        user_details = []
+        if isinstance(users, list) and len(users) > 0:
+            user_structure_valid = True
+            for i, user in enumerate(users):
+                is_dict = isinstance(user, dict)
+                has_name = 'name' in user if is_dict else False
+                has_age = 'age' in user if is_dict else False
+
+                user_details.append({
+                    "index": i,
+                    "is_dict": is_dict,
+                    "has_name": has_name,
+                    "has_age": has_age,
+                    "type": type(user).__name__
+                })
+
+                if not is_dict:
+                    user_structure_valid = False
+
+        # This is the KEY CHECK - users should be dicts, not strings
+        primary_fix_working = (
+            type_checks["users_is_list"] and
+            type_checks["users_not_empty"] and
+            user_structure_valid
+        )
+
+        result = {
+            "test_passed": primary_fix_working,
+            "primary_fix_verification": {
+                "users_is_list_of_dicts": user_structure_valid,
+                "users_count": len(users) if isinstance(users, list) else 0,
+                "fix_working": primary_fix_working
+            },
+            "type_checks": type_checks,
+            "user_structure_details": user_details,
+            "actual_values": {
+                "users": users,
+                "summary": summary,
+                "total_count": total_count
+            },
+            "actual_types": {
+                "users": type(users).__name__,
+                "users_element_types": [type(u).__name__ for u in users] if isinstance(users, list) else [],
+                "summary": type(summary).__name__,
+                "total_count": type(total_count).__name__
+            },
+            "bug_indicator": {
+                "would_fail_before_fix": not user_structure_valid,
+                "reason": "Before fix, list[dict] was impossible - 'list' auto-converted to 'list[str]'"
+            }
+        }
+        test_results = result
+        test_results
+
+    input:
+      - users
+      - summary
+      - total_count
+    output:
+
+      - messages
+    structured_output: false
+    transition: END

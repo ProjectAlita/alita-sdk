@@ -26,7 +26,7 @@ generateTestData: true
 ## Pre-requisites
 
 - Valid toolkit config for `confluence`
-- Target page with `{{TC_019_PAGE_ID_TO_UPDATE}}` exists and is accessible
+- Create page with `{{TC_019_PAGE_ID_TO_UPDATE}}` before test execution
 - `{{TC_019_NEW_BODY}}` is valid per representation `storage`
 
 ## Test Steps & Expectations

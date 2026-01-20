@@ -26,7 +26,7 @@ class ElasticToolkit(BaseToolkit):
         selected_tools = {x['name']: x['args_schema'].schema() for x in ELITEAElasticApiWrapper.model_construct().get_available_tools()}
         return create_model(
             name,
-            url=(str, Field(default=None, title="Elasticsearch URL", description="Elasticsearch URL", json_schema_extra={'toolkit_name': True})),
+            url=(Optional[str], Field(default=None, title="Elasticsearch URL", description="Elasticsearch URL", json_schema_extra={'toolkit_name': True})),
             api_key=(
                 Optional[SecretStr],
                 Field(

@@ -10,23 +10,51 @@ Verify that the `deleteFile` tool correctly removes files from artifact buckets.
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Base URL** | `${ALITA_BASE_URL}` | Alita instance base URL |
-| **Project ID** | `${ALITA_PROJECT_ID}` | Project ID for artifact storage |
-| **API Key** | `${ALITA_API_KEY}` | Authentication token |
 | **Tool** | `deleteFile` | Artifact tool to execute for file deletion |
 | **Bucket Name** | `test-artifacts` | Target bucket for cleanup |
+| **Primary Input(s)** | `{{TC_010_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_010_TXT_FILENAME}}={{RANDOM_STRING}}.txt` | Required and optional inputs derived from args_schema |
 
 ## Config
 
 path: .alita\tool_configs\artifact-config.json
-generateTestData: false
+generateTestData: true
 
 ## Pre-requisites
 
 - Alita instance is accessible and configured
 - Valid API key with artifact delete permissions
-- Bucket `test-artifacts` exists with test files
-- User has permission to delete files in the bucket
+- Create bucket `tc-010-delete-file` if missing. If it already exists, bucket creation must be treated as a non-error (idempotent).
+- Ensure the bucket exists
+
+Tool: `createNewBucket`
+
+Input:
+```json
+{
+  "bucket_name": "TC-010-delete-file",
+  "expiration_measure": "weeks",
+  "expiration_value": 1
+}
+```
+
+- Create files used for partial reads
+
+Tool: `createFile`
+
+Inputs:
+```json
+{
+  "filename": "{{TC_010_TXT_FILENAME}}",
+  "filedata": "This is a test document for TC-010.\nLine 2: Testing partial reads.\nLine 3: More content here.\nLine 4: Final line.",
+  "bucket_name": "tc-010-delete-file"
+}
+```
+```json
+{
+  "filename": "{{TC_010_TXT_FILENAME}}",
+  "filedata": "This is a test document.\nLine 2: Testing partial reads.\nLine 3: More content here.\nLine 4: Final line.",
+}
+```
 
 ## Test Steps & Expectations
 
@@ -37,8 +65,8 @@ Execute the `deleteFile` tool to remove one test file.
 **Input:**
 ```json
 {
-  "filename": "test-document.txt",
-  "bucket_name": "test-artifacts"
+  "filename": "{{TC_010_TXT_FILENAME}}",
+  "bucket_name": "tc-010-delete-file"
 }
 ```
 
@@ -51,110 +79,48 @@ List files to confirm the file was removed.
 **Input:**
 ```json
 {
-  "bucket_name": "test-artifacts"
+  "bucket_name": "tc-010-delete-file"
 }
 ```
 
-**Expectation:** The file list no longer includes `test-document.txt`.
+**Expectation:** The file list no longer includes `{{TC_010_TXT_FILENAME}}`.
 
-### Step 3: Delete Multiple Files
-
-Execute the `deleteFile` tool multiple times to clean up test files.
-
-**Files to delete:**
-- test-readme.md
-- test-data.csv
-- test-data.xlsx
-- new-file.txt (if created)
-- Sanitized filename from TC-002
-
-**Expectation:** Each file is deleted successfully.
-
-### Step 4: Attempt to Delete Non-Existent File
+### Step 3: Attempt to Delete Non-Existent File
 
 Execute the `deleteFile` tool on an already-deleted file.
 
 **Input:**
 ```json
 {
-  "filename": "test-document.txt",
-  "bucket_name": "test-artifacts"
+  "filename": "does_not_exist.txt",
+  "bucket_name": "tc-010-delete-file"
 }
 ```
-
 **Expectation:** The tool returns an appropriate error message indicating the file doesn't exist.
 
-### Step 5: Verify Bucket is Empty
-
-List files to confirm all test files were removed.
-
-**Input:**
-```json
-{
-  "bucket_name": "test-artifacts"
-}
-```
-
-**Expectation:** The file list is empty or shows only files not created during testing.
-
-### Step 6: Clean Up TC-001 Temporary Buckets
-
-Delete test files and buckets created in TC-001.
-
-**Delete files from temp-bucket-2weeks:**
-```json
-{
-  "filename": "test-file-1.txt",
-  "bucket_name": "temp-bucket-2weeks"
-}
-```
-
-**Delete files from temp-bucket-sanitize:**
-```json
-{
-  "filename": "test-file-2.txt",
-  "bucket_name": "temp-bucket-sanitize"
-}
-```
-
-**Expectation:** All test files from TC-001 temporary buckets are deleted successfully.
-
-### Step 7: Delete File from Default Bucket
+### Step 4: Delete File from Default Bucket
 
 Execute the `deleteFile` tool without specifying bucket_name.
 
 **Input:**
+
 ```json
 {
-  "filename": "some-file.txt"
+  "filename": "{{TC_010_TXT_FILENAME}}"
 }
 ```
 
 **Expectation:** The tool deletes the file from the default configured bucket.
 
-## Post-Test Cleanup
+### Step 5: Verify File Deletion
 
-### Cleanup Summary
+List files to confirm the file was removed.
 
-This test case (TC-010) serves as the final cleanup for the entire artifact test suite:
+**Input:**
+```json
+{
+  "bucket_name": "tc-010-delete-file"
+}
+```
 
-1. **Default Bucket (`test-artifacts`):**
-   - Deleted all files created in TC-002 through TC-009
-   - Bucket remains (will auto-expire based on retention policy)
-   - Can be reused for future test runs
-
-2. **Temporary Buckets from TC-001:**
-   - Deleted all test files from `temp-bucket-2weeks` and `temp-bucket-sanitize`
-   - Buckets remain until manual deletion or expiration
-   - Note: Bucket deletion tool not currently available in SDK
-
-### Manual Cleanup (Optional)
-
-If needed, delete temporary buckets through:
-- Alita UI → Artifacts → Bucket Management
-- Direct API calls to `/api/v2/artifacts/bucket/delete`
-- Or wait for automatic expiration based on retention policies
-
-**Buckets that may need manual deletion:**
-- `temp-bucket-2weeks` (2 weeks retention)
-- `temp-bucket-sanitize` (1 week retention)
+**Expectation:** The file list no longer includes `{{TC_010_TXT_FILENAME}}`.

@@ -1,0 +1,88 @@
+name: "SR5 - JSON Strings"
+description: "Verify strings that contain JSON are not double-parsed"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  api_response:
+    type: str
+    value: '{"status": "ok", "data": [1, 2, 3]}'
+  config_json:
+    type: str
+    value: '{"debug": true, "timeout": 30}'
+  test_results:
+    type: dict
+
+entry_point: verify_json_strings
+
+nodes:
+  - id: verify_json_strings
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        api_resp = alita_state.get('api_response', '')
+        config = alita_state.get('config_json', '')
+
+        # These should be STRINGS, not dicts
+        api_response_is_string = isinstance(api_resp, str)
+        config_is_string = isinstance(config, str)
+
+        # Parse them manually to verify they're valid JSON strings
+        api_parsed = None
+        config_parsed = None
+        parse_error = None
+
+        try:
+            if api_response_is_string:
+                api_parsed = json.loads(api_resp)
+            else:
+                api_parsed = "NOT A STRING"
+        except Exception as e:
+            parse_error = f"api_response parse error: {str(e)}"
+
+        try:
+            if config_is_string:
+                config_parsed = json.loads(config)
+            else:
+                config_parsed = "NOT A STRING"
+        except Exception as e:
+            parse_error = f"config_json parse error: {str(e)}"
+
+        # Verify parsed content is correct
+        api_status_ok = api_parsed.get('status') == 'ok' if isinstance(api_parsed, dict) else False
+        api_data_correct = api_parsed.get('data') == [1, 2, 3] if isinstance(api_parsed, dict) else False
+        config_debug_true = config_parsed.get('debug') == True if isinstance(config_parsed, dict) else False
+        config_timeout_30 = config_parsed.get('timeout') == 30 if isinstance(config_parsed, dict) else False
+
+        all_passed = (
+            api_response_is_string and
+            config_is_string and
+            api_status_ok and
+            api_data_correct and
+            config_debug_true and
+            config_timeout_30
+        )
+
+        result = {
+            "test_passed": all_passed,
+            "api_response_is_string": api_response_is_string,
+            "config_is_string": config_is_string,
+            "api_parsed": api_parsed,
+            "config_parsed": config_parsed,
+            "parse_error": parse_error
+        }
+        test_results = result
+
+        test_results
+    input:
+      - api_response
+      - config_json
+    output:
+      - messages
+    structured_output: false
+    transition: END

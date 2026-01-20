@@ -19,9 +19,9 @@ class ZephyrEssentialAPI:
                 if resp.headers.get("Content-Type", "").startswith("application/json"):
                     return resp.json()
                 return resp.text
-            return ToolException(f"Error performing request {method} {api_path}: {resp.content}")
+            return ToolException(f"Unexpected status code {resp.status_code} for {method} {api_path}: {resp.content}")
         except requests.RequestException as e:
-            raise Exception(f"Error performing request {method} {api_path}: {str(e)}")
+            raise Exception(f"Unexpected error while performing request {method} {api_path}: {str(e)}")
 
     # Test Cases
     def list_test_cases(self, project_key=None, folder_id=None, max_results=10, start_at=0):

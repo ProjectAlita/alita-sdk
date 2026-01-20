@@ -1,5 +1,9 @@
 # Edit File with OLD/NEW Markers
 
+## Priority
+
+Critical
+
 ## Objective
 
 Verify that the `edit_file` tool correctly edits text files using OLD/NEW markers for precise replacements.
@@ -10,23 +14,66 @@ Verify that the `edit_file` tool correctly edits text files using OLD/NEW marker
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Base URL** | `${ALITA_BASE_URL}` | Alita instance base URL |
-| **Project ID** | `${ALITA_PROJECT_ID}` | Project ID for artifact storage |
-| **API Key** | `${ALITA_API_KEY}` | Authentication token |
-| **Tool** | `edit_file` | Artifact tool to execute for editing files |
-| **Bucket Name** | `test-artifacts` | Target bucket containing files to edit |
+| **Tools Used** | `createNewBucket`, `createFile`, `edit_file`, `readFile`, `deleteFile` | Tools required for setup, verification, and cleanup |
+| **Bucket Name** | `TC-007-edit-file` | Dedicated bucket for this test case (created if missing) |
 
 ## Config
 
 path: .alita\tool_configs\artifact-config.json
-generateTestData: false
+generateTestData: true
 
 ## Pre-requisites
 
-- Alita instance is accessible and configured
-- Valid API key with artifact write permissions
-- Bucket `test-artifacts` exists with editable text files
-- Files created in TC-002 are available for editing
+ - Alita instance is accessible and configured
+ - Valid API key with artifact read/write permissions
+ - User has permission to manage files and create buckets in the project
+ - Create bucket `TC-007-edit-file` if missing. If it already exists, bucket creation must be treated as a non-error (idempotent).
+- Ensure the bucket exists
+
+Tool: `createNewBucket`
+
+Input:
+```json
+{
+  "bucket_name": "TC-007-edit-file",
+  "expiration_measure": "weeks",
+  "expiration_value": 1
+}
+```
+
+- Create files to edit and verify
+
+Tool: `createFile`
+
+Inputs:
+```json
+{
+  "filename": "test-document.txt",
+  "filedata": "This is a test document for TC-007.\nLine 2: Testing partial reads.\nLine 3: More content here.\nLine 4: Final line.",
+  "bucket_name": "TC-007-edit-file"
+}
+```
+```json
+{
+  "filename": "test-readme.md",
+  "filedata": "# TC-007 README\n\n## Section 1\nContent for section 1.",
+  "bucket_name": "TC-007-edit-file"
+}
+```
+```json
+{
+  "filename": "test-data.csv",
+  "filedata": "Name,Email,Role\nJohn Doe,john@example.com,Developer\nJane Doe,jane@example.com,Analyst",
+  "bucket_name": "TC-007-edit-file"
+}
+```
+```json
+{
+  "filename": "test-data.xlsx",
+  "filedata": "{\"Sheet1\": [[\"ColA\", \"ColB\"], [\"Val1\", \"Val2\"]], \"Meta\": [[\"Key\", \"Value\"], [\"Run\", \"TC-007\"]]}",
+  "bucket_name": "TC-007-edit-file"
+}
+```
 
 ## Test Steps & Expectations
 
@@ -39,7 +86,7 @@ Execute the `edit_file` tool to replace a single line in the test document.
 {
   "file_path": "test-document.txt",
   "file_query": "OLD <<<<\nLine 2: Testing partial reads.\n>>>> OLD\nNEW <<<<\nLine 2: Testing partial reads and edits.\n>>>> NEW",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-007-edit-file"
 }
 ```
 
@@ -53,7 +100,7 @@ Read the file to confirm the edit was applied.
 ```json
 {
   "filename": "test-document.txt",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-007-edit-file"
 }
 ```
 
@@ -68,7 +115,7 @@ Execute the `edit_file` tool to modify markdown content.
 {
   "file_path": "test-readme.md",
   "file_query": "OLD <<<<\n## Section 1\nContent for section 1.\n>>>> OLD\nNEW <<<<\n## Section 1 - Updated\nUpdated content for section 1.\nAdditional line added.\n>>>> NEW",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-007-edit-file"
 }
 ```
 
@@ -83,7 +130,7 @@ Execute the `edit_file` tool with multiple OLD/NEW pairs.
 {
   "file_path": "test-document.txt",
   "file_query": "OLD <<<<\nLine 3: More content here.\n>>>> OLD\nNEW <<<<\nLine 3: Modified content.\n>>>> NEW\nOLD <<<<\nLine 4: Final line.\n>>>> OLD\nNEW <<<<\nLine 4: Updated final line.\n>>>> NEW",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-007-edit-file"
 }
 ```
 
@@ -98,7 +145,7 @@ Execute the `edit_file` tool to modify CSV content.
 {
   "file_path": "test-data.csv",
   "file_query": "OLD <<<<\nJohn Doe,john@example.com,Developer\n>>>> OLD\nNEW <<<<\nJohn Doe,john.doe@example.com,Senior Developer\n>>>> NEW",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-007-edit-file"
 }
 ```
 
@@ -113,7 +160,7 @@ Execute the `edit_file` tool on the Excel file (should be rejected).
 {
   "file_path": "test-data.xlsx",
   "file_query": "OLD <<<<\nsome content\n>>>> OLD\nNEW <<<<\nnew content\n>>>> NEW",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-007-edit-file"
 }
 ```
 
@@ -128,8 +175,42 @@ Execute the `edit_file` tool with OLD content that doesn't exist.
 {
   "file_path": "test-document.txt",
   "file_query": "OLD <<<<\nThis line does not exist\n>>>> OLD\nNEW <<<<\nNew content\n>>>> NEW",
-  "bucket_name": "test-artifacts"
+  "bucket_name": "TC-007-edit-file"
 }
 ```
 
 **Expectation:** The tool returns a message indicating no changes were made because the old content was not found, suggesting to use read_file to verify current content.
+
+### Cleanup — Delete Created Files (Bucket remains)
+
+Delete the files created during setup from `TC-007-edit-file`. Buckets are intentionally left in place.
+
+Tool: `deleteFile`
+
+Inputs:
+```json
+{
+  "filename": "test-document.txt",
+  "bucket_name": "TC-007-edit-file"
+}
+```
+```json
+{
+  "filename": "test-readme.md",
+  "bucket_name": "TC-007-edit-file"
+}
+```
+```json
+{
+  "filename": "test-data.csv",
+  "bucket_name": "TC-007-edit-file"
+}
+```
+```json
+{
+  "filename": "test-data.xlsx",
+  "bucket_name": "TC-007-edit-file"
+}
+```
+
+**Expectation:** All specified files are deleted successfully or `None` response.

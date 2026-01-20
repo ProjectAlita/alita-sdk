@@ -168,14 +168,32 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
     commit_message=(Optional[str], Field(description="Commit message for the change (VCS toolkits only)", default=None)),
 )
 
-SearchFileInput = create_model(
-    "SearchFileInput",
-    file_path=(str, Field(description="Path to the file to search")),
-    pattern=(str, Field(description="Search pattern. Treated as regex by default unless is_regex=False.")),
-    branch=(Optional[str], Field(description="Branch name. If None, uses active branch.", default=None)),
-    is_regex=(bool, Field(description="Whether pattern is a regex. Default is True for flexible matching.", default=True)),
-    context_lines=(int, Field(description="Number of lines before/after match to include for context", default=2, ge=0)),
+# GrepFileInput - for searching text patterns WITHIN a specific file (like grep/rg command)
+# Named "grep_file" to clearly indicate it searches file content, not for file names
+GrepFileInput = create_model(
+    "GrepFileInput",
+    file_path=(str, Field(
+        description="Path to the specific FILE to search within. Example: 'src/main.py', 'README.md'. Must be a file path, not a directory. Use list_files_in_main_branch to find file paths first."
+    )),
+    pattern=(str, Field(
+        description="Text or regex pattern to find in the file's content. Examples: 'def main', 'TODO', 'class.*Controller', 'import re'. Works like grep/ripgrep."
+    )),
+    branch=(Optional[str], Field(
+        description="Git branch to search in. Default: current active branch.",
+        default=None
+    )),
+    is_regex=(bool, Field(
+        description="Treat pattern as regular expression (default: True). Set False for exact literal matching.",
+        default=True
+    )),
+    context_lines=(int, Field(
+        description="Lines of context to show before/after each match (default: 2). Like grep -C.",
+        default=2,
+        ge=0
+    )),
 )
+# Backward compatibility alias
+SearchFileInput = GrepFileInput
 
 
 class BaseToolApiWrapper(BaseModel):
@@ -774,17 +792,20 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         context_lines: int = 2
     ) -> str:
         """
-        Search for pattern in file content with context.
-        
+        Search for text/pattern INSIDE a specific file (like grep). NOT for finding files by name.
+
+        Use this to find occurrences of text within a file's content.
+        To find files by name, use list_files_in_main_branch or get_files_from_directory instead.
+
         Args:
-            file_path: Path to the file
-            pattern: Search pattern (regex if is_regex=True, else literal)
+            file_path: Full path to specific file (e.g., 'src/main.py', NOT '.' or a directory)
+            pattern: Text or regex to search for in the file content
             branch: Branch name (None for active branch)
             is_regex: Whether pattern is regex (default True)
             context_lines: Lines of context before/after matches (default 2)
-            
+
         Returns:
-            Formatted string with search results and context
+            Matching lines with context, or "No matches found" message
         """
         from .utils.text_operations import search_in_content
         
@@ -837,10 +858,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
             commit_message: Commit message (VCS toolkits only)
             
         Returns:
-            Success message or error
-            
-        Raises:
-            ToolException: If file is not text-editable or edit fails
+            Success message or raises ToolException on failure.
         """
         from .utils.text_operations import parse_old_new_markers, is_text_editable, try_apply_edit
         from langchain_core.callbacks import dispatch_custom_event
@@ -868,45 +886,32 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
                 raise current_content if isinstance(current_content, Exception) else ToolException(str(current_content))
         except Exception as e:
             raise ToolException(f"Failed to read file {file_path}: {e}")
-        
-        # Apply all edits (with tolerant fallback)
+
+        # Apply all edits (stop on first warning/error)
         updated_content = current_content
-        fallbacks_used = 0
         edits_applied = 0
         for old_text, new_text in edits:
-            if not old_text.strip():
-                continue
-            
-            new_updated, used_fallback = try_apply_edit(
+            new_updated, error_message = try_apply_edit(
                 content=updated_content,
                 old_text=old_text,
                 new_text=new_text,
                 file_path=file_path,
             )
 
-            if new_updated == updated_content:
-                # No change applied for this pair (exact nor fallback)
-                logger.warning(
-                    "Old content not found, appears several times or could not be safely matched in %s. Snippet: %s...",
-                    file_path,
-                    old_text[:100].replace("\n", "\\n"),
-                )
-                continue
+            if error_message:
+                return error_message
 
             # A replacement was applied
             edits_applied += 1
-            if used_fallback:
-                fallbacks_used += 1
-
             updated_content = new_updated
         
         # Check if any changes were made
-        if current_content == updated_content or edits_applied == 0:
-            return (
-                f"No changes made to {file_path}. "
-                "Old content was not found or is empty. "
-                "Use read_file or search_file to verify current content."
-            )
+        if current_content == updated_content:
+            # At least one edit was applied, but the final content is identical.
+            # This usually means the sequence of OLD/NEW pairs is redundant or cancels out.
+            return (f"Edits for {file_path} were applied but the final content is identical to the original. "
+                    "The sequence of OLD/NEW pairs appears to be redundant or self-cancelling. "
+                    "Please simplify or review the update_query.")
         
         # Write updated content
         try:
@@ -1116,60 +1121,77 @@ def extend_with_file_operations(method):
     """
     Decorator to automatically add file operation tools to toolkits that implement
     _read_file and _write_file methods.
-    
+
     Adds:
-    - read_file_chunk: Read specific line ranges
-    - read_multiple_files: Batch read files
-    - search_file: Search for patterns in files
+    - read_file_chunk: Read specific line ranges from a file
+    - read_multiple_files: Batch read multiple files at once
+    - grep_file: Search for text/patterns WITHIN a file's content (like grep/ripgrep)
     - edit_file: Edit files using OLD/NEW markers
+
+    Custom Schema Support:
+    Toolkits can provide custom schemas by implementing _get_file_operation_schemas() method
+    that returns a dict mapping tool names to Pydantic models. This allows toolkits like
+    ArtifactWrapper to use bucket_name instead of branch.
+
+    Example:
+        def _get_file_operation_schemas(self):
+            return {
+                "read_file_chunk": MyCustomReadFileChunkInput,
+                "read_multiple_files": MyCustomReadMultipleFilesInput,
+            }
     """
     def wrapper(self, *args, **kwargs):
         tools = method(self, *args, **kwargs)
-        
+
         # Only add file operations if toolkit has implemented the required methods
         # Check for both _read_file and _write_file methods
         has_file_ops = (hasattr(self, '_read_file') and callable(getattr(self, '_read_file')) and
                         hasattr(self, '_write_file') and callable(getattr(self, '_write_file')))
-        
+
         if has_file_ops:
             # Import schemas from elitea_base
             from . import elitea_base
-            
+
+            # Check for toolkit-specific custom schemas
+            custom_schemas = {}
+            if hasattr(self, '_get_file_operation_schemas') and callable(getattr(self, '_get_file_operation_schemas')):
+                custom_schemas = self._get_file_operation_schemas() or {}
+
             file_operation_tools = [
                 {
                     "name": "read_file_chunk",
                     "mode": "read_file_chunk",
                     "ref": self.read_file_chunk,
                     "description": self.read_file_chunk.__doc__,
-                    "args_schema": elitea_base.ReadFileChunkInput
+                    "args_schema": custom_schemas.get("read_file_chunk", elitea_base.ReadFileChunkInput)
                 },
                 {
                     "name": "read_multiple_files",
                     "mode": "read_multiple_files",
                     "ref": self.read_multiple_files,
                     "description": self.read_multiple_files.__doc__,
-                    "args_schema": elitea_base.ReadMultipleFilesInput
+                    "args_schema": custom_schemas.get("read_multiple_files", elitea_base.ReadMultipleFilesInput)
                 },
                 {
-                    "name": "search_file",
-                    "mode": "search_file",
-                    "ref": self.search_file,
-                    "description": self.search_file.__doc__,
-                    "args_schema": elitea_base.SearchFileInput
+                    "name": "grep_file",
+                    "mode": "grep_file",
+                    "ref": self.search_file,  # internal method name unchanged for compatibility
+                    "description": "Search for text/pattern WITHIN a specific file's content (like grep/ripgrep). Use this to find function definitions, imports, TODOs, or any text pattern inside a file you've already identified. NOT for finding files by name - use list_files_in_main_branch for that.",
+                    "args_schema": custom_schemas.get("grep_file", elitea_base.GrepFileInput)
                 },
                 {
                     "name": "edit_file",
                     "mode": "edit_file",
                     "ref": self.edit_file,
                     "description": self.edit_file.__doc__,
-                    "args_schema": elitea_base.EditFileInput
+                    "args_schema": custom_schemas.get("edit_file", elitea_base.EditFileInput)
                 },
             ]
-            
+
             tools.extend(file_operation_tools)
-        
+
         return tools
-    
+
     return wrapper
 
 

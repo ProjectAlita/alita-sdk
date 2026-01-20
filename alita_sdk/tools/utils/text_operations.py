@@ -24,50 +24,81 @@ TEXT_EDITABLE_EXTENSIONS = {
 
 
 def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
-    """Parse OLD/NEW marker-based edit instructions.
-
-    Extracts pairs of old and new content from a file query using markers in
-    a minimal, regex-based way without additional line splitting logic.
-
-    Supported forms (OLD/NEW blocks must appear in pairs):
-    - OLD <<<< ... >>>> OLD
-      NEW <<<< ... >>>> NEW
-    - If no such pairs are found, we also accept the slightly incorrect
-      "<<<" form as a fallback:
-      OLD <<< ... >>> OLD
-      NEW <<< ... >>> NEW
-
-    Args:
-        file_query: String containing marked old and new content sections.
-
-    Returns:
-        List of (old_content, new_content) tuples, where each content string
-        is the raw inner block (with leading/trailing whitespace stripped),
-        but otherwise unmodified.
     """
-    # Primary pattern: correct 4-< markers
-    pattern_primary = re.compile(
-        r"OLD <<<<(\s*.*?\s*)>>>> OLD"  # OLD block
-        r"\s*"                          # optional whitespace between OLD/NEW
-        r"NEW <<<<(\s*.*?\s*)>>>> NEW",  # NEW block
-        re.DOTALL,
-    )
+    Parse OLD/NEW marker-based edit instructions.
+    
+    Extracts the first pair of old and new content from a file query using markers:
+    - OLD <<<< ... >>>> OLD
+    - NEW <<<< ... >>>> NEW
+    
+    Args:
+        file_query: String containing marked old and new content sections
+        
+    Returns:
+        List with at most one tuple (old_content, new_content) for the first edit pair.
+        Returns empty list if no valid OLD/NEW pair is found.
+        
+    Example:
+        >>> query = '''
+        ... OLD <<<<
+        ... Hello World
+        ... >>>> OLD
+        ... NEW <<<<
+        ... Hello Mars
+        ... >>>> NEW
+        ... '''
+        >>> parse_old_new_markers(query)
+        [('Hello World', 'Hello Mars')]
+    """
+    # Split the file content by lines
+    code_lines = file_query.split("\n")
 
-    matches = pattern_primary.findall(file_query)
+    # Initialize variables to track section state
+    in_old_section = False
+    in_new_section = False
+    old_content = None
+    new_content = None
 
-    # Fallback pattern: accept 3-< markers if no proper 4-< markers found
-    if not matches:
-        pattern_fallback = re.compile(
-            r"OLD <<<(\s*.*?\s*)>>>> OLD"   # OLD block (3 < and 4 > to support previous version)
-            r"\s*"                          # optional whitespace between OLD/NEW
-            r"NEW <<<(\s*.*?\s*)>>>> NEW",  # NEW block (3 < and 4 > to support previous version)
-            re.DOTALL,
-        )
-        matches = pattern_fallback.findall(file_query)
+    # Temporary storage for the current section's content
+    current_section_content = []
 
-    # Preserve block content exactly as captured so Stage 1 can use exact
-    # substring replacement (including indentation and trailing spaces).
-    return [(old_block, new_block) for old_block, new_block in matches]
+    # Iterate through each line in the file content
+    for line in code_lines:
+        # Check for OLD section start
+        if "OLD <<<" in line:
+            in_old_section = True
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
+
+        # Check for OLD section end
+        if ">>>> OLD" in line:
+            in_old_section = False
+            old_content = "\n".join(current_section_content).strip()
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
+
+        # Check for NEW section start
+        if "NEW <<<" in line:
+            in_new_section = True
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
+
+        # Check for NEW section end
+        if ">>>> NEW" in line:
+            in_new_section = False
+            new_content = "\n".join(current_section_content).strip()
+            # Return immediately after finding the first complete pair
+            if old_content is not None and new_content is not None:
+                return [(old_content, new_content)]
+            current_section_content = []  # Reset current section content
+            continue  # Skip the line with the marker
+
+        # If currently in an OLD or NEW section, add the line to the current section content
+        if in_old_section or in_new_section:
+            current_section_content.append(line)
+
+    # Return empty list if no complete pair found
+    return []
 
 
 def is_text_editable(filename: str) -> bool:
@@ -250,7 +281,7 @@ def try_apply_edit(
     old_text: str,
     new_text: str,
     file_path: Optional[str] = None,
-) -> Tuple[str, bool]:
+) -> Tuple[str, Optional[str]]:
     """Apply a single OLD/NEW edit with a tolerant fallback.
 
     This helper is used by edit_file to apply one (old_text, new_text) pair:
@@ -271,30 +302,53 @@ def try_apply_edit(
         file_path: Optional path for logging context
     
     Returns:
-        (updated_content, used_fallback)
+        (updated_content, warning_message)
+        - updated_content: resulting content (may be unchanged)
+        - warning_message: human-readable warning if no edit was applied
+          or if the operation was ambiguous; None if an edit was
+          successfully and unambiguously applied.
     """
     # Stage 1: exact match
     if old_text:
         occurrences = content.count(old_text)
         if occurrences == 1:
-            return content.replace(old_text, new_text, 1), False
+            return content.replace(old_text, new_text, 1), None
         if occurrences > 1:
-            logger.warning(
-                "Exact OLD block appears %d times in %s; no replacement applied to avoid ambiguity.",
-                occurrences,
-                file_path or "<unknown>",
+            msg = (
+                "Exact OLD block appears %d times in %s; no replacement applied to avoid ambiguity. "
+                "OLD value: %r" % (
+                    occurrences,
+                    file_path or "<unknown>",
+                    old_text,
+                )
             )
-            return content, False
+            logger.warning(msg)
+            return content, msg
 
     # Stage 2: tolerant match
     if not old_text or not old_text.strip() or not content:
-        return content, False
+        msg = None
+        if not old_text or not old_text.strip():
+            msg = (
+                "OLD block is empty or whitespace-only; no replacement applied. "
+                "OLD value: %r" % (old_text,)
+            )
+        elif not content:
+            msg = "Content is empty; no replacement applied."
+        if msg:
+            logger.warning(msg)
+        return content, msg
 
     # Logical OLD: drop empty/whitespace-only lines
     old_lines_raw = old_text.splitlines()
     old_lines = [l for l in old_lines_raw if l.strip()]
     if not old_lines:
-        return content, False
+        msg = (
+            "OLD block contains only empty/whitespace lines; no replacement applied. "
+            "OLD value: %r" % (old_text,)
+        )
+        logger.warning(msg)
+        return content, msg
 
     # Precompute normalized OLD (joined by '\n')
     norm_old = _normalize_for_match("\n".join(old_lines))
@@ -327,29 +381,30 @@ def try_apply_edit(
             candidates.append((start, idx, block))
 
     if not candidates:
-        logger.warning(
-            "Fallback match: normalized OLD block not found in %s.",
-            file_path or "<unknown>",
+        msg = (
+            "Normalized OLD block not found in %s. OLD value: %r"
+            % (file_path or "<unknown>", old_text)
         )
-        return content, False
+        logger.warning(msg)
+        return content, msg
 
     if len(candidates) > 1:
-        logger.warning(
-            "Fallback match: multiple candidate regions for OLD block in %s; "
-            "no change applied to avoid ambiguity.",
-            file_path or "<unknown>",
+        msg = (
+            "Multiple candidate regions for OLD block in %s; "
+            "no change applied to avoid ambiguity. OLD value: %r"
+            % (file_path or "<unknown>", old_text)
         )
-        return content, False
+        logger.warning(msg)
+        return content, msg
 
     start_idx, end_idx, candidate_block = candidates[0]
     updated = content.replace(candidate_block, new_text, 1)
 
     logger.info(
-        "Fallback match: applied tolerant OLD/NEW replacement in %s around lines %d-%d",
+        "Applied tolerant OLD/NEW replacement in %s around lines %d-%d",
         file_path or "<unknown>",
         start_idx + 1,
         start_idx + len(old_lines),
     )
 
-    return updated, True
-
+    return updated, None

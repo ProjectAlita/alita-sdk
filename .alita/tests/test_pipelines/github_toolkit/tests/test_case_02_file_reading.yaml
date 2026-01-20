@@ -1,0 +1,297 @@
+name: "GH02 - File Reading Workflow"
+description: "Test file reading operations: list files in branch, get files from directory, read file content"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  directory_path:
+    type: str
+    value: "test-data"
+  known_file:
+    type: str
+    value: ".gitignore"
+  expected_content:
+    type: str
+    value: ".DS_Store"
+  tool_result:
+    type: str
+  files_in_branch:
+    type: str
+  files_in_directory:
+    type: str
+  file_content:
+    type: str
+  file_to_read:
+    type: str
+  validation_results:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: list_files_in_branch
+
+nodes:
+  # Step 1: List all files in main branch
+  - id: list_files_in_branch
+    type: toolkit
+    tool: list_files_in_main_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - files_in_branch
+    structured_output: true
+    transition: validate_branch_files
+
+  # Step 2: Validate branch files listing
+  - id: validate_branch_files
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        files_result = alita_state.get('files_in_branch', '')
+        known_file = alita_state.get('known_file', '.gitignore')
+
+        files_list = []
+        try:
+            if isinstance(files_result, list):
+                files_list = files_result
+            elif isinstance(files_result, str):
+                try:
+                    files_list = json.loads(files_result)
+                except:
+                    files_list = [f.strip() for f in files_result.split('\n') if f.strip()]
+        except:
+            pass
+
+        # Extract file paths
+        file_paths = []
+        for f in files_list:
+            if isinstance(f, dict):
+                file_paths.append(f.get('path') or f.get('name', ''))
+            else:
+                file_paths.append(str(f))
+
+        has_files = len(file_paths) > 0
+        has_known_file = any(known_file in p for p in file_paths)
+
+        validation_results = {
+            "list_branch_files": has_files,
+            "branch_files_count": len(file_paths),
+            "has_known_file": has_known_file,
+            "branch_files_sample": file_paths[:10]
+        }
+
+        {"validation_results": validation_results}
+    input:
+      - files_in_branch
+      - known_file
+    output:
+      - validation_results
+    structured_output: true
+    transition: get_files_from_directory
+
+  # Step 3: Get files from a specific directory
+  - id: get_files_from_directory
+    type: toolkit
+    tool: get_files_from_directory
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - directory_path
+    input_mapping:
+      directory_path:
+        type: variable
+        value: directory_path
+    output:
+      - files_in_directory
+    structured_output: true
+    transition: validate_directory_files
+
+  # Step 4: Validate directory files and pick one to read
+  - id: validate_directory_files
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        files_result = alita_state.get('files_in_directory', '')
+        directory_path = alita_state.get('directory_path', 'test-data')
+        validation_results = alita_state.get('validation_results', {})
+
+        files_list = []
+        try:
+            if isinstance(files_result, list):
+                files_list = files_result
+            elif isinstance(files_result, str):
+                try:
+                    files_list = json.loads(files_result)
+                except:
+                    files_list = [f.strip() for f in files_result.split('\n') if f.strip()]
+        except:
+            pass
+
+        # Extract file paths
+        file_paths = []
+        for f in files_list:
+            if isinstance(f, dict):
+                path = f.get('path') or f.get('name', '')
+                file_paths.append(path)
+            else:
+                file_paths.append(str(f))
+
+        has_dir_files = len(file_paths) > 0
+
+        # Pick a file to read (prefer .txt or .md files)
+        file_to_read = None
+        for fp in file_paths:
+            if fp.endswith('.txt') or fp.endswith('.md'):
+                file_to_read = fp
+                break
+        if not file_to_read and file_paths:
+            # Just pick the first file
+            file_to_read = file_paths[0]
+
+        validation_results['list_dir_files'] = has_dir_files
+        validation_results['dir_files_count'] = len(file_paths)
+        validation_results['dir_files_sample'] = file_paths[:10]
+        validation_results['directory_path'] = directory_path
+
+        {"validation_results": validation_results, "file_to_read": file_to_read}
+    input:
+      - files_in_directory
+      - directory_path
+      - validation_results
+    output:
+      - validation_results
+      - file_to_read
+    structured_output: true
+    transition: read_known_file
+
+  # Step 5: Read a known file (.gitignore) to validate read_file works
+  - id: read_known_file
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - known_file
+    input_mapping:
+      file_path:
+        type: variable
+        value: known_file
+    output:
+      - file_content
+    structured_output: true
+    transition: validate_known_file
+
+  # Step 6: Validate known file content
+  - id: validate_known_file
+    type: code
+    code:
+      type: fixed
+      value: |
+        file_content = alita_state.get('file_content', '')
+        known_file = alita_state.get('known_file', '.gitignore')
+        expected_content = alita_state.get('expected_content', '.DS_Store')
+        validation_results = alita_state.get('validation_results', {})
+
+        content_valid = False
+        has_expected = False
+
+        if file_content and isinstance(file_content, str):
+            content_valid = len(file_content) > 0
+            has_expected = expected_content in file_content if expected_content else True
+
+        validation_results['read_known_file'] = content_valid
+        validation_results['known_file_has_expected'] = has_expected
+        validation_results['known_file_length'] = len(file_content) if file_content else 0
+
+        {"validation_results": validation_results}
+    input:
+      - file_content
+      - known_file
+      - expected_content
+      - validation_results
+    output:
+      - validation_results
+    structured_output: true
+    transition: read_directory_file
+
+  # Step 7: Read a file from the directory (if found)
+  - id: read_directory_file
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_to_read
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_to_read
+    output:
+      - file_content
+    structured_output: true
+    transition: process_results
+
+  # Step 8: Process all results
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        file_content = alita_state.get('file_content', '')
+        file_to_read = alita_state.get('file_to_read', '')
+        validation_results = alita_state.get('validation_results', {})
+
+        # Validate directory file read
+        dir_file_read = False
+        if file_content and isinstance(file_content, str):
+            dir_file_read = len(file_content) > 0
+
+        validation_results['read_dir_file'] = dir_file_read
+        validation_results['dir_file_path'] = file_to_read
+        validation_results['dir_file_length'] = len(file_content) if file_content else 0
+
+        # Overall test pass
+        list_branch_ok = validation_results.get('list_branch_files', False)
+        list_dir_ok = validation_results.get('list_dir_files', False)
+        read_known_ok = validation_results.get('read_known_file', False)
+        read_dir_ok = validation_results.get('read_dir_file', False)
+
+        # Test passes if we can list files and read known file
+        # Directory operations are bonus (may fail if test-data doesn't exist)
+        all_ok = list_branch_ok and read_known_ok
+
+        test_results = {
+            "test_passed": all_ok,
+            "operations": {
+                "list_files_in_main_branch": list_branch_ok,
+                "get_files_from_directory": list_dir_ok,
+                "read_known_file": read_known_ok,
+                "read_directory_file": read_dir_ok
+            },
+            "details": {
+                "branch_files_count": validation_results.get('branch_files_count', 0),
+                "dir_files_count": validation_results.get('dir_files_count', 0),
+                "known_file_length": validation_results.get('known_file_length', 0),
+                "dir_file_path": file_to_read,
+                "dir_file_length": validation_results.get('dir_file_length', 0)
+            }
+        }
+        {"test_results": test_results}
+    input:
+      - file_content
+      - file_to_read
+      - validation_results
+    output:
+      - test_results
+    structured_output: true
+    transition: END

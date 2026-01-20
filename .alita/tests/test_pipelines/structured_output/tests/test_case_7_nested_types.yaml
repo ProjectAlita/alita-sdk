@@ -1,0 +1,151 @@
+name: "TC7 - Nested Types"
+description: "Verify complex nested type definitions like dict[str, list[int]] work correctly"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  simple_dict:
+    type: dict
+  dict_with_lists:
+    type: dict
+  list_of_nested_dicts:
+    type: list
+  deep_nested:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: generate_nested_types
+
+nodes:
+  - id: generate_nested_types
+    type: llm
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a helpful assistant that provides structured data with nested structures."
+      task:
+        type: fixed
+        value: |
+          Generate the following nested data structures:
+
+          1. A simple dict with string keys and values:
+             {"key1": "value1", "key2": "value2"}
+
+          2. A dict with string keys and list values:
+             {"numbers": [1, 2, 3], "letters": ["a", "b", "c"]}
+
+          3. A list of dicts, where each dict has a string key with nested dict value:
+             [{"config": {"enabled": true, "count": 5}}, {"config": {"enabled": false, "count": 0}}]
+
+          4. A deeply nested structure:
+             {"level1": {"level2": {"level3": "deep_value"}}}
+    output:
+      - simple_dict
+      - dict_with_lists
+      - list_of_nested_dicts
+      - deep_nested
+    structured_output: true
+    structured_output_dict:
+      simple_dict: "dict"
+      dict_with_lists: "dict[str, list]"
+      list_of_nested_dicts: "list[dict]"
+      deep_nested: "dict[str, dict]"
+    transition: verify_output
+
+  - id: verify_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify nested type definitions work correctly
+        simple_dict = alita_state.get('simple_dict', {})
+        dict_with_lists = alita_state.get('dict_with_lists', {})
+        list_of_nested_dicts = alita_state.get('list_of_nested_dicts', [])
+        deep_nested = alita_state.get('deep_nested', {})
+
+        # Type checks
+        type_checks = {
+            "simple_dict_is_dict": isinstance(simple_dict, dict),
+            "dict_with_lists_is_dict": isinstance(dict_with_lists, dict),
+            "list_of_nested_dicts_is_list": isinstance(list_of_nested_dicts, list),
+            "deep_nested_is_dict": isinstance(deep_nested, dict)
+        }
+
+        # Structure verification
+        structure_checks = {}
+
+        # Check simple_dict has string values
+        if isinstance(simple_dict, dict):
+            structure_checks["simple_dict_has_values"] = len(simple_dict) > 0
+            structure_checks["simple_dict_values_are_strings"] = all(
+                isinstance(v, str) for v in simple_dict.values()
+            ) if simple_dict else True
+
+        # Check dict_with_lists has list values
+        if isinstance(dict_with_lists, dict):
+            structure_checks["dict_with_lists_has_values"] = len(dict_with_lists) > 0
+            structure_checks["dict_with_lists_values_are_lists"] = all(
+                isinstance(v, list) for v in dict_with_lists.values()
+            ) if dict_with_lists else True
+
+        # Check list_of_nested_dicts contains dicts
+        if isinstance(list_of_nested_dicts, list):
+            structure_checks["list_of_nested_dicts_not_empty"] = len(list_of_nested_dicts) > 0
+            structure_checks["list_of_nested_dicts_elements_are_dicts"] = all(
+                isinstance(item, dict) for item in list_of_nested_dicts
+            ) if list_of_nested_dicts else True
+
+        # Check deep_nested has nested dict values
+        if isinstance(deep_nested, dict):
+            structure_checks["deep_nested_has_values"] = len(deep_nested) > 0
+            # Check if values are dicts (for nested structure)
+            structure_checks["deep_nested_values_are_dicts"] = all(
+                isinstance(v, dict) for v in deep_nested.values()
+            ) if deep_nested else True
+
+        all_types_ok = all(type_checks.values())
+        structure_ok = all(structure_checks.values()) if structure_checks else True
+
+        result = {
+            "test_passed": all_types_ok and structure_ok,
+            "nested_types_working": all_types_ok,
+            "type_checks": type_checks,
+            "structure_checks": structure_checks,
+            "actual_values": {
+                "simple_dict": simple_dict,
+                "dict_with_lists": dict_with_lists,
+                "list_of_nested_dicts": list_of_nested_dicts,
+                "deep_nested": deep_nested
+            },
+            "actual_types": {
+                "simple_dict": type(simple_dict).__name__,
+                "dict_with_lists": type(dict_with_lists).__name__,
+                "list_of_nested_dicts": type(list_of_nested_dicts).__name__,
+                "deep_nested": type(deep_nested).__name__
+            },
+            "nesting_depth_analysis": {
+                "simple_dict_depth": 1,
+                "dict_with_lists_depth": 2,
+                "list_of_nested_dicts_depth": 2,
+                "deep_nested_expected_depth": 3
+            }
+        }
+        test_results = result
+        test_results
+
+    input:
+      - simple_dict
+      - dict_with_lists
+      - list_of_nested_dicts
+      - deep_nested
+    output:
+
+      - messages
+    structured_output: false
+    transition: END

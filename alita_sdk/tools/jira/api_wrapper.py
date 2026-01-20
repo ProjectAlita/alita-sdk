@@ -429,6 +429,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
     labels: Optional[List[str]] = []
     additional_fields: list[str] | str | None = []
     verify_ssl: Optional[bool] = True
+    custom_headers: Optional[Dict[str, str]] = {}
     _client: Jira = PrivateAttr()
     _image_cache: ImageDescriptionCache = PrivateAttr(default_factory=lambda: ImageDescriptionCache(max_size=50))
     issue_search_pattern: str = r'/rest/api/\d+/search'
@@ -444,32 +445,72 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                 "`pip install atlassian-python-api`"
             )
 
-        url = values['base_url']
-        api_key = values.get('api_key')
-        username = values.get('username')
-        token = values.get('token')
-        cloud = values.get('cloud')
-        api_version = values.get('api_version', '2')
+        # Just validate and normalize values - client creation moved to model_post_init
         additional_fields = values.get('additional_fields')
         if isinstance(additional_fields, str):
             values['additional_fields'] = [i.strip() for i in additional_fields.split(',')]
-        if token and is_cookie_token(token):
-            # cookies-based flow
-            # TODO: move to separate auth item after testing
-            session = requests.Session()
-            session.cookies.update(parse_cookie_string(token))
-            cls._client = Jira(url=url, session=session, cloud=cloud, verify_ssl=values['verify_ssl'], api_version=api_version)
-        elif token:
-            cls._client = Jira(url=url, token=token, cloud=cloud, verify_ssl=values['verify_ssl'], api_version=api_version)
-        else:
-            cls._client = Jira(url=url, username=username, password=api_key, cloud=cloud, verify_ssl=values['verify_ssl'], api_version=api_version)
-        custom_headers = values.get('custom_headers') or {}
-        logger.info(f"Jira tool: custom headers length: {len(custom_headers)}")
-        for header, value in custom_headers.items():
-            cls._client._update_header(header, value)
 
-        cls.llm=values.get('llm')
+        cls.llm = values.get('llm')
         return super().validate_toolkit(values)
+
+    def model_post_init(self, __context) -> None:
+        """Initialize the Jira client using the shared ClientRegistry."""
+        # Skip client initialization if this is a schema discovery call (model_construct)
+        # Use getattr for safe access since model_construct() may not set all attributes
+        base_url = getattr(self, 'base_url', None)
+        if not base_url or not isinstance(base_url, str) or not base_url.startswith('http'):
+            return
+
+        from atlassian import Jira
+        from ..client_registry import get_client_registry
+
+        # Extract auth values (handle SecretStr) - safely check type first
+        token = None
+        api_key = None
+        if self.token and hasattr(self.token, 'get_secret_value'):
+            token = self.token.get_secret_value()
+        if self.api_key and hasattr(self.api_key, 'get_secret_value'):
+            api_key = self.api_key.get_secret_value()
+
+        # Build auth config for registry lookup (used for cache key)
+        auth_config = {
+            'token': token,
+            'api_key': api_key,
+            'username': self.username,
+            'cloud': self.cloud,
+            'api_version': self.api_version,
+            'verify_ssl': self.verify_ssl,
+        }
+
+        # Factory function to create Jira client (only called if not cached)
+        def create_jira_client():
+            if token and is_cookie_token(token):
+                session = requests.Session()
+                session.cookies.update(parse_cookie_string(token))
+                return Jira(url=self.base_url, session=session, cloud=self.cloud,
+                           verify_ssl=self.verify_ssl, api_version=self.api_version)
+            elif token:
+                return Jira(url=self.base_url, token=token, cloud=self.cloud,
+                           verify_ssl=self.verify_ssl, api_version=self.api_version)
+            else:
+                return Jira(url=self.base_url, username=self.username, password=api_key,
+                           cloud=self.cloud, verify_ssl=self.verify_ssl, api_version=self.api_version)
+
+        # Get shared client from registry (or create new one)
+        registry = get_client_registry()
+        self._client = registry.get_client(
+            service_type='jira',
+            base_url=self.base_url,
+            auth_config=auth_config,
+            factory=create_jira_client
+        )
+
+        # Apply custom headers (toolkit-specific, applied each time)
+        custom_headers = self.custom_headers or {}
+        if custom_headers:
+            logger.info(f"Jira tool: applying {len(custom_headers)} custom headers")
+            for header, value in custom_headers.items():
+                self._client._update_header(header, value)
 
     def _parse_issues(self, issues: Dict) -> List[dict]:
         parsed: List[dict] = []

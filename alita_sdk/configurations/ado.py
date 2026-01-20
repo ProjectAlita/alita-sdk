@@ -162,26 +162,3 @@ class AdoConfiguration(BaseModel):
             return f"Request failed: {str(e)}"
         except Exception:
             return "Unexpected error during Azure DevOps connection check"
-
-
-class AdoReposConfiguration(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "metadata": {
-                "label": "ADO repos",
-                "icon_url": "ado-repos-icon.svg",
-                "section": "credentials",
-                "type": "ado_repos",
-                "categories": ["code repositories"],
-            }
-        }
-    )
-    repository_id: str = Field(description="ADO repository ID")
-
-    ado_configuration: AdoConfiguration = Field(
-        default_factory=AdoConfiguration,
-        description="ADO configuration",
-        json_schema_extra={
-            'configuration_types': ['ado']
-        }
-    )

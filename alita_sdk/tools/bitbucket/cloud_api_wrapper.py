@@ -142,32 +142,28 @@ class BitbucketServerApi(BitbucketApiAbstract):
             filename=file_path
         )
 
-    def update_file(self, file_path: str, update_query: str, branch: str) -> str:
-        file_content = self.get_file(file_path=file_path, branch=branch)
-        updated_file_content = file_content
-        for old, new in parse_old_new_markers(update_query):
-            if not old.strip():
-                continue
-            updated_file_content = updated_file_content.replace(old, new)
+    def _write_file(self, file_path: str, content: str, branch: str, commit_message: str) -> str:
+        """Write updated file content to Bitbucket Server.
 
-        if file_content == updated_file_content:
-            raise ToolException(
-                "File content was not updated because old content was not found or empty. "
-                "It may be helpful to use the read_file action to get "
-                "the current file contents."
-            )
-
+        it creates a new commit on the given branch that edits the existing file.
+        """
+        # Get the latest commit on the branch (used as source_commit_id)
         source_commit_generator = self.api_client.get_commits(project_key=self.project, repository_slug=self.repository,
                                                               hash_newest=branch, limit=1)
-        source_commit = next(source_commit_generator)
+        source_commit = next(source_commit_generator, None)
+        if not source_commit:
+            raise ToolException(
+                f"Unable to determine latest commit on branch '{branch}' for repository '{self.repository}'."
+            )
+
         return self.api_client.update_file(
             project_key=self.project,
             repository_slug=self.repository,
-            content=updated_file_content,
-            message=f"Update {file_path}",
+            content=content,
+            message=commit_message or f"Update {file_path}",
             branch=branch,
             filename=file_path,
-            source_commit_id=source_commit['id']
+            source_commit_id=source_commit['id'],
         )
 
     def get_pull_request_commits(self, pr_id: str) -> List[Dict[str, Any]]:
@@ -294,7 +290,37 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         return None
 
     def get_file(self, file_path: str, branch: str) -> str:
-        return self.repository.get(path=f'src/{branch}/{file_path}')
+        """Fetch a file's content from Bitbucket Cloud and return it as text.
+
+        Uses the 'get' endpoint with advanced_mode to get a rich response object.
+        """
+        try:
+            file_response = self.repository.get(
+                path=f"src/{branch}/{file_path}",
+                advanced_mode=True,
+            )
+
+            # Prefer HTTP status when available
+            status = getattr(file_response, "status_code", None)
+            if status is not None and status != 200:
+                raise ToolException(
+                    f"Failed to retrieve text from file '{file_path}' from branch '{branch}': "
+                    f"HTTP {status}"
+                )
+
+            # Safely extract text content
+            file_text = getattr(file_response, "text", None)
+            if not isinstance(file_text, str) or not file_text:
+                raise ToolException(
+                    f"File '{file_path}' from branch '{branch}' is empty or could not be retrieved."
+                )
+
+            return file_text
+        except Exception as e:
+            # Network/transport or client-level failure
+            raise ToolException(
+                f"Failed to retrieve text from file '{file_path}' from branch '{branch}': {e}"
+            )
 
     def get_files_list(self, file_path: str, branch: str) -> list:
         files_list = []
@@ -315,22 +341,10 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         return self.repository.post(path='src', data=form_data, files={},
                                     headers={'Content-Type': 'application/x-www-form-urlencoded'})
 
-    def update_file(self, file_path: str, update_query: str, branch: str) -> ToolException | str:
-
-        file_content = self.get_file(file_path=file_path, branch=branch)
-        updated_file_content = file_content
-        for old, new in parse_old_new_markers(file_query=update_query):
-            if not old.strip():
-                continue
-            updated_file_content = updated_file_content.replace(old, new)
-
-        if file_content == updated_file_content:
-            return ToolException(
-                "File content was not updated because old content was not found or empty. "
-                "It may be helpful to use the read_file action to get "
-                "the current file contents."
-            )
-        return self.create_file(file_path, updated_file_content, branch)
+    def _write_file(self, file_path: str, content: str, branch: str, commit_message: str) -> str:
+        """Write updated file content to Bitbucket Cloud.
+        """
+        return self.create_file(file_path=file_path, file_contents=content, branch=branch)
 
     def get_pull_request_commits(self, pr_id: str) -> List[Dict[str, Any]]:
         """

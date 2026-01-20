@@ -1,0 +1,112 @@
+name: "GH09 - Search Issues"
+description: "Verify search_issues tool finds matching issues and PRs based on query"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  search_query:
+    type: str
+    value: "state:open"
+  max_count:
+    type: int
+    value: 5
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_search
+
+nodes:
+  - id: invoke_search
+    type: toolkit
+    tool: search_issues
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - search_query
+      - max_count
+    input_mapping:
+      search_query:
+        type: variable
+        value: search_query
+      max_count:
+        type: variable
+        value: max_count
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Process the result from toolkit node
+        search_result = alita_state.get('tool_result')
+        search_query = alita_state.get('search_query', 'state:open')
+        max_count = alita_state.get('max_count', 5)
+
+        tool_executed = search_result is not None
+        error_message = None
+        issues_list = []
+
+        try:
+            # Parse result
+            if isinstance(search_result, list):
+                issues_list = search_result
+            elif isinstance(search_result, dict):
+                # Might be wrapped in items/issues key
+                issues_list = search_result.get('items') or search_result.get('issues') or [search_result]
+            elif isinstance(search_result, str):
+                import json
+                try:
+                    parsed = json.loads(search_result)
+                    if isinstance(parsed, list):
+                        issues_list = parsed
+                    elif isinstance(parsed, dict):
+                        issues_list = parsed.get('items') or parsed.get('issues') or [parsed]
+                except:
+                    issues_list = []
+        except Exception as e:
+            error_message = str(e)
+
+        has_results = len(issues_list) > 0
+        within_limit = len(issues_list) <= max_count
+
+        # Extract sample info
+        issues_sample = []
+        for item in issues_list[:5]:
+            if isinstance(item, dict):
+                issues_sample.append({
+                    "number": item.get('number'),
+                    "title": item.get('title', '')[:60] if item.get('title') else None,
+                    "state": item.get('state')
+                })
+
+        test_results = {
+            "test_passed": tool_executed and has_results,
+            "tool_executed": tool_executed,
+            "search_query": search_query,
+            "max_count": max_count,
+            "results_count": len(issues_list),
+            "has_results": has_results,
+            "within_limit": within_limit,
+            "issues_sample": issues_sample,
+            "error": error_message
+        }
+        test_results
+    input:
+      - search_query
+      - max_count
+      - tool_result
+    output:
+      - messages
+    structured_output: false
+    transition: END

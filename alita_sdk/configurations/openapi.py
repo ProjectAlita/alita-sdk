@@ -27,6 +27,12 @@ class OpenApiConfiguration(BaseModel):
                 "categories": ["integrations"],
                 "type": "openapi",
                 "extra_categories": ["api", "openapi", "swagger"],
+                "check_connection": {
+                    "enabled_when": {
+                        "all_fields_set": ["client_id", "client_secret", "method", "token_url"],
+                    },
+                    "disabled_tooltip": "Available only for OAuth (Client Credentials). Please setup client_id, client_secret, method and token_url to activate it on setup.",
+                },
                 "sections": {
                     "auth": {
                         "required": False,
@@ -64,7 +70,7 @@ class OpenApiConfiguration(BaseModel):
         ),
     )
     auth_type: Optional[Literal['Basic', 'Bearer', 'Custom']] = Field(
-        default='Bearer',
+        default=None,
         description=(
             "How to apply the API key. "
             "- 'Bearer': sets 'Authorization: Bearer <api_key>' "
@@ -111,7 +117,7 @@ class OpenApiConfiguration(BaseModel):
         )
     )
     method: Optional[Literal['default', 'Basic']] = Field(
-        default='default',
+        default=None,
         description=(
             "Token exchange method for client credentials flow. "
             "'default': Sends client_id and client_secret in POST body (Azure AD, Auth0, most providers). "

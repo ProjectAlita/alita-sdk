@@ -1,0 +1,92 @@
+name: "SR4 - Nested Structures"
+description: "Verify nested data structures are properly serialized"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  user_data:
+    type: dict
+    value:
+      name: "Alice"
+      age: 30
+      email: "alice@example.com"
+  items_list:
+    type: list
+    value:
+      - 1
+      - 2
+      - 3
+      - "four"
+      - nested: true
+  complex_data:
+    type: dict
+    value:
+      users:
+        - id: 1
+          name: "Bob"
+        - id: 2
+          name: "Carol"
+      meta:
+        count: 2
+  test_results:
+    type: dict
+
+entry_point: verify_nested
+
+nodes:
+  - id: verify_nested
+    type: code
+    code:
+      type: fixed
+      value: |
+        user = alita_state.get('user_data', {})
+        items = alita_state.get('items_list', [])
+        complex_obj = alita_state.get('complex_data', {})
+
+        # Check user_data
+        user_is_dict = isinstance(user, dict)
+        user_name = user.get('name')
+
+        # Check items_list
+        items_is_list = isinstance(items, list)
+        items_length = len(items)
+        nested_in_list = items[4].get('nested') if len(items) > 4 and isinstance(items[4], dict) else None
+
+        # Check complex_data
+        users_list = complex_obj.get('users', [])
+        complex_user_count = len(users_list)
+        first_user_name = users_list[0].get('name') if users_list else None
+
+        all_passed = (
+            user_is_dict and
+            user_name == "Alice" and
+            items_is_list and
+            items_length == 5 and
+            nested_in_list == True and
+            complex_user_count == 2 and
+            first_user_name == "Bob"
+        )
+
+        result = {
+            "test_passed": all_passed,
+            "user_is_dict": user_is_dict,
+            "user_name": user_name,
+            "items_is_list": items_is_list,
+            "items_length": items_length,
+            "nested_in_list": nested_in_list,
+            "complex_user_count": complex_user_count,
+            "first_user_name": first_user_name
+        }
+        test_results = result
+
+        test_results
+    input:
+      - user_data
+      - items_list
+      - complex_data
+    output:
+      - messages
+    structured_output: false
+    transition: END
