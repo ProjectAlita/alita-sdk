@@ -26,6 +26,9 @@ ReadList = create_model(
 GetFiles = create_model(
     "GetFiles",
     folder_name=(Optional[str], Field(description="Folder name to get list of the files.", default=None)),
+    form_name=(Optional[str], Field(description="Form (Document Library) name to filter files. "
+                                                "If specified, only files from this form will be returned. "
+                                                "Example: 'siblingdir' or 'SharedDocuments'.", default=None)),
     limit_files=(Optional[int], Field(description="Limit (maximum number) of files to be returned."
                                                   "Can be called with synonyms, such as First, Top, etc., "
                                                   "or can be reflected just by a number for example 'Top 10 files'. "
@@ -121,8 +124,17 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 return ToolException(f"Cannot read list '{list_title}'. Check list name and permissions: {base_e} | {graph_e}")
 
 
-    def get_files_list(self, folder_name: str = None, limit_files: int = 100):
-        """ If folder name is specified, lists all files in this folder under Shared Documents path. If folder name is empty, lists all files under root catalog (Shared Documents). Number of files is limited by limit_files (default is 100)."""
+    def get_files_list(self, folder_name: str = None, limit_files: int = 100, form_name: Optional[str] = None):
+        """
+        If folder name is specified, lists all files in this folder under Shared Documents path.
+        If folder name is empty, lists all files under root catalog (Shared Documents).
+        Number of files is limited by limit_files (default is 100).
+
+        If form_name is specified, only files from specified form will be returned.
+        Note:
+            * URL anatomy: https://epam.sharepoint.com/sites/{some_site}/{form_name}/Forms/AllItems.aspx
+            * Example of folders syntax: `{form_name} / Hello / inner-folder` - 1st folder is commonly form_name
+        """
         try:
             # exclude default system libraries like 'Form Templates', 'Site Assets', 'Style Library'
             all_libraries = self._client.web.lists.filter("BaseTemplate eq 101 and Title ne 'Form Templates' and Title ne 'Site Assets' and Title ne 'Style Library'").get().execute_query()
@@ -135,6 +147,10 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             #
             for lib in all_libraries:
                 library_type = decode_sharepoint_string(lib.properties["EntityTypeName"])
+                if form_name:
+                    # if form_name is specified, only files from specified form will be returned
+                    if form_name.lower() != library_type.lower():
+                        continue
                 target_folder_url = library_type
                 if folder_name:
                     folder_path = folder_name.strip('/')
