@@ -81,6 +81,33 @@ class Artifact:
         artifacts = self.client.list_artifacts(bucket_name)
         return str(artifacts) if return_as_string else artifacts
 
+    def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None, create_if_missing: bool = True):
+        if not bucket_name:
+            bucket_name = self.bucket_name
+
+        # First check if file exists by getting raw response
+        raw_data = self.client.download_artifact(bucket_name, artifact_name)
+
+        # If download returns an error dict, the file doesn't exist or there's an access issue
+        if isinstance(raw_data, dict) and raw_data.get('error'):
+            # Check if we should create the file if it doesn't exist
+            if create_if_missing:
+                # Create empty file and append data (no leading newline for first content)
+                self.client.create_artifact(bucket_name, artifact_name, additional_data)
+                return "Data appended successfully"
+            else:
+                # Return error as before
+                return f"Error: Cannot append to file '{artifact_name}'. {raw_data['error']}"
+
+        # Get the parsed content
+        data = self.get(artifact_name, bucket_name)
+        if data == "Could not detect encoding":
+            return data
+
+        # Append the new data
+        data += f"\n{additional_data}" if len(data) > 0 else additional_data
+        self.client.create_artifact(bucket_name, artifact_name, data)
+        return "Data appended successfully"
     def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None):
         try:
             if not bucket_name:
@@ -95,7 +122,7 @@ class Artifact:
         except Exception as e:
             logger.error(f"Error: {e}")
             return dumps({"error": str(e)})
-    
+
     def overwrite(self, artifact_name: str, new_data: Any, bucket_name: str = None):
         try:
             if not bucket_name:

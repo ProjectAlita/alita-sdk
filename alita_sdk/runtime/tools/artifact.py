@@ -304,13 +304,13 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
 
     def create_file(self, filename: str, bucket_name = None, filedata: str = None, artifact_id: str = None):
         """Create a file in the artifact bucket from new content or by copying an existing artifact.
-        
+
         Args:
             filename: Target filename in destination bucket
             bucket_name: Destination bucket (uses default if None)
             filedata: Content for creating new files (text, JSON, CSV, etc.)
             artifact_id: UUID of existing artifact to copy (preserves binary format)
-            
+
         Note: Provide EITHER filedata OR artifact_id, not both or neither.
         """
         # Validation: exactly one source must be provided
@@ -319,14 +319,14 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 "Must provide either 'filedata' (to create new content) or 'artifact_id' (to copy existing file). "
                 "Both parameters cannot be empty."
             )
-        
+
         if filedata is not None and artifact_id is not None:
             raise ToolException(
                 "Cannot provide both 'filedata' and 'artifact_id'. "
                 "Use 'artifact_id' to copy existing files preserving binary format, "
                 "or 'filedata' to create new content from text/data."
             )
-        
+
         # Sanitize filename to prevent regex errors during indexing
         sanitized_filename, was_modified = self._sanitize_filename(filename)
         if was_modified:
@@ -340,7 +340,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 filedata = self.artifact.get_raw_content_by_artifact_id(artifact_id)
             except Exception as e:
                 raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
-            
+
             file_size = len(filedata) if isinstance(filedata, bytes) else 0
             source_artifact_id = artifact_id
         else:
@@ -349,7 +349,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             if sanitized_filename.endswith(".xlsx"):
                 data = json.loads(filedata)
                 filedata = self.create_xlsx_filedata(data)
-            
+
             file_size = len(filedata) if isinstance(filedata, (str, bytes)) else 0
             source_artifact_id = None
 
@@ -358,7 +358,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         response_data = json.loads(create_response)
         if "error" in response_data:
             raise ToolException(f"Failed to create file '{sanitized_filename}': {response_data['error']}")
-        
+
         new_artifact_id = response_data['artifact_id']
 
         # Build event metadata
@@ -385,7 +385,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             "artifact_id": new_artifact_id,
             "filename": sanitized_filename,
             "bucket": bucket_name or self.bucket,
-            "message": response_data.get('message', 
+            "message": response_data.get('message',
                 f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully")
         })
     
@@ -518,13 +518,13 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 operation_type = "create"
                 message = f"File '{sanitized_filename}' created successfully"
                 return_msg = f"Created file {sanitized_filename}"
-            
+
             response_data = json.loads(result)
             if "error" in response_data:
                 raise ToolException(f"Failed to write file '{sanitized_filename}': {response_data['error']}")
-            
+
             artifact_id = response_data['artifact_id']
-            
+
             dispatch_custom_event("file_modified", {
                 "message": message,
                 "artifact_id": artifact_id,
@@ -538,7 +538,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                     "source": "generated"
                 }
             })
-            
+
             return return_msg
         except Exception as e:
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
@@ -561,35 +561,23 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             raise ToolException(f'Error (deleteFile): {result.get("error")} for file \'{filename}\'')
         return f'File "{filename}" deleted successfully.'
 
-    def append_data(self, filename: str, filedata: str, bucket_name = None):
-        append_response = self.artifact.append(filename, filedata, bucket_name)
-        
-        response_data = json.loads(append_response)
-        if "error" in response_data:
-            raise ToolException(f"Failed to append to file '{filename}': {response_data['error']}")
-        
-        artifact_id = response_data['artifact_id']
-        
-        dispatch_custom_event("file_modified", {
-            "message": f"Data appended to file '{filename}' successfully",
-            "artifact_id": artifact_id,
-            "filename": filename,
-            "tool_name": "appendData",
-            "toolkit": "artifact",
-            "operation_type": "modify",
-            "meta": {
-                "bucket": bucket_name or self.bucket,
-                "file_size": response_data.get('size', 0),
-                "source": "generated"
-            }
-        })
-        
-        return json.dumps({
-            "artifact_id": artifact_id,
-            "filename": filename,
-            "bucket": bucket_name or self.bucket,
-            "message": response_data.get('message', "Data appended successfully")
-        })
+    def append_data(self, filename: str, filedata: str, bucket_name = None, create_if_missing: bool = True):
+        result = self.artifact.append(filename, filedata, bucket_name, create_if_missing)
+
+        # Only dispatch custom event if append succeeded (not an error message)
+        if not (isinstance(result, str) and result.startswith("Error:")):
+            dispatch_custom_event("file_modified", {
+                "message": f"Data appended to file '{filename}' successfully",
+                "filename": filename,
+                "tool_name": "appendData",
+                "toolkit": "artifact",
+                "operation_type": "modify",
+                "meta": {
+                    "bucket": bucket_name or self.bucket
+                }
+            })
+
+        return result
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
         result = self.artifact.overwrite(filename, filedata, bucket_name)
@@ -597,9 +585,9 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         response_data = json.loads(result)
         if "error" in response_data:
             raise ToolException(f"Failed to overwrite file '{filename}': {response_data['error']}")
-        
+
         artifact_id = response_data['artifact_id']
-        
+
         dispatch_custom_event("file_modified", {
             "message": f"File '{filename}' overwritten successfully",
             "artifact_id": artifact_id,
@@ -623,13 +611,13 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
 
     def get_file_type(self, artifact_id: str) -> str:
         """Detect file type of an artifact using file content analysis.
-        
+
         Uses the `filetype` library to determine file type from magic bytes,
         which is more reliable than extension-based detection.
-        
+
         Args:
             artifact_id: UUID of the artifact to analyze
-            
+
         Returns:
             JSON string with file type information:
             {
@@ -648,28 +636,28 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 "status": "error",
                 "message": "filetype library not installed. Install with: pip install filetype"
             })
-        
+
         try:
             # Get raw file content using Artifact client's get_raw_content_by_artifact_id() method
             file_content = self.artifact.get_raw_content_by_artifact_id(artifact_id)
-            
+
             if not file_content:
                 return json.dumps({
                     "artifact_id": artifact_id,
                     "status": "error",
                     "message": "Artifact not found or empty"
                 })
-            
+
             # Detect file type from content
             kind = filetype.guess(file_content)
-            
+
             if kind is None:
                 return json.dumps({
                     "artifact_id": artifact_id,
                     "status": "error",
                     "message": "Cannot guess file type from content"
                 })
-            
+
             return json.dumps({
                 "artifact_id": artifact_id,
                 "extension": kind.extension,
@@ -677,7 +665,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 "status": "success",
                 "message": f"File type detected: {kind.mime}"
             })
-            
+
         except Exception as e:
             return json.dumps({
                 "artifact_id": artifact_id,
@@ -786,13 +774,13 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         basic_tools = [
             {
                 "ref": self.list_files,
-                "name": "listFiles",
+                "name": "List files",
                 "description": "List all files in the artifact",
                 "args_schema": create_model("listBucket", bucket_name=bucket_name)
             },
             {
                 "ref": self.create_file,
-                "name": "createFile",
+                "name": "Create file",
                 "description": """Create a file in the artifact bucket. Supports two modes:
                 1. Create from content: Use 'filedata' parameter to create new files with text, JSON, CSV, or Excel data
                 2. Copy existing file: Use 'artifact_id' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
@@ -828,7 +816,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.read_file,
-                "name": "readFile",
+                "name": "Read file",
                 "description": "Read a file in the artifact",
                 "args_schema": create_model(
                     "readFile", 
@@ -856,7 +844,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.delete_file,
-                "name": "deleteFile",
+                "name": "Delete file",
                 "description": "Delete a file in the artifact",
                 "args_schema": create_model(
                     "deleteFile", 
@@ -866,18 +854,22 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.append_data,
-                "name": "appendData",
+                "name": "Append data",
                 "description": "Append data to a file in the artifact",
                 "args_schema": create_model(
                     "appendData", 
                     filename=(str, Field(description="Filename")),
                     filedata=(str, Field(description="Stringified content to append")),
-                    bucket_name=bucket_name
+                    bucket_name=bucket_name,
+                    create_if_missing=(Optional[bool], Field(
+                        description="If True (default), creates an empty file if it doesn't exist before appending. If False, returns an error when file is not found.",
+                        default=True
+                    ))
                 )
             },
             {
                 "ref": self.overwrite_data,
-                "name": "overwriteData",
+                "name": "Overwrite data",
                 "description": "Overwrite data in a file in the artifact",
                 "args_schema": create_model(
                     "overwriteData", 
@@ -888,7 +880,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.create_new_bucket,
-                "name": "createNewBucket",
+                "name": "Create new bucket",
                 "description": "Creates new bucket specified by user.",
                 "args_schema": create_model(
                     "createNewBucket",
