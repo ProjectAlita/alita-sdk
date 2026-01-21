@@ -686,13 +686,13 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         basic_tools = [
             {
                 "ref": self.list_files,
-                "name": "List files",
+                "name": "listFiles",
                 "description": "List all files in the artifact",
                 "args_schema": create_model("listBucket", bucket_name=bucket_name)
             },
             {
                 "ref": self.create_file,
-                "name": "Create file",
+                "name": "createFile",
                 "description": "Create a file in the artifact",
                 "args_schema": create_model(
                     "createFile", 
@@ -717,7 +717,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.read_file,
-                "name": "Read file",
+                "name": "readFile",
                 "description": "Read a file in the artifact",
                 "args_schema": create_model(
                     "readFile", 
@@ -736,7 +736,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.delete_file,
-                "name": "Delete file",
+                "name": "deleteFile",
                 "description": "Delete a file in the artifact",
                 "args_schema": create_model(
                     "deleteFile", 
@@ -746,7 +746,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.append_data,
-                "name": "Append data",
+                "name": "appendData",
                 "description": "Append data to a file in the artifact",
                 "args_schema": create_model(
                     "appendData", 
@@ -761,7 +761,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.overwrite_data,
-                "name": "Overwrite data",
+                "name": "overwriteData",
                 "description": "Overwrite data in a file in the artifact",
                 "args_schema": create_model(
                     "overwriteData", 
@@ -772,7 +772,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.create_new_bucket,
-                "name": "Create new bucket",
+                "name": "createNewBucket",
                 "description": "Creates new bucket specified by user.",
                 "args_schema": create_model(
                     "createNewBucket",
