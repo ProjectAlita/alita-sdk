@@ -7,9 +7,9 @@ Sessions are persisted to $ALITA_DIR/sessions/<session_id>/
 - memory.db: SQLite database for conversation memory
 - session.json: Session metadata (agent, model, etc.)
 
-This module re-exports the runtime PlanningToolkit for unified usage across
-CLI, indexer_worker, and SDK agents. The runtime toolkit supports both
-PostgreSQL (production) and filesystem (local) storage backends.
+This module uses PlanningMiddleware for unified usage across CLI, indexer_worker,
+and SDK agents. The middleware supports both PostgreSQL (production) and
+filesystem (local CLI) storage backends.
 """
 
 import os
@@ -19,7 +19,6 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field
 import logging
 
 logger = logging.getLogger(__name__)
@@ -189,84 +188,46 @@ def from_portable_path(portable_path: str) -> str:
 
 
 # ============================================================================
-# PlanState - For CLI UI compatibility and session listing
+# PlanState - Re-export from middleware for CLI UI compatibility
 # ============================================================================
 
-class PlanStep(BaseModel):
-    """A single step in a plan."""
-    description: str = Field(description="Step description")
-    completed: bool = Field(default=False, description="Whether step is completed")
+# Re-export from middleware for consistent types across the codebase
+from alita_sdk.runtime.middleware.planning import (
+    PlanStep,
+    PlanState,
+    StepStatus,
+    PlanningMiddleware,
+)
 
 
-class PlanState(BaseModel):
+def load_plan_state(session_id: str) -> Optional[PlanState]:
     """
-    Current plan state for CLI display.
-    
-    This is used for CLI UI rendering and backwards compatibility.
-    The actual plan storage is handled by the runtime PlanningWrapper.
+    Load plan state from session directory using middleware storage.
+
+    Args:
+        session_id: The session ID
+
+    Returns:
+        PlanState or None if not found
     """
-    title: str = Field(default="", description="Plan title")
-    steps: List[PlanStep] = Field(default_factory=list, description="List of steps")
-    session_id: str = Field(default="", description="Session ID for persistence")
-    
-    def render(self) -> str:
-        """Render plan as formatted string with checkboxes."""
-        if not self.steps:
-            return ""
-        
-        lines = []
-        if self.title:
-            lines.append(f"📋 {self.title}")
-        
-        for i, step in enumerate(self.steps, 1):
-            checkbox = "☑" if step.completed else "☐"
-            status = " (completed)" if step.completed else ""
-            lines.append(f"   {checkbox} {i}. {step.description}{status}")
-        
-        return "\n".join(lines)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "title": self.title,
-            "steps": [{"description": s.description, "completed": s.completed} for s in self.steps],
-            "session_id": self.session_id
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PlanState":
-        """Create from dictionary."""
-        steps = [PlanStep(**s) for s in data.get("steps", [])]
-        return cls(
-            title=data.get("title", ""), 
-            steps=steps,
-            session_id=data.get("session_id", "")
-        )
-    
-    @classmethod
-    def load(cls, session_id: str) -> Optional["PlanState"]:
-        """Load plan state from session file."""
-        try:
-            plan_file = get_sessions_dir() / session_id / "plan.json"
-            if plan_file.exists():
-                data = json.loads(plan_file.read_text())
-                state = cls.from_dict(data)
-                state.session_id = session_id
-                logger.debug(f"Loaded plan from {plan_file}")
-                return state
-        except Exception as e:
-            logger.warning(f"Failed to load plan: {e}")
-        return None
+    try:
+        # Use middleware's filesystem storage to load plan
+        from alita_sdk.runtime.middleware.planning import FilesystemStorage
+        storage = FilesystemStorage(str(get_sessions_dir() / session_id))
+        return storage.get_plan(session_id)
+    except Exception as e:
+        logger.warning(f"Failed to load plan: {e}")
+    return None
 
 
 def list_sessions() -> List[Dict[str, Any]]:
     """List all sessions with their metadata and plans."""
     sessions = []
     sessions_dir = get_sessions_dir()
-    
+
     if not sessions_dir.exists():
         return sessions
-    
+
     for session_dir in sessions_dir.iterdir():
         if session_dir.is_dir():
             session_info = {
@@ -274,13 +235,14 @@ def list_sessions() -> List[Dict[str, Any]]:
                 "title": None,
                 "steps_total": 0,
                 "steps_completed": 0,
+                "steps_in_progress": 0,
                 "agent_name": None,
                 "model": None,
                 "modified": 0,
                 "has_memory": False,
                 "has_plan": False,
             }
-            
+
             # Load session metadata
             metadata_file = session_dir / "session.json"
             if metadata_file.exists():
@@ -291,7 +253,7 @@ def list_sessions() -> List[Dict[str, Any]]:
                     session_info["modified"] = metadata_file.stat().st_mtime
                 except Exception:
                     pass
-            
+
             # Check for memory database
             memory_file = session_dir / "memory.db"
             if memory_file.exists():
@@ -300,7 +262,7 @@ def list_sessions() -> List[Dict[str, Any]]:
                 mem_mtime = memory_file.stat().st_mtime
                 if mem_mtime > session_info["modified"]:
                     session_info["modified"] = mem_mtime
-            
+
             # Load plan info
             plan_file = session_dir / "plan.json"
             if plan_file.exists():
@@ -308,27 +270,65 @@ def list_sessions() -> List[Dict[str, Any]]:
                     data = json.loads(plan_file.read_text())
                     session_info["has_plan"] = True
                     session_info["title"] = data.get("title", "(untitled)")
-                    session_info["steps_total"] = len(data.get("steps", []))
-                    session_info["steps_completed"] = sum(1 for s in data.get("steps", []) if s.get("completed"))
+                    steps = data.get("steps", [])
+                    session_info["steps_total"] = len(steps)
+                    # Handle both old (completed bool) and new (status string) formats
+                    for s in steps:
+                        if s.get("status") == StepStatus.COMPLETED or s.get("completed"):
+                            session_info["steps_completed"] += 1
+                        elif s.get("status") == StepStatus.IN_PROGRESS:
+                            session_info["steps_in_progress"] += 1
                     # Use plan file mtime if newer
                     plan_mtime = plan_file.stat().st_mtime
                     if plan_mtime > session_info["modified"]:
                         session_info["modified"] = plan_mtime
                 except Exception:
                     pass
-            
+
             # Only include sessions that have some content
             if session_info["has_memory"] or session_info["has_plan"]:
                 sessions.append(session_info)
-    
+
     # Sort by modified time, newest first
     sessions.sort(key=lambda x: x.get("modified", 0), reverse=True)
     return sessions
 
 
 # ============================================================================
-# Planning Tools - Using Runtime PlanningToolkit
+# Planning Tools - Using PlanningMiddleware
 # ============================================================================
+
+def get_planning_middleware(
+    plan_callback: Optional[Callable] = None,
+    session_id: Optional[str] = None
+) -> PlanningMiddleware:
+    """
+    Get a PlanningMiddleware instance for CLI usage.
+
+    Uses filesystem storage with session_id as the conversation identifier.
+
+    Args:
+        plan_callback: Optional callback function called when plan changes (for CLI UI)
+        session_id: Optional session ID for persistence. If None, generates a new one.
+
+    Returns:
+        PlanningMiddleware instance
+    """
+    # Generate session_id if not provided
+    if not session_id:
+        session_id = generate_session_id()
+
+    # Create middleware with filesystem storage (no connection_string)
+    # Use session-specific directory for plan storage
+    middleware = PlanningMiddleware(
+        conversation_id=session_id,
+        connection_string=None,  # Uses filesystem storage
+        storage_dir=str(get_sessions_dir() / session_id),
+        callbacks={"plan_updated": plan_callback} if plan_callback else None,
+    )
+
+    return middleware
+
 
 def get_planning_tools(
     plan_state: Optional[PlanState] = None,
@@ -336,54 +336,35 @@ def get_planning_tools(
     session_id: Optional[str] = None
 ) -> tuple[List[BaseTool], PlanState]:
     """
-    Get planning tools using the runtime PlanningToolkit.
-    
-    Uses the runtime PlanningToolkit which supports both PostgreSQL
+    Get planning tools using PlanningMiddleware.
+
+    Uses the PlanningMiddleware which supports both PostgreSQL
     and filesystem storage. For CLI, it uses filesystem storage with
-    session_id as the thread identifier.
-    
+    session_id as the conversation identifier.
+
     Args:
         plan_state: Optional existing plan state (for backwards compatibility)
         plan_callback: Optional callback function called when plan changes (for CLI UI)
         session_id: Optional session ID for persistence. If None, generates a new one.
-        
+
     Returns:
         Tuple of (list of tools, plan state object)
     """
-    from alita_sdk.runtime.toolkits.planning import PlanningToolkit
-    from alita_sdk.runtime.tools.planning.wrapper import PlanState as RuntimePlanState
-    
     # Generate session_id if not provided
     if not session_id:
         session_id = generate_session_id()
-    
-    # Create adapter callback that converts between PlanState types
-    def adapter_callback(runtime_plan: RuntimePlanState):
-        if plan_callback:
-            # Convert runtime PlanState to CLI PlanState for UI
-            cli_plan = PlanState(
-                title=runtime_plan.title,
-                steps=[PlanStep(description=s.description, completed=s.completed) for s in runtime_plan.steps],
-                session_id=session_id
-            )
-            plan_callback(cli_plan)
-    
-    # Create toolkit with filesystem storage (no pgvector_configuration)
-    # Use session_id as conversation_id so tools don't need it passed explicitly
-    toolkit = PlanningToolkit.get_toolkit(
-        toolkit_name=None,  # No prefix - tools are called directly
-        selected_tools=['update_plan', 'complete_step', 'get_plan_status', 'delete_plan'],
-        pgvector_configuration=None,  # Uses filesystem storage
-        storage_dir=str(get_sessions_dir() / session_id),  # Use session-specific directory
-        plan_callback=adapter_callback if plan_callback else None,
-        conversation_id=session_id  # Use session_id as conversation_id
+
+    # Create middleware with filesystem storage
+    middleware = get_planning_middleware(
+        plan_callback=plan_callback,
+        session_id=session_id
     )
-    
-    tools = toolkit.get_tools()
-    
-    # Create local state for return (for backward compatibility)
-    loaded = PlanState.load(session_id)
+
+    # Get tools from middleware
+    tools = middleware.get_tools()
+
+    # Try to load existing plan state
+    loaded = load_plan_state(session_id)
     state = loaded if loaded else (plan_state or PlanState())
-    state.session_id = session_id
-    
+
     return tools, state

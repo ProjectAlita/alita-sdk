@@ -4,6 +4,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List
+from urllib.parse import quote
 
 from atlassian.bitbucket import Bitbucket, Cloud
 from langchain_core.tools import ToolException
@@ -51,7 +52,7 @@ class BitbucketApiAbstract(ABC):
         pass
 
     @abstractmethod
-    def get_files_list(self, file_path: str, branch: str) -> str:
+    def get_files_list(self, file_path: str, branch: str, recursive: bool = True) -> str:
         pass
 
     @abstractmethod
@@ -124,13 +125,59 @@ class BitbucketServerApi(BitbucketApiAbstract):
         return self.api_client.get_content_of_file(project_key=self.project, repository_slug=self.repository, at=branch,
                                                    filename=file_path).decode('utf-8')
 
-    def get_files_list(self, file_path: str, branch: str) -> list:
+    def get_files_list(self, file_path: str, branch: str, recursive: bool = True) -> list:
+        """Get list of files from a specific path and branch.
+
+        Parameters:
+            file_path (str): The path to list files from
+            branch (str): The branch name
+            recursive (bool): Whether to list files recursively. If False, only direct children are returned.
+
+        Returns:
+            list: List of file paths
+        """
         files = self.api_client.get_file_list(project_key=self.project, repository_slug=self.repository, query=branch,
                                               sub_folder=file_path)
         files_list = []
         for file in files:
             files_list.append(file['path'])
+
+        # Apply client-side filtering when recursive=False
+        if not recursive:
+            files_list = self._filter_non_recursive(files_list, file_path)
+
         return files_list
+
+    def _filter_non_recursive(self, files_list: list, base_path: str) -> list:
+        """Filter file list to only include direct children (non-recursive).
+
+        Parameters:
+            files_list (list): List of all file paths
+            base_path (str): The base path to filter from
+
+        Returns:
+            list: Filtered list containing only direct children
+        """
+        filtered = []
+        # Normalize base_path (remove trailing slash if present)
+        base_path = base_path.rstrip('/') if base_path else ''
+
+        for file_path in files_list:
+            # If base_path is empty (root), check if file has no directory separators
+            if not base_path:
+                # Only include files without '/' (direct children of root)
+                if '/' not in file_path:
+                    filtered.append(file_path)
+            else:
+                # Check if file starts with base_path and has no additional subdirectories
+                if file_path.startswith(base_path + '/'):
+                    # Get the relative part after base_path
+                    relative_path = file_path[len(base_path) + 1:]
+                    # Only include if there's no '/' in the relative path (direct child)
+                    if '/' not in relative_path:
+                        filtered.append(file_path)
+
+        return filtered
 
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
         return self.api_client.upload_file(
@@ -259,7 +306,13 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         return branch_names
 
     def _get_branch(self, branch_name: str) -> Response:
-        return self.repository.branches.get(branch_name)
+        """Get branch details by name.
+
+        Branch names with slashes are URL-encoded to ensure proper API requests.
+        """
+        # URL-encode branch name to handle special characters like forward slashes
+        encoded_branch = quote(branch_name, safe='')
+        return self.repository.branches.get(encoded_branch)
 
     def create_branch(self, branch_name: str, branch_from: str) -> Response:
         """
@@ -293,10 +346,14 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         """Fetch a file's content from Bitbucket Cloud and return it as text.
 
         Uses the 'get' endpoint with advanced_mode to get a rich response object.
+        Branch names with slashes are URL-encoded to ensure proper API requests.
         """
         try:
+            # URL-encode branch name to handle special characters like forward slashes
+            branch_hash = self._get_branch(branch).hash
+
             file_response = self.repository.get(
-                path=f"src/{branch}/{file_path}",
+                path=f"src/{branch_hash}/{file_path}",
                 advanced_mode=True,
             )
 
@@ -322,16 +379,76 @@ class BitbucketCloudApi(BitbucketApiAbstract):
                 f"Failed to retrieve text from file '{file_path}' from branch '{branch}': {e}"
             )
 
-    def get_files_list(self, file_path: str, branch: str) -> list:
+    def get_files_list(self, file_path: str, branch: str, recursive: bool = True) -> list:
+        """Get list of files from a specific path and branch.
+
+        Branch names with slashes are URL-encoded to ensure proper API requests.
+
+        Parameters:
+            file_path (str): The path to list files from
+            branch (str): The branch name
+            recursive (bool): Whether to list files recursively. If False, only direct children are returned.
+
+        Returns:
+            list: List of file paths
+        """
         files_list = []
-        index = 0
-        # TODO: add pagination
-        for item in \
-                self.repository.get(
-                    path=f'src/{branch}/{file_path}?max_depth=100&pagelen=100&fields=values.path&q=type="commit_file"')[
-                    'values']:
-            files_list.append(item['path'])
+        # URL-encode branch name to handle special characters like forward slashes
+        branch_hash = self._get_branch(branch).hash
+        page = None
+
+        while True:
+            # Build the path with pagination
+            path = f'src/{branch_hash}/{file_path}?max_depth=100&pagelen=100&fields=values.path,next&q=type="commit_file"'
+            if page:
+                path = page
+
+            response = self.repository.get(path=path)
+
+            for item in response.get('values', []):
+                files_list.append(item['path'])
+
+            # Check for next page
+            page = response.get('next')
+            if not page:
+                break
+
+        # Apply client-side filtering when recursive=False
+        if not recursive:
+            files_list = self._filter_non_recursive(files_list, file_path)
+
         return files_list
+
+    def _filter_non_recursive(self, files_list: list, base_path: str) -> list:
+        """Filter file list to only include direct children (non-recursive).
+
+        Parameters:
+            files_list (list): List of all file paths
+            base_path (str): The base path to filter from
+
+        Returns:
+            list: Filtered list containing only direct children
+        """
+        filtered = []
+        # Normalize base_path (remove trailing slash if present)
+        base_path = base_path.rstrip('/') if base_path else ''
+
+        for file_path in files_list:
+            # If base_path is empty (root), check if file has no directory separators
+            if not base_path:
+                # Only include files without '/' (direct children of root)
+                if '/' not in file_path:
+                    filtered.append(file_path)
+            else:
+                # Check if file starts with base_path and has no additional subdirectories
+                if file_path.startswith(base_path + '/'):
+                    # Get the relative part after base_path
+                    relative_path = file_path[len(base_path) + 1:]
+                    # Only include if there's no '/' in the relative path (direct child)
+                    if '/' not in relative_path:
+                        filtered.append(file_path)
+
+        return filtered
 
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
         form_data = {

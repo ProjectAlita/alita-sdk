@@ -81,6 +81,16 @@ class ToolRegistry:
         """
         registry = cls()
 
+        # Log all incoming tools for debugging
+        logger.info(f"[TOOL_REGISTRY] Creating registry from {len(tools)} tools")
+        all_tool_names = [t.name if hasattr(t, 'name') else str(type(t)) for t in tools]
+        logger.info(f"[TOOL_REGISTRY] All incoming tools: {all_tool_names}")
+
+        # Check for indexer tools in incoming tools
+        indexer_tools_incoming = [n for n in all_tool_names if 'index' in n.lower()]
+        if indexer_tools_incoming:
+            logger.warning(f"[TOOL_REGISTRY] Indexer tools in incoming list: {indexer_tools_incoming}")
+
         for tool in tools:
             if not isinstance(tool, BaseTool):
                 logger.debug(f"Skipping non-BaseTool: {type(tool)}")
@@ -88,6 +98,9 @@ class ToolRegistry:
 
             toolkit_name = registry._extract_toolkit_name(tool)
             tool_name = tool.name
+
+            # Log each tool being added
+            logger.debug(f"[TOOL_REGISTRY] Adding tool '{tool_name}' to toolkit '{toolkit_name}'")
 
             # Store tool in registry
             registry._toolkits[toolkit_name][tool_name] = tool
@@ -104,6 +117,15 @@ class ToolRegistry:
                 toolkit_type = registry._extract_toolkit_type(tool, toolkit_name)
                 if toolkit_type:
                     registry._toolkit_types[toolkit_name] = toolkit_type
+
+        # Log final registry contents
+        for tk_name, tk_tools in registry._toolkits.items():
+            tool_names_in_tk = list(tk_tools.keys())
+            logger.info(f"[TOOL_REGISTRY] Toolkit '{tk_name}' has {len(tool_names_in_tk)} tools: {tool_names_in_tk}")
+            # Check for indexer tools in this toolkit
+            indexer_in_tk = [n for n in tool_names_in_tk if 'index' in n.lower()]
+            if indexer_in_tk:
+                logger.warning(f"[TOOL_REGISTRY] Indexer tools in toolkit '{tk_name}': {indexer_in_tk}")
 
         logger.info(
             f"ToolRegistry initialized with {len(registry._toolkits)} toolkits, "
@@ -148,7 +170,6 @@ class ToolRegistry:
             'confluence': 'Confluence documentation - pages, spaces, search',
             'slack': 'Slack messaging - channels, messages, threads',
             'artifact': 'File storage and retrieval - upload, download, search',
-            'datasource': 'Data source querying and retrieval',
             'memory': 'Conversation memory and context management',
             'planning': 'Task planning and tracking',
             'default': 'General purpose tools',
@@ -234,7 +255,6 @@ class ToolRegistry:
             'artifact': ['artifact', 'upload', 'download', 'storage', 'attachment'],
             'azure_devops': ['azure devops', 'ado', 'devops', 'pipeline', 'work item'],
             'testrail': ['testrail', 'test case', 'test run'],
-            'datasource': ['datasource', 'index', 'vector', 'embedding', 'rag'],
             'memory': ['remember', 'context', 'history', 'previous conversation'],
             'planning': ['plan', 'planning', 'todo', 'schedule'],
         }
@@ -330,6 +350,16 @@ class ToolRegistry:
         Returns:
             Formatted string suitable for inclusion in system prompt
         """
+        # Log what we're generating index for
+        logger.info(f"[TOOL_REGISTRY] Generating index for {len(self._toolkits)} toolkits")
+        for tk_name, tk_tools in self._toolkits.items():
+            tool_names = list(tk_tools.keys())
+            logger.info(f"[TOOL_REGISTRY] Index will include toolkit '{tk_name}' with tools: {tool_names}")
+            # Check for indexer tools
+            indexer_tools = [n for n in tool_names if 'index' in n.lower()]
+            if indexer_tools:
+                logger.warning(f"[TOOL_REGISTRY] INDEX GENERATION: Indexer tools in '{tk_name}': {indexer_tools}")
+
         # Group toolkits by type
         toolkits_by_type: Dict[str, List[str]] = defaultdict(list)
         for toolkit_name in self._toolkits.keys():

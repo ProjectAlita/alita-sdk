@@ -177,9 +177,40 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         return super().validate_toolkit(values)
 
     def set_active_branch(self, branch_name: str) -> str:
-        """Set the active branch for the bot."""
-        self._active_branch = branch_name
-        return f"Active branch set to `{branch_name}`"
+        """
+        Switches the active branch to the specified branch.
+
+        Parameters:
+            branch_name (str): The name of the branch to be the current branch
+
+        Returns:
+            str: Success message if branch exists, or ToolException if branch doesn't exist
+        """
+        try:
+            # Fetch all branches from the repository (no caching)
+            branches = self._bitbucket.list_branches()
+
+            # Check if the requested branch exists
+            if branch_name in branches:
+                self._active_branch = branch_name
+                return f"Switched to branch `{branch_name}`"
+            else:
+                # Format branch list for error message
+                if len(branches) <= 30:
+                    branch_list = str(branches)
+                else:
+                    # Show first 30 branches and indicate there are more
+                    remaining_count = len(branches) - 30
+                    branch_list = str(branches[:30])[:-1] + f", and {remaining_count} more]"
+
+                msg = (
+                    f"Error branch `{branch_name}` does not exist, "
+                    f"in repo with current branches: {branch_list}"
+                )
+                return ToolException(msg)
+        except Exception as e:
+            # Handle unexpected errors during branch fetching
+            return ToolException(f"Failed to validate branch '{branch_name}': {str(e)}")
 
     def list_branches_in_repo(self, limit: Optional[int] = 20, branch_wildcard: Optional[str] = None) -> List[str]:
         """
@@ -257,9 +288,11 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         Updates file on the bitbucket repo
         Parameters:
             file_path(str): a string which contains the file path (example: "hello_world.md").
-            update_query(str): Contains the file contents requried to be updated.
+            update_query(str): Contains the file contents required to be updated.
                 The old file contents is wrapped in OLD <<<< and >>>> OLD
                 The new file contents is wrapped in NEW <<<< and >>>> NEW
+                IMPORTANT: Markers must be on their own dedicated line (not inline with content).
+                Multiple OLD/NEW pairs are supported for multiple edits.
                 For example:
                 OLD <<<<
                 Hello Earth!
@@ -349,16 +382,17 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         except Exception as e:
             return ToolException(f"Can't add comment to pull request `{pr_id}` due to error:\n{str(e)}")
 
-    def _get_files(self, path: str, branch: str) -> str:
+    def _get_files(self, path: str, branch: str, recursive: bool = True) -> str:
         """
         Get files from the bitbucket repo
         Parameters:
             path(str): the file path
             branch(str): branch name (by default: active_branch)
+            recursive(bool): whether to list files recursively
         Returns:
             str: List of the files
         """
-        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self._active_branch))
+        return str(self._bitbucket.get_files_list(file_path=path if path else '', branch=branch if branch else self._active_branch, recursive=recursive))
 
     # TODO: review this method, it may not work as expected
     # def _file_commit_hash(self, file_path: str, branch: str):
@@ -396,7 +430,7 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         """List files in the repository with optional path, recursive search, and branch."""
         branch = branch if branch else self._active_branch
         try:
-            files_str = self._get_files(path, branch)
+            files_str = self._get_files(path, branch, recursive)
             # Parse the string response to extract file paths
             # This is a simplified implementation - might need adjustment based on actual response format
             import ast

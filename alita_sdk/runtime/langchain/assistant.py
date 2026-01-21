@@ -14,6 +14,7 @@ from .constants import (
     DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
     SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS
 )
+from ..middleware.base import Middleware, MiddlewareManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,8 @@ class Assistant:
                  ignored_mcp_servers: Optional[list] = None,
                  persona: Optional[str] = "generic",
                  is_subgraph: bool = False,
-                 lazy_tools_mode: Optional[bool] = None):
+                 lazy_tools_mode: Optional[bool] = None,
+                 middleware: Optional[list[Middleware]] = None):
 
         self.app_type = app_type
         self.memory = memory
@@ -134,6 +136,31 @@ class Assistant:
         )
         if tools:
             self.tools += tools
+
+        # Initialize middleware manager and add middleware tools
+        # Middleware tools are tracked separately as "always-bind" tools
+        # In lazy_tools_mode, these are bound directly to LLM (not via ToolRegistry)
+        self.middleware_manager = MiddlewareManager()
+        self._middleware_prompt = ""
+        self._always_bind_tools = []  # Tools to always bind directly (not via ToolRegistry)
+        if middleware:
+            for mw in middleware:
+                self.middleware_manager.add(mw)
+            # Get tools from all middleware - these are always-bind tools
+            middleware_tools = self.middleware_manager.get_all_tools()
+            if middleware_tools:
+                # Store middleware tools separately for always-bind behavior
+                self._always_bind_tools = list(middleware_tools)
+                # Also add to main tools list for non-lazy mode and tool availability
+                self.tools += middleware_tools
+                logger.info(f"Added {len(middleware_tools)} middleware tools (always-bind in lazy mode)")
+            # Get combined system prompt from middleware
+            self._middleware_prompt = self.middleware_manager.get_combined_prompt()
+            # Notify middleware of conversation start
+            if conversation_id:
+                context_messages = self.middleware_manager.start_conversation(conversation_id)
+                if context_messages:
+                    logger.info(f"Middleware context: {context_messages}")
 
         # In lazy tools mode, don't rename tools - ToolRegistry handles namespacing by toolkit
         # Only add suffixes in non-lazy mode where tools are bound directly to LLM
@@ -305,7 +332,10 @@ class Assistant:
                 logger.info("Binding tools: %s", tool_names)
 
         user_addon = USER_ADDON.format(prompt=str(prompt_instructions)) if prompt_instructions else ""
-        plan_addon = PLAN_ADDON if 'update_plan' in tool_names else ""
+        # Check for planning tools (any of them indicates planning capability)
+        has_planning_tools = any(t in tool_names for t in ['update_plan', 'start_step', 'complete_step'])
+        # Use middleware prompt if available, otherwise fall back to PLAN_ADDON
+        plan_addon = self._middleware_prompt if self._middleware_prompt else (PLAN_ADDON if has_planning_tools else "")
         data_analysis_addon = DATA_ANALYSIS_ADDON if 'pandas_analyze_data' in tool_names else ""
         pyodite_addon = PYODITE_ADDON if 'pyodide_sandbox' in tool_names else ""
         search_index_addon = SEARCH_INDEX_ADDON if 'stepback_summary_index' in tool_names else ""
@@ -407,9 +437,10 @@ class Assistant:
             for_subgraph=False,
             lazy_tools_mode=self.lazy_tools_mode,
             alita_client=self.alita_client,
-            steps_limit=self.max_iterations
+            steps_limit=self.max_iterations,
+            always_bind_tools=self._always_bind_tools  # Middleware tools always bound directly
         )
-        
+
         return agent
 
     def pipeline(self):
@@ -425,7 +456,8 @@ class Assistant:
             alita_client=self.alita_client,
             steps_limit=self.max_iterations,
             for_subgraph=self.is_subgraph,  # Pass for_subgraph flag to filter PrinterNodes
-            lazy_tools_mode=self.lazy_tools_mode
+            lazy_tools_mode=self.lazy_tools_mode,
+            always_bind_tools=self._always_bind_tools  # Middleware tools always bound directly
         )
         #
         return agent

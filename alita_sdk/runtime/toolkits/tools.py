@@ -8,14 +8,10 @@ from alita_sdk.tools import get_toolkits as alita_toolkits
 from alita_sdk.tools import get_tools as alita_tools
 from .application import ApplicationToolkit
 from .artifact import ArtifactToolkit
-from .datasource import DatasourcesToolkit
-from .planning import PlanningToolkit
-from .prompt import PromptToolkit
 from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from .mcp import McpToolkit
 from .mcp_config import McpConfigToolkit, get_mcp_config_toolkit_schemas
-from .skill_router import SkillRouterToolkit
 from ..tools.mcp_server_tool import McpServerTool
 from ..tools.sandbox import SandboxToolkit
 from ..tools.data_analysis import DataAnalysisToolkit
@@ -30,16 +26,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_toolkits():
+    # Note: Planning is now provided via PlanningMiddleware, not as a toolkit
+    # See alita_sdk.runtime.middleware.planning
     core_toolkits = [
         ArtifactToolkit.toolkit_config_schema(),
         MemoryToolkit.toolkit_config_schema(),
-        PlanningToolkit.toolkit_config_schema(),
         VectorStoreToolkit.toolkit_config_schema(),
         SandboxToolkit.toolkit_config_schema(),
         DataAnalysisToolkit.toolkit_config_schema(),
         McpToolkit.toolkit_config_schema(),
         McpConfigToolkit.toolkit_config_schema(),
-        SkillRouterToolkit.toolkit_config_schema()
     ]
 
     # Add configured MCP servers (stdio and http) as available toolkits
@@ -74,7 +70,6 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
             logger.warning(f"Skipping non-dict tool: {tool}")
             # Skip non-dict tools
 
-    prompts = []
     tools = []
     unhandled_tools = []  # Track tools not handled by main processing
 
@@ -83,15 +78,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
         # Used to prevent double processing by fallback systems
         tool_handled = False
         try:
-            if tool['type'] == 'datasource':
-                tool_handled = True
-                tools.extend(DatasourcesToolkit.get_toolkit(
-                    alita_client,
-                    datasource_ids=[int(tool['settings']['datasource_id'])],
-                    selected_tools=tool['settings']['selected_tools'],
-                    toolkit_name=tool.get('toolkit_name', '') or tool.get('name', '')
-                ).get_tools())
-            elif tool['type'] == 'application':
+            if tool['type'] == 'application':
                 tool_handled = True
                 # Check if this is a pipeline to enable PrinterNode filtering
                 is_pipeline_subgraph = tool.get('agent_type', '') == 'pipeline'
@@ -136,10 +123,9 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         alita_client=alita_client,
                     ).get_tools()
                 elif tool['name'] == 'planner':
-                    tools += PlanningToolkit.get_toolkit(
-                        pgvector_configuration=tool.get('settings', {}).get('pgvector_configuration'),
-                        conversation_id=conversation_id,
-                    ).get_tools()
+                    # Planning is now provided via PlanningMiddleware, not as an internal tool
+                    # See alita_sdk.runtime.middleware.planning
+                    logger.warning("'planner' internal tool is deprecated. Use PlanningMiddleware instead.")
                 elif tool['name'] == 'data_analysis':
                     # Data Analysis internal tool - uses conversation attachment bucket
                     settings = tool.get('settings', {})
@@ -181,44 +167,9 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     **tool['settings']).get_tools())
             elif tool['type'] == 'planning':
                 tool_handled = True
-                # Planning toolkit for multi-step task tracking
-                settings = tool.get('settings', {})
-                
-                # Check if local mode is enabled (uses filesystem storage, ignores pgvector)
-                use_local = settings.get('local', False)
-                
-                if use_local:
-                    # Local mode - use filesystem storage
-                    logger.info("Planning toolkit using local filesystem storage (local=true)")
-                    pgvector_config = {}
-                else:
-                    # Check if explicit connection_string is provided in pgvector_configuration
-                    explicit_pgvector_config = settings.get('pgvector_configuration', {})
-                    explicit_connstr = explicit_pgvector_config.get('connection_string') if explicit_pgvector_config else None
-                    
-                    if explicit_connstr:
-                        # Use explicitly provided connection string (overrides project secrets)
-                        logger.info("Using explicit connection_string for planning toolkit")
-                        pgvector_config = explicit_pgvector_config
-                    else:
-                        # Try to fetch pgvector_project_connstr from project secrets
-                        pgvector_connstr = None
-                        if alita_client:
-                            try:
-                                pgvector_connstr = alita_client.unsecret('pgvector_project_connstr')
-                                if pgvector_connstr:
-                                    logger.info("Using pgvector_project_connstr for planning toolkit")
-                            except Exception as e:
-                                logger.debug(f"pgvector_project_connstr not available: {e}")
-                        
-                        pgvector_config = {'connection_string': pgvector_connstr} if pgvector_connstr else {}
-                
-                tools.extend(PlanningToolkit.get_toolkit(
-                    toolkit_name=tool.get('toolkit_name', ''),
-                    selected_tools=settings.get('selected_tools', []),
-                    pgvector_configuration=pgvector_config,
-                    conversation_id=conversation_id or settings.get('conversation_id'),
-                ).get_tools())
+                # Planning is now provided via PlanningMiddleware, not as a toolkit type
+                # See alita_sdk.runtime.middleware.planning
+                logger.warning("'planning' toolkit type is deprecated. Use PlanningMiddleware instead.")
             elif tool['type'] == 'mcp':
                 tool_handled = True
                 # remote mcp tool initialization with token injection
@@ -272,28 +223,6 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     toolkit_name=tool.get('toolkit_name', ''),
                     client=alita_client,
                     **settings).get_tools())
-            elif tool['type'] == 'skill_router':
-                tool_handled = True
-                # Skills Registry Router Toolkit
-                logger.info(f"Processing skill_router toolkit: {tool}")
-                try:
-                    settings = tool.get('settings', {})
-                    toolkit_name = tool.get('toolkit_name', '')
-                    selected_tools = settings.get('selected_tools', [])
-
-                    toolkit_tools = SkillRouterToolkit.get_toolkit(
-                        client=alita_client,
-                        llm=llm,
-                        toolkit_name=toolkit_name,
-                        selected_tools=selected_tools,
-                        **settings
-                    ).get_tools()
-
-                    tools.extend(toolkit_tools)
-                    logger.info(f"✅ Successfully added {len(toolkit_tools)} tools from SkillRouterToolkit")
-                except Exception as e:
-                    logger.error(f"❌ Failed to initialize SkillRouterToolkit: {e}")
-                    raise
             elif tool['type'] == 'mcp_config' or tool['type'].startswith('mcp_'):
                 tool_handled = True
                 # MCP Config toolkit - pre-configured MCP servers (stdio or http)
@@ -352,20 +281,35 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
             if isinstance(tool, dict) and 'type' in tool and isinstance(tool['type'], str):
                 unhandled_tools.append(dict(tool))
 
-    if len(prompts) > 0:
-        tools += PromptToolkit.get_toolkit(alita_client, prompts).get_tools()
-
     # Add community tools (only for unhandled tools)
-    tools += community_tools(unhandled_tools, alita_client, llm)
+    community_loaded = community_tools(unhandled_tools, alita_client, llm)
+    tools += community_loaded
+    logger.info(f"[RUNTIME_TOOLS] Community tools loaded: {len(community_loaded)} tools")
+
     # Add alita tools (only for unhandled tools)
-    tools += alita_tools(unhandled_tools, alita_client, llm, memory_store)
+    alita_loaded = alita_tools(unhandled_tools, alita_client, llm, memory_store)
+    tools += alita_loaded
+    logger.info(f"[RUNTIME_TOOLS] Alita tools loaded: {len(alita_loaded)} tools")
+
     # Add MCP tools registered via alita-mcp CLI (static registry)
     # Note: Tools with type='mcp' are already handled in main loop above
-    tools += _mcp_tools(unhandled_tools, alita_client)
-    
+    mcp_loaded = _mcp_tools(unhandled_tools, alita_client)
+    tools += mcp_loaded
+    logger.info(f"[RUNTIME_TOOLS] MCP tools loaded: {len(mcp_loaded)} tools")
+
+    # Final logging of all tools being returned
+    all_tool_names = [t.name if hasattr(t, 'name') else str(type(t)) for t in tools]
+    logger.info(f"[RUNTIME_TOOLS] Total tools being returned: {len(tools)}")
+    logger.info(f"[RUNTIME_TOOLS] All tool names: {all_tool_names}")
+
+    # Check for indexer tools in the final list
+    indexer_tools_final = [n for n in all_tool_names if 'index' in n.lower()]
+    if indexer_tools_final:
+        logger.warning(f"[RUNTIME_TOOLS] FINAL TOOL LIST contains indexer tools: {indexer_tools_final}")
+
     # Sanitize tool names to meet OpenAI's function naming requirements
     # tools = _sanitize_tool_names(tools)
-    
+
     return tools
 
 

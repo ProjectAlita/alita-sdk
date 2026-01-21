@@ -838,7 +838,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
                     result_lines.append(f"  {line}")
         
         return "\n".join(result_lines)
-    
+
     def edit_file(
         self,
         file_path: str,
@@ -875,7 +875,8 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         if not edits:
             raise ToolException(
                 "No OLD/NEW marker pairs found in file_query. "
-                "Format: OLD <<<< old text >>>> OLD  NEW <<<< new text >>>> NEW"
+                "Format: Each marker must be on its own line:\n"
+                "OLD <<<<\nold text\n>>>> OLD\nNEW <<<<\nnew text\n>>>> NEW"
             )
         
         # Read current file content
