@@ -1,5 +1,8 @@
 import json
 import logging
+import os
+import tempfile
+from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union, Any, Generator
 
 import pandas as pd
@@ -206,6 +209,13 @@ addCases = create_model(
                                            "title (required) - Title"
                                            "case_properties (optional) - " + _case_properties_description + "default: {}"))
                          )
+)
+
+addFileToCase = create_model(
+    "addFileToCase",
+    case_id=(str, Field(description="The ID of the test case to attach the file to")),
+    artifact_id=(str, Field(description="The artifact ID of the file to upload from artifact storage")),
+    filename=(str, Field(description="The name of the file to upload")),
 )
 
 updateCase = create_model(
@@ -632,7 +642,41 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         return (
             f"Test case #{case_id} has been updated at '{updated_case['updated_on']}')"
         )
-    
+
+    def add_file_to_case(self, case_id: str, artifact_id: str, filename: str) -> str:
+        """Upload file from artifact and attach to TestRail test case."""
+        try:
+            artifact_client = self.alita.artifact('__temp__')
+            file_bytes = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+
+            if not file_bytes:
+                raise ToolException(f"Failed to download artifact {artifact_id}")
+
+            suffix = Path(filename).suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(file_bytes)
+                tmp_path = tmp.name
+
+            try:
+                result = self._client.attachments.add_attachment_to_case(
+                    case_id=int(case_id),
+                    path=tmp_path
+                )
+
+                attachment_id = result.get('attachment_id')
+                return f"File '{filename}' successfully attached to test case {case_id}. Attachment ID: {attachment_id}"
+
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp file {tmp_path}: {e}")
+
+        except StatusCodeError as e:
+            raise ToolException(f"Failed to attach file to test case {case_id}: {e}")
+        except Exception as e:
+            raise ToolException(f"Error attaching file to test case {case_id}: {str(e)}")
+
     def _get_raw_suites(self, project_id: str) -> List[Dict]:
         """
         Internal helper to get raw suite data from TestRail API.
@@ -887,6 +931,12 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                 "ref": self.update_case,
                 "description": self.update_case.__doc__,
                 "args_schema": updateCase,
+            },
+            {
+                "name": "add_file_to_case",
+                "ref": self.add_file_to_case,
+                "description": self.add_file_to_case.__doc__,
+                "args_schema": addFileToCase,
             },
             {
                 "name": "get_suites",

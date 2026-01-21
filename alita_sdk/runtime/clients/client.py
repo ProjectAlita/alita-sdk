@@ -81,6 +81,7 @@ class AlitaClient:
 
         self.base_url = base_url.rstrip('/')
         self.api_path = '/api/v1'
+        self.api_v2_path = '/api/v2'
         self.llm_path = '/llm/v1'
         self.allm_path = '/llm'
         self.project_id = project_id
@@ -99,9 +100,10 @@ class AlitaClient:
         self.list_apps_url = f"{self.base_url}{self.api_path}/applications/applications/prompt_lib/{self.project_id}"
         self.integration_details = f"{self.base_url}{self.api_path}/integrations/integration/{self.project_id}"
         self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/{self.project_id}"
-        self.artifacts_url = f"{self.base_url}{self.api_path}/artifacts/artifacts/default/{self.project_id}"
-        self.artifact_url = f"{self.base_url}{self.api_path}/artifacts/artifact/default/{self.project_id}"
-        self.bucket_url = f"{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}"
+        self.artifacts_url = f"{self.base_url}{self.api_v2_path}/artifacts/artifacts/default/{self.project_id}"
+        self.artifact_url = f"{self.base_url}{self.api_v2_path}/artifacts/artifact/default/{self.project_id}"
+        self.artifact_by_id_url = f"{self.base_url}{self.api_v2_path}/artifacts/artifact_id/default/{self.project_id}"
+        self.bucket_url = f"{self.base_url}{self.api_v2_path}/artifacts/buckets/{self.project_id}"
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.models_url = f'{self.base_url}{self.api_path}/configurations/models/{self.project_id}?include_shared=true'
@@ -109,10 +111,6 @@ class AlitaClient:
         self.configurations: list = configurations or []
         self.model_timeout = kwargs.get('model_timeout', 120)
         self.model_image_generation = kwargs.get('model_image_generation')
-        
-        # Cache for generated images to avoid token consumption
-        # This is used by image_generation and artifact toolkits to pass data via reference
-        self._generated_images_cache: Dict[str, Dict[str, Any]] = {}
 
     def get_mcp_toolkits(self):
         if user_id := self._get_real_user_id():
@@ -527,18 +525,35 @@ class AlitaClient:
         data = requests.get(url, headers=self.headers, verify=False)
         return self._process_requst(data)
 
-    def create_artifact(self, bucket_name, artifact_name, artifact_data):
+    def create_artifact(self, bucket_name, artifact_name, artifact_data, source: str = 'generated', prompt: str = None):
         # Sanitize filename to prevent regex errors during indexing
         sanitized_name, was_modified = self._sanitize_artifact_name(artifact_name)
         if was_modified:
             logger.warning(f"Artifact filename sanitized: '{artifact_name}' -> '{sanitized_name}'")
         
         url = f'{self.artifacts_url}/{bucket_name.lower()}'
+        form_data = {'source': source}
+        if prompt:
+            form_data['prompt'] = prompt
         data = requests.post(url, headers=self.headers, files={
             'file': (sanitized_name, artifact_data)
-        }, verify=False)
+        }, data=form_data, verify=False)
         return self._process_requst(data)
     
+    def download_artifact_by_id(self, artifact_id: str):
+        url = f"{self.artifact_by_id_url}/{artifact_id}"
+        data = requests.get(url, headers=self.headers, verify=False)
+        if data.status_code == 403:
+            return {"error": "You are not authorized to access this resource"}
+        elif data.status_code == 404:
+            return {"error": "Resource not found"}
+        elif data.status_code != 200:
+            return {
+                "error": "An error occurred while fetching the resource",
+                "content": data.content
+            }
+        return data.content
+
     @staticmethod
     def _sanitize_artifact_name(filename: str) -> tuple:
         """Sanitize filename for safe storage and regex pattern matching."""

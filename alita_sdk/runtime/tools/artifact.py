@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import io
 import json
@@ -15,7 +14,7 @@ from pydantic import create_model, Field, model_validator
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...tools.utils.available_tools_decorator import extend_with_parent_available_tools
 from ...tools.elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
-from ...runtime.utils.utils import IndexerKeywords, resolve_image_from_cache
+from ...runtime.utils.utils import IndexerKeywords
 
 
 class ArtifactWrapper(NonCodeIndexerToolkit):
@@ -303,38 +302,92 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         
         return str(result) if return_as_string else result
 
-    def create_file(self, filename: str, filedata: str, bucket_name = None):
+    def create_file(self, filename: str, bucket_name = None, filedata: str = None, artifact_id: str = None):
+        """Create a file in the artifact bucket from new content or by copying an existing artifact.
+        
+        Args:
+            filename: Target filename in destination bucket
+            bucket_name: Destination bucket (uses default if None)
+            filedata: Content for creating new files (text, JSON, CSV, etc.)
+            artifact_id: UUID of existing artifact to copy (preserves binary format)
+            
+        Note: Provide EITHER filedata OR artifact_id, not both or neither.
+        """
+        # Validation: exactly one source must be provided
+        if filedata is None and artifact_id is None:
+            raise ToolException(
+                "Must provide either 'filedata' (to create new content) or 'artifact_id' (to copy existing file). "
+                "Both parameters cannot be empty."
+            )
+        
+        if filedata is not None and artifact_id is not None:
+            raise ToolException(
+                "Cannot provide both 'filedata' and 'artifact_id'. "
+                "Use 'artifact_id' to copy existing files preserving binary format, "
+                "or 'filedata' to create new content from text/data."
+            )
+        
         # Sanitize filename to prevent regex errors during indexing
         sanitized_filename, was_modified = self._sanitize_filename(filename)
         if was_modified:
             logging.warning(f"Filename sanitized: '{filename}' -> '{sanitized_filename}'")
-        
-        # Auto-detect and extract base64 from image_url structures (from image_generation tool)
-        # Returns tuple: (processed_data, is_from_image_generation)
-        filedata, is_from_image_generation = self._extract_base64_if_needed(filedata)
-        
-        if sanitized_filename.endswith(".xlsx"):
-            data = json.loads(filedata)
-            filedata = self.create_xlsx_filedata(data)
 
-        result = self.artifact.create(sanitized_filename, filedata, bucket_name)
-        
-        # Skip file_modified event for images from image_generation tool
-        # These are already tracked in the tool output and don't need duplicate events
-        if not is_from_image_generation:
-            # Dispatch custom event for file creation
-            dispatch_custom_event("file_modified", {
-                "message": f"File '{filename}' created successfully",
-                "filename": filename,
-                "tool_name": "createFile",
-                "toolkit": "artifact",
-                "operation_type": "create",
-                "meta": {
-                    "bucket": bucket_name or self.bucket
-                }
-            })
+        # Determine operation type and get file content
+        if artifact_id:
+            # Copy mode: get raw bytes from existing artifact
+            operation_type = "copy"
+            try:
+                filedata = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+            except Exception as e:
+                raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
+            
+            file_size = len(filedata) if isinstance(filedata, bytes) else 0
+            source_artifact_id = artifact_id
+        else:
+            # Create mode: use provided content
+            operation_type = "create"
+            if sanitized_filename.endswith(".xlsx"):
+                data = json.loads(filedata)
+                filedata = self.create_xlsx_filedata(data)
+            
+            file_size = len(filedata) if isinstance(filedata, (str, bytes)) else 0
+            source_artifact_id = None
 
-        return result
+        create_response = self.artifact.create(sanitized_filename, filedata, bucket_name)
+        
+        response_data = json.loads(create_response)
+        if "error" in response_data:
+            raise ToolException(f"Failed to create file '{sanitized_filename}': {response_data['error']}")
+        
+        new_artifact_id = response_data['artifact_id']
+
+        # Build event metadata
+        event_meta = {
+            "bucket": bucket_name or self.bucket,
+            "file_size": file_size,
+            "source": "generated"
+        }
+        if source_artifact_id:
+            event_meta["source_artifact_id"] = source_artifact_id
+            event_meta["operation"] = "copy"
+
+        dispatch_custom_event("file_modified", {
+            "message": f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully",
+            "artifact_id": new_artifact_id,
+            "filename": filename,
+            "tool_name": "createFile",
+            "toolkit": "artifact",
+            "operation_type": operation_type,
+            "meta": event_meta
+        })
+
+        return json.dumps({
+            "artifact_id": new_artifact_id,
+            "filename": sanitized_filename,
+            "bucket": bucket_name or self.bucket,
+            "message": response_data.get('message', 
+                f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully")
+        })
     
     @staticmethod
     def _sanitize_filename(filename: str) -> tuple:
@@ -362,43 +415,6 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         
         sanitized = sanitized_name + extension
         return sanitized, (sanitized != original)
-    
-    def _extract_base64_if_needed(self, filedata: str) -> tuple[str | bytes, bool]:
-        """
-        Resolve cached_image_id references from cache and decode to binary data.
-        
-        Requires JSON format with cached_image_id field: {"cached_image_id": "img_xxx"}
-        LLM must extract specific cached_image_id from generate_image response.
-        
-        Returns:
-            tuple: (processed_data, is_from_image_generation)
-                - processed_data: Original filedata or resolved binary image data
-                - is_from_image_generation: True if data came from image_generation cache
-        """
-        if not filedata or not isinstance(filedata, str):
-            return filedata, False
-        
-        # Require JSON format - fail fast if not JSON
-        if '{' not in filedata:
-            return filedata, False
-        
-        try:
-            data = json.loads(filedata)
-        except json.JSONDecodeError:
-            # Not valid JSON, return as-is (regular file content)
-            return filedata, False
-        
-        if not isinstance(data, dict):
-            return filedata, False
-        
-        # Only accept direct cached_image_id format: {"cached_image_id": "img_xxx"}
-        # LLM must parse generate_image response and extract specific cached_image_id
-        if 'cached_image_id' in data:
-            binary_data = resolve_image_from_cache(self.alita, data['cached_image_id'])
-            return binary_data, True  # Mark as from image_generation
-        
-        # If JSON doesn't have cached_image_id, treat as regular file content
-        return filedata, False
 
     def create_xlsx_filedata(self, data: dict[str, list[list]]) -> bytes:
         try:
@@ -487,47 +503,43 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             Success message
         """
         try:
-            # Sanitize filename
             sanitized_filename, was_modified = self._sanitize_filename(file_path)
             if was_modified:
                 logging.warning(f"Filename sanitized: '{file_path}' -> '{sanitized_filename}'")
             
-            # Check if file exists
+            operation_type = "modify"
             try:
                 self.artifact.get(artifact_name=sanitized_filename, bucket_name=bucket_name, llm=self.llm)
-                # File exists, overwrite it
                 result = self.artifact.overwrite(sanitized_filename, content, bucket_name)
-                
-                # Dispatch custom event
-                dispatch_custom_event("file_modified", {
-                    "message": f"File '{sanitized_filename}' updated successfully",
-                    "filename": sanitized_filename,
-                    "tool_name": "edit_file",
-                    "toolkit": "artifact",
-                    "operation_type": "modify",
-                    "meta": {
-                        "bucket": bucket_name or self.bucket
-                    }
-                })
-                
-                return f"Updated file {sanitized_filename}"
+                message = f"File '{sanitized_filename}' updated successfully"
+                return_msg = f"Updated file {sanitized_filename}"
             except:
-                # File doesn't exist, create it
                 result = self.artifact.create(sanitized_filename, content, bucket_name)
-                
-                # Dispatch custom event
-                dispatch_custom_event("file_modified", {
-                    "message": f"File '{sanitized_filename}' created successfully",
-                    "filename": sanitized_filename,
-                    "tool_name": "edit_file",
-                    "toolkit": "artifact",
-                    "operation_type": "create",
-                    "meta": {
-                        "bucket": bucket_name or self.bucket
-                    }
-                })
-                
-                return f"Created file {sanitized_filename}"
+                operation_type = "create"
+                message = f"File '{sanitized_filename}' created successfully"
+                return_msg = f"Created file {sanitized_filename}"
+            
+            response_data = json.loads(result)
+            if "error" in response_data:
+                raise ToolException(f"Failed to write file '{sanitized_filename}': {response_data['error']}")
+            
+            artifact_id = response_data['artifact_id']
+            
+            dispatch_custom_event("file_modified", {
+                "message": message,
+                "artifact_id": artifact_id,
+                "filename": sanitized_filename,
+                "tool_name": "edit_file",
+                "toolkit": "artifact",
+                "operation_type": operation_type,
+                "meta": {
+                    "bucket": bucket_name or self.bucket,
+                    "file_size": len(content),
+                    "source": "generated"
+                }
+            })
+            
+            return return_msg
         except Exception as e:
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
@@ -550,41 +562,130 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         return f'File "{filename}" deleted successfully.'
 
     def append_data(self, filename: str, filedata: str, bucket_name = None):
-        result = self.artifact.append(filename, filedata, bucket_name)
+        append_response = self.artifact.append(filename, filedata, bucket_name)
         
-        # Dispatch custom event for file append
+        response_data = json.loads(append_response)
+        if "error" in response_data:
+            raise ToolException(f"Failed to append to file '{filename}': {response_data['error']}")
+        
+        artifact_id = response_data['artifact_id']
+        
         dispatch_custom_event("file_modified", {
             "message": f"Data appended to file '{filename}' successfully",
+            "artifact_id": artifact_id,
             "filename": filename,
             "tool_name": "appendData",
             "toolkit": "artifact",
             "operation_type": "modify",
             "meta": {
-                "bucket": bucket_name or self.bucket
+                "bucket": bucket_name or self.bucket,
+                "file_size": response_data.get('size', 0),
+                "source": "generated"
             }
         })
         
-        return result
+        return json.dumps({
+            "artifact_id": artifact_id,
+            "filename": filename,
+            "bucket": bucket_name or self.bucket,
+            "message": response_data.get('message', "Data appended successfully")
+        })
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
         result = self.artifact.overwrite(filename, filedata, bucket_name)
         
-        # Dispatch custom event for file overwrite
+        response_data = json.loads(result)
+        if "error" in response_data:
+            raise ToolException(f"Failed to overwrite file '{filename}': {response_data['error']}")
+        
+        artifact_id = response_data['artifact_id']
+        
         dispatch_custom_event("file_modified", {
             "message": f"File '{filename}' overwritten successfully",
+            "artifact_id": artifact_id,
             "filename": filename,
             "tool_name": "overwriteData",
             "toolkit": "artifact",
             "operation_type": "modify",
             "meta": {
-                "bucket": bucket_name or self.bucket
+                "bucket": bucket_name or self.bucket,
+                "file_size": len(filedata) if isinstance(filedata, (str, bytes)) else 0,
+                "source": "generated"
             }
         })
         
-        return result
+        return json.dumps({
+            "artifact_id": artifact_id,
+            "filename": filename,
+            "bucket": bucket_name or self.bucket,
+            "message": response_data.get('message', f"File '{filename}' overwritten successfully")
+        })
+
+    def get_file_type(self, artifact_id: str) -> str:
+        """Detect file type of an artifact using file content analysis.
+        
+        Uses the `filetype` library to determine file type from magic bytes,
+        which is more reliable than extension-based detection.
+        
+        Args:
+            artifact_id: UUID of the artifact to analyze
+            
+        Returns:
+            JSON string with file type information:
+            {
+                "artifact_id": str,
+                "extension": str,      # e.g., "jpg", "png", "pdf"
+                "mime": str,          # e.g., "image/jpeg", "application/pdf"
+                "status": "success" | "error",
+                "message": str        # Error message if status is "error"
+            }
+        """
+        try:
+            import filetype
+        except ImportError:
+            return json.dumps({
+                "artifact_id": artifact_id,
+                "status": "error",
+                "message": "filetype library not installed. Install with: pip install filetype"
+            })
+        
+        try:
+            # Get raw file content using Artifact client's get_raw_content_by_artifact_id() method
+            file_content = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+            
+            if not file_content:
+                return json.dumps({
+                    "artifact_id": artifact_id,
+                    "status": "error",
+                    "message": "Artifact not found or empty"
+                })
+            
+            # Detect file type from content
+            kind = filetype.guess(file_content)
+            
+            if kind is None:
+                return json.dumps({
+                    "artifact_id": artifact_id,
+                    "status": "error",
+                    "message": "Cannot guess file type from content"
+                })
+            
+            return json.dumps({
+                "artifact_id": artifact_id,
+                "extension": kind.extension,
+                "mime": kind.mime,
+                "status": "success",
+                "message": f"File type detected: {kind.mime}"
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "artifact_id": artifact_id,
+                "status": "error",
+                "message": f"Error detecting file type: {str(e)}"
+            })
 
     def create_new_bucket(self, bucket_name: str, expiration_measure = "weeks", expiration_value = 1):
-        # Sanitize bucket name: replace underscores with hyphens and ensure lowercase
         sanitized_name = bucket_name.replace('_', '-').lower()
         if sanitized_name != bucket_name:
             logging.warning(f"Bucket name '{bucket_name}' was sanitized to '{sanitized_name}' (underscores replaced with hyphens, converted to lowercase)")
@@ -692,26 +793,37 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             {
                 "ref": self.create_file,
                 "name": "createFile",
-                "description": "Create a file in the artifact",
+                "description": """Create a file in the artifact bucket. Supports two modes:
+                1. Create from content: Use 'filedata' parameter to create new files with text, JSON, CSV, or Excel data
+                2. Copy existing file: Use 'artifact_id' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
+                
+                IMPORTANT: Provide EITHER 'filedata' OR 'artifact_id', never both or neither.
+                Use artifact_id when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
+                The artifact_id can be found in previous file_modified events in the conversation history.""",
                 "args_schema": create_model(
                     "createFile", 
-                    filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="""Stringified content of the file.
-                    
-                    Supports three input formats:
-                    
-                    1. CACHED IMAGE REFERENCE (for generated/cached images):
-                       Pass JSON with cached_image_id field: {"cached_image_id": "img_xxx"}
-                       The tool will automatically resolve and decode the image from cache.
-                       This is typically used when another tool returns an image reference.
-                    
-                    2. EXCEL FILES (.xlsx extension):
-                       Pass JSON with sheet structure: {"Sheet1": [["Name", "Age"], ["Alice", 25], ["Bob", 30]]}
-                    
-                    3. TEXT/OTHER FILES:
-                       Pass the plain text string directly.
-                    """)),
-                    bucket_name=bucket_name
+                    filename=(str, Field(description="Target filename in destination bucket")),
+                    bucket_name=bucket_name,
+                    filedata=(Optional[str], Field(
+                        description="""Content for creating new files. Use this for text, JSON, CSV, or structured data.
+                        Example for .xlsx filedata format:
+                        {
+                            "Sheet1":[
+                                ["Name", "Age", "City"],
+                                ["Alice", 25, "New York"],
+                                ["Bob", 30, "San Francisco"],
+                                ["Charlie", 35, "Los Angeles"]
+                            ]
+                        }
+                        Leave empty if using artifact_id to copy existing file.""",
+                        default=None
+                    )),
+                    artifact_id=(Optional[str], Field(
+                        description="""UUID of existing artifact to copy. Use this to copy images, PDFs, or any binary files while preserving format.
+                        Find artifact_id in previous messages (file_modified events, generate_image responses, etc.).
+                        Leave empty if using filedata to create new content.""",
+                        default=None
+                    ))
                 )
             },
             {
@@ -731,6 +843,15 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                     sheet_name=(Optional[str], Field(
                         description="Specifies which sheet to read. If it is None, then full document will be read.",
                         default=None))
+                )
+            },
+            {
+                "ref": self.get_file_type,
+                "name": "getFileType",
+                "description": "Detect the file type of an artifact using content analysis. More reliable than extension-based detection as it analyzes file magic bytes. Useful for verifying file types before processing or after generation.",
+                "args_schema": create_model(
+                    "getFileType",
+                    artifact_id=(str, Field(description="UUID of the artifact to analyze. This is the artifact_id returned when files are uploaded or generated."))
                 )
             },
             {

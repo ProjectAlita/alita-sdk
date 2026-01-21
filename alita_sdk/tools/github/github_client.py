@@ -1191,17 +1191,35 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"Failed to delete branch '{branch_name}': {str(e)}"
 
-    def create_file(self, file_path: str, file_contents: str, repo_name: Optional[str] = None) -> str:
+    def create_file(self, file_path: str, repo_name: Optional[str] = None, file_contents: str = None, artifact_id: str = None) -> str:
         """
-        Creates a new file on the GitHub repo
+        Creates a new file on the GitHub repo from new content or by copying an existing artifact.
+        
         Parameters:
             file_path (str): The path of the file to be created
-            file_contents (str): The content of the file to be created
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            file_contents (str): The content of the file to be created (for text/code files)
+            artifact_id (str): UUID of existing artifact to copy (for binary files like images)
+            
+        Note: Provide EITHER file_contents OR artifact_id, not both or neither.
 
         Returns:
             str: A success or failure message
         """
+        # Validation: exactly one source must be provided
+        if file_contents is None and artifact_id is None:
+            return (
+                "Must provide either 'file_contents' (to create new content) or 'artifact_id' (to copy existing file). "
+                "Both parameters cannot be empty."
+            )
+        
+        if file_contents is not None and artifact_id is not None:
+            return (
+                "Cannot provide both 'file_contents' and 'artifact_id'. "
+                "Use 'artifact_id' to copy existing files preserving binary format, "
+                "or 'file_contents' to create new content from text/code."
+            )
+        
         try:
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
             branch = self.active_branch
@@ -1220,13 +1238,25 @@ class GitHubClient(BaseModel):
                 # expected behavior, file shouldn't exist yet
                 pass
 
+            # Determine operation type and get file content
+            if artifact_id:
+                # Copy mode: get raw bytes from existing artifact
+                if not self.alita:
+                    return "Alita client not configured. Cannot retrieve artifact content."
+                
+                try:
+                    artifact_client = self.alita.artifact('__temp__')  # Bucket doesn't matter for download by ID
+                    file_contents = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+                except Exception as e:
+                    return f"Failed to retrieve artifact '{artifact_id}': {str(e)}"
+
             repo.create_file(
                 path=file_path,
-                message=f"Create {file_path}",
+                message=f"Create {file_path}" + (" (copied from artifact)" if artifact_id else ""),
                 content=file_contents,
                 branch=branch,
             )
-            return f"Created file {file_path}"
+            return f"Created file {file_path}" + (" (copied from artifact)" if artifact_id else "")
         except Exception as e:
             return f"Unable to create file due to error:\n{str(e)}"
 
