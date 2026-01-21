@@ -120,7 +120,7 @@ getPagesWithLabel = create_model(
 
 searchPages = create_model(
     "searchPages",
-    query=(str, Field(description="Query text to search pages")),
+    query=(str, Field(description="Query text to search pages", min_length=1)),
     skip_images=(Optional[bool], Field(description="Whether we need to skip existing images or not", default=False))
 )
 
@@ -656,6 +656,10 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
     def search_pages(self, query: str, skip_images: bool = False):
         """Search pages in Confluence by query text in title or page content."""
+
+        if not query:
+            raise ToolException("Search query text is empty. Query parameter is required for Confluence search.")
+
         if not self.space:
             cql = f'(type=page) and (title~"{query}" or text~"{query}")'
         else:
