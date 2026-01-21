@@ -549,21 +549,22 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             raise ToolException(f'Error (deleteFile): {result.get("error")} for file \'{filename}\'')
         return f'File "{filename}" deleted successfully.'
 
-    def append_data(self, filename: str, filedata: str, bucket_name = None):
-        result = self.artifact.append(filename, filedata, bucket_name)
-        
-        # Dispatch custom event for file append
-        dispatch_custom_event("file_modified", {
-            "message": f"Data appended to file '{filename}' successfully",
-            "filename": filename,
-            "tool_name": "appendData",
-            "toolkit": "artifact",
-            "operation_type": "modify",
-            "meta": {
-                "bucket": bucket_name or self.bucket
-            }
-        })
-        
+    def append_data(self, filename: str, filedata: str, bucket_name = None, create_if_missing: bool = True):
+        result = self.artifact.append(filename, filedata, bucket_name, create_if_missing)
+
+        # Only dispatch custom event if append succeeded (not an error message)
+        if not (isinstance(result, str) and result.startswith("Error:")):
+            dispatch_custom_event("file_modified", {
+                "message": f"Data appended to file '{filename}' successfully",
+                "filename": filename,
+                "tool_name": "appendData",
+                "toolkit": "artifact",
+                "operation_type": "modify",
+                "meta": {
+                    "bucket": bucket_name or self.bucket
+                }
+            })
+
         return result
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
@@ -685,13 +686,13 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         basic_tools = [
             {
                 "ref": self.list_files,
-                "name": "listFiles",
+                "name": "List files",
                 "description": "List all files in the artifact",
                 "args_schema": create_model("listBucket", bucket_name=bucket_name)
             },
             {
                 "ref": self.create_file,
-                "name": "createFile",
+                "name": "Create file",
                 "description": "Create a file in the artifact",
                 "args_schema": create_model(
                     "createFile", 
@@ -716,7 +717,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.read_file,
-                "name": "readFile",
+                "name": "Read file",
                 "description": "Read a file in the artifact",
                 "args_schema": create_model(
                     "readFile", 
@@ -735,7 +736,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.delete_file,
-                "name": "deleteFile",
+                "name": "Delete file",
                 "description": "Delete a file in the artifact",
                 "args_schema": create_model(
                     "deleteFile", 
@@ -745,18 +746,22 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.append_data,
-                "name": "appendData",
+                "name": "Append data",
                 "description": "Append data to a file in the artifact",
                 "args_schema": create_model(
                     "appendData", 
                     filename=(str, Field(description="Filename")),
                     filedata=(str, Field(description="Stringified content to append")),
-                    bucket_name=bucket_name
+                    bucket_name=bucket_name,
+                    create_if_missing=(Optional[bool], Field(
+                        description="If True (default), creates an empty file if it doesn't exist before appending. If False, returns an error when file is not found.",
+                        default=True
+                    ))
                 )
             },
             {
                 "ref": self.overwrite_data,
-                "name": "overwriteData",
+                "name": "Overwrite data",
                 "description": "Overwrite data in a file in the artifact",
                 "args_schema": create_model(
                     "overwriteData", 
@@ -767,7 +772,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             },
             {
                 "ref": self.create_new_bucket,
-                "name": "createNewBucket",
+                "name": "Create new bucket",
                 "description": "Creates new bucket specified by user.",
                 "args_schema": create_model(
                     "createNewBucket",
