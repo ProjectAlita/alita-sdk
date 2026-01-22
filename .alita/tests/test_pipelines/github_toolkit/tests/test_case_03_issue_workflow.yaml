@@ -36,69 +36,30 @@ state:
 entry_point: prepare_test_data
 
 nodes:
-  # Step 1: Prepare test data
+  # Step 1: Prepare test data using LLM
   - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-
-        # Issue details
-        issue_title = f"[Test] GH3 Issue Workflow - {timestamp}-{random_suffix}"
-        issue_body = (
-            f"This is an automated test issue created by the GH3 pipeline.\n\n"
-            f"Purpose: Test issue creation, listing, retrieval, and various comment types.\n\n"
-            f"- Timestamp: {timestamp}\n"
-            f"- Random ID: {random_suffix}\n\n"
-            f"This issue will be closed automatically after testing."
-        )
-
-        # Different comment types
-        plain_comment = f"Plain text comment - Test ID: {random_suffix} at {timestamp}"
-
-        code_comment = (
-            f"Here's a code example for testing:\n\n"
-            f"```python\n"
-            f"def hello_world():\n"
-            f"    # Test comment with code block\n"
-            f"    print('Hello from GH3 test - {random_suffix}')\n"
-            f"    return True\n"
-            f"```\n\n"
-            f"```javascript\n"
-            f"// JavaScript example\n"
-            f"const testId = '{random_suffix}';\n"
-            f"console.log('Test executed at {timestamp}');\n"
-            f"```"
-        )
-
-        markdown_comment = (
-            f"## Markdown Comment Test\n\n"
-            f"This comment tests various markdown features:\n\n"
-            f"| Feature | Status | Notes |\n"
-            f"|---------|--------|-------|\n"
-            f"| Bold | Working | Uses double asterisks |\n"
-            f"| Italic | Working | Uses single asterisks |\n"
-            f"| Code | inline | Uses backticks |\n\n"
-            f"### Checklist\n"
-            f"- [x] Create issue\n"
-            f"- [x] List issues\n"
-            f"- [x] Get issue\n"
-            f"- [x] Add plain comment\n"
-            f"- [x] Add code comment\n"
-            f"- [x] Add markdown comment\n"
-            f"- [ ] Close issue\n\n"
-            f"> This is a blockquote for testing.\n\n"
-            f"Test ID: {random_suffix}"
-        )
-
-        {"issue_title": issue_title, "issue_body": issue_body, "plain_comment": plain_comment, "code_comment": code_comment, "markdown_comment": markdown_comment}
-    input: []
+    type: llm
+    model: gpt-4o
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a test data generator for software testing."
+      task:
+        type: fixed
+        value: |
+          Generate test data for a GitHub issue workflow test.
+          
+          I need the following strings generated:
+          1. issue_title: A unique title like "[Test] GH3 Issue Workflow - {Timestamp} - {RandomID}"
+          2. issue_body: A comprehensive body text explaining this is an automated test.
+          3. plain_comment: A simple plain text comment string.
+          4. code_comment: A comment string containing a Python code block and a JavaScript code block.
+          5. markdown_comment: A comment string containing a Markdown table and a checklist.
+          
+          Make them realistic and varied.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - issue_title
       - issue_body
@@ -106,6 +67,12 @@ nodes:
       - code_comment
       - markdown_comment
     structured_output: true
+    structured_output_dict:
+       issue_title: "str"
+       issue_body: "str"
+       plain_comment: "str"
+       code_comment: "str"
+       markdown_comment: "str"
     transition: create_issue
 
   # Step 2: Create the test issue
@@ -128,42 +95,36 @@ nodes:
     structured_output: true
     transition: extract_issue_number
 
-  # Step 3: Extract issue number
+  # Step 3: Extract issue number using LLM
   - id: extract_issue_number
-    type: code
-    code:
-      type: fixed
-      value: |
-        import re
-
-        create_result = alita_state.get('tool_result', '')
-        issue_number = None
-
-        if isinstance(create_result, str):
-            # Look for #123 pattern
-            match = re.search(r'#(\d+)', create_result)
-            if match:
-                issue_number = match.group(1)
-            # Look for issue/123 pattern
-            if not issue_number:
-                match = re.search(r'issues?/(\d+)', create_result)
-                if match:
-                    issue_number = match.group(1)
-            # Look for "number": 123 pattern
-            if not issue_number:
-                match = re.search(r'"number":\s*(\d+)', create_result)
-                if match:
-                    issue_number = match.group(1)
-        elif isinstance(create_result, dict):
-            issue_number = str(create_result.get('number', ''))
-
-        {"issue_number": issue_number, "validation_results": {"issue_created": bool(issue_number)}}
+    type: llm
+    model: gpt-4o
     input:
       - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a data extractor. Your job is to parse API responses."
+      task:
+        type: fstring
+        value: |
+          Analyze the following result from a create_issue operation:
+          {tool_result}
+
+          1. Extract the issue number (as a string).
+          2. Create a validation_results dictionary with key "issue_created" set to true if the issue number was found, else false.
+          
+          Return issue_number and validation_results.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - issue_number
       - validation_results
     structured_output: true
+    structured_output_dict:
+        issue_number: "str"
+        validation_results: "dict"
     transition: list_issues
 
   # Step 4: List issues to verify our issue appears
@@ -181,49 +142,43 @@ nodes:
     structured_output: true
     transition: validate_list_issues
 
-  # Step 5: Validate our issue appears in the list
+  # Step 5: Validate our issue appears in the list using LLM
   - id: validate_list_issues
-    type: code
-    code:
-      type: fixed
-      value: |
-        import json
-
-        issues_list = alita_state.get('issues_list', '')
-        issue_number = alita_state.get('issue_number')
-        validation_results = alita_state.get('validation_results', {})
-
-        # Check if our issue appears in the list
-        issue_in_list = False
-        issues_count = 0
-
-        if issues_list:
-            issues_str = str(issues_list)
-            if issue_number:
-                issue_in_list = str(issue_number) in issues_str
-
-            # Try to count issues
-            try:
-                if isinstance(issues_list, list):
-                    issues_count = len(issues_list)
-                elif isinstance(issues_list, str):
-                    parsed = json.loads(issues_list)
-                    issues_count = len(parsed) if isinstance(parsed, list) else 0
-            except:
-                pass
-
-        validation_results['issues_listed'] = issues_count > 0
-        validation_results['issue_in_list'] = issue_in_list
-        validation_results['issues_count'] = issues_count
-
-        {"validation_results": validation_results}
+    type: llm
+    model: gpt-4o
     input:
       - issues_list
       - issue_number
       - validation_results
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a test validator."
+      task:
+        type: fstring
+        value: |
+          I have a list of issues and an issue number I expect to be in it.
+          
+          Issue Number: {issue_number}
+          Issues List: {issues_list}
+          Current Validation Results: {validation_results}
+          
+          1. Check if the issue_number is present in the issues_list.
+          2. Count the number of issues in the list.
+          3. Update validation_results with:
+             - "issues_listed": true if count > 0
+             - "issue_in_list": true if issue_number is found
+             - "issues_count": the count of issues
+          
+          Return the updated validation_results.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - validation_results
     structured_output: true
+    structured_output_dict:
+        validation_results: "dict"
     transition: get_issue
 
   # Step 6: Get specific issue to validate details
@@ -242,38 +197,44 @@ nodes:
     structured_output: true
     transition: validate_get_issue
 
-  # Step 7: Validate get_issue result
+  # Step 7: Validate get_issue result using LLM
   - id: validate_get_issue
-    type: code
-    code:
-      type: fixed
-      value: |
-        issue_details = alita_state.get('issue_details', '')
-        issue_number = alita_state.get('issue_number')
-        issue_title = alita_state.get('issue_title', '')
-        validation_results = alita_state.get('validation_results', {})
-
-        # Validate issue details
-        issue_retrieved = False
-        title_matches = False
-
-        if issue_details and issue_number:
-            details_str = str(issue_details)
-            issue_retrieved = str(issue_number) in details_str or 'title' in details_str.lower()
-            title_matches = issue_title in details_str if issue_title else False
-
-        validation_results['issue_retrieved'] = issue_retrieved
-        validation_results['title_matches'] = title_matches
-
-        {"validation_results": validation_results}
+    type: llm
+    model: gpt-4o
     input:
       - issue_details
       - issue_number
       - issue_title
       - validation_results
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a test validator."
+      task:
+        type: fstring
+        value: |
+          Verify the retrieved issue details match expectations.
+          
+          Issue Number: {issue_number}
+          Expected Title: {issue_title}
+          Retrieved Details: {issue_details}
+          Current Validation Results: {validation_results}
+          
+          1. Verify if the retrieved details correspond to the issue number (look for the number in the details).
+          2. Verify if the title in details matches (or contains) the expected title.
+          3. Update validation_results with:
+             - "issue_retrieved": true if verification passes
+             - "title_matches": true if title matches
+          
+          Return the updated validation_results.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - validation_results
     structured_output: true
+    structured_output_dict:
+        validation_results: "dict"
     transition: add_plain_comment
 
   # Step 8: Add plain text comment
@@ -294,23 +255,36 @@ nodes:
     output:
       - tool_result
     structured_output: true
-    transition: store_plain_result
+    transition: validate_plain_comment
 
-  - id: store_plain_result
-    type: code
-    code:
-      type: fixed
-      value: |
-        result = alita_state.get('tool_result', '')
-        validation_results = alita_state.get('validation_results', {})
-        validation_results['comment_plain'] = 'success' in str(result).lower() or 'added' in str(result).lower() or 'created' in str(result).lower() or 'http' in str(result).lower()
-        {"validation_results": validation_results}
+  - id: validate_plain_comment
+    type: llm
+    model: gpt-4o
     input:
       - tool_result
       - validation_results
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a test validator."
+      task:
+        type: fstring
+        value: |
+          Validate if the comment was added successfully based on this tool result:
+          {tool_result}
+          
+          Current Validation Results: {validation_results}
+          
+          Update validation_results with "comment_plain": true if successful.
+          Return updated validation_results.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - validation_results
     structured_output: true
+    structured_output_dict:
+        validation_results: "dict"
     transition: add_code_comment
 
   # Step 9: Add code block comment
@@ -331,23 +305,36 @@ nodes:
     output:
       - tool_result
     structured_output: true
-    transition: store_code_result
+    transition: validate_code_comment
 
-  - id: store_code_result
-    type: code
-    code:
-      type: fixed
-      value: |
-        result = alita_state.get('tool_result', '')
-        validation_results = alita_state.get('validation_results', {})
-        validation_results['comment_code'] = 'success' in str(result).lower() or 'added' in str(result).lower() or 'created' in str(result).lower() or 'http' in str(result).lower()
-        {"validation_results": validation_results}
+  - id: validate_code_comment
+    type: llm
+    model: gpt-4o
     input:
       - tool_result
       - validation_results
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a test validator."
+      task:
+        type: fstring
+        value: |
+          Validate if the code comment was added successfully based on this tool result:
+          {tool_result}
+          
+          Current Validation Results: {validation_results}
+          
+          Update validation_results with "comment_code": true if successful.
+          Return updated validation_results.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - validation_results
     structured_output: true
+    structured_output_dict:
+        validation_results: "dict"
     transition: add_markdown_comment
 
   # Step 10: Add markdown comment with table
@@ -368,68 +355,97 @@ nodes:
     output:
       - tool_result
     structured_output: true
-    transition: store_markdown_result
+    transition: validate_markdown_comment
 
-  - id: store_markdown_result
-    type: code
-    code:
-      type: fixed
-      value: |
-        result = alita_state.get('tool_result', '')
-        validation_results = alita_state.get('validation_results', {})
-        validation_results['comment_markdown'] = 'success' in str(result).lower() or 'added' in str(result).lower() or 'created' in str(result).lower() or 'http' in str(result).lower()
-        {"validation_results": validation_results}
+  - id: validate_markdown_comment
+    type: llm
+    model: gpt-4o
     input:
       - tool_result
       - validation_results
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a test validator."
+      task:
+        type: fstring
+        value: |
+          Validate if the markdown comment was added successfully based on this tool result:
+          {tool_result}
+          
+          Current Validation Results: {validation_results}
+          
+          Update validation_results with "comment_markdown": true if successful.
+          Return updated validation_results.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - validation_results
     structured_output: true
+    structured_output_dict:
+        validation_results: "dict"
     transition: process_results
 
-  # Step 11: Process and validate all results
+  # Step 11: Process and validate all results using LLM
   - id: process_results
-    type: code
-    code:
-      type: fixed
-      value: |
-        issue_number = alita_state.get('issue_number')
-        validation_results = alita_state.get('validation_results', {})
-
-        # Check all validations
-        issue_created = validation_results.get('issue_created', False)
-        issues_listed = validation_results.get('issues_listed', False)
-        issue_retrieved = validation_results.get('issue_retrieved', False)
-        comment_plain = validation_results.get('comment_plain', False)
-        comment_code = validation_results.get('comment_code', False)
-        comment_markdown = validation_results.get('comment_markdown', False)
-
-        all_comments_ok = comment_plain and comment_code and comment_markdown
-        all_operations_ok = issue_created and issues_listed and issue_retrieved and all_comments_ok
-
-        test_results = {
-            "test_passed": all_operations_ok,
-            "issue_number": issue_number,
-            "operations": {
-                "create_issue": issue_created,
-                "list_issues": issues_listed,
-                "get_issue": issue_retrieved,
-                "issues_count": validation_results.get('issues_count', 0)
-            },
-            "comments": {
-                "plain_text": comment_plain,
-                "code_block": comment_code,
-                "markdown_table": comment_markdown,
-                "all_passed": all_comments_ok
-            }
-        }
-        {"test_results": test_results}
+    type: llm
+    model: gpt-4o
     input:
       - issue_number
       - validation_results
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance reporter."
+      task:
+        type: fstring
+        value: |
+          Analyze the final validation results for the Issue Workflow test.
+          
+          Issue Number: {issue_number}
+          Validation Results: {validation_results}
+          
+          Calculate the following statuses based on validation_results:
+          - create_issue: result of 'issue_created'
+          - list_issues: result of 'issues_listed'
+          - get_issue: result of 'issue_retrieved'
+          - issues_count: value of 'issues_count' (default 0)
+          - plain_text: result of 'comment_plain'
+          - code_block: result of 'comment_code'
+          - markdown_table: result of 'comment_markdown'
+          
+          Logic:
+          - all_comments_ok = plain_text AND code_block AND markdown_table
+          - all_operations_ok = create_issue AND list_issues AND get_issue AND all_comments_ok
+          
+          Construct a final test_results object strictly following this structure:
+          {
+              "test_passed": all_operations_ok,
+              "issue_number": "{issue_number}",
+              "operations": {
+                  "create_issue": create_issue,
+                  "list_issues": list_issues,
+                  "get_issue": get_issue,
+                  "issues_count": issues_count
+              },
+              "comments": {
+                  "plain_text": plain_text,
+                  "code_block": code_block,
+                  "markdown_table": markdown_table,
+                  "all_passed": all_comments_ok
+              }
+          }
+          
+          Return the test_results object.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - test_results
     structured_output: true
+    structured_output_dict:
+        test_results: "dict"
     transition: close_issue
 
   # Step 12: Close the test issue

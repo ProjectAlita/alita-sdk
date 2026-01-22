@@ -216,6 +216,7 @@ if python scripts/run_suite.py "$SUITE" \
     --pattern "$PATTERN" \
     --timeout "$TIMEOUT" \
     --env-file "$ENV_FILE" \
+    --output-json "test_results/$SUITE/results.json" \
     $VERBOSE \
     $LOCAL_FLAG; then
 
