@@ -108,20 +108,6 @@ class Artifact:
         data += f"\n{additional_data}" if len(data) > 0 else additional_data
         self.client.create_artifact(bucket_name, artifact_name, data)
         return "Data appended successfully"
-    def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None):
-        try:
-            if not bucket_name:
-                bucket_name = self.bucket_name
-            data = self.get(artifact_name, bucket_name)
-            if data == "Could not detect encoding":
-                return dumps({"error": "Could not detect encoding"})
-            data += f"\n{additional_data}" if len(data) > 0 else additional_data
-            response = self.client.create_artifact(bucket_name, artifact_name, data)
-            response['message'] = "Data appended successfully"
-            return dumps(response)
-        except Exception as e:
-            logger.error(f"Error: {e}")
-            return dumps({"error": str(e)})
 
     def overwrite(self, artifact_name: str, new_data: Any, bucket_name: str = None):
         try:

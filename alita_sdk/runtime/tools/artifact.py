@@ -561,23 +561,35 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             raise ToolException(f'Error (deleteFile): {result.get("error")} for file \'{filename}\'')
         return f'File "{filename}" deleted successfully.'
 
-    def append_data(self, filename: str, filedata: str, bucket_name = None, create_if_missing: bool = True):
+    def append_data(self, filename: str, filedata: str, bucket_name=None, create_if_missing: bool = True):
         result = self.artifact.append(filename, filedata, bucket_name, create_if_missing)
 
-        # Only dispatch custom event if append succeeded (not an error message)
-        if not (isinstance(result, str) and result.startswith("Error:")):
-            dispatch_custom_event("file_modified", {
-                "message": f"Data appended to file '{filename}' successfully",
-                "filename": filename,
-                "tool_name": "appendData",
-                "toolkit": "artifact",
-                "operation_type": "modify",
-                "meta": {
-                    "bucket": bucket_name or self.bucket
-                }
-            })
+        if isinstance(result, str) or result.startswith("Error:"):
+            raise ToolException(f"Failed to append to file '{filename}': {response_data['error']}")
 
-        return result
+        # Only dispatch custom event if append succeeded (not an error message)
+        response_data = json.loads(result)
+        artifact_id = response_data['artifact_id']
+        dispatch_custom_event("file_modified", {
+            "message": f"Data appended to file '{filename}' successfully",
+            "artifact_id": artifact_id,
+            "filename": filename,
+            "tool_name": "appendData",
+            "toolkit": "artifact",
+            "operation_type": "modify",
+            "meta": {
+                "bucket": bucket_name or self.bucket,
+                "file_size": response_data.get('size', 0),
+                "source": "generated"
+            }
+        })
+
+        return json.dumps({
+            "artifact_id": artifact_id,
+            "filename": filename,
+            "bucket": bucket_name or self.bucket,
+            "message": response_data.get('message', "Data appended successfully")
+        })
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
         result = self.artifact.overwrite(filename, filedata, bucket_name)
