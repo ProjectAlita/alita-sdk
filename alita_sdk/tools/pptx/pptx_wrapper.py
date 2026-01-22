@@ -2,12 +2,15 @@ from typing import Dict, Any, List, Optional
 from copy import copy
 import os
 import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 import chardet
 from pydantic import create_model, BaseModel, Field
 from ..elitea_base import BaseToolApiWrapper
 from logging import getLogger
 import traceback
 from langchain_core.messages import HumanMessage
+import pptx
 logger = getLogger(__name__)
 
 
@@ -111,6 +114,71 @@ class PPTXWrapper(BaseToolApiWrapper):
         shalow_llm = copy(self.llm)
         return shalow_llm.with_structured_output(stuct_model)
 
+    def _extract_text_from_shape(self, shape) -> List[str]:
+        """
+        Safely extract text from any shape type including SmartArt, tables, and text frames.
+
+        Args:
+            shape: A shape object from python-pptx
+
+        Returns:
+            List of text strings found in the shape
+        """
+        texts = []
+
+        try:
+            # Handle regular text frames
+            if hasattr(shape, "text_frame") and shape.text_frame:
+                try:
+                    text = shape.text_frame.text
+                    if text:
+                        texts.append(text)
+                except Exception as e:
+                    logger.debug(f"Could not extract text from text_frame: {e}")
+
+            # Handle tables
+            if hasattr(shape, "has_table") and shape.has_table:
+                try:
+                    for row in shape.table.rows:
+                        for cell in row.cells:
+                            if cell.text_frame and cell.text_frame.text:
+                                texts.append(cell.text_frame.text)
+                except Exception as e:
+                    logger.debug(f"Could not extract text from table: {e}")
+
+            # Handle SmartArt and other GraphicFrame shapes
+            if shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER or shape.shape_type not in [
+                MSO_SHAPE_TYPE.PICTURE,
+                MSO_SHAPE_TYPE.TABLE,
+                MSO_SHAPE_TYPE.TEXT_BOX,
+                MSO_SHAPE_TYPE.AUTO_SHAPE,
+                MSO_SHAPE_TYPE.GROUP
+            ]:
+                # Try to extract text from graphic frame elements via XML
+                try:
+                    if hasattr(shape, 'element'):
+                        # Navigate through the XML to find text elements
+                        element = shape.element
+                        # Look for text in a:t elements (drawingML text)
+                        namespaces = {
+                            'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+                            'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
+                        }
+                        text_elements = element.findall('.//a:t', namespaces)
+                        for text_elem in text_elements:
+                            if text_elem.text:
+                                texts.append(text_elem.text)
+
+                        if text_elements:
+                            logger.debug(f"Extracted {len(text_elements)} text elements from SmartArt/GraphicFrame via XML")
+                except Exception as e:
+                    logger.debug(f"Could not extract text from SmartArt/GraphicFrame via XML: {e}")
+
+        except Exception as e:
+            logger.debug(f"Error extracting text from shape: {e}")
+
+        return texts
+
     def _create_slide_model(self, placeholders: List[str]) -> type:
         """
         Dynamically creates a Pydantic model for a slide based on its placeholders
@@ -203,25 +271,48 @@ class PPTXWrapper(BaseToolApiWrapper):
                 
                 # Get all shapes that contain text
                 for shape in slide.shapes:
+                    shape_type_name = shape.shape_type if hasattr(shape, 'shape_type') else 'unknown'
+
                     # Check text frames for placeholders
-                    if hasattr(shape, "text_frame") and shape.text_frame:
-                        # Check if this is a placeholder that needs to be filled
-                        text = shape.text_frame.text
-                        if text and ("{{" in text or "[PLACEHOLDER]" in text):
-                            placeholders.append(text)
-                            placeholder_shapes.append(shape)
-                    
+                    try:
+                        if hasattr(shape, "text_frame") and shape.text_frame:
+                            # Check if this is a placeholder that needs to be filled
+                            text = shape.text_frame.text
+                            if text and ("{{" in text or "[PLACEHOLDER]" in text):
+                                placeholders.append(text)
+                                placeholder_shapes.append(shape)
+                                logger.debug(f"Found placeholder in text_frame (shape_type={shape_type_name})")
+                    except Exception as e:
+                        logger.debug(f"Could not access text_frame for shape_type={shape_type_name}: {e}")
+
                     # Check tables for placeholders in cells
-                    if hasattr(shape, "table") and shape.table:
-                        for row_idx, row in enumerate(shape.table.rows):
-                            for col_idx, cell in enumerate(row.cells):
-                                if cell.text_frame:
-                                    text = cell.text_frame.text
-                                    if text and ("{{" in text or "[PLACEHOLDER]" in text):
-                                        placeholders.append(text)
-                                        # Store tuple with table info: (shape, row_idx, col_idx)
-                                        placeholder_shapes.append((shape, row_idx, col_idx))
-                
+                    try:
+                        if hasattr(shape, "has_table") and shape.has_table:
+                            for row_idx, row in enumerate(shape.table.rows):
+                                for col_idx, cell in enumerate(row.cells):
+                                    if cell.text_frame:
+                                        text = cell.text_frame.text
+                                        if text and ("{{" in text or "[PLACEHOLDER]" in text):
+                                            placeholders.append(text)
+                                            # Store tuple with table info: (shape, row_idx, col_idx)
+                                            placeholder_shapes.append((shape, row_idx, col_idx))
+                                            logger.debug(f"Found placeholder in table cell [{row_idx},{col_idx}]")
+                    except Exception as e:
+                        logger.debug(f"Could not access table for shape_type={shape_type_name}: {e}")
+
+                    # Check SmartArt and other GraphicFrame shapes for placeholders
+                    if shape_type_name not in [MSO_SHAPE_TYPE.PICTURE, MSO_SHAPE_TYPE.TABLE, MSO_SHAPE_TYPE.TEXT_BOX]:
+                        try:
+                            smartart_texts = self._extract_text_from_shape(shape)
+                            for text in smartart_texts:
+                                if text and ("{{" in text or "[PLACEHOLDER]" in text):
+                                    placeholders.append(text)
+                                    placeholder_shapes.append(shape)
+                                    logger.debug(f"Found placeholder in SmartArt/GraphicFrame (shape_type={shape_type_name})")
+                        except Exception as e:
+                            logger.debug(f"Could not extract text from SmartArt/GraphicFrame (shape_type={shape_type_name}): {e}")
+
+
                 logger.info(f"Found {len(placeholders)} placeholders in slide {slide_idx + 1}")
                 if placeholders:
                     # Create a dynamic Pydantic model for this slide
@@ -413,10 +504,152 @@ class PPTXWrapper(BaseToolApiWrapper):
                 "message": f"Failed to fill template: {traceback.format_exc()}"
             }
 
+    def unzip_pptx(self, pptx_path, extract_dir):
+        # Unzip the pptx file
+        with zipfile.ZipFile(pptx_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+
+    def edit_smartart_xml(self, diagram_folder, target_language):
+
+        for root_dir, dirs, files in os.walk(diagram_folder):
+            for file in files:
+                if file.startswith('data') and file.endswith('.xml'):
+                    xml_file = os.path.join(root_dir, file)
+                    tree = ET.parse(xml_file)
+                    root = tree.getroot()
+
+                    for elem in root.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}t'):
+                        elem.text = self.translate(elem.text, target_language)
+
+                    tree.write(xml_file, encoding='utf-8', xml_declaration=True)
+                    print(f"Edited {xml_file}")
+
+    def rezip_pptx(self, extract_dir, output_pptx):
+        with zipfile.ZipFile(output_pptx, 'w', zipfile.ZIP_DEFLATED) as pptx_zip:
+            for root, dirs, files in os.walk(extract_dir):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    arcname = os.path.relpath(full_path, extract_dir)
+                    pptx_zip.write(full_path, arcname)
+
+    def translate(self, text_to_translate: str, target_language: str) -> str:
+        prompt = f"""Please translate the following text to {target_language}:
+"{text_to_translate}"
+
+Provide only the translated text without quotes or explanations."""
+
+        result = self.llm.invoke([HumanMessage(content=[{"type": "text", "text": prompt}])])
+        translated_text = result.content
+        # Clean up any extra quotes or whitespace
+        return translated_text.strip().strip('"\'')
+
+    # def translate_presentation(self, file_name: str, output_file_name: str, target_language: str) -> Dict[str, Any]:
+    #     """
+    #            Translate text in a PowerPoint presentation to another language.
+    #
+    #            Args:
+    #                file_name: PPTX file name in the bucket
+    #                output_file_name: Output PPTX file name to save in the bucket
+    #                target_language: Target language code (e.g., 'es' for Spanish, 'ua' for Ukrainian)
+    #
+    #            Returns:
+    #                Dictionary with result information
+    #            """
+    #     import pptx
+    #
+    #     try:
+    #         # Download the PPTX file
+    #         local_path = self._download_pptx(file_name)
+    #
+    #         # Map of language codes to full language names
+    #         language_names = {
+    #             'en': 'English',
+    #             'es': 'Spanish',
+    #             'fr': 'French',
+    #             'de': 'German',
+    #             'it': 'Italian',
+    #             'pt': 'Portuguese',
+    #             'ru': 'Russian',
+    #             'ja': 'Japanese',
+    #             'zh': 'Chinese',
+    #             'ar': 'Arabic',
+    #             'hi': 'Hindi',
+    #             'ko': 'Korean',
+    #             'ua': 'Ukrainian'
+    #         }
+    #
+    #         # Get the full language name if available, otherwise use the code
+    #         target_language_name = language_names.get(target_language.lower(), target_language)
+    #
+    #         # Translate
+    #         import shutil
+    #
+    #         # Create a unique temporary directory for extraction
+    #         extract_dir = tempfile.mkdtemp(prefix='pptx_translate_')
+    #
+    #         try:
+    #             self.unzip_pptx(pptx_path=local_path, extract_dir=extract_dir)
+    #             self.edit_smartart_xml(extract_dir, target_language_name)
+    #
+    #             # Save to the proper output path
+    #             temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
+    #             self.rezip_pptx(extract_dir, temp_output_path)
+    #
+    #             # Load the modified presentation to ensure it's valid
+    #             presentation = pptx.Presentation(temp_output_path)
+    #         finally:
+    #             # Clean up the extraction directory
+    #             if os.path.exists(extract_dir):
+    #                 shutil.rmtree(extract_dir)
+    #
+    #         # Save the translated presentation
+    #         temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
+    #         presentation.save(temp_output_path)
+    #
+    #         # Upload the translated file
+    #         result_url = self._upload_pptx(temp_output_path, output_file_name)
+    #
+    #         # Clean up temporary files
+    #         try:
+    #             os.remove(local_path)
+    #             os.remove(temp_output_path)
+    #         except:
+    #             pass
+    #
+    #         return {
+    #             "status": "success",
+    #             "message": f"Successfully translated presentation to {target_language_name} and saved as {output_file_name}",
+    #             "url": result_url
+    #         }
+    #
+    #     except Exception as e:
+    #         logger.error(f"Error translating PPTX: {str(e)}")
+    #         return {
+    #             "status": "error",
+    #             "message": f"Failed to translate presentation: {str(e)}"
+    #         }
+
+    def _translate_smart_objects(self, local_path, output_file_name, target_language_name):
+        # Translate smart objects in the presentation from unzipped resources folder
+
+        # Create a unique temporary directory for extraction
+        extract_dir = tempfile.mkdtemp(prefix='pptx_translate_')
+
+        self.unzip_pptx(pptx_path=local_path, extract_dir=extract_dir)
+        self.edit_smartart_xml(extract_dir, target_language_name)
+
+        # Save to the proper output path
+        temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
+        self.rezip_pptx(extract_dir, temp_output_path)
+
+        # Load the modified presentation to ensure it's valid
+        presentation = pptx.Presentation(temp_output_path)
+        return temp_output_path
+
     def translate_presentation(self, file_name: str, output_file_name: str, target_language: str) -> Dict[str, Any]:
         """
         Translate text in a PowerPoint presentation to another language.
-        
+
         Args:
             file_name: PPTX file name in the bucket
             output_file_name: Output PPTX file name to save in the bucket
@@ -425,8 +658,6 @@ class PPTXWrapper(BaseToolApiWrapper):
         Returns:
             Dictionary with result information
         """
-        import pptx
-        
         try:
             # Download the PPTX file
             local_path = self._download_pptx(file_name)
@@ -455,68 +686,88 @@ class PPTXWrapper(BaseToolApiWrapper):
             target_language_name = language_names.get(target_language.lower(), target_language)
             
             # Process each slide and translate text
-            for slide in presentation.slides:
+            for slide_idx, slide in enumerate(presentation.slides):
+                logger.debug(f"Processing slide {slide_idx + 1} for translation")
+
                 # Get all shapes that contain text
                 for shape in slide.shapes:
-                    if hasattr(shape, "text_frame") and shape.text_frame:
-                        # Check if there's text to translate
-                        if shape.text_frame.text:
-                            # Translate each paragraph
-                            for paragraph in shape.text_frame.paragraphs:
-                                if paragraph.text:
-                                    # Use LLM to translate the text
-                                    prompt = f"""
-                                    Please translate the following text to {target_language_name}:
-                                    
-                                    "{paragraph.text}"
-                                    
-                                    Provide only the translated text without quotes or explanations.
-                                    """
-                                    
-                                    result = self.llm.invoke([ HumanMessage(content=[ {"type": "text", "text": prompt} ] ) ])
-                                    translated_text = result.content
-                                    # Clean up any extra quotes or whitespace
-                                    translated_text = translated_text.strip().strip('"\'')
-                                    
-                                    # Replace the text
-                                    paragraph.text = translated_text
-                    
-                    # Also translate text in tables
-                    if hasattr(shape, "table") and shape.table:
-                        for row in shape.table.rows:
-                            for cell in row.cells:
-                                if cell.text_frame and cell.text_frame.text:
-                                    # Translate each paragraph in the cell
-                                    for paragraph in cell.text_frame.paragraphs:
-                                        if paragraph.text:
-                                            # Use LLM to translate the text
-                                            prompt = f"""
-                                            Please translate the following text to {target_language_name}:
-                                            
-                                            "{paragraph.text}"
-                                            
-                                            Provide only the translated text without quotes or explanations.
-                                            """
-                                            
-                                            result = self.llm.invoke([ HumanMessage(content=[ {"type": "text", "text": prompt} ] ) ])
-                                            translated_text = result.content
-                                            # Clean up any extra quotes or whitespace
-                                            translated_text = translated_text.strip().strip('"\'')
-                                            
-                                            # Replace the text
-                                            paragraph.text = translated_text
-            
-            # Save the translated presentation
+                    shape_type_name = shape.shape_type if hasattr(shape, 'shape_type') else 'unknown'
+
+                    # Translate text in text frames
+                    try:
+                        if hasattr(shape, "text_frame") and shape.text_frame:
+                            # Check if there's text to translate
+                            if shape.text_frame.text:
+                                logger.debug(f"Translating text_frame in shape_type={shape_type_name}")
+                                # Translate each paragraph
+                                for paragraph in shape.text_frame.paragraphs:
+                                    if paragraph.text:
+                                        # Use LLM to translate the text
+                                        prompt = f"""
+                                        Please translate the following text to {target_language_name}:
+
+                                        "{paragraph.text}"
+
+                                        Provide only the translated text without quotes or explanations.
+                                        """
+
+                                        result = self.llm.invoke([ HumanMessage(content=[ {"type": "text", "text": prompt} ] ) ])
+                                        translated_text = result.content
+                                        # Clean up any extra quotes or whitespace
+                                        translated_text = translated_text.strip().strip('"\'')
+
+                                        # Replace the text
+                                        paragraph.text = translated_text
+                    except Exception as e:
+                        logger.debug(f"Could not translate text_frame for shape_type={shape_type_name}: {e}")
+
+                    # Translate text in tables
+                    try:
+                        if hasattr(shape, "has_table") and shape.has_table:
+                            logger.debug(f"Translating table in shape_type={shape_type_name}")
+                            for row in shape.table.rows:
+                                for cell in row.cells:
+                                    if cell.text_frame and cell.text_frame.text:
+                                        # Translate each paragraph in the cell
+                                        for paragraph in cell.text_frame.paragraphs:
+                                            if paragraph.text:
+                                                # Use LLM to translate the text
+                                                prompt = f"""
+                                                Please translate the following text to {target_language_name}:
+
+                                                "{paragraph.text}"
+
+                                                Provide only the translated text without quotes or explanations.
+                                                """
+
+                                                result = self.llm.invoke([ HumanMessage(content=[ {"type": "text", "text": prompt} ] ) ])
+                                                translated_text = result.content
+                                                # Clean up any extra quotes or whitespace
+                                                translated_text = translated_text.strip().strip('"\'')
+
+                                                # Replace the text
+                                                paragraph.text = translated_text
+                    except Exception as e:
+                        logger.debug(f"Could not translate table for shape_type={shape_type_name}: {e}")
+
+            # Save already translated version of presentation (it can be modified for smart objects later)
             temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
             presentation.save(temp_output_path)
-            
-            # Upload the translated file
-            result_url = self._upload_pptx(temp_output_path, output_file_name)
-            
+
+            # Translate text in SmartArt and other GraphicFrame shapes from the unzipped resources
+            try:
+               translated_pptx_path = self._translate_smart_objects(temp_output_path, output_file_name, target_language_name)
+               result_url = self._upload_pptx(translated_pptx_path, output_file_name)
+            except Exception as e:
+                logger.debug(f"Could not translate SmartArt objects: {e}")
+                # Upload the translated file
+                result_url = self._upload_pptx(temp_output_path, output_file_name)
+
             # Clean up temporary files
             try:
                 os.remove(local_path)
                 os.remove(temp_output_path)
+                os.remove(translated_pptx_path)
             except:
                 pass
             
