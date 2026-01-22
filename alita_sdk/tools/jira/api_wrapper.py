@@ -167,7 +167,7 @@ AddFileToIssueDescription = create_model(
     "AddFileToIssueDescriptionModel",
     issue_key=(str, Field(description="Jira issue key where file will be added, e.g. 'PROJ-123'. The file will be uploaded as attachment and referenced in the description.")),
     artifact_id=(str, Field(description="UUID of the artifact containing the file to attach. Artifact can be any file type (image, PDF, video, document, etc.). Get this from the file/image generation tool's response.")),
-    filename=(str, Field(description="Filename for the attachment, e.g. 'diagram.png', 'report.pdf'. Should include file extension.")),
+    filename=(Optional[str], Field(description="Filename for the attachment, e.g. 'diagram.png', 'report.pdf'. If not provided, uses the original filename from artifact. Should include file extension.", default=None)),
     alt_text=(Optional[str], Field(default=None, description="Alternative text for the file (optional). Used for accessibility and as caption.")),
     position=(Optional[Literal["append", "prepend"]], Field(default="append", description="Where to place the file reference in description: 'append' (end) or 'prepend' (beginning)."))
 )
@@ -177,7 +177,7 @@ UpdateCommentWithFile = create_model(
     issue_key=(str, Field(description="Jira issue key, e.g. 'PROJ-123'.")),
     comment_id=(str, Field(description="ID of the existing comment to update. Get from list_comments tool.")),
     artifact_id=(str, Field(description="UUID of the artifact containing the file. Get this from the file/image generation tool's response.")),
-    filename=(str, Field(description="Filename for the attachment, e.g. 'screenshot.png', 'report.pdf'.")),
+    filename=(Optional[str], Field(description="Filename for the attachment, e.g. 'screenshot.png', 'report.pdf'. If not provided, uses the original filename from artifact.", default=None)),
     position=(Optional[Literal["append", "prepend"]], Field(default="append", description="Where to place file: 'append' (end) or 'prepend' (beginning) of existing comment."))
 )
 
@@ -850,16 +850,19 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             else:
                 return f"[^{filename}]"
 
-    def _upload_file_from_artifact(self, issue_key: str, artifact_id: str, filename: str) -> Dict[str, Any]:
+    def _upload_file_from_artifact(self, issue_key: str, artifact_id: str, filename: str = None) -> Dict[str, Any]:
         """Upload file from artifact storage to Jira issue."""
         # Get artifact client on the fly - bucket doesn't matter for download by ID
         artifact_client = self.alita.artifact('__temp__')
         
         # Get raw file bytes from artifact storage
         try:
-            file_bytes = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
         except Exception as e:
             raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
+        
+        # Use provided filename or fallback to artifact filename
+        filename = filename or artifact_filename
         
         if not file_bytes:
             raise ToolException(f"Artifact '{artifact_id}' not found or empty")

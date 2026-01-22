@@ -64,11 +64,18 @@ class Artifact:
                                       excel_by_sheets=excel_by_sheets,
                                       llm=llm)
 
-    def get_raw_content_by_artifact_id(self, artifact_id: str) -> bytes:
-        data = self.client.download_artifact_by_id(artifact_id)
-        if isinstance(data, dict) and data.get('error'):
-            raise Exception(f"{data['error']}. {data.get('content', '')}")
-        return data
+    def get_raw_content_by_artifact_id(self, artifact_id: str) -> tuple:
+        """Get artifact content and filename by artifact ID.
+        
+        Returns:
+            tuple: (file_bytes, filename) where file_bytes is the raw content
+                   and filename is extracted from Content-Disposition header
+        """
+        result = self.client.download_artifact_by_id(artifact_id)
+        # Check if result is an error dict (backward compatibility)
+        if isinstance(result, dict) and result.get('error'):
+            raise Exception(f"{result['error']}. {result.get('content', '')}")
+        return result
 
     def delete(self, artifact_name: str, bucket_name = None):
         if not bucket_name:

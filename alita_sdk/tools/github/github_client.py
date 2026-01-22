@@ -1246,7 +1246,8 @@ class GitHubClient(BaseModel):
                 
                 try:
                     artifact_client = self.alita.artifact('__temp__')  # Bucket doesn't matter for download by ID
-                    file_contents = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+                    file_contents, _ = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+                    # Use the tuple but only need the bytes, filename comes from file_path parameter
                 except Exception as e:
                     return f"Failed to retrieve artifact '{artifact_id}': {str(e)}"
 
