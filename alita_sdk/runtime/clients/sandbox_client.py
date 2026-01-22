@@ -84,7 +84,7 @@ class SandboxArtifact:
             return data
 
         # Append the new data
-        data += f'{additional_data}' if len(data) > 0 else additional_data
+        data += f'\n{additional_data}' if len(data) > 0 else additional_data
         self.client.create_artifact(bucket_name, artifact_name, data)
         return 'Data appended successfully'
 
