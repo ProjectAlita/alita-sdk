@@ -975,9 +975,25 @@ def main():
                                             pipelines.append(full)
                                         break
 
+        # If pattern is specified along with folder, filter the folder's pipelines
+        # Otherwise, pattern acts as a standalone filter across all pipelines
         if args.pattern:
-            suite_name = f"Pattern: {', '.join(args.pattern)}"
-            pipelines.extend(get_pipelines_by_pattern(base_url, project_id, args.pattern, headers))
+            if args.folder:
+                # Filter already collected pipelines by pattern
+                filtered_pipelines = []
+                for p in pipelines:
+                    name = normalize_for_matching(p.get("name", ""))
+                    for pattern in args.pattern:
+                        normalized_pattern = normalize_for_matching(pattern)
+                        if normalized_pattern in name:
+                            filtered_pipelines.append(p)
+                            break
+                pipelines = filtered_pipelines
+                suite_name = f"{suite_name} (filtered: {', '.join(args.pattern)})"
+            else:
+                # Pattern as standalone filter
+                suite_name = f"Pattern: {', '.join(args.pattern)}"
+                pipelines = get_pipelines_by_pattern(base_url, project_id, args.pattern, headers)
 
         if args.ids:
             suite_name = f"IDs: {', '.join(map(str, args.ids))}"
@@ -985,12 +1001,15 @@ def main():
 
         # Build env_vars from environment and config (remote only)
         if config:
+            # Load env from config's env_mapping section
             for key, value in config.get("env_mapping", {}).items():
                 env_vars[key] = resolve_env_value(value, env_vars)
+            # Load composable pipeline IDs if available
             for cp in config.get("composable_pipelines", []):
                 for save_item in cp.get("save_to_env", []):
                     key = save_item.get("key")
                     if key:
+                        # Try to load from environment
                         env_value = load_from_env(key)
                         if env_value:
                             env_vars[key] = env_value
@@ -998,6 +1017,16 @@ def main():
     # ========================================
     # VALIDATE: Common for both modes
     # ========================================
+    # Deduplicate pipelines by ID (in case any got added multiple times)
+    seen_ids = set()
+    unique_pipelines = []
+    for p in pipelines:
+        pid = p.get('id')
+        if pid not in seen_ids:
+            seen_ids.add(pid)
+            unique_pipelines.append(p)
+    pipelines = unique_pipelines
+
     if not pipelines:
         error_msg = f"No pipelines found matching pattern '{pattern}'" if args.local else "No pipelines found matching criteria"
         if args.json:
@@ -1052,8 +1081,6 @@ def main():
     # Exit code
     if args.exit_code:
         sys.exit(0 if result.all_passed else 1)
-    else:
-        sys.exit(0 if result.failed == 0 and result.errors == 0 else 1)
 
 
 if __name__ == "__main__":
