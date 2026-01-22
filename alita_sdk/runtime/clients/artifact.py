@@ -93,21 +93,23 @@ class Artifact:
             # Check if we should create the file if it doesn't exist
             if create_if_missing:
                 # Create empty file and append data (no leading newline for first content)
-                self.client.create_artifact(bucket_name, artifact_name, additional_data)
-                return "Data appended successfully"
+                response = self.client.create_artifact(bucket_name, artifact_name, additional_data)
+                response['message'] = "Data appended successfully"
+                return dumps(response)
             else:
                 # Return error as before
-                return f"Error: Cannot append to file '{artifact_name}'. {raw_data['error']}"
+                return dumps({"error": f"Cannot append to file '{artifact_name}'. {raw_data['error']}"})
 
         # Get the parsed content
         data = self.get(artifact_name, bucket_name)
         if data == "Could not detect encoding":
-            return data
+            return dumps({"error": data})
 
         # Append the new data
         data += f"\n{additional_data}" if len(data) > 0 else additional_data
-        self.client.create_artifact(bucket_name, artifact_name, data)
-        return "Data appended successfully"
+        response = self.client.create_artifact(bucket_name, artifact_name, data)
+        response['message'] = "Data appended successfully"
+        return dumps(response)
 
     def overwrite(self, artifact_name: str, new_data: Any, bucket_name: str = None):
         try:

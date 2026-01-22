@@ -563,12 +563,11 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
 
     def append_data(self, filename: str, filedata: str, bucket_name=None, create_if_missing: bool = True):
         result = self.artifact.append(filename, filedata, bucket_name, create_if_missing)
-
-        if isinstance(result, str) or result.startswith("Error:"):
+        response_data = json.loads(result)
+        if 'error' in response_data:
             raise ToolException(f"Failed to append to file '{filename}': {response_data['error']}")
 
         # Only dispatch custom event if append succeeded (not an error message)
-        response_data = json.loads(result)
         artifact_id = response_data['artifact_id']
         dispatch_custom_event("file_modified", {
             "message": f"Data appended to file '{filename}' successfully",
