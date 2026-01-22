@@ -55,8 +55,8 @@ nodes:
           { "test_passed": boolean (true if all checks pass), 
           "tool_executed": boolean, 
           "branches_count": integer, 
-          "has_main_branch": boolean, "
-          branches_sample": list of strings (first 5 branches) 
+          "has_main_branch": boolean,
+          "branches_sample": list of strings (first 5 branches) 
           }
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.

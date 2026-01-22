@@ -51,7 +51,7 @@ nodes:
           Perform the following checks:
 
           Confirm the tool executed successfully (the result is not empty or null).
-          Confirm pr numeber 999 is in the list.
+          Confirm pr numeber 163 is in the list.
           Determine if any pull requests were found (PRs count >= 0).
           Check if pull requests have proper structure with 'number' and 'title' fields.
           Extract a sample of the first 5 pull requests with their number, title (first 50 chars), and state.
