@@ -169,7 +169,7 @@ AddFileToPage = create_model(
     "AddFileToPage",
     page_id=(str, Field(description="Confluence page ID to add file to")),
     artifact_id=(str, Field(description="Artifact ID containing the file to upload")),
-    filename=(str, Field(description="Filename in the artifact")),
+    filename=(Optional[str], Field(description="Filename to use for the upload. If not provided, uses the original filename from artifact.", default=None)),
     alt_text=(Optional[str], Field(description="Alternative text for images (optional)", default=None)),
     position=(Optional[str], Field(description="Position to add file reference: 'append' or 'prepend'", default="append")),
 )
@@ -1744,7 +1744,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error retrieving attachments for page {page_id}: {str(e)}")
             return f"Error retrieving attachments: {str(e)}"
 
-    def _upload_file_from_artifact(self, page_id: str, artifact_id: str, filename: str) -> Dict[str, Any]:
+    def _upload_file_from_artifact(self, page_id: str, artifact_id: str, filename: str = None) -> Dict[str, Any]:
         """Download file from artifact storage and upload to Confluence page."""
         try:
             # Download file from artifact storage using artifact_id
@@ -1752,7 +1752,10 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 raise ToolException("Alita client is not initialized. Cannot download artifact.")
 
             artifact_client = self.alita.artifact('__temp__')
-            file_bytes = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            
+            # Use provided filename or fallback to artifact filename
+            filename = filename or artifact_filename
 
             if not file_bytes:
                 raise ToolException(f"Failed to download artifact {artifact_id}")

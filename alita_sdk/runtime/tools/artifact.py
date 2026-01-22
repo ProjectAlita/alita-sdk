@@ -337,7 +337,9 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             # Copy mode: get raw bytes from existing artifact
             operation_type = "copy"
             try:
-                filedata = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+                file_bytes, _ = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+                # Use the tuple but only need the bytes, filename comes from method parameter
+                filedata = file_bytes
             except Exception as e:
                 raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
 
@@ -651,7 +653,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
 
         try:
             # Get raw file content using Artifact client's get_raw_content_by_artifact_id() method
-            file_content = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+            file_content, artifact_filename = self.artifact.get_raw_content_by_artifact_id(artifact_id)
 
             if not file_content:
                 return json.dumps({
@@ -660,20 +662,39 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                     "message": "Artifact not found or empty"
                 })
 
-            # Detect file type from content
+            # Detect file type from content first (more reliable)
             kind = filetype.guess(file_content)
 
             if kind is None:
-                return json.dumps({
-                    "artifact_id": artifact_id,
-                    "status": "error",
-                    "message": "Cannot guess file type from content"
-                })
+                # Fallback to extension-based detection from filename
+                import mimetypes
+                from pathlib import Path
+                
+                ext = Path(artifact_filename).suffix.lower()
+                mime_type = mimetypes.guess_type(artifact_filename)[0]
+                
+                if mime_type:
+                    return json.dumps({
+                        "artifact_id": artifact_id,
+                        "extension": ext.lstrip('.') if ext else "unknown",
+                        "mime": mime_type,
+                        "filename": artifact_filename,
+                        "status": "success",
+                        "message": f"File type detected from extension: {mime_type}"
+                    })
+                else:
+                    return json.dumps({
+                        "artifact_id": artifact_id,
+                        "filename": artifact_filename,
+                        "status": "error",
+                        "message": "Cannot guess file type from content or extension"
+                    })
 
             return json.dumps({
                 "artifact_id": artifact_id,
                 "extension": kind.extension,
                 "mime": kind.mime,
+                "filename": artifact_filename,
                 "status": "success",
                 "message": f"File type detected: {kind.mime}"
             })

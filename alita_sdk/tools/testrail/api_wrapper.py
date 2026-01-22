@@ -215,7 +215,7 @@ addFileToCase = create_model(
     "addFileToCase",
     case_id=(str, Field(description="The ID of the test case to attach the file to")),
     artifact_id=(str, Field(description="The artifact ID of the file to upload from artifact storage")),
-    filename=(str, Field(description="The name of the file to upload")),
+    filename=(Optional[str], Field(description="The name of the file to upload. If not provided, uses the original filename from artifact.", default=None)),
 )
 
 updateCase = create_model(
@@ -643,11 +643,14 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             f"Test case #{case_id} has been updated at '{updated_case['updated_on']}')"
         )
 
-    def add_file_to_case(self, case_id: str, artifact_id: str, filename: str) -> str:
+    def add_file_to_case(self, case_id: str, artifact_id: str, filename: str = None) -> str:
         """Upload file from artifact and attach to TestRail test case."""
         try:
             artifact_client = self.alita.artifact('__temp__')
-            file_bytes = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            
+            # Use provided filename or fallback to artifact filename
+            filename = filename or artifact_filename
 
             if not file_bytes:
                 raise ToolException(f"Failed to download artifact {artifact_id}")
