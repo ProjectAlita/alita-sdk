@@ -44,69 +44,54 @@ nodes:
     transition: process_results
 
   - id: process_results
-    type: code
-    code:
-      type: fixed
-      value: |
-        # Process the result from toolkit node
-        search_result = alita_state.get('tool_result')
-        search_query = alita_state.get('search_query', 'state:open')
-        max_count = alita_state.get('max_count', 5)
-
-        tool_executed = search_result is not None
-        error_message = None
-        issues_list = []
-
-        try:
-            # Parse result
-            if isinstance(search_result, list):
-                issues_list = search_result
-            elif isinstance(search_result, dict):
-                # Might be wrapped in items/issues key
-                issues_list = search_result.get('items') or search_result.get('issues') or [search_result]
-            elif isinstance(search_result, str):
-                import json
-                try:
-                    parsed = json.loads(search_result)
-                    if isinstance(parsed, list):
-                        issues_list = parsed
-                    elif isinstance(parsed, dict):
-                        issues_list = parsed.get('items') or parsed.get('issues') or [parsed]
-                except:
-                    issues_list = []
-        except Exception as e:
-            error_message = str(e)
-
-        has_results = len(issues_list) > 0
-        within_limit = len(issues_list) <= max_count
-
-        # Extract sample info
-        issues_sample = []
-        for item in issues_list[:5]:
-            if isinstance(item, dict):
-                issues_sample.append({
-                    "number": item.get('number'),
-                    "title": item.get('title', '')[:60] if item.get('title') else None,
-                    "state": item.get('state')
-                })
-
-        test_results = {
-            "test_passed": tool_executed and has_results,
-            "tool_executed": tool_executed,
-            "search_query": search_query,
-            "max_count": max_count,
-            "results_count": len(issues_list),
-            "has_results": has_results,
-            "within_limit": within_limit,
-            "issues_sample": issues_sample,
-            "error": error_message
-        }
-        test_results
+    type: llm
+    model: gpt-4o
     input:
       - search_query
       - max_count
       - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'search_issues' tool.
+
+          Search Query: {search_query}
+          Max Count: {max_count}
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+
+          1. Confirm the tool executed successfully (the result is not empty or null)
+          2. Verify that results were found (results_count > 0)
+          3. Check if results count is within the max_count limit
+          4. Parse the results structure (could be a list, or a dict with 'items' or 'issues' key)
+          5. Extract sample information from the first 5 results (number, title first 60 chars, state)
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and found results),
+            "tool_executed": boolean,
+            "search_query": string,
+            "max_count": integer,
+            "results_count": integer (number of results found),
+            "has_results": boolean (results_count > 0),
+            "within_limit": boolean (results_count <= max_count),
+            "issues_sample": list of dicts with keys: number, title, state,
+            "error": string or null (error message if any),
+            "failed_checks": list of strings (failed checks if any)
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
     output:
-      - messages
-    structured_output: false
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
     transition: END
