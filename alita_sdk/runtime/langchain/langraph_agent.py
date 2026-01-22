@@ -194,7 +194,22 @@ Answer only with step name, no need to add descrip in case none of the steps are
         decision_input.append(HumanMessage(
             self.prompt.format(steps=self.steps, description=safe_format(self.description, state), additional_info=additional_info)))
         completion = self.client.invoke(decision_input)
-        result = clean_string(completion.content.strip())
+
+        # skip thinking steps if any
+        if hasattr(completion, 'content'):
+            if isinstance(completion.content, list):
+                # Filter out thinking blocks, keep only text responses
+                text_content = ''.join(
+                    block.get('text', '')
+                    for block in completion.content
+                    if isinstance(block, dict) and block.get('type') == 'text'
+                )
+                result = clean_string(text_content.strip())
+            else:
+                result = clean_string(completion.content.strip())
+        else:
+            result = clean_string(str(completion).strip())
+
         logger.info(f"Plan to transition to: {result}")
         if result not in self.steps or result == 'END':
             result = self.default_output
