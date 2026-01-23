@@ -50,6 +50,15 @@ class Assistant:
         self.max_iterations = data.get('meta', {}).get('step_limit', 25)
         self.is_subgraph = is_subgraph  # Store is_subgraph flag
 
+        # Current participant ID - used for self-filtering in tools
+        self.current_participant_id = data.get('current_participant_id')
+
+        # Swarm mode - enables multi-agent collaboration with shared message history
+        # Check both conversation-level internal_tools and agent version meta internal_tools
+        conversation_internal_tools = data.get('internal_tools', [])
+        version_internal_tools = data.get('meta', {}).get('internal_tools', [])
+        self.swarm_mode = 'swarm' in conversation_internal_tools or 'swarm' in version_internal_tools
+
         # Lazy tools mode - reduces token usage by using meta-tools instead of binding all tools
         # Can be set via: 1) constructor param, 2) data['meta']['lazy_tools_mode'], 3) default False
         if lazy_tools_mode is not None:
@@ -132,7 +141,8 @@ class Assistant:
             debug_mode=debug_mode,
             mcp_tokens=mcp_tokens,
             conversation_id=conversation_id,
-            ignored_mcp_servers=ignored_mcp_servers
+            ignored_mcp_servers=ignored_mcp_servers,
+            current_participant_id=self.current_participant_id
         )
         if tools:
             self.tools += tools
@@ -298,9 +308,22 @@ class Assistant:
         """
         Create a LangGraph react agent using a tool-calling agent pattern.
         This creates a proper LangGraphAgentRunnable with modern tool support.
+
+        If swarm_mode is enabled and there are agent tools (Application tools),
+        creates a swarm-style multi-agent system where all agents share message history.
         """
         # Exclude compiled graph runnables from simple tool agents
         simple_tools = [t for t in self.tools if isinstance(t, (BaseTool, CompiledStateGraph))]
+
+        # Check if swarm mode should be used
+        if self.swarm_mode:
+            # Separate agent tools from regular tools
+            agent_tools = [t for t in simple_tools if self._is_agent_tool(t)]
+            if agent_tools:
+                logger.info(f"Swarm mode enabled with {len(agent_tools)} child agents")
+                return self._create_swarm_agent(simple_tools, agent_tools)
+            else:
+                logger.info("Swarm mode enabled but no agent tools found, using standard agent")
 
         # Set up memory/checkpointer if available
         checkpointer = None
@@ -460,6 +483,483 @@ class Assistant:
             always_bind_tools=self._always_bind_tools  # Middleware tools always bound directly
         )
         #
+        return agent
+
+    def _is_agent_tool(self, tool: BaseTool) -> bool:
+        """
+        Check if a tool is an Application tool (represents a child agent).
+
+        Application tools wrap other agents/pipelines and can be identified by:
+        - Being an instance of the Application class
+        - Having an 'application' attribute (the wrapped runnable)
+        """
+        from ..tools.application import Application
+        if isinstance(tool, Application):
+            return True
+        # Fallback: check for application attribute
+        if hasattr(tool, 'application') and tool.application is not None:
+            return True
+        return False
+
+    def _build_swarm_compatible_agent(self, model, tools: list, prompt: str, agent_name: str):
+        """
+        Build a react agent compatible with langgraph-swarm.
+
+        This is a workaround for langgraph version incompatibility where
+        create_react_agent uses 'input_schema' parameter but StateGraph.add_node
+        only accepts 'input'. We build the agent manually using StateGraph API.
+
+        Args:
+            model: The LLM client
+            tools: List of tools for this agent
+            prompt: System prompt for the agent
+            agent_name: Name for the compiled agent
+
+        Returns:
+            CompiledStateGraph with proper name for swarm integration
+        """
+        from typing import Annotated, TypedDict
+        from langchain_core.messages import AIMessage
+        from langgraph.graph import StateGraph, END, MessagesState
+        from langgraph.prebuilt import ToolNode
+
+        # Bind tools to model
+        if tools:
+            model_with_tools = model.bind_tools(tools)
+        else:
+            model_with_tools = model
+
+        # Define agent node that calls the model
+        def call_model(state: MessagesState):
+            messages = state["messages"]
+            # Prepend system message with prompt
+            system_msg = SystemMessage(content=prompt)
+            response = model_with_tools.invoke([system_msg] + list(messages))
+            return {"messages": [response]}
+
+        # Define routing logic
+        def should_continue(state: MessagesState):
+            messages = state["messages"]
+            last_message = messages[-1]
+            if isinstance(last_message, AIMessage) and last_message.tool_calls:
+                return "tools"
+            return END
+
+        # Build the graph using MessagesState (compatible with swarm)
+        workflow = StateGraph(MessagesState)
+        workflow.add_node("agent", call_model)
+        if tools:
+            workflow.add_node("tools", ToolNode(tools))
+
+        workflow.set_entry_point("agent")
+        workflow.add_conditional_edges("agent", should_continue)
+        if tools:
+            workflow.add_edge("tools", "agent")
+
+        # Compile with name - this is what swarm uses to identify agents
+        return workflow.compile(name=agent_name)
+
+    def _create_swarm_agent(self, all_tools: list, agent_tools: list):
+        """
+        Create a swarm-style multi-agent system where all child agents share message history.
+
+        This implementation manually builds the swarm using StateGraph to avoid
+        version incompatibilities with langgraph_swarm's create_swarm function.
+
+        Architecture:
+        - Parent agent is the default entry point
+        - Child agents are accessible via handoff tools
+        - All agents share the same message history via SwarmState
+        - Control flows between agents based on handoffs
+
+        Args:
+            all_tools: All tools including agent tools
+            agent_tools: Subset of tools that are Application (child agent) tools
+        """
+        from typing import Literal, Optional, Annotated
+        from langchain_core.messages import AIMessage, ToolMessage
+        from langchain_core.tools import StructuredTool
+        from langgraph.graph import StateGraph, END, START, MessagesState
+        from langgraph.prebuilt import ToolNode
+        from langgraph.checkpoint.memory import MemorySaver
+
+        # For swarm mode, always use a fresh MemorySaver to avoid corrupted state
+        # from previous failed runs. The message history is passed via invoke(),
+        # so we don't need to persist across invocations.
+        checkpointer = MemorySaver()
+        logger.info("[SWARM] Using fresh MemorySaver for swarm mode (avoiding shared memory corruption)")
+
+        # Separate regular tools from agent tools
+        regular_tools = [t for t in all_tools if t not in agent_tools]
+
+        # Resolve prompt
+        prompt_instructions = self._resolve_jinja2_variables(self.prompt)
+
+        # Build agent name list for type hints
+        agent_names = ["parent"] + [t.name for t in agent_tools]
+
+        # Create SwarmState class with active_agent tracking
+        class SwarmState(MessagesState):
+            """State schema for the multi-agent swarm."""
+            active_agent: Optional[str] = None
+
+        # Create simple handoff tools that return messages instead of Command objects
+        def create_simple_handoff_tool(target_agent: str, description: str):
+            """Create a simple handoff tool that returns a string message."""
+            def handoff_func() -> str:
+                return f"Successfully transferred to {target_agent}"
+
+            return StructuredTool.from_function(
+                func=handoff_func,
+                name=f"transfer_to_{target_agent}",
+                description=description
+            )
+
+        # Create handoff tools for each child agent
+        parent_handoff_tools = []
+        child_agent_descriptions = []
+
+        # Handoff tool to return to parent
+        handoff_to_parent = create_simple_handoff_tool(
+            "parent",
+            "Hand control back to the main assistant when done with the specialized task"
+        )
+
+        child_configs = []  # Store child agent configurations
+
+        for agent_tool in agent_tools:
+            agent_name = agent_tool.name
+            original_name = agent_tool.metadata.get('original_name', agent_name) if hasattr(agent_tool, 'metadata') else agent_name
+
+            # Create handoff tool for parent to call this child
+            handoff_tool_name = f"transfer_to_{agent_name}"
+            handoff_to_child = create_simple_handoff_tool(
+                agent_name,
+                f"Hand off to {original_name}: {agent_tool.description}"
+            )
+            parent_handoff_tools.append(handoff_to_child)
+
+            # Track child agent info
+            child_agent_descriptions.append({
+                'name': original_name,
+                'handoff_tool': handoff_tool_name,
+                'description': agent_tool.description
+            })
+
+            # Store child config for later node creation
+            child_system_prompt = f"You are {original_name}. {agent_tool.description}\n\nComplete your task using the available tools. When done, use 'transfer_to_parent' to return control to the main assistant."
+            child_configs.append({
+                'name': agent_name,
+                'tools': [agent_tool, handoff_to_parent],
+                'prompt': child_system_prompt
+            })
+
+        # Build swarm instructions for the parent prompt
+        swarm_prompt_addon = self._build_swarm_prompt_addon(child_agent_descriptions)
+        enhanced_prompt = f"{prompt_instructions}\n\n{swarm_prompt_addon}"
+
+        # Parent tools = regular tools + handoff tools to children
+        parent_tools = regular_tools + parent_handoff_tools
+
+        # Build the swarm StateGraph manually
+        workflow = StateGraph(SwarmState)
+
+        # Helper function to filter orphaned tool_use blocks from message history
+        def filter_orphaned_tool_calls(messages: list) -> list:
+            """
+            Remove or fix orphaned tool_use blocks that don't have matching tool_result blocks.
+            Anthropic requires every tool_use to have a corresponding tool_result immediately after.
+            """
+            if not messages:
+                return messages
+
+            # Collect all tool_call_ids that have corresponding ToolMessages
+            tool_result_ids = set()
+            for msg in messages:
+                if isinstance(msg, ToolMessage):
+                    if hasattr(msg, 'tool_call_id') and msg.tool_call_id:
+                        tool_result_ids.add(msg.tool_call_id)
+
+            # Filter messages, removing AIMessages with orphaned tool_calls
+            cleaned_messages = []
+            for msg in messages:
+                if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    # Check if all tool_calls have matching results
+                    orphaned_calls = []
+                    valid_calls = []
+                    for tc in msg.tool_calls:
+                        tc_id = tc.get('id', '')
+                        if tc_id in tool_result_ids:
+                            valid_calls.append(tc)
+                        else:
+                            orphaned_calls.append(tc)
+                            logger.warning(f"[SWARM] Filtering orphaned tool_call: {tc_id}")
+
+                    if orphaned_calls and not valid_calls:
+                        # All tool_calls are orphaned - convert to plain AIMessage without tool_calls
+                        if msg.content:
+                            cleaned_msg = AIMessage(content=msg.content)
+                            cleaned_messages.append(cleaned_msg)
+                        # Skip if no content either
+                    elif orphaned_calls:
+                        # Some tool_calls are orphaned - create new message with only valid calls
+                        cleaned_msg = AIMessage(content=msg.content, tool_calls=valid_calls)
+                        cleaned_messages.append(cleaned_msg)
+                    else:
+                        # All tool_calls have matching results
+                        cleaned_messages.append(msg)
+                else:
+                    cleaned_messages.append(msg)
+
+            return cleaned_messages
+
+        # Helper function to create agent node
+        def make_agent_node(model, tools, prompt, agent_name):
+            """Create an agent node function."""
+            if tools:
+                model_with_tools = model.bind_tools(tools)
+            else:
+                model_with_tools = model
+
+            def agent_node(state: SwarmState):
+                messages = state["messages"]
+                # Filter out existing system messages to avoid "multiple non-consecutive system messages" error
+                filtered_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+                # Filter orphaned tool_use blocks to avoid Anthropic API errors
+                filtered_messages = filter_orphaned_tool_calls(filtered_messages)
+                system_msg = SystemMessage(content=prompt)
+                response = model_with_tools.invoke([system_msg] + filtered_messages)
+                return {"messages": [response]}
+
+            return agent_node
+
+        # Helper to check for handoff in tool calls
+        def get_handoff_destination(message: AIMessage) -> Optional[str]:
+            """Check if the message contains a handoff tool call."""
+            if not hasattr(message, 'tool_calls') or not message.tool_calls:
+                return None
+            for tool_call in message.tool_calls:
+                tool_name = tool_call.get('name', '')
+                if tool_name.startswith('transfer_to_'):
+                    return tool_name.replace('transfer_to_', '')
+            return None
+
+        # Custom tool node that updates active_agent on handoff
+        def make_tool_node_with_handoff(tools, agent_names_list):
+            """Create a tool node that handles handoff state updates."""
+            base_tool_node = ToolNode(tools)
+
+            def tool_node_with_handoff(state: SwarmState):
+                # Execute tools normally
+                result = base_tool_node.invoke(state)
+
+                # Check if there was a handoff in the last AI message
+                messages = state.get("messages", [])
+                for msg in reversed(messages):
+                    if isinstance(msg, AIMessage):
+                        handoff_dest = get_handoff_destination(msg)
+                        if handoff_dest and handoff_dest in agent_names_list:
+                            # Update active_agent in the result
+                            if isinstance(result, dict):
+                                result["active_agent"] = handoff_dest
+                            else:
+                                result = {"messages": result.get("messages", []), "active_agent": handoff_dest}
+                            logger.info(f"[SWARM] Handoff detected: transferring to {handoff_dest}")
+                        break
+                return result
+
+            return tool_node_with_handoff
+
+        # Add parent agent node
+        parent_node = make_agent_node(self.client, parent_tools, enhanced_prompt, "parent")
+        workflow.add_node("parent", parent_node)
+
+        # Add parent tools node with handoff handling
+        if parent_tools:
+            workflow.add_node("parent_tools", make_tool_node_with_handoff(parent_tools, agent_names))
+
+        # Add child agent nodes
+        for config in child_configs:
+            child_node = make_agent_node(self.client, config['tools'], config['prompt'], config['name'])
+            workflow.add_node(config['name'], child_node)
+            # Add child tools node with handoff handling
+            if config['tools']:
+                workflow.add_node(f"{config['name']}_tools", make_tool_node_with_handoff(config['tools'], agent_names))
+
+        # Router function to route to active agent
+        def route_to_active_agent(state: SwarmState) -> str:
+            return state.get("active_agent", "parent") or "parent"
+
+        # Routing logic after parent agent
+        def route_after_parent(state: SwarmState) -> str:
+            messages = state["messages"]
+            if not messages:
+                return END
+            last_message = messages[-1]
+            if isinstance(last_message, AIMessage):
+                # Check for handoff
+                handoff_dest = get_handoff_destination(last_message)
+                if handoff_dest and handoff_dest != "parent":
+                    return "parent_tools"  # Process handoff tool first
+                if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                    return "parent_tools"
+            return END
+
+        # Routing logic after parent tools
+        def route_after_parent_tools(state: SwarmState) -> str:
+            # Check active_agent first (set by handoff)
+            active = state.get("active_agent")
+            if active and active in agent_names and active != "parent":
+                return active
+
+            messages = state["messages"]
+            if not messages:
+                return "parent"
+            # Check the last AI message for handoff
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage):
+                    handoff_dest = get_handoff_destination(msg)
+                    if handoff_dest and handoff_dest in agent_names:
+                        return handoff_dest
+                    break
+            return "parent"
+
+        # Add routing from START
+        workflow.add_conditional_edges(START, route_to_active_agent, {name: name for name in agent_names})
+
+        # Add routing after parent
+        workflow.add_conditional_edges("parent", route_after_parent, {
+            "parent_tools": "parent_tools",
+            END: END
+        })
+
+        # Add routing after parent tools
+        tool_routes = {name: name for name in agent_names}
+        tool_routes["parent"] = "parent"
+        workflow.add_conditional_edges("parent_tools", route_after_parent_tools, tool_routes)
+
+        # Add routing for child agents
+        for config in child_configs:
+            child_name = config['name']
+
+            def make_child_router(child_name):
+                def route_after_child(state: SwarmState) -> str:
+                    messages = state["messages"]
+                    if not messages:
+                        return END
+                    last_message = messages[-1]
+                    if isinstance(last_message, AIMessage):
+                        handoff_dest = get_handoff_destination(last_message)
+                        if handoff_dest:
+                            return f"{child_name}_tools"
+                        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                            return f"{child_name}_tools"
+                    return END
+                return route_after_child
+
+            def make_child_tools_router(child_name, agent_names_list):
+                def route_after_child_tools(state: SwarmState) -> str:
+                    # Check active_agent first (set by handoff)
+                    active = state.get("active_agent")
+                    if active and active in agent_names_list and active != child_name:
+                        return active
+
+                    messages = state["messages"]
+                    for msg in reversed(messages):
+                        if isinstance(msg, AIMessage):
+                            handoff_dest = get_handoff_destination(msg)
+                            if handoff_dest and handoff_dest in agent_names_list:
+                                return handoff_dest
+                            break
+                    return child_name
+                return route_after_child_tools
+
+            workflow.add_conditional_edges(child_name, make_child_router(child_name), {
+                f"{child_name}_tools": f"{child_name}_tools",
+                END: END
+            })
+
+            child_tool_routes = {name: name for name in agent_names}
+            child_tool_routes[child_name] = child_name
+            workflow.add_conditional_edges(f"{child_name}_tools", make_child_tools_router(child_name, agent_names), child_tool_routes)
+
+        # Compile with checkpointer
+        try:
+            compiled = workflow.compile(checkpointer=checkpointer, store=self.store)
+            logger.info(f"Created manual swarm agent with {len(agent_tools)} child agents: {[t.name for t in agent_tools]}")
+            return compiled
+        except Exception as e:
+            logger.error(f"Failed to compile swarm: {type(e).__name__}: {e}", exc_info=True)
+            raise
+
+    def _build_swarm_prompt_addon(self, child_agents: list) -> str:
+        """
+        Build prompt instructions explaining available child agents for handoff.
+
+        Args:
+            child_agents: List of dicts with 'name', 'handoff_tool', 'description'
+
+        Returns:
+            Formatted string to append to the parent agent's prompt
+        """
+        if not child_agents:
+            return ""
+
+        lines = [
+            "## Available Specialist Agents",
+            "",
+            "You can delegate tasks to the following specialist agents by using their handoff tools.",
+            "When you hand off to a specialist, they will have access to the full conversation history.",
+            "After completing their task, control will return to you.",
+            ""
+        ]
+
+        for agent in child_agents:
+            lines.append(f"### {agent['name']}")
+            lines.append(f"- **Handoff tool**: `{agent['handoff_tool']}`")
+            lines.append(f"- **Specialization**: {agent['description']}")
+            lines.append("")
+
+        lines.extend([
+            "## When to Hand Off",
+            "",
+            "- Hand off when a task requires the specialist's specific capabilities",
+            "- You can hand off multiple times to different specialists as needed",
+            "- After a specialist completes their work, continue coordinating the overall task",
+        ])
+
+        return "\n".join(lines)
+
+    def _get_checkpointer(self):
+        """Get or create a checkpointer for conversation persistence."""
+        if self.memory is not None:
+            return self.memory
+        elif self.store is not None:
+            from langgraph.checkpoint.memory import MemorySaver
+            return MemorySaver()
+        else:
+            from langgraph.checkpoint.memory import MemorySaver
+            logger.info("Using default MemorySaver for conversation persistence")
+            return MemorySaver()
+
+    def _create_standard_react_agent(self, tools: list):
+        """
+        Fallback method to create a standard react agent without swarm.
+        Used when swarm mode is enabled but langgraph-swarm is not available.
+        """
+        # This reuses the existing getLangGraphReactAgent logic
+        # but bypasses the swarm check
+        checkpointer = self._get_checkpointer()
+        prompt_instructions = self._resolve_jinja2_variables(self.prompt)
+
+        from langgraph.prebuilt import create_react_agent
+
+        agent = create_react_agent(
+            self.client,
+            tools=tools,
+            prompt=prompt_instructions
+        )
+
         return agent
 
     # This one is used only in Alita and OpenAI

@@ -93,7 +93,9 @@ class AlitaClient:
         if api_extra_headers is not None:
             self.headers.update(api_extra_headers)
         self.predict_url = f"{self.base_url}{self.api_path}/prompt_lib/predict/prompt_lib/{self.project_id}"
-        self.app = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/{self.project_id}"
+        self.base_app_url = f"{self.base_url}{self.api_path}/applications/application/prompt_lib/"
+        self.base_public_app_url = f"{self.base_url}{self.api_path}/applications/public_application/prompt_lib/"
+        self.app = f"{self.base_app_url}{self.project_id}"
         self.mcp_tools_list = f"{self.base_url}{self.api_path}/mcp_sse/tools_list/{self.project_id}"
         self.mcp_tools_call = f"{self.base_url}{self.api_path}/mcp_sse/tools_call/{self.project_id}"
         self.application_versions = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}"
@@ -144,9 +146,45 @@ class AlitaClient:
             return f"Error: Could not determine user ID for MCP tool call"
 
     def get_app_details(self, application_id: int):
-        url = f"{self.app}/{application_id}"
+        """Get application details for the client's project."""
+        url = f"{self.base_app_url}{self.project_id}/{application_id}"
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
+
+    def get_public_app_details(self, application_id: int, version_name: str = None) -> dict:
+        """
+        Get application details from the public project.
+
+        Uses the public_application endpoint which auto-resolves to the public project.
+        This is used when accessing applications from public projects that the current
+        user may not have direct access to.
+
+        Args:
+            application_id: The ID of the application to fetch
+            version_name: Optional specific version name. If not provided, gets latest published.
+
+        Returns:
+            dict with application details including 'version_details' for the published version
+
+        Raises:
+            ApiDetailsRequestError: If the application is not found or has no published version
+        """
+        url = f"{self.base_public_app_url}{application_id}"
+        if version_name:
+            url = f"{url}/{version_name}"
+
+        resp = requests.get(url, headers=self.headers, verify=False)
+        if resp.ok:
+            data = resp.json()
+            logger.info(f"[PUBLIC_APP] Successfully fetched public app {application_id}: {data.get('name')}")
+            return data
+
+        logger.error(f"[PUBLIC_APP] Failed to fetch public application: {resp.status_code} - {resp.text}. "
+                    f"Application ID: {application_id}")
+        raise ApiDetailsRequestError(
+            f"Failed to fetch public application {application_id}. "
+            f"Application may not exist or may not have a published version."
+        )
 
     def toolkit(self, toolkit_id: int):
         url = f"{self.base_url}{self.api_path}/tool/prompt_lib/{self.project_id}/{toolkit_id}"
@@ -375,7 +413,8 @@ class AlitaClient:
             raise
 
     def get_app_version_details(self, application_id: int, application_version_id: int) -> dict:
-        url = f"{self.application_versions}/{application_id}/{application_version_id}"
+        """Get application version details for the client's project."""
+        url = f"{self.base_url}{self.api_path}/applications/version/prompt_lib/{self.project_id}/{application_id}/{application_version_id}"
         if self.configurations:
             configs = self.configurations
         else:
@@ -385,7 +424,7 @@ class AlitaClient:
         if resp.ok:
             return resp.json()
         logger.error(f"Failed to fetch application version details: {resp.status_code} - {resp.text}."
-                     f" Application ID: {application_id}, Version ID: {application_version_id}")
+                     f" Application ID: {application_id}, Version ID: {application_version_id}, Project ID: {self.project_id}")
         raise ApiDetailsRequestError(f"Failed to fetch application version details for {application_id}/{application_version_id}.")
 
     def get_integration_details(self, integration_id: str, format_for_model: bool = False):
@@ -724,7 +763,7 @@ class AlitaClient:
                       store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False,
                       mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None,
                       ignored_mcp_servers: Optional[list] = None, persona: Optional[str] = "generic",
-                      lazy_tools_mode: Optional[bool] = False):
+                      lazy_tools_mode: Optional[bool] = False, internal_tools: Optional[list] = None):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -743,6 +782,8 @@ class AlitaClient:
             ignored_mcp_servers: Optional list of MCP server URLs to ignore (user chose to continue without auth)
             persona: Default persona for chat: 'generic' or 'qa' (default: 'generic')
             lazy_tools_mode: Enable lazy tools mode to reduce token usage with many toolkits (default: False)
+            internal_tools: Optional list of internal tool names (e.g., ['swarm', 'planner']).
+                           Enables special modes like swarm for multi-agent collaboration.
 
         Returns:
             Runnable agent ready for execution
@@ -753,6 +794,8 @@ class AlitaClient:
             chat_history = []
         if variables is None:
             variables = []
+        if internal_tools is None:
+            internal_tools = []
 
         # Create a minimal data structure for predict agent
         # All LLM settings are taken from the passed client instance
@@ -761,7 +804,8 @@ class AlitaClient:
         agent_data = {
             'instructions': instructions,
             'tools': tools,  # Tool configs that will be processed by get_tools()
-            'variables': variables
+            'variables': variables,
+            'internal_tools': internal_tools  # Mode flags like 'swarm' for multi-agent collaboration
         }
 
         # Auto-create middleware based on internal_tools in the tools list

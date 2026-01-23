@@ -552,6 +552,19 @@ def create_graph(
 
     # Normalize always_bind_tools
     always_bind_tools = always_bind_tools or []
+
+    # Application tools (agents/pipelines) should always be bound directly
+    # They are first-class citizens that need direct LLM access for handoffs
+    # This is critical for swarm mode to work with lazy tools selection
+    from ..tools.application import Application
+    agent_tools = [t for t in tools if isinstance(t, Application)]
+    if agent_tools:
+        always_bind_tools = list(always_bind_tools) + agent_tools
+        logger.info(
+            f"[LazyTools] Agent/pipeline tools bound directly ({len(agent_tools)}): "
+            f"{[t.name for t in agent_tools]}"
+        )
+
     always_bind_tool_names = {t.name for t in always_bind_tools if hasattr(t, 'name')}
 
     if lazy_tools_mode:
@@ -1191,13 +1204,25 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         
         logger.info(f"Input: {thread_id} - {input}")
         try:
-            if self.checkpointer and self.checkpointer.get_tuple(config):
-                if config.pop("should_continue", False):
-                    invoke_input = input
+            checkpoint_tuple = self.checkpointer.get_tuple(config) if self.checkpointer else None
+            if checkpoint_tuple:
+                # Check if checkpoint is at END state (previous run completed)
+                checkpoint_state = self.get_state(config)
+                is_at_end = not checkpoint_state.next
+                should_continue = config.pop("should_continue", False)
+
+                if should_continue:
+                    # Explicitly continuing interrupted execution - invoke with input
+                    result = super().invoke(input, config=config, *args, **kwargs)
+                elif is_at_end:
+                    # Previous run completed - start fresh run with new input
+                    # Don't use invoke(None) as that just returns current state without running
+                    logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
+                    result = super().invoke(input, config=config, *args, **kwargs)
                 else:
+                    # Interrupted mid-execution - update state and continue from where we left off
                     self.update_state(config, input)
-                    invoke_input = None
-                result = super().invoke(invoke_input, config=config, *args, **kwargs)
+                    result = super().invoke(None, config=config, *args, **kwargs)
             else:
                 result = super().invoke(input, config=config, *args, **kwargs)
         except GraphRecursionError as e:

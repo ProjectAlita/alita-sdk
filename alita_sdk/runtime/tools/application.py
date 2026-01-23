@@ -53,7 +53,8 @@ class Application(BaseTool):
     args_runnable: dict = {}
     metadata: dict = {}
     is_subgraph: Optional[bool] = False
-    
+    variable_defaults: dict = {}  # Default values for agent variables (from version_details)
+
     @model_validator(mode='before')
     @classmethod
     def preserve_original_name(cls, data: Any) -> Any:
@@ -83,7 +84,24 @@ class Application(BaseTool):
         if self.client and self.args_runnable:
             # Recreate new LanggraphAgentRunnable in order to reflect the current input_mapping (it can be dynamic for pipelines).
             # Actually, for pipelines agent toolkits LanggraphAgentRunnable is created (for LLMNode) before pipeline's schema parsing.
-            application_variables = {k: {"name": k, "value": v} for k, v in kwargs.items()}
+
+            # Merge variable defaults with passed kwargs
+            # Defaults are applied first, then overridden by explicitly passed values
+            # This ensures variables always have a value (either default or passed)
+            merged_vars = dict(self.variable_defaults)  # Start with defaults
+            for k, v in kwargs.items():
+                # Only override if value is not None (allow explicit override with actual values)
+                if v is not None:
+                    merged_vars[k] = v
+                elif k not in merged_vars:
+                    # Keep None values only if no default exists
+                    merged_vars[k] = v
+
+            # Build application_variables from merged values
+            application_variables = {k: {"name": k, "value": v} for k, v in merged_vars.items()}
+            logger.debug(f"[APP_RUN] Variable defaults: {self.variable_defaults}")
+            logger.debug(f"[APP_RUN] Merged variables: {list(merged_vars.keys())}")
+
             self.application = self.client.application(**self.args_runnable, application_variables=application_variables)
         response = self.application.invoke(formulate_query(kwargs))
         if self.is_subgraph:

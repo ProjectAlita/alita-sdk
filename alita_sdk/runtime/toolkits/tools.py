@@ -44,9 +44,18 @@ def get_toolkits():
     return core_toolkits + mcp_config_toolkits + community_toolkits() + alita_toolkits()
 
 
-def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None) -> list:
+def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseStore = None, debug_mode: Optional[bool] = False, mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None, current_participant_id: Optional[int] = None) -> list:
+    """
+    Process tool configurations and return instantiated tools.
+
+    Args:
+        current_participant_id: The participant ID of the agent being predicted to.
+            Used to filter out self-references (prevent agent from calling itself).
+    """
     # Sanitize tools_list to handle corrupted tool configurations
     sanitized_tools = []
+    seen_toolkit_ids = set()  # Track seen toolkit IDs for deduplication
+
     for tool in tools_list:
         if isinstance(tool, dict):
             # Check for corrupted structure where 'type' and 'name' contain the full tool config
@@ -70,10 +79,30 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
             logger.warning(f"Skipping non-dict tool: {tool}")
             # Skip non-dict tools
 
+    # Deduplication and self-filtering
+    deduplicated_tools = []
+    for tool in sanitized_tools:
+        # Deduplicate by toolkit ID (for toolkits that have an ID)
+        toolkit_id = tool.get('id')
+        if toolkit_id is not None:
+            if toolkit_id in seen_toolkit_ids:
+                logger.debug(f"Skipping duplicate toolkit id={toolkit_id}")
+                continue
+            seen_toolkit_ids.add(toolkit_id)
+
+        # Self-filtering for application tools (prevent agent from calling itself)
+        if tool.get('type') == 'application' and current_participant_id is not None:
+            participant_id = tool.get('participant_id')
+            if participant_id == current_participant_id:
+                logger.info(f"Filtering out self-reference: participant_id={participant_id}")
+                continue
+
+        deduplicated_tools.append(tool)
+
     tools = []
     unhandled_tools = []  # Track tools not handled by main processing
 
-    for tool in sanitized_tools:
+    for tool in deduplicated_tools:
         # Flag to track if this tool was processed by the main loop
         # Used to prevent double processing by fallback systems
         tool_handled = False
@@ -82,16 +111,30 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 tool_handled = True
                 # Check if this is a pipeline to enable PrinterNode filtering
                 is_pipeline_subgraph = tool.get('agent_type', '') == 'pipeline'
+                # Get project_id from settings (needed for public project agents)
+                app_project_id = tool.get('settings', {}).get('project_id')
+                logger.info(f"[APP_TOOL] Processing application tool '{tool.get('name')}': "
+                           f"app_id={tool['settings'].get('application_id')}, "
+                           f"version_id={tool['settings'].get('application_version_id')}, "
+                           f"project_id={app_project_id}, "
+                           f"raw_settings={tool.get('settings')}")
 
-                tools.extend(ApplicationToolkit.get_toolkit(
-                    alita_client,
-                    application_id=int(tool['settings']['application_id']),
-                    application_version_id=int(tool['settings']['application_version_id']),
-                    selected_tools=[],
-                    ignored_mcp_servers=ignored_mcp_servers,
-                    is_subgraph=is_pipeline_subgraph,  # Pass is_subgraph for pipelines
-                    mcp_tokens=mcp_tokens
-                ).get_tools())
+                try:
+                    tools.extend(ApplicationToolkit.get_toolkit(
+                        alita_client,
+                        application_id=int(tool['settings']['application_id']),
+                        application_version_id=int(tool['settings']['application_version_id']),
+                        selected_tools=[],
+                        ignored_mcp_servers=ignored_mcp_servers,
+                        is_subgraph=is_pipeline_subgraph,  # Pass is_subgraph for pipelines
+                        mcp_tokens=mcp_tokens,
+                        project_id=app_project_id  # Use agent's project, not conversation's
+                    ).get_tools())
+                except Exception as app_err:
+                    # Gracefully skip application tools that fail to load (e.g., deleted agents)
+                    # This is common for conversation participants that reference stale agents
+                    logger.warning(f"Skipping application tool '{tool.get('name', 'unknown')}': {app_err}")
+                    continue
                 # TODO: deprecate next release (1/15/2026)
                 # if is_pipeline_subgraph:
                 #     # static get_toolkit returns a list of CompiledStateGraph stubs
