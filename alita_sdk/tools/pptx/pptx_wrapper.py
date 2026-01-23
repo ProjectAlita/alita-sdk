@@ -5,12 +5,14 @@ import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
 import chardet
+from langchain_core.tools import ToolException
 from pydantic import create_model, BaseModel, Field
 from ..elitea_base import BaseToolApiWrapper
 from logging import getLogger
 import traceback
 from langchain_core.messages import HumanMessage
 import pptx
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 logger = getLogger(__name__)
 
 
@@ -107,12 +109,12 @@ class PPTXWrapper(BaseToolApiWrapper):
             logger.error(f"Error uploading PPTX file {file_name}: {str(e)}")
             raise e
 
-    def _get_structured_output_llm(self, stuct_model):
+    def _get_structured_output_llm(self, stuct_model, method: Literal["function_calling", "json_mode", "json_schema"] = "function_calling"):
         """
         Returns the structured output LLM if available, otherwise returns the regular LLM
         """
         shalow_llm = copy(self.llm)
-        return shalow_llm.with_structured_output(stuct_model)
+        return shalow_llm.with_structured_output(stuct_model, method)
 
     def _extract_text_from_shape(self, shape) -> List[str]:
         """
@@ -344,8 +346,11 @@ class PPTXWrapper(BaseToolApiWrapper):
                     
                     # Get the structured output LLM
                     structured_llm = self._get_structured_output_llm(slide_model)
-                    result = structured_llm.invoke([HumanMessage(content=prompt_parts)])
-                    # response = result.content
+                    try:
+                        result = structured_llm.invoke([HumanMessage(content=prompt_parts)])
+                    except Exception as e:
+                        logger.error(f"Error invoking structured LLM: {str(e)}")
+                        return ToolException(f"Cannot fill the pptx template: \nerror invoking structured LLM: {str(e)}")
                     for key, value in result.model_dump().items():
                         # Replace the placeholder text with the generated content
                         for i, shape_or_cell_info in enumerate(placeholder_shapes):
@@ -510,6 +515,11 @@ class PPTXWrapper(BaseToolApiWrapper):
             zip_ref.extractall(extract_dir)
 
     def edit_smartart_xml(self, diagram_folder, target_language):
+        """
+        Translate SmartArt texts in batch mode.
+        """
+        # Phase 1: Collect all texts with their element references
+        text_items = []  # List of (element, original_text) tuples
 
         for root_dir, dirs, files in os.walk(diagram_folder):
             for file in files:
@@ -519,10 +529,25 @@ class PPTXWrapper(BaseToolApiWrapper):
                     root = tree.getroot()
 
                     for elem in root.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}t'):
-                        elem.text = self.translate(elem.text, target_language)
+                        if elem.text:
+                            text_items.append((elem, xml_file, tree))
 
-                    tree.write(xml_file, encoding='utf-8', xml_declaration=True)
-                    print(f"Edited {xml_file}")
+        # Phase 2: Translate all texts in a single batch
+        if text_items:
+            texts_to_translate = [elem.text for elem, _, _ in text_items]
+            translated_texts = self.translate_batch(texts_to_translate, target_language)
+
+            # Phase 3: Update elements with translations
+            files_to_save = {}  # Track which files need to be saved
+            for (elem, xml_file, tree), translated_text in zip(text_items, translated_texts):
+                elem.text = translated_text
+                files_to_save[xml_file] = tree
+
+            # Save all modified XML files
+            for xml_file, tree in files_to_save.items():
+                tree.write(xml_file, encoding='utf-8', xml_declaration=True)
+                logger.debug(f"Edited {xml_file}")
+
 
     def rezip_pptx(self, extract_dir, output_pptx):
         with zipfile.ZipFile(output_pptx, 'w', zipfile.ZIP_DEFLATED) as pptx_zip:
@@ -532,102 +557,135 @@ class PPTXWrapper(BaseToolApiWrapper):
                     arcname = os.path.relpath(full_path, extract_dir)
                     pptx_zip.write(full_path, arcname)
 
-    def translate(self, text_to_translate: str, target_language: str) -> str:
-        prompt = f"""Please translate the following text to {target_language}:
-"{text_to_translate}"
+    def translate_batch(self, texts: List[str], target_language: str, max_batch_size: int = 20) -> List[str]:
+        """
+        Translate multiple texts in a single LLM call (or multiple calls if texts exceed max_batch_size).
 
-Provide only the translated text without quotes or explanations."""
+        Args:
+            texts: List of texts to translate
+            target_language: Target language name (e.g., 'Spanish', 'Ukrainian')
+            max_batch_size: Maximum number of texts to translate in a single LLM call (default: 100)
+                           Adjust this based on your LLM's token limits and average text length.
+
+        Returns:
+            List of translated texts in the same order as input
+        """
+        if not texts:
+            return []
+
+        # If texts exceed max_batch_size, process in chunks
+        if len(texts) > max_batch_size:
+            logger.info(f"Processing {len(texts)} texts in chunks of {max_batch_size}")
+            all_translations = []
+
+            for i in range(0, len(texts), max_batch_size):
+                chunk = texts[i:i + max_batch_size]
+                chunk_num = (i // max_batch_size) + 1
+                total_chunks = (len(texts) + max_batch_size - 1) // max_batch_size
+                logger.info(f"Translating chunk {chunk_num}/{total_chunks} ({len(chunk)} texts)")
+
+                chunk_translations = self._translate_batch_single(chunk, target_language, start_index=i)
+                all_translations.extend(chunk_translations)
+
+            logger.info(f"Completed translation of {len(all_translations)} texts in {total_chunks} chunks")
+            return all_translations
+
+        # Process all texts in a single call
+        return self._translate_batch_single(texts, target_language, start_index=0)
+
+    def _translate_batch_single(self, texts: List[str], target_language: str, start_index: int = 0) -> List[str]:
+        """
+        Internal method to translate a batch of texts in a single LLM call.
+
+        Args:
+            texts: List of texts to translate
+            target_language: Target language name
+            start_index: Starting index for numbering (used when chunking)
+
+        Returns:
+            List of translated texts in the same order as input
+        """
+        if not texts:
+            return []
+
+        # Escape texts for JSON-like format to handle newlines properly
+        import json
+
+        # Create a structured list of texts with indices
+        texts_list = [{"index": start_index + i + 1, "text": text} for i, text in enumerate(texts)]
+        texts_json = json.dumps(texts_list, ensure_ascii=False, indent=2)
+
+        prompt = f"""Please translate the following {len(texts)} texts to {target_language}.
+The texts are provided in JSON format below. Some texts may contain newlines or special characters.
+
+Return your response as a JSON array with the same structure, keeping the same index numbers.
+Format: [{{"index": {start_index + 1}, "translation": "translated text"}}, {{"index": {start_index + 2}, "translation": "translated text"}}, ...]
+
+IMPORTANT: Preserve any newlines (\\n) in the translated text. Only translate the content, keep the formatting.
+
+Texts to translate:
+{texts_json}"""
 
         result = self.llm.invoke([HumanMessage(content=[{"type": "text", "text": prompt}])])
-        translated_text = result.content
-        # Clean up any extra quotes or whitespace
-        return translated_text.strip().strip('"\'')
+        translated_content = result.content.strip()
 
-    # def translate_presentation(self, file_name: str, output_file_name: str, target_language: str) -> Dict[str, Any]:
-    #     """
-    #            Translate text in a PowerPoint presentation to another language.
-    #
-    #            Args:
-    #                file_name: PPTX file name in the bucket
-    #                output_file_name: Output PPTX file name to save in the bucket
-    #                target_language: Target language code (e.g., 'es' for Spanish, 'ua' for Ukrainian)
-    #
-    #            Returns:
-    #                Dictionary with result information
-    #            """
-    #     import pptx
-    #
-    #     try:
-    #         # Download the PPTX file
-    #         local_path = self._download_pptx(file_name)
-    #
-    #         # Map of language codes to full language names
-    #         language_names = {
-    #             'en': 'English',
-    #             'es': 'Spanish',
-    #             'fr': 'French',
-    #             'de': 'German',
-    #             'it': 'Italian',
-    #             'pt': 'Portuguese',
-    #             'ru': 'Russian',
-    #             'ja': 'Japanese',
-    #             'zh': 'Chinese',
-    #             'ar': 'Arabic',
-    #             'hi': 'Hindi',
-    #             'ko': 'Korean',
-    #             'ua': 'Ukrainian'
-    #         }
-    #
-    #         # Get the full language name if available, otherwise use the code
-    #         target_language_name = language_names.get(target_language.lower(), target_language)
-    #
-    #         # Translate
-    #         import shutil
-    #
-    #         # Create a unique temporary directory for extraction
-    #         extract_dir = tempfile.mkdtemp(prefix='pptx_translate_')
-    #
-    #         try:
-    #             self.unzip_pptx(pptx_path=local_path, extract_dir=extract_dir)
-    #             self.edit_smartart_xml(extract_dir, target_language_name)
-    #
-    #             # Save to the proper output path
-    #             temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
-    #             self.rezip_pptx(extract_dir, temp_output_path)
-    #
-    #             # Load the modified presentation to ensure it's valid
-    #             presentation = pptx.Presentation(temp_output_path)
-    #         finally:
-    #             # Clean up the extraction directory
-    #             if os.path.exists(extract_dir):
-    #                 shutil.rmtree(extract_dir)
-    #
-    #         # Save the translated presentation
-    #         temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
-    #         presentation.save(temp_output_path)
-    #
-    #         # Upload the translated file
-    #         result_url = self._upload_pptx(temp_output_path, output_file_name)
-    #
-    #         # Clean up temporary files
-    #         try:
-    #             os.remove(local_path)
-    #             os.remove(temp_output_path)
-    #         except:
-    #             pass
-    #
-    #         return {
-    #             "status": "success",
-    #             "message": f"Successfully translated presentation to {target_language_name} and saved as {output_file_name}",
-    #             "url": result_url
-    #         }
-    #
-    #     except Exception as e:
-    #         logger.error(f"Error translating PPTX: {str(e)}")
-    #         return {
-    #             "status": "error",
-    #             "message": f"Failed to translate presentation: {str(e)}"
-    #         }
+        # Parse the JSON response
+        translated_texts = []
+        try:
+            # Try to extract JSON from the response (LLM might wrap it in markdown)
+            import re
+
+            # Remove markdown code blocks if present
+            json_match = re.search(r'```(?:json)?\s*(\[.*\])\s*```', translated_content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Try to find JSON array directly
+                json_match = re.search(r'(\[.*\])', translated_content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                else:
+                    json_str = translated_content
+
+            # Parse the JSON
+            translations_list = json.loads(json_str)
+
+            # Sort by index to ensure correct order
+            translations_list.sort(key=lambda x: x.get('index', 0))
+
+            # Extract translations in order
+            for item in translations_list:
+                translated_text = item.get('translation', item.get('text', ''))
+                translated_texts.append(translated_text)
+
+            logger.debug(f"Successfully parsed {len(translated_texts)} translations from JSON response")
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning(f"Failed to parse JSON response: {e}. Falling back to line-by-line parsing.")
+
+            # Fallback to old parsing method
+            for line in translated_content.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                # Remove numbering and quotes
+                match = re.match(r'^\d+[\.\)]\s*(.*)', line)
+                if match:
+                    translated_texts.append(match.group(1).strip().strip('"\''))
+                else:
+                    # Try to extract from JSON-like format
+                    trans_match = re.search(r'"translation":\s*"([^"]*)"', line)
+                    if trans_match:
+                        translated_texts.append(trans_match.group(1))
+
+        # Ensure we have the same number of translations as inputs
+        if len(translated_texts) != len(texts):
+            logger.warning(f"Expected {len(texts)} translations but got {len(translated_texts)}. Falling back to original texts for missing translations.")
+            # Pad with original texts if needed
+            while len(translated_texts) < len(texts):
+                translated_texts.append(texts[len(translated_texts)])
+
+        return translated_texts[:len(texts)]
 
     def _translate_smart_objects(self, local_path, output_file_name, target_language_name):
         # Translate smart objects in the presentation from unzipped resources folder
@@ -685,70 +743,72 @@ Provide only the translated text without quotes or explanations."""
             # Get the full language name if available, otherwise use the code
             target_language_name = language_names.get(target_language.lower(), target_language)
             
-            # Process each slide and translate text
+            # Phase 1: Collect all texts with their locations
+            text_items = []  # List of (text, location_reference) tuples
+
+            # Process each slide and collect text
             for slide_idx, slide in enumerate(presentation.slides):
-                logger.debug(f"Processing slide {slide_idx + 1} for translation")
+                logger.debug(f"Collecting texts from slide {slide_idx + 1} for translation")
 
                 # Get all shapes that contain text
                 for shape in slide.shapes:
                     shape_type_name = shape.shape_type if hasattr(shape, 'shape_type') else 'unknown'
 
-                    # Translate text in text frames
+                    # Collect text from text frames
                     try:
                         if hasattr(shape, "text_frame") and shape.text_frame:
                             # Check if there's text to translate
                             if shape.text_frame.text:
-                                logger.debug(f"Translating text_frame in shape_type={shape_type_name}")
-                                # Translate each paragraph
-                                for paragraph in shape.text_frame.paragraphs:
+                                logger.debug(f"Collecting text_frame in shape_type={shape_type_name}")
+                                # Collect each paragraph
+                                for para_idx, paragraph in enumerate(shape.text_frame.paragraphs):
                                     if paragraph.text:
-                                        # Use LLM to translate the text
-                                        prompt = f"""
-                                        Please translate the following text to {target_language_name}:
-
-                                        "{paragraph.text}"
-
-                                        Provide only the translated text without quotes or explanations.
-                                        """
-
-                                        result = self.llm.invoke([ HumanMessage(content=[ {"type": "text", "text": prompt} ] ) ])
-                                        translated_text = result.content
-                                        # Clean up any extra quotes or whitespace
-                                        translated_text = translated_text.strip().strip('"\'')
-
-                                        # Replace the text
-                                        paragraph.text = translated_text
+                                        text_items.append((
+                                            paragraph.text,
+                                            ('text_frame', slide_idx, shape, para_idx)
+                                        ))
                     except Exception as e:
-                        logger.debug(f"Could not translate text_frame for shape_type={shape_type_name}: {e}")
+                        logger.debug(f"Could not collect text_frame for shape_type={shape_type_name}: {e}")
 
-                    # Translate text in tables
+                    # Collect text from tables
                     try:
                         if hasattr(shape, "has_table") and shape.has_table:
-                            logger.debug(f"Translating table in shape_type={shape_type_name}")
-                            for row in shape.table.rows:
-                                for cell in row.cells:
+                            logger.debug(f"Collecting table texts in shape_type={shape_type_name}")
+                            for row_idx, row in enumerate(shape.table.rows):
+                                for col_idx, cell in enumerate(row.cells):
                                     if cell.text_frame and cell.text_frame.text:
-                                        # Translate each paragraph in the cell
-                                        for paragraph in cell.text_frame.paragraphs:
+                                        # Collect each paragraph in the cell
+                                        for para_idx, paragraph in enumerate(cell.text_frame.paragraphs):
                                             if paragraph.text:
-                                                # Use LLM to translate the text
-                                                prompt = f"""
-                                                Please translate the following text to {target_language_name}:
-
-                                                "{paragraph.text}"
-
-                                                Provide only the translated text without quotes or explanations.
-                                                """
-
-                                                result = self.llm.invoke([ HumanMessage(content=[ {"type": "text", "text": prompt} ] ) ])
-                                                translated_text = result.content
-                                                # Clean up any extra quotes or whitespace
-                                                translated_text = translated_text.strip().strip('"\'')
-
-                                                # Replace the text
-                                                paragraph.text = translated_text
+                                                text_items.append((
+                                                    paragraph.text,
+                                                    ('table', slide_idx, shape, row_idx, col_idx, para_idx)
+                                                ))
                     except Exception as e:
-                        logger.debug(f"Could not translate table for shape_type={shape_type_name}: {e}")
+                        logger.debug(f"Could not collect table texts for shape_type={shape_type_name}: {e}")
+
+            logger.info(f"Collected {len(text_items)} text items for translation")
+
+            # Phase 2: Translate all texts in a single batch call
+            if text_items:
+                texts_to_translate = [item[0] for item in text_items]
+                translated_texts = self.translate_batch(texts_to_translate, target_language_name)
+
+                # Phase 3: Apply translations back to their original locations
+                for (original_text, location), translated_text in zip(text_items, translated_texts):
+                    try:
+                        if location[0] == 'text_frame':
+                            _, slide_idx, shape, para_idx = location
+                            shape.text_frame.paragraphs[para_idx].text = translated_text
+                            logger.debug(f"Updated text_frame paragraph {para_idx} on slide {slide_idx + 1}")
+                        elif location[0] == 'table':
+                            _, slide_idx, shape, row_idx, col_idx, para_idx = location
+                            cell = shape.table.rows[row_idx].cells[col_idx]
+                            cell.text_frame.paragraphs[para_idx].text = translated_text
+                            logger.debug(f"Updated table cell [{row_idx},{col_idx}] paragraph {para_idx} on slide {slide_idx + 1}")
+                    except Exception as e:
+                        logger.error(f"Failed to apply translation at location {location}: {e}")
+
 
             # Save already translated version of presentation (it can be modified for smart objects later)
             temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
