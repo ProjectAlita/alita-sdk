@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Literal
 from copy import copy
 import os
 import tempfile
@@ -201,318 +201,544 @@ class PPTXWrapper(BaseToolApiWrapper):
         # Create and return the model
         return create_model(f"SlideModel", **field_dict)
 
-    def fill_template(self, file_name: str, output_file_name: str, content_description: str, pdf_file_name: str = None) -> Dict[str, Any]:
+    def _collect_placeholders_from_presentation(self, presentation) -> List[tuple]:
+        """
+        Collect all placeholders from the presentation (text frames and tables only).
+        SmartArt will be handled separately via XML.
+
+        Returns:
+            List of tuples: (placeholder_text, location_reference)
+            location_reference formats:
+            - ('text_frame', slide_idx, shape)
+            - ('table', slide_idx, shape, row_idx, col_idx)
+        """
+        placeholders = []
+
+        for slide_idx, slide in enumerate(presentation.slides):
+            # Collect from text frames
+            for shape in slide.shapes:
+                try:
+                    if hasattr(shape, "text_frame") and shape.text_frame:
+                        text = shape.text_frame.text
+                        if text and ("{{" in text or "[PLACEHOLDER]" in text):
+                            placeholders.append((text, ('text_frame', slide_idx, shape)))
+                            logger.debug(f"Found placeholder in text_frame on slide {slide_idx + 1}")
+                except Exception as e:
+                    logger.debug(f"Could not access text_frame: {e}")
+
+                # Collect from tables
+                try:
+                    if hasattr(shape, "has_table") and shape.has_table:
+                        for row_idx, row in enumerate(shape.table.rows):
+                            for col_idx, cell in enumerate(row.cells):
+                                if cell.text_frame:
+                                    text = cell.text_frame.text
+                                    if text and ("{{" in text or "[PLACEHOLDER]" in text):
+                                        placeholders.append((
+                                            text,
+                                            ('table', slide_idx, shape, row_idx, col_idx)
+                                        ))
+                                        logger.debug(f"Found placeholder in table cell on slide {slide_idx + 1}")
+                except Exception as e:
+                    logger.debug(f"Could not access table: {e}")
+
+        return placeholders
+
+    def _generate_content_batch(self, placeholders: List[str], content_description: str,
+                               pdf_pages: dict) -> Dict[str, str]:
+        """
+        Generate content for a batch of placeholders in a single LLM call.
+
+        Args:
+            placeholders: List of placeholder texts (unique keys)
+            content_description: User's content description
+            pdf_pages: Dictionary mapping slide indices to base64 images
+
+        Returns:
+            Dictionary mapping placeholder text to generated content
+        """
+        import json
+
+        if not placeholders:
+            return {}
+
+        # Create structured placeholder list with placeholder text as key
+        placeholder_list = [
+            {"placeholder": text, "key": text}
+            for text in placeholders
+        ]
+        placeholders_json = json.dumps(placeholder_list, ensure_ascii=False, indent=2)
+
+        prompt_parts = [{
+            "type": "text",
+            "text": f"""I need content for {len(placeholders)} placeholders in a PowerPoint presentation.
+
+<Data Available for use>
+{content_description}
+</Data Available for use>
+
+<Placeholders to fill>
+{placeholders_json}
+</Placeholders to fill>
+
+Please provide content for ALL placeholders listed above.
+Return your response as a JSON array matching each placeholder by its key:
+[{{"key": "{{{{placeholder_name}}}}", "content": "generated content"}}, ...]
+
+IMPORTANT:
+- Use the exact "key" value from the input to identify each placeholder
+- Preserve any newlines (\\n) if needed in the content
+- Match the tone and style suggested by each placeholder
+- Base your content on the provided data description
+- Keep content concise and appropriate for PowerPoint slides"""
+        }]
+
+        # Add PDF images if available (add a sample of images as context)
+        image_count = 0
+        for slide_idx, img_str in pdf_pages.items():
+            if image_count < 3:  # Limit to 3 images to save tokens
+                prompt_parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{img_str}",
+                        "detail": "low"
+                    }
+                })
+                image_count += 1
+
+        result = self.llm.invoke([HumanMessage(content=prompt_parts)])
+        generated_content = result.content.strip()
+
+        # Parse JSON response into dictionary
+        content_map = {}
+        try:
+            import re
+
+            # Extract JSON from response
+            json_match = re.search(r'```(?:json)?\s*(\[.*\])\s*```', generated_content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_match = re.search(r'(\[.*\])', generated_content, re.DOTALL)
+                json_str = json_match.group(1) if json_match else generated_content
+
+            # Parse JSON
+            content_list = json.loads(json_str)
+
+            for item in content_list:
+                key = item.get('key', item.get('placeholder', ''))
+                content = item.get('content', item.get('text', ''))
+                if key:
+                    content_map[key] = content
+
+            logger.debug(f"Successfully parsed {len(content_map)} content items from JSON response")
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning(f"Failed to parse JSON response: {e}. Using fallback parsing.")
+
+            # Fallback parsing - try to match content to placeholders by order
+            import re
+            lines = [line.strip() for line in generated_content.split('\n') if line.strip()]
+            content_values = []
+
+            for line in lines:
+                # Try to extract content from JSON-like format
+                content_match = re.search(r'"content":\s*"([^"]*)"', line)
+                if content_match:
+                    content_values.append(content_match.group(1))
+                elif not line.startswith('{') and not line.startswith('['):
+                    # Plain text line
+                    content_values.append(line.strip('"\''))
+
+            # Map by order if we have values
+            for i, placeholder in enumerate(placeholders):
+                if i < len(content_values):
+                    content_map[placeholder] = content_values[i]
+
+        # Ensure we have content for all placeholders
+        for placeholder in placeholders:
+            if placeholder not in content_map:
+                logger.warning(f"No content generated for placeholder: {placeholder}")
+                content_map[placeholder] = f"[Content for: {placeholder}]"
+
+        return content_map
+
+    def _update_text_frame_with_formatting(self, text_frame, new_content: str):
+        """
+        Update text frame content while preserving formatting.
+        """
+        # Save paragraph formatting
+        paragraph_styles = []
+        for paragraph in text_frame.paragraphs:
+            para_style = {
+                'alignment': paragraph.alignment,
+                'level': paragraph.level,
+                'line_spacing': paragraph.line_spacing,
+                'space_before': paragraph.space_before,
+                'space_after': paragraph.space_after
+            }
+
+            runs_style = []
+            for run in paragraph.runs:
+                run_style = {
+                    'font': run.font,
+                    'text_len': len(run.text)
+                }
+                runs_style.append(run_style)
+
+            para_style['runs'] = runs_style
+            paragraph_styles.append(para_style)
+
+        # Clear and update
+        text_frame.clear()
+        p = text_frame.paragraphs[0]
+
+        # Apply formatting if available
+        if paragraph_styles:
+            first_para_style = paragraph_styles[0]
+            p.alignment = first_para_style['alignment']
+            p.level = first_para_style['level']
+            p.line_spacing = first_para_style['line_spacing']
+            p.space_before = first_para_style['space_before']
+            p.space_after = first_para_style['space_after']
+
+            if first_para_style['runs']:
+                remaining_text = new_content
+                for run_style in first_para_style['runs']:
+                    if not remaining_text:
+                        break
+
+                    text_len = min(run_style['text_len'], len(remaining_text))
+                    run_text = remaining_text[:text_len]
+                    remaining_text = remaining_text[text_len:]
+
+                    run = p.add_run()
+                    run.text = run_text
+
+                    # Copy font properties safely
+                    safe_font_attrs = ['bold', 'italic', 'underline']
+                    for attr in safe_font_attrs:
+                        if hasattr(run_style['font'], attr):
+                            try:
+                                setattr(run.font, attr, getattr(run_style['font'], attr))
+                            except (AttributeError, TypeError):
+                                pass
+
+                    # Handle color
+                    try:
+                        if (hasattr(run_style['font'], 'color') and
+                            hasattr(run_style['font'].color, 'rgb') and
+                            run_style['font'].color.rgb is not None):
+                            run.font.color.rgb = run_style['font'].color.rgb
+                    except (AttributeError, TypeError):
+                        pass
+
+                    # Handle size
+                    if hasattr(run_style['font'], 'size') and run_style['font'].size is not None:
+                        try:
+                            run.font.size = run_style['font'].size
+                        except (AttributeError, TypeError):
+                            pass
+
+                # Add remaining text
+                if remaining_text and first_para_style['runs']:
+                    run = p.add_run()
+                    run.text = remaining_text
+                    last_style = first_para_style['runs'][-1]
+
+                    for attr in safe_font_attrs:
+                        if hasattr(last_style['font'], attr):
+                            try:
+                                setattr(run.font, attr, getattr(last_style['font'], attr))
+                            except (AttributeError, TypeError):
+                                pass
+
+                    try:
+                        if (hasattr(last_style['font'], 'color') and
+                            hasattr(last_style['font'].color, 'rgb') and
+                            last_style['font'].color.rgb is not None):
+                            run.font.color.rgb = last_style['font'].color.rgb
+                    except (AttributeError, TypeError):
+                        pass
+
+                    if hasattr(last_style['font'], 'size') and last_style['font'].size is not None:
+                        try:
+                            run.font.size = last_style['font'].size
+                        except (AttributeError, TypeError):
+                            pass
+            else:
+                p.text = new_content
+        else:
+            p.text = new_content
+
+    def fill_template(self, file_name: str, output_file_name: str, content_description: str, pdf_file_name: str = None, batch_size: int = 20) -> Dict[str, Any]:
         """
         Fill a PPTX template with content based on the provided description.
-        
+        Uses batch processing to minimize LLM calls.
+
         Args:
             file_name: PPTX file name in the bucket
             output_file_name: Output PPTX file name to save in the bucket
             content_description: Detailed description of what content to put where in the template
             pdf_file_name: Optional PDF file name in the bucket that matches the PPTX template 1:1
-            
+            batch_size: Number of placeholders to process per LLM call (default: 20)
+
         Returns:
             Dictionary with result information
         """
         import pptx
         import base64
         from io import BytesIO
-        
+        import shutil
+
         try:
             # Download the PPTX file
             local_path = self._download_pptx(file_name)
-            
+
             # Load the presentation
             presentation = pptx.Presentation(local_path)
-            
-            # If PDF file is provided, download and extract images from it
+
+            # Process PDF if provided
             pdf_pages = {}
             if pdf_file_name:
                 try:
                     import fitz  # PyMuPDF
                     from PIL import Image
-                    
-                    # Download PDF file
+
                     pdf_data = self.alita.download_artifact(self.bucket_name, pdf_file_name)
                     if isinstance(pdf_data, dict) and pdf_data.get('error'):
                         raise ValueError(f"Error downloading PDF: {pdf_data.get('error')}")
-                    
-                    # Create a temporary memory buffer for PDF
+
                     pdf_buffer = BytesIO(pdf_data)
-                    
-                    # Open the PDF
                     pdf_doc = fitz.open(stream=pdf_buffer, filetype="pdf")
-                    
-                    # Extract images from each page
+
                     for page_idx in range(len(pdf_doc)):
                         page = pdf_doc.load_page(page_idx)
-                        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x scale for better readability
-                        
-                        # Convert to PIL Image
+                        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                        
-                        # Convert to base64 for LLM
+
                         buffered = BytesIO()
                         img.save(buffered, format="PNG")
                         img_str = base64.b64encode(buffered.getvalue()).decode()
-                        
-                        # Store image for later use
                         pdf_pages[page_idx] = img_str
-                    
-                    logger.info(f"Successfully extracted {len(pdf_pages)} pages from PDF {pdf_file_name}")
+
+                    logger.info(f"Successfully extracted {len(pdf_pages)} pages from PDF")
                 except ImportError:
-                    logger.warning("PyMuPDF (fitz) or PIL not installed. PDF processing skipped. Install with 'pip install PyMuPDF Pillow'")
+                    logger.warning("PyMuPDF or PIL not installed. PDF processing skipped.")
                 except Exception as e:
-                    logger.warning(f"Failed to process PDF {pdf_file_name}: {str(e)}")
-            
-            # Process each slide based on the content description
-            for slide_idx, slide in enumerate(presentation.slides):
-                # Collect all placeholders in this slide
-                placeholders = []
-                placeholder_shapes = []
-                
-                # Get all shapes that contain text
-                for shape in slide.shapes:
-                    shape_type_name = shape.shape_type if hasattr(shape, 'shape_type') else 'unknown'
+                    logger.warning(f"Failed to process PDF: {str(e)}")
 
-                    # Check text frames for placeholders
-                    try:
-                        if hasattr(shape, "text_frame") and shape.text_frame:
-                            # Check if this is a placeholder that needs to be filled
-                            text = shape.text_frame.text
-                            if text and ("{{" in text or "[PLACEHOLDER]" in text):
-                                placeholders.append(text)
-                                placeholder_shapes.append(shape)
-                                logger.debug(f"Found placeholder in text_frame (shape_type={shape_type_name})")
-                    except Exception as e:
-                        logger.debug(f"Could not access text_frame for shape_type={shape_type_name}: {e}")
+            # Phase 1a: Collect placeholders from presentation (text frames and tables)
+            placeholder_items = self._collect_placeholders_from_presentation(presentation)
+            logger.info(f"Collected {len(placeholder_items)} placeholder locations from text frames and tables")
 
-                    # Check tables for placeholders in cells
-                    try:
-                        if hasattr(shape, "has_table") and shape.has_table:
-                            for row_idx, row in enumerate(shape.table.rows):
-                                for col_idx, cell in enumerate(row.cells):
-                                    if cell.text_frame:
-                                        text = cell.text_frame.text
-                                        if text and ("{{" in text or "[PLACEHOLDER]" in text):
-                                            placeholders.append(text)
-                                            # Store tuple with table info: (shape, row_idx, col_idx)
-                                            placeholder_shapes.append((shape, row_idx, col_idx))
-                                            logger.debug(f"Found placeholder in table cell [{row_idx},{col_idx}]")
-                    except Exception as e:
-                        logger.debug(f"Could not access table for shape_type={shape_type_name}: {e}")
+            # Phase 1b: Unzip and collect placeholders from SmartArt
+            # Note: We unzip the original file first to collect SmartArt placeholders
+            extract_dir = tempfile.mkdtemp(prefix='pptx_fill_')
+            self.unzip_pptx(pptx_path=local_path, extract_dir=extract_dir)
 
-                    # Check SmartArt and other GraphicFrame shapes for placeholders
-                    if shape_type_name not in [MSO_SHAPE_TYPE.PICTURE, MSO_SHAPE_TYPE.TABLE, MSO_SHAPE_TYPE.TEXT_BOX]:
-                        try:
-                            smartart_texts = self._extract_text_from_shape(shape)
-                            for text in smartart_texts:
-                                if text and ("{{" in text or "[PLACEHOLDER]" in text):
-                                    placeholders.append(text)
-                                    placeholder_shapes.append(shape)
-                                    logger.debug(f"Found placeholder in SmartArt/GraphicFrame (shape_type={shape_type_name})")
-                        except Exception as e:
-                            logger.debug(f"Could not extract text from SmartArt/GraphicFrame (shape_type={shape_type_name}): {e}")
+            smartart_items = self._collect_smartart_placeholders(extract_dir)
+            logger.info(f"Collected {len(smartart_items)} placeholder locations from SmartArt")
 
+            # Clean up the initial extraction - we'll re-extract later from the updated file
+            try:
+                shutil.rmtree(extract_dir)
+            except:
+                pass
 
-                logger.info(f"Found {len(placeholders)} placeholders in slide {slide_idx + 1}")
-                if placeholders:
-                    # Create a dynamic Pydantic model for this slide
-                    slide_model = self._create_slide_model(placeholders)
-                    # Create a prompt with image and all placeholders on this slide
-                    prompt_parts = [
-                        {
-                            "type": "text", 
-                            "text": INTRO_PROMPT.format(slide_idx=slide_idx + 1,
-                                                        content_description=content_description)
-                        }
-                    ]
-                    
-                    # Add each placeholder text
-                    for i, placeholder in enumerate(placeholders):
-                        prompt_parts.append({
-                            "type": "text",
-                            "text": f"Placeholder {i+1}: {placeholder}"
-                        })
-                    
-                    # Add PDF image if available
-                    if pdf_pages and slide_idx in pdf_pages:
-                        prompt_parts.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{pdf_pages[slide_idx]}"
-                            }
-                        })
-                    
-                    # Get the structured output LLM
-                    structured_llm = self._get_structured_output_llm(slide_model)
-                    try:
-                        result = structured_llm.invoke([HumanMessage(content=prompt_parts)])
-                    except Exception as e:
-                        logger.error(f"Error invoking structured LLM: {str(e)}")
-                        return ToolException(f"Cannot fill the pptx template: \nerror invoking structured LLM: {str(e)}")
-                    for key, value in result.model_dump().items():
-                        # Replace the placeholder text with the generated content
-                        for i, shape_or_cell_info in enumerate(placeholder_shapes):
-                            if key == f"placeholder_{i}":
-                                # Store the text frame for cleaner code
-                                if isinstance(shape_or_cell_info, tuple):
-                                    table_shape, row_idx, col_idx = shape_or_cell_info
-                                    text_frame = table_shape.table.rows[row_idx].cells[col_idx].text_frame
-                                else:
-                                    text_frame = shape_or_cell_info.text_frame
-                                
-                                # Save paragraph formatting settings before clearing
-                                paragraph_styles = []
-                                for paragraph in text_frame.paragraphs:
-                                    # Save paragraph level properties
-                                    para_style = {
-                                        'alignment': paragraph.alignment,
-                                        'level': paragraph.level,
-                                        'line_spacing': paragraph.line_spacing,
-                                        'space_before': paragraph.space_before,
-                                        'space_after': paragraph.space_after
-                                    }
-                                    
-                                    # Save run level properties for each run in the paragraph
-                                    runs_style = []
-                                    for run in paragraph.runs:
-                                        run_style = {
-                                            'font': run.font,
-                                            'text_len': len(run.text)
-                                        }
-                                        runs_style.append(run_style)
-                                    
-                                    para_style['runs'] = runs_style
-                                    paragraph_styles.append(para_style)
-                                
-                                # Clear the text frame but keep the formatting
-                                text_frame.clear()
-                                
-                                # Get the first paragraph (created automatically when frame is cleared)
-                                p = text_frame.paragraphs[0]
-                                
-                                # Apply the first paragraph's style if available
-                                if paragraph_styles:
-                                    first_para_style = paragraph_styles[0]
-                                    p.alignment = first_para_style['alignment']
-                                    p.level = first_para_style['level']
-                                    p.line_spacing = first_para_style['line_spacing']
-                                    p.space_before = first_para_style['space_before']
-                                    p.space_after = first_para_style['space_after']
-                                    
-                                    # If we have style info for runs, apply it to segments of the new text
-                                    if first_para_style['runs']:
-                                        remaining_text = value
-                                        for run_style in first_para_style['runs']:
-                                            if not remaining_text:
-                                                break
-                                                
-                                            # Calculate text length for this run (use original or remaining, whichever is smaller)
-                                            text_len = min(run_style['text_len'], len(remaining_text))
-                                            run_text = remaining_text[:text_len]
-                                            remaining_text = remaining_text[text_len:]
-                                            
-                                            # Create a run with the style from the original
-                                            run = p.add_run()
-                                            run.text = run_text
-                                            
-                                            # Copy font properties safely
-                                            # Some font attributes in python-pptx are read-only
-                                            # Only copy attributes that can be safely set
-                                            safe_font_attrs = ['bold', 'italic', 'underline']
-                                            for attr in safe_font_attrs:
-                                                if hasattr(run_style['font'], attr):
-                                                    try:
-                                                        setattr(run.font, attr, getattr(run_style['font'], attr))
-                                                    except (AttributeError, TypeError):
-                                                        # Skip if attribute can't be set
-                                                        logger.debug(f"Couldn't set font attribute: {attr}")
-                                            
-                                            # Handle color safely - check if color attribute exists and has rgb
-                                            try:
-                                                if (hasattr(run_style['font'], 'color') and 
-                                                    hasattr(run_style['font'].color, 'rgb') and 
-                                                    run_style['font'].color.rgb is not None):
-                                                    run.font.color.rgb = run_style['font'].color.rgb
-                                            except (AttributeError, TypeError) as e:
-                                                logger.debug(f"Couldn't set font color: {e}")
-                                            
-                                            # Handle size specially
-                                            if hasattr(run_style['font'], 'size') and run_style['font'].size is not None:
-                                                try:
-                                                    run.font.size = run_style['font'].size
-                                                except (AttributeError, TypeError):
-                                                    logger.debug("Couldn't set font size")
-                                        
-                                        # If there's still text left, add it with the last style
-                                        if remaining_text and first_para_style['runs']:
-                                            run = p.add_run()
-                                            run.text = remaining_text
-                                            last_style = first_para_style['runs'][-1]
-                                            
-                                            # Copy font properties safely for the remaining text
-                                            safe_font_attrs = ['bold', 'italic', 'underline']
-                                            for attr in safe_font_attrs:
-                                                if hasattr(last_style['font'], attr):
-                                                    try:
-                                                        setattr(run.font, attr, getattr(last_style['font'], attr))
-                                                    except (AttributeError, TypeError):
-                                                        # Skip if attribute can't be set
-                                                        logger.debug(f"Couldn't set font attribute: {attr}")
-                                            
-                                            # Handle color safely for remaining text
-                                            try:
-                                                if (hasattr(last_style['font'], 'color') and 
-                                                    hasattr(last_style['font'].color, 'rgb') and 
-                                                    last_style['font'].color.rgb is not None):
-                                                    run.font.color.rgb = last_style['font'].color.rgb
-                                            except (AttributeError, TypeError) as e:
-                                                logger.debug(f"Couldn't set font color: {e}")
-                                            
-                                            # Handle size specially
-                                            if hasattr(last_style['font'], 'size') and last_style['font'].size is not None:
-                                                try:
-                                                    run.font.size = last_style['font'].size
-                                                except (AttributeError, TypeError):
-                                                    logger.debug("Couldn't set font size")
-                                    else:
-                                        # No run style information available, just add the text
-                                        p.text = value
-                                else:
-                                    # No style information available, just add the text
-                                    p.text = value
-            # Save the modified presentation
+            total_placeholder_locations = len(placeholder_items) + len(smartart_items)
+
+            if total_placeholder_locations == 0:
+                logger.warning("No placeholders found in the presentation")
+                # Clean up
+                try:
+                    os.remove(local_path)
+                except:
+                    pass
+
+                return {
+                    "status": "warning",
+                    "message": "No placeholders found in the presentation. Nothing to fill.",
+                    "url": None
+                }
+
+            # Phase 2: Get unique placeholders and generate content in batches
+            # Collect unique placeholder texts
+            unique_placeholders = set()
+            for item in placeholder_items:
+                unique_placeholders.add(item[0])
+            for item in smartart_items:
+                unique_placeholders.add(item[0])
+
+            unique_placeholder_list = list(unique_placeholders)
+            logger.info(f"Found {len(unique_placeholder_list)} unique placeholders to fill")
+
+            # Generate content for all unique placeholders in batches
+            content_map = {}  # Map from placeholder text to generated content
+
+            for i in range(0, len(unique_placeholder_list), batch_size):
+                batch = unique_placeholder_list[i:i + batch_size]
+                batch_num = (i // batch_size) + 1
+                total_batches = (len(unique_placeholder_list) + batch_size - 1) // batch_size
+
+                logger.info(f"Generating content for batch {batch_num}/{total_batches} ({len(batch)} unique placeholders)")
+
+                batch_content_map = self._generate_content_batch(
+                    batch,
+                    content_description,
+                    pdf_pages
+                )
+                content_map.update(batch_content_map)
+
+            # Phase 3a: Apply generated content to text frames and tables
+            text_frame_updates = 0
+            table_updates = 0
+
+            for placeholder_text, location in placeholder_items:
+                try:
+                    generated_content = content_map.get(placeholder_text, f"[Missing content for: {placeholder_text}]")
+                    location_type = location[0]
+
+                    if location_type == 'text_frame':
+                        _, slide_idx, shape = location
+                        self._update_text_frame_with_formatting(shape.text_frame, generated_content)
+                        text_frame_updates += 1
+                        logger.debug(f"Updated text_frame on slide {slide_idx + 1} with placeholder '{placeholder_text}'")
+
+                    elif location_type == 'table':
+                        _, slide_idx, shape, row_idx, col_idx = location
+                        cell = shape.table.rows[row_idx].cells[col_idx]
+                        self._update_text_frame_with_formatting(cell.text_frame, generated_content)
+                        table_updates += 1
+                        logger.debug(f"Updated table cell [{row_idx},{col_idx}] on slide {slide_idx + 1} with placeholder '{placeholder_text}'")
+
+                except Exception as e:
+                    logger.error(f"Failed to apply content to location {location} for placeholder '{placeholder_text}': {e}")
+
+            logger.info(f"Updated {text_frame_updates} text frames and {table_updates} table cells")
+
+            # Save the modified presentation (before SmartArt updates)
             temp_output_path = os.path.join(tempfile.gettempdir(), output_file_name)
             presentation.save(temp_output_path)
-            
-            # Upload the modified file
-            result_url = self._upload_pptx(temp_output_path, output_file_name)
-            
+
+            # Phase 3b: Apply generated content to SmartArt XML files
+            # IMPORTANT: Unzip the UPDATED presentation (temp_output_path) not the original
+            # This ensures text frame and table updates are preserved
+            smartart_updates = 0  # Initialize counter
+
+            if smartart_items:
+                extract_dir = tempfile.mkdtemp(prefix='pptx_smartart_')
+                self.unzip_pptx(pptx_path=temp_output_path, extract_dir=extract_dir)
+
+                files_to_save = {}  # Track which XML files need to be saved
+
+                # Build a set of unique placeholder texts to search for
+                placeholders_to_find = set(item[0] for item in smartart_items)
+
+                # Parse all XML files once and update matching elements
+                for root_dir, dirs, files in os.walk(extract_dir):
+                    for file in files:
+                        if file.startswith('data') and file.endswith('.xml'):
+                            xml_file = os.path.join(root_dir, file)
+                            tree = ET.parse(xml_file)
+                            root = tree.getroot()
+                            file_modified = False
+
+                            for elem in root.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}t'):
+                                if elem.text and elem.text in placeholders_to_find:
+                                    try:
+                                        placeholder_text = elem.text
+                                        generated_content = content_map.get(placeholder_text, f"[Missing content for: {placeholder_text}]")
+                                        elem.text = generated_content
+                                        file_modified = True
+                                        smartart_updates += 1
+                                        logger.debug(f"Updated SmartArt placeholder '{placeholder_text}' in {xml_file}")
+                                    except Exception as e:
+                                        logger.error(f"Failed to update SmartArt placeholder '{elem.text}': {e}")
+
+                            if file_modified:
+                                files_to_save[xml_file] = tree
+
+                # Save all modified XML files
+                for xml_file, tree in files_to_save.items():
+                    tree.write(xml_file, encoding='utf-8', xml_declaration=True)
+
+                logger.info(f"Updated {smartart_updates} SmartArt elements in {len(files_to_save)} XML files")
+
+                # Rezip the presentation with updated SmartArt
+                final_output_path = os.path.join(tempfile.gettempdir(), f"final_{output_file_name}")
+                self.rezip_pptx(extract_dir, final_output_path)
+
+                # Clean up extract directory
+                try:
+                    shutil.rmtree(extract_dir)
+                except:
+                    pass
+            else:
+                # No SmartArt to update, use the temp output as final
+                final_output_path = temp_output_path
+
+            # Upload the final file
+            result_url = self._upload_pptx(final_output_path, output_file_name)
+
             # Clean up temporary files
             try:
                 os.remove(local_path)
-                os.remove(temp_output_path)
+                if temp_output_path != final_output_path:
+                    os.remove(temp_output_path)
+                os.remove(final_output_path)
             except:
                 pass
-            
+
             return {
                 "status": "success",
-                "message": f"Successfully filled template and saved as {output_file_name}",
-                "url": result_url
+                "message": f"Successfully filled {len(unique_placeholder_list)} unique placeholders ({total_placeholder_locations} total locations) across {len(presentation.slides)} slides. Saved as {output_file_name}",
+                "url": result_url,
+                "stats": {
+                    "unique_placeholders": len(unique_placeholder_list),
+                    "total_placeholder_locations": total_placeholder_locations,
+                    "text_frame_updates": text_frame_updates,
+                    "table_updates": table_updates,
+                    "smartart_updates": smartart_updates,
+                    "total_slides": len(presentation.slides),
+                    "batches_processed": (len(unique_placeholder_list) + batch_size - 1) // batch_size
+                }
             }
-            
+
         except Exception as e:
             logger.error(f"Error filling PPTX template: {str(e)}")
             return {
                 "status": "error",
-                "message": f"Failed to fill template: {traceback.format_exc()}"
+                "message": f"Failed to fill template: {str(e)}"
             }
 
     def unzip_pptx(self, pptx_path, extract_dir):
         # Unzip the pptx file
         with zipfile.ZipFile(pptx_path, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
+
+    def _collect_smartart_placeholders(self, diagram_folder) -> List[tuple]:
+        """
+        Collect placeholders from SmartArt XML files.
+
+        Returns:
+            List of tuples: (placeholder_text, xml_element, xml_file, xml_tree)
+        """
+        placeholders = []
+
+        for root_dir, dirs, files in os.walk(diagram_folder):
+            for file in files:
+                if file.startswith('data') and file.endswith('.xml'):
+                    xml_file = os.path.join(root_dir, file)
+                    tree = ET.parse(xml_file)
+                    root = tree.getroot()
+
+                    for elem in root.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}t'):
+                        if elem.text and ("{{" in elem.text or "[PLACEHOLDER]" in elem.text):
+                            placeholders.append((elem.text, elem, xml_file, tree))
+                            logger.debug(f"Found placeholder in SmartArt: {xml_file}")
+
+        return placeholders
 
     def edit_smartart_xml(self, diagram_folder, target_language):
         """
@@ -851,14 +1077,15 @@ Texts to translate:
         """
         return [{
             "name": "fill_template",
-            "description": "Fill a PPTX template with content based on the provided description",
+            "description": self.fill_template.__doc__,
             "ref": self.fill_template,
             "args_schema": create_model(
                 "FillTemplateArgs",
                 file_name=(str, Field(description="PPTX file name in the bucket")),
                 output_file_name=(str, Field(description="Output PPTX file name to save in the bucket")),
                 content_description=(str, Field(description="Detailed description of what content to put where in the template")),
-                pdf_file_name=(Optional[str], Field(description="Optional PDF file name in the bucket that matches the PPTX template 1:1", default=None))
+                pdf_file_name=(Optional[str], Field(description="Optional PDF file name in the bucket that matches the PPTX template 1:1", default=None)),
+                batch_size=(Optional[int], Field(description="Number of placeholders to process per LLM call (default: 20)", default=20))
             )
         },{
             "name": "translate_presentation",
