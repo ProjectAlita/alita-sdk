@@ -47,7 +47,19 @@ class McpSseClient:
         self._stream_session = None
         self._stream_response = None
         self._endpoint_ready = asyncio.Event()  # Signal when endpoint is received
-        
+
+        # Derive message endpoint for POST requests
+        # Atlassian-style SSE: GET /sse, POST /message
+        self.message_url = url
+        if url.rstrip('/').endswith('/sse'):
+            # Replace /sse with /message for POST requests
+            self.message_url = url.rstrip('/')[:-4] + '/message'
+            logger.info(f"[MCP SSE Client] Using message endpoint: {self.message_url}")
+        else:
+            self.message_url = url
+
+        self.message_url_with_session = f"{self.message_url}?sessionId={session_id}"
+
         logger.info(f"[MCP SSE Client] Initialized for {url} with session {session_id}")
     
     async def _ensure_stream_connected(self):
@@ -197,14 +209,19 @@ class McpSseClient:
         
         # Handle 'endpoint' event - server provides the actual session URL to use
         if event_type == 'endpoint':
-            # Extract session ID from endpoint URL
-            # Format: /v1/sse?sessionId=<uuid>
+            # Extract session ID if present
             if 'sessionId=' in data_str:
                 new_session_id = data_str.split('sessionId=')[1].split('&')[0]
                 logger.info(f"[MCP SSE Client] Server provided session ID: {new_session_id}")
                 self.session_id = new_session_id
-                self.url_with_session = f"{self.url}?sessionId={new_session_id}"
-                self._endpoint_ready.set()  # Signal that we can now send requests
+
+            # Construct full URL from server-provided path
+            from urllib.parse import urlparse, urljoin
+            parsed_base = urlparse(self.url)
+            base_url = f"{parsed_base.scheme}://{parsed_base.netloc}"
+            self.message_url_with_session = urljoin(base_url, data_str)
+
+            self._endpoint_ready.set()
             return
         
         # Skip other non-message events
@@ -228,15 +245,6 @@ class McpSseClient:
                 
         except json.JSONDecodeError as e:
             logger.warning(f"[MCP SSE Client] Failed to parse SSE data: {e}, data: {repr(data_str)[:200]}")
-                            
-        except Exception as e:
-            logger.error(f"[MCP SSE Client] Stream reader error: {e}")
-            # Fail all pending requests
-            for future in self._pending_requests.values():
-                if not future.done():
-                    future.set_exception(e)
-        finally:
-            logger.info(f"[MCP SSE Client] Stream reader stopped")
     
     async def send_request(self, method: str, params: Optional[Dict[str, Any]] = None, request_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -281,26 +289,21 @@ class McpSseClient:
         future = asyncio.Future()
         self._pending_requests[request_id] = future
         
-        # Send POST request
+        # Send POST request to message endpoint
         headers = {
             "Content-Type": "application/json",
             **self.headers
         }
         
         timeout = aiohttp.ClientTimeout(total=30)
-        
+
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(self.url_with_session, json=request, headers=headers) as response:
-                    if response.status == 404:
-                        error_text = await response.text()
-                        raise Exception(f"HTTP 404: {error_text}")
-                    
-                    # 202 is expected - response will come via stream
+                async with session.post(self.message_url_with_session, json=request, headers=headers) as response:
                     if response.status not in [200, 202]:
                         error_text = await response.text()
                         raise Exception(f"HTTP {response.status}: {error_text}")
-            
+
             # Wait for response from stream (with timeout)
             result = await asyncio.wait_for(future, timeout=self.timeout)
             
@@ -319,7 +322,42 @@ class McpSseClient:
             self._pending_requests.pop(request_id, None)
             logger.error(f"[MCP SSE Client] Request failed: {e}")
             raise
-    
+
+    async def send_notification(self, method: str, params: Optional[Dict[str, Any]] = None):
+        """
+        Send a JSON-RPC notification (no response expected).
+
+        Args:
+            method: Notification method name (e.g., "notifications/initialized")
+            params: Optional notification parameters
+        """
+        # Ensure stream is connected
+        await self._ensure_stream_connected()
+
+        # Wait for endpoint event
+        await asyncio.wait_for(self._endpoint_ready.wait(), timeout=10)
+
+        notification = {
+            "jsonrpc": "2.0",
+            "method": method
+        }
+        if params:
+            notification["params"] = params
+
+        headers = {
+            "Content-Type": "application/json",
+            **self.headers
+        }
+
+        timeout = aiohttp.ClientTimeout(total=10)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(self.message_url_with_session, json=notification, headers=headers) as response:
+                    pass  # Notifications don't expect a response
+        except Exception:
+            pass  # Don't raise - notifications are fire-and-forget
+
     async def close(self):
         """Close the persistent SSE stream."""
         logger.info(f"[MCP SSE Client] Closing connection...")
@@ -381,6 +419,11 @@ class McpSseClient:
         )
         
         logger.info(f"[MCP SSE Client] MCP session initialized")
+
+        # Send initialized notification (required by MCP protocol)
+        # This is a notification (no ID), so server doesn't send a response
+        await self.send_notification("notifications/initialized")
+
         return response.get('result', {})
     
     async def list_tools(self) -> list:
