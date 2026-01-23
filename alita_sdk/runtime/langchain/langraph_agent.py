@@ -406,11 +406,11 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         interrupt_before = []
     output_channels = (
         "__root__"
-        if len(lg_builder.schemas[lg_builder.output]) == 1
-           and "__root__" in lg_builder.schemas[lg_builder.output]
+        if len(lg_builder.schemas[lg_builder.output_schema]) == 1
+           and "__root__" in lg_builder.schemas[lg_builder.output_schema]
         else [
             key
-            for key, val in lg_builder.schemas[lg_builder.output].items()
+            for key, val in lg_builder.schemas[lg_builder.output_schema].items()
             if not is_managed_value(val)
         ]
     )
@@ -424,12 +424,11 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
 
     compiled = LangGraphAgentRunnable(
         builder=lg_builder,
-        config_type=lg_builder.config_schema,
         nodes={},
         channels={
             **lg_builder.channels,
             **lg_builder.managed,
-            START: EphemeralValue(lg_builder.input),
+            START: EphemeralValue(lg_builder.input_schema),
         },
         input_channels=START,
         stream_mode="updates",
