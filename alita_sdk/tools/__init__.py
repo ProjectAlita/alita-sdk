@@ -120,6 +120,8 @@ _safe_import_tool('delta_lake', 'aws.delta_lake', 'get_tools', 'DeltaLakeToolkit
 available_count = len(AVAILABLE_TOOLS)
 total_attempted = len(AVAILABLE_TOOLS) + len(FAILED_IMPORTS)
 logger.info(f"Tool imports completed: {available_count}/{total_attempted} successful")
+if FAILED_IMPORTS:
+    logger.warning(f"Failed imports: {', '.join(FAILED_IMPORTS.keys())}")
 
 # Import community module to trigger community toolkit registration
 try:
