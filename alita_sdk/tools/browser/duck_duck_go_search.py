@@ -2,7 +2,7 @@ from langchain_community.document_loaders import AsyncChromiumLoader
 from typing import Type # Add Type import
 
 from langchain_community.document_transformers import BeautifulSoupTransformer
-from langchain.text_splitter import CharacterTextSplitter
+from langchain_text_splitters import CharacterTextSplitter
 from duckduckgo_search import DDGS
 from langchain_core.tools import BaseTool
 

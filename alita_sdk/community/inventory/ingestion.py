@@ -2494,7 +2494,7 @@ class IngestionPipeline(BaseModel):
             try:
                 from alita_sdk.tools.chunkers.universal_chunker import chunk_single_document
                 from alita_sdk.tools.chunkers.code.codeparser import parse_code_files_for_db
-                from langchain.text_splitter import RecursiveCharacterTextSplitter
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
                 has_chunker = True
                 
                 # Create text splitter for non-code files

@@ -567,7 +567,7 @@ def predict(
     #
     log.info("Importing packages")
     #
-    from langchain.schema import HumanMessage
+    from langchain_core.messages import HumanMessage
     #
     from .interfaces.llm_processor import (
         get_model,

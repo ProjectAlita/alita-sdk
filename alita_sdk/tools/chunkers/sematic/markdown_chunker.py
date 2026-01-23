@@ -1,7 +1,7 @@
 from typing import Generator, List
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter, ExperimentalMarkdownSyntaxTextSplitter
-from langchain.text_splitter import TokenTextSplitter
+from langchain_text_splitters import TokenTextSplitter
 from ..utils import tiktoken_length
 from copy import deepcopy as copy
 

@@ -1,8 +1,8 @@
 import os
 
 from typing import Generator
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter, TokenTextSplitter
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter, TokenTextSplitter
 
 from .constants import (Language, get_langchain_language, get_file_extension, 
                         get_programming_language, image_extensions, default_skip)

@@ -1,11 +1,24 @@
 import json
 from typing import Union
+from abc import ABC, abstractmethod
 
 from langchain_core.agents import AgentAction, AgentFinish
-
-from langchain.agents.agent import AgentOutputParser
+from langchain_core.output_parsers import BaseOutputParser
 
 from .utils import unpack_json
+
+
+class AgentOutputParser(BaseOutputParser, ABC):
+    """Base class for agent output parsers.
+
+    Backwards compatibility shim for langchain 1.x where AgentOutputParser
+    was removed. Provides the same interface as the old langchain.agents.agent.AgentOutputParser.
+    """
+
+    @abstractmethod
+    def parse(self, text: str) -> Union[AgentAction, AgentFinish]:
+        """Parse text into agent action/finish."""
+        pass
 
 FORMAT_INSTRUCTIONS = """Respond only with JSON format as described below
 {

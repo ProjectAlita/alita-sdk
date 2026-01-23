@@ -279,7 +279,7 @@ class ReposApiWrapper(CodeIndexerToolkit):
     @model_validator(mode="before")
     @classmethod
     def validate_toolkit(cls, values):
-        from langchain.utils import get_from_dict_or_env
+        from langchain_core.utils import get_from_dict_or_env
 
         # Get ADO configuration values
         organization_url = get_from_dict_or_env(values, ["organization_url"], "ADO_ORGANIZATION_URL", default=None)

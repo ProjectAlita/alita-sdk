@@ -15,7 +15,7 @@
 import os
 from langchain_core.documents import Document
 from typing import Optional, Any, List
-from langchain.text_splitter import (
+from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
     Language,
 )

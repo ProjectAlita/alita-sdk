@@ -21,7 +21,7 @@ import logging
 import os
 from typing import Generator, Dict, Any, Optional
 from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from .code.codeparser import parse_code_files_for_db
 from .sematic.markdown_chunker import markdown_chunker

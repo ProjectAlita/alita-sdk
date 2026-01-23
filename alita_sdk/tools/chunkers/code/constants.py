@@ -1,6 +1,6 @@
 import os
 from enum import Enum
-import langchain.text_splitter as text_splitter
+import langchain_text_splitters as text_splitter
 
 # We need to port more language from here
 # https://github.com/grantjenks/py-tree-sitter-languages?tab=readme-ov-file

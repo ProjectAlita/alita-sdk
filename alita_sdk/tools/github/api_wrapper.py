@@ -58,7 +58,7 @@ class AlitaGitHubAPIWrapper(CodeIndexerToolkit):
         Returns:
             Dict: Updated values dictionary
         """
-        from langchain.utils import get_from_dict_or_env
+        from langchain_core.utils import get_from_dict_or_env
 
         # Get all authentication values
         github_access_token = get_from_dict_or_env(values, ["access_token", "github_access_token"], "GITHUB_ACCESS_TOKEN", default='')

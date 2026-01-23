@@ -2,8 +2,8 @@
 import numpy as np
 from typing import Generator, Optional, List
 from logging import getLogger
-from langchain.schema import Document
-from langchain.text_splitter import TokenTextSplitter
+from langchain_core.documents import Document
+from langchain_text_splitters import TokenTextSplitter
 from tqdm.auto import tqdm
 
 logger = getLogger(__name__)
