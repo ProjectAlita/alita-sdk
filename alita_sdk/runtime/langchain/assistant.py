@@ -941,30 +941,3 @@ class Assistant:
             from langgraph.checkpoint.memory import MemorySaver
             logger.info("Using default MemorySaver for conversation persistence")
             return MemorySaver()
-
-    def _create_standard_react_agent(self, tools: list):
-        """
-        Fallback method to create a standard react agent without swarm.
-        Used when swarm mode is enabled but langgraph-swarm is not available.
-        """
-        # This reuses the existing getLangGraphReactAgent logic
-        # but bypasses the swarm check
-        checkpointer = self._get_checkpointer()
-        prompt_instructions = self._resolve_jinja2_variables(self.prompt)
-
-        from langgraph.prebuilt import create_react_agent
-
-        agent = create_react_agent(
-            self.client,
-            tools=tools,
-            prompt=prompt_instructions
-        )
-
-        return agent
-
-    # This one is used only in Alita and OpenAI
-    def apredict(self, messages: list[BaseMessage]):
-        yield from self.client.ainvoke(messages)
-
-    def predict(self, messages: list[BaseMessage]):
-        return self.client.invoke(messages)
