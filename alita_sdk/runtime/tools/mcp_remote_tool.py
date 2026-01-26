@@ -20,7 +20,8 @@ from ..utils.mcp_oauth import (
     fetch_resource_metadata_async,
     infer_authorization_servers_from_realm,
 )
-from ..utils.mcp_client import McpClient
+# Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters) instead of custom McpClient
+from ..utils.mcp_adapter import UnifiedMcpClient as McpClient
 
 logger = logging.getLogger(__name__)
 
