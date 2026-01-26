@@ -308,8 +308,12 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
         else:
             return ToolException("Unknown test steps format: " + test_steps_format)
         work_item_json = self.build_ado_test_case(title, description, steps_xml)
-        created_work_item_id = \
-        work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")['id']
+        create_work_item_result = \
+        work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")
+        if isinstance(create_work_item_result, ToolException):
+            # issue creating work item, return error
+            return create_work_item_result
+        created_work_item_id = create_work_item_result['id']
         return self.add_test_case([{"work_item": {"id": created_work_item_id}}], plan_id, suite_id)
 
     def build_ado_test_case(self, title, description, steps_xml):
