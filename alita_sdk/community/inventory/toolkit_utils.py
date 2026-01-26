@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from alita_sdk.alita_client import AlitaClient
+from alita_sdk.runtime.clients.client import AlitaClient
 
 
 def load_toolkit_config(toolkit_path: str) -> Dict[str, Any]:
