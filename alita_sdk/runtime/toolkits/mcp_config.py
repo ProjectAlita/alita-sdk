@@ -625,11 +625,11 @@ def _discover_tools_for_http_server(url: str, headers: Optional[Dict[str, Any]] 
     Returns empty list if discovery fails (e.g., auth required).
     """
     try:
-        from ..utils.mcp_client import McpClient
+        from ..utils.mcp_adapter import UnifiedMcpClient
         import asyncio
 
         async def _discover():
-            client = McpClient(
+            client = UnifiedMcpClient(
                 url=url,
                 headers=headers or {},
                 timeout=timeout
@@ -793,7 +793,8 @@ def _create_check_connection_for_http(server_name: str, server_config: Dict[str,
         logger.info(f"[MCP Config] Discovering tools from {server_name} at {url}")
 
         try:
-            from ..utils.mcp_client import McpClient
+            # Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters)
+            from ..utils.mcp_adapter import UnifiedMcpClient as McpClient
             import asyncio
 
             async def _discover():

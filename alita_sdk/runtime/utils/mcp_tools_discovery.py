@@ -9,7 +9,8 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .mcp_oauth import McpAuthorizationRequired
-from .mcp_client import McpClient
+# Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters) instead of custom McpClient
+from .mcp_adapter import UnifiedMcpClient as McpClient
 
 logger = logging.getLogger(__name__)
 
