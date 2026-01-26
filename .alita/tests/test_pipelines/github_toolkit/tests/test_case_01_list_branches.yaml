@@ -52,7 +52,8 @@ nodes:
           Check if a 'main' branch exists in the list.
           Return a JSON object named test_results with the following structure: 
 
-          { "test_passed": boolean (true if all checks pass), 
+          { 
+          "test_passed": boolean (true if all checks pass), 
           "tool_executed": boolean, 
           "branches_count": integer, 
           "has_main_branch": boolean,

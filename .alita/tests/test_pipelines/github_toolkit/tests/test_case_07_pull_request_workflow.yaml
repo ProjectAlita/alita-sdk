@@ -6,41 +6,38 @@ toolkits:
     name: ${GITHUB_TOOLKIT_NAME}
 
 state:
+  base_branch:
+    type: str
+    value: main
+  branch_name:
+    type: str
+  branch_name_base:
+    type: str
+    value: test/gh10-pr-workflow
+  file_contents:
+    type: str
+  file_path:
+    type: str
   input:
     type: str
   messages:
     type: list
-  branch_name_base:
-    type: str
-    value: "test/gh10-pr-workflow"
-  branch_name:
-    type: str
-  base_branch:
-    type: str
-    value: "main"
-  file_path:
-    type: str
-  file_contents:
-    type: str
-  pr_title:
-    type: str
   pr_body:
-    type: str
-  pr_number:
-    type: int
-  tool_result:
     type: str
   pr_details:
     type: str
   pr_diffs:
     type: str
+  pr_number:
+    type: int
+  pr_title:
+    type: str
   test_results:
     type: dict
-
+  tool_result:
+    type: str
 entry_point: prepare_test_data
-
 nodes:
-  # Step 1: Prepare unique branch, file, and PR data
   - id: prepare_test_data
     type: code
     code:
@@ -77,12 +74,8 @@ nodes:
       - pr_body
     structured_output: true
     transition: create_branch
-
-  # Step 2: Create test branch
   - id: create_branch
     type: toolkit
-    tool: create_branch
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - branch_name
     input_mapping:
@@ -92,13 +85,11 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    tool: create_branch
+    toolkit_name: testing
     transition: set_active_branch
-
-  # Step 3: Set the new branch as active
   - id: set_active_branch
     type: toolkit
-    tool: set_active_branch
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - branch_name
     input_mapping:
@@ -108,66 +99,64 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    tool: set_active_branch
+    toolkit_name: testing
     transition: create_file
-
-  # Step 4: Create a file on the branch (PR needs changes)
   - id: create_file
     type: toolkit
-    tool: create_file
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - file_path
       - file_contents
     input_mapping:
-      file_path:
-        type: variable
-        value: file_path
       file_contents:
         type: variable
         value: file_contents
+      file_path:
+        type: variable
+        value: file_path
     output:
       - tool_result
     structured_output: true
+    tool: create_file
+    toolkit_name: testing
     transition: create_pull_request
-
-  # Step 5: Create the pull request
   - id: create_pull_request
     type: toolkit
-    tool: create_pull_request
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - pr_title
       - pr_body
       - branch_name
       - base_branch
     input_mapping:
-      title:
+      base:
         type: variable
-        value: pr_title
+        value: base_branch
       body:
         type: variable
         value: pr_body
       head:
         type: variable
         value: branch_name
-      base:
+      title:
         type: variable
-        value: base_branch
+        value: pr_title
     output:
       - tool_result
     structured_output: true
+    tool: create_pull_request
+    toolkit_name: testing
     transition: extract_pr_number
-
-  # Step 6: Extract PR number from result using LLM
   - id: extract_pr_number
     type: llm
-    model: gpt-4o
     input:
       - tool_result
     input_mapping:
+      chat_history:
+        type: fixed
+        value: []
       system:
         type: fixed
-        value: "You are a data extraction assistant."
+        value: You are a data extraction assistant.
       task:
         type: fstring
         value: |
@@ -187,20 +176,15 @@ nodes:
           }}
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the JSON object with pr_number. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
-      chat_history:
-        type: fixed
-        value: []
+    model: gpt-4o
     output:
       - pr_number
+    structured_output: true
     structured_output_dict:
-        pr_number: "int"
+      pr_number: int
     transition: get_pull_request
-
-  # Step 7: Validate PR exists by fetching it
   - id: get_pull_request
     type: toolkit
-    tool: get_pull_request
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - pr_number
     input_mapping:
@@ -210,13 +194,11 @@ nodes:
     output:
       - pr_details
     structured_output: true
+    tool: get_pull_request
+    toolkit_name: testing
     transition: list_pull_request_diffs
-
-  # Step 8: List PR diffs to validate file changes are visible
   - id: list_pull_request_diffs
     type: toolkit
-    tool: list_pull_request_diffs
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - pr_number
     input_mapping:
@@ -226,12 +208,11 @@ nodes:
     output:
       - pr_diffs
     structured_output: true
+    tool: list_pull_request_diffs
+    toolkit_name: testing
     transition: process_results
-
-  # Step 9: Validate all results with LLM
   - id: process_results
     type: llm
-    model: gpt-4o
     input:
       - pr_number
       - pr_details
@@ -239,9 +220,12 @@ nodes:
       - pr_title
       - file_path
     input_mapping:
+      chat_history:
+        type: fixed
+        value: []
       system:
         type: fixed
-        value: "You are a quality assurance validator."
+        value: You are a quality assurance validator.
       task:
         type: fstring
         value: |
@@ -277,39 +261,31 @@ nodes:
           }}
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
-      chat_history:
-        type: fixed
-        value: []
+    model: gpt-4o
     output:
       - test_results
     structured_output_dict:
-        test_results: "dict"
+      test_results: dict
     transition: close_pull_request
-
-  # Step 10: Close the PR using update_issue
   - id: close_pull_request
     type: toolkit
-    tool: update_issue
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - pr_number
     input_mapping:
+      state:
+        type: fixed
+        value: closed
       issue_id:
         type: variable
         value: pr_number
-      state:
-        type: fixed
-        value: "closed"
     output:
       - tool_result
     structured_output: true
+    tool: update_issue
+    toolkit_name: testing
     transition: delete_branch
-
-  # Step 11: Delete the test branch
   - id: delete_branch
     type: toolkit
-    tool: delete_branch
-    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - branch_name
     input_mapping:
@@ -322,4 +298,6 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    tool: delete_branch
+    toolkit_name: testing
     transition: END
