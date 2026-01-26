@@ -227,10 +227,13 @@ class GitHubClient(BaseModel):
 
     def _get_files(self, directory_path: str, ref: str, repo_name: Optional[str] = None) -> List[str]:
         """
-        Get all files in a directory recursively.
+        Get all files in a directory recursively using Git Trees API.
+
+        This optimized implementation fetches the entire file tree in a single API call
+        instead of making one API call per directory (which was extremely slow for large repos).
 
         Args:
-            directory_path: Path to the directory
+            directory_path: Path to the directory (empty string for root)
             ref: Branch or commit reference
             repo_name: Optional repository name to override default
 
@@ -241,23 +244,52 @@ class GitHubClient(BaseModel):
 
         try:
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
-            contents = repo.get_contents(directory_path, ref=ref)
+
+            # Get the commit SHA for the ref (branch/tag name)
+            try:
+                # Try as branch first
+                branch = repo.get_branch(ref)
+                tree_sha = branch.commit.commit.tree.sha
+            except GithubException:
+                # Fall back to treating ref as a commit SHA or tag
+                try:
+                    commit = repo.get_commit(ref)
+                    tree_sha = commit.commit.tree.sha
+                except GithubException as e:
+                    return f"Error: Could not resolve ref '{ref}': {e.message}"
+
+            # Fetch entire tree recursively in ONE API call
+            # This returns up to 100,000 entries - sufficient for most repos
+            tree = repo.get_git_tree(tree_sha, recursive=True)
+
+            # Normalize directory path for filtering
+            dir_prefix = directory_path.strip("/") + "/" if directory_path.strip("/") else ""
+
+            # Filter to files only (blob = file, tree = directory)
+            files = []
+            for item in tree.tree:
+                if item.type == "blob":
+                    # If directory_path specified, filter by prefix
+                    if dir_prefix:
+                        if item.path.startswith(dir_prefix):
+                            files.append(item.path)
+                    else:
+                        files.append(item.path)
+
+            # Check if tree was truncated (>100k files)
+            # Use getattr for compatibility with different PyGithub versions
+            if getattr(tree, 'truncated', False):
+                logger.warning(
+                    f"[GitHubClient] Tree was truncated for {repo.full_name}. "
+                    f"Returned {len(files)} files but repo may have more."
+                )
+
+            return files
+
         except GithubException as e:
             return f"Error: status code {e.status}, {e.message}"
-
-        files = []
-        while contents:
-            file_content = contents.pop(0)
-            if file_content.type == "dir":
-                try:
-                    directory_contents = repo.get_contents(file_content.path, ref=ref)
-                    contents.extend(directory_contents)
-                except GithubException:
-                    pass
-            else:
-                files.append(file_content)
-
-        return [file.path for file in files]
+        except Exception as e:
+            return f"Error fetching files: {str(e)}"
 
     def get_files_from_directory(self, directory_path: str, repo_name: Optional[str] = None) -> str:
         """
