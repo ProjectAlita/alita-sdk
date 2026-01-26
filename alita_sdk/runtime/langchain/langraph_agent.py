@@ -7,7 +7,7 @@ from typing import Dict
 import yaml
 import ast
 from langchain_core.callbacks import dispatch_custom_event
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage, RemoveMessage
 from langchain_core.runnables import Runnable
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
@@ -1217,6 +1217,20 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Previous run completed - start fresh run with new input
                     # Don't use invoke(None) as that just returns current state without running
                     logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
+
+                    # FIX: When input contains 'messages' (e.g., regeneration scenario),
+                    # clear old checkpoint messages first to prevent duplication.
+                    # The add_messages reducer would otherwise APPEND new messages to existing ones.
+                    if input.get('messages'):
+                        existing_messages = checkpoint_state.values.get('messages', [])
+                        if existing_messages:
+                            logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
+                            # Create RemoveMessage objects for all existing messages
+                            remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if hasattr(msg, 'id') and msg.id]
+                            if remove_msgs:
+                                # Update state to remove old messages before invoking
+                                self.update_state(config, {'messages': remove_msgs})
+
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
                     # Interrupted mid-execution - update state and continue from where we left off
