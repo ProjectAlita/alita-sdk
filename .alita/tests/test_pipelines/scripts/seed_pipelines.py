@@ -30,6 +30,9 @@ from typing import Any
 import requests
 import yaml
 
+# Import shared pattern matching utilities
+from pattern_matcher import filter_by_patterns, matches_any_pattern
+
 
 DEFAULT_BASE_URL = "http://192.168.68.115"
 DEFAULT_PROJECT_ID = 2
@@ -719,10 +722,21 @@ def run(
         filtered_files = []
         for yaml_file in yaml_files:
             # Check if any pattern matches the filename
-            for p in pattern:
-                if p.lower() in yaml_file.name.lower():
-                    filtered_files.append(yaml_file)
-                    break
+            if matches_any_pattern(yaml_file.name, pattern):
+                filtered_files.append(yaml_file)
+                continue
+            
+            # Also check against the pipeline name inside the YAML
+            try:
+                with open(yaml_file, "r", encoding="utf-8") as f:
+                    yaml_content = yaml.safe_load(f)
+                    pipeline_name = yaml_content.get("name", "")
+                    if pipeline_name and matches_any_pattern(pipeline_name, pattern):
+                        filtered_files.append(yaml_file)
+            except Exception:
+                # If we can't read the YAML, just skip checking the name
+                pass
+        
         yaml_files = filtered_files
         if not quiet:
             print(f"Filtered {original_count} -> {len(yaml_files)} test(s) matching: {pattern}")

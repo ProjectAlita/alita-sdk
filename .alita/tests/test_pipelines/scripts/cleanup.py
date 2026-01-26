@@ -26,7 +26,6 @@ Suite Specification Format:
 """
 
 import argparse
-import fnmatch
 import json
 import re
 import sys
@@ -47,6 +46,9 @@ from seed_pipelines import (
 )
 
 from delete_pipelines import delete_pipeline, list_pipelines
+
+# Import shared pattern matching utilities
+from pattern_matcher import matches_pattern
 
 
 class CleanupContext:
@@ -266,7 +268,8 @@ def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
             ctx.project_id,
             bearer_token=ctx.bearer_token,
         )
-        matching = [p for p in pipelines if fnmatch.fnmatch(p.get("name", ""), pattern)]
+        # Use pattern matching with wildcard support
+        matching = [p for p in pipelines if matches_pattern(p.get("name", ""), pattern, use_wildcards=True)]
         ctx.log(f"[DRY RUN] Would delete {len(matching)} pipelines: {[p['name'] for p in matching]}")
         return {"success": True, "dry_run": True, "count": len(matching)}
 
@@ -281,7 +284,8 @@ def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
         ctx.log("No pipelines found", "info")
         return {"success": True, "deleted": 0}
 
-    matching = [p for p in pipelines if fnmatch.fnmatch(p.get("name", ""), pattern)]
+    # Use pattern matching with wildcard support
+    matching = [p for p in pipelines if matches_pattern(p.get("name", ""), pattern, use_wildcards=True)]
 
     if not matching:
         ctx.log(f"No pipelines matching pattern: {pattern}", "info")
@@ -411,11 +415,10 @@ def handle_composable_cleanup(config: dict, ctx: CleanupContext) -> dict:
     failed = 0
 
     for target_name in pipeline_names:
-        # Check if it's a pattern or exact match
-        if "*" in target_name or "?" in target_name:
-            matching = [p for p in pipelines if fnmatch.fnmatch(p.get("name", ""), target_name)]
-        else:
-            matching = [p for p in pipelines if p.get("name") == target_name]
+        # Use pattern matching with wildcard support
+        # matches_pattern will handle both wildcards and flexible substring matching
+        use_wildcards = "*" in target_name or "?" in target_name
+        matching = [p for p in pipelines if matches_pattern(p.get("name", ""), target_name, use_wildcards=use_wildcards)]
 
         for pipeline in matching:
             result = delete_pipeline(

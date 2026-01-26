@@ -33,6 +33,7 @@ DEFAULT_SUITES=("github_toolkit" "state_retrieval" "structured_output")
 # Parse arguments
 SUITES=()
 VERBOSE=""
+SHOW_OUTPUT=false
 SKIP_CLEANUP=false
 SKIP_SETUP=false
 SKIP_INITIAL_CLEANUP=false
@@ -45,7 +46,8 @@ print_usage() {
     echo "Run test suites with full workflow (setup, seed, run, cleanup)"
     echo ""
     echo "Options:"
-    echo "  -v, --verbose           Enable verbose output"
+    echo "  -v, --verbose           Enable verbose output (logs to run.log)"
+    echo "  --show-output           Show verbose test execution in real-time (implies -v)"
     echo "  --skip-initial-cleanup  Skip cleanup before starting (not recommended)"
     echo "  --skip-cleanup          Skip cleanup after tests"
     echo "  --skip-setup            Skip setup (use existing environment)"
@@ -63,7 +65,8 @@ print_usage() {
     echo ""
     echo "Examples:"
     echo "  $0                              # Run all suites with initial cleanup"
-    echo "  $0 -v github_toolkit            # Run GitHub toolkit with verbose output"
+    echo "  $0 -v github_toolkit            # Run GitHub toolkit with verbose logs"
+    echo "  $0 --show-output github_toolkit # Show live test execution"
     echo "  $0 --skip-cleanup               # Run all but skip post-test cleanup"
     echo "  $0 --skip-initial-cleanup       # Skip cleanup before starting"
     echo "  $0 --stop-on-failure state_retrieval structured_output"
@@ -74,6 +77,11 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -v|--verbose)
             VERBOSE="--verbose"
+            shift
+            ;;
+        --show-output)
+            VERBOSE="--verbose"
+            SHOW_OUTPUT=true
             shift
             ;;
         --skip-initial-cleanup)
@@ -209,27 +217,46 @@ run_suite() {
     print_step "Step 3/4: Running tests for $suite_spec"
     local results_file="$suite_output_dir/results.json"
 
-    # Run tests with JSON output redirected to results file
-    if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
-        print_success "Tests completed"
+    # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
+    # Now verbose output goes to stderr, so we can use both --json and $VERBOSE together
+    if [ "$SHOW_OUTPUT" = true ]; then
+        # Show verbose output in real-time while also capturing to log
+        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+            print_success "Tests completed"
+        else
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
+            return 1
+        fi
+    else
+        # Capture verbose output to log file only
+        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
+            print_success "Tests completed"
+        else
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
+            return 1
+        fi
+    fi
 
-        # Parse results
-        if [ -f "$results_file" ]; then
-            local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
-            local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
-            local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total_tests', 0))" 2>/dev/null || echo "0")
+    # Parse results
+    if [ -f "$results_file" ]; then
+        local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
+        local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+        local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total', 0))" 2>/dev/null || echo "0")
 
-            SUITE_PASSED[$suite_spec]=$passed
-            SUITE_FAILED[$suite_spec]=$failed
+        SUITE_PASSED[$suite_spec]=$passed
+        SUITE_FAILED[$suite_spec]=$failed
 
-            echo "  Results: $passed passed, $failed failed (total: $total)"
+        echo "  Results: $passed passed, $failed failed (total: $total)"
 
-            if [ "$failed" -gt 0 ]; then
-                SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
-                print_error "Some tests failed"
-            else
-                SUITE_RESULTS[$suite_spec]="PASSED"
-            fi
+        if [ "$failed" -gt 0 ]; then
+            SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
+            print_error "Some tests failed"
+        else
+            SUITE_RESULTS[$suite_spec]="PASSED"
         fi
     else
         print_error "Test execution failed - see $suite_output_dir/run.log"

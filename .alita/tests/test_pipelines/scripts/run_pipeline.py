@@ -35,6 +35,9 @@ from typing import Optional, Any
 
 import requests
 
+# Import shared pattern matching utilities
+from pattern_matcher import matches_pattern
+
 
 @dataclass
 class PipelineResult:
@@ -98,16 +101,29 @@ def get_pipeline_by_id(base_url: str, project_id: int, pipeline_id: int, headers
 
 
 def get_pipeline_by_name(base_url: str, project_id: int, name: str, headers: dict) -> Optional[dict]:
-    """Get pipeline details by name."""
+    """
+    Get pipeline details by name or pattern.
+    
+    Supports both exact name matching and flexible pattern matching
+    (case-insensitive, underscore/space/hyphen agnostic).
+    """
     url = f"{base_url}/api/v2/elitea_core/applications/prompt_lib/{project_id}?limit=500"
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
         return None
 
     data = response.json()
+    
+    # First try exact match (fast path)
     for pipeline in data.get("rows", []):
         if pipeline.get("name") == name:
             return get_pipeline_by_id(base_url, project_id, pipeline["id"], headers)
+    
+    # Fall back to pattern matching (flexible)
+    for pipeline in data.get("rows", []):
+        if matches_pattern(pipeline.get("name", ""), name):
+            return get_pipeline_by_id(base_url, project_id, pipeline["id"], headers)
+    
     return None
 
 
@@ -117,9 +133,14 @@ def execute_pipeline(
     pipeline: dict,
     input_message: str = "",
     timeout: int = 120,
-    verbose: bool = False
+    verbose: bool = False,
+    verbose_to_stderr: bool = False
 ) -> PipelineResult:
-    """Execute a pipeline using the v2 predict API (synchronous)."""
+    """Execute a pipeline using the v2 predict API (synchronous).
+    
+    Args:
+        verbose_to_stderr: If True and verbose is True, write verbose output to stderr
+    """
     start_time = time.time()
     headers = get_auth_headers(include_content_type=True)
 
@@ -140,7 +161,8 @@ def execute_pipeline(
     version_id = version.get("id")
 
     if verbose:
-        print(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})")
+        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
+        print(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})", file=output_stream)
 
     # Use v2 predict API for synchronous execution
     predict_url = f"{base_url}/api/v2/elitea_core/predict/prompt_lib/{project_id}/{version_id}"
@@ -150,8 +172,9 @@ def execute_pipeline(
     }
 
     if verbose:
-        print(f"  POST {predict_url}")
-        print(f"  Payload: {json.dumps(payload)}")
+        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
+        print(f"  POST {predict_url}", file=output_stream)
+        print(f"  Payload: {json.dumps(payload)}", file=output_stream)
 
     try:
         response = requests.post(
@@ -184,7 +207,8 @@ def execute_pipeline(
     execution_time = time.time() - start_time
 
     if verbose:
-        print(f"  Response: {response.status_code}")
+        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
+        print(f"  Response: {response.status_code}", file=output_stream)
 
     # Handle HTTP errors
     if response.status_code not in (200, 201):

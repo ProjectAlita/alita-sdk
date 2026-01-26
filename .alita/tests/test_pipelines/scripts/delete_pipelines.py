@@ -28,6 +28,9 @@ from seed_pipelines import (
     load_project_id_from_env,
 )
 
+# Import shared pattern matching utilities
+from pattern_matcher import matches_pattern
+
 
 def delete_pipeline(
     base_url: str,
@@ -224,7 +227,9 @@ Environment Variables:
             session_cookie=session_cookie,
             bearer_token=bearer_token,
         )
-        ids_to_delete = [p["id"] for p in pipelines if args.pattern.lower() in p["name"].lower()]
+        # Use shared pattern matching utility with wildcard support
+        use_wildcards = "*" in args.pattern or "?" in args.pattern
+        ids_to_delete = [p["id"] for p in pipelines if matches_pattern(p["name"], args.pattern, use_wildcards=use_wildcards)]
 
         if not ids_to_delete:
             print(f"No pipelines matching pattern '{args.pattern}' found.")

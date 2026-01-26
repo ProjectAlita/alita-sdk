@@ -314,15 +314,19 @@ def generate_html(data: Dict[str, Any]) -> str:
                 </div>
                 """)
 
-        # 2. Execution Steps (Tool Calls)
+        # 2. Execution Steps (Tool Calls + LLM Nodes)
         steps_html = []
         tools_dict = output_data.get("tool_calls_dict", {}) if isinstance(output_data, dict) else {}
+        thinking_steps = output_data.get("thinking_steps", []) if isinstance(output_data, dict) else []
         
         # Collect and sort steps
         steps = []
+        
+        # Add tool calls
         if isinstance(tools_dict, dict):
             for key, tc in tools_dict.items():
                 steps.append({
+                    "type": "tool",
                     "name": tc.get("tool_name", "Unknown Tool"),
                     "input": tc.get("tool_inputs"),
                     "output": tc.get("tool_output"),
@@ -330,15 +334,49 @@ def generate_html(data: Dict[str, Any]) -> str:
                     "timestamp": tc.get("timestamp_start", "")
                 })
         
+        # Add LLM thinking steps (reasoning/validation nodes)
+        if isinstance(thinking_steps, list):
+            for idx, ts in enumerate(thinking_steps):
+                if isinstance(ts, dict):
+                    # Extract LLM response text
+                    llm_output = ts.get("text", "")
+                    if not llm_output and "message" in ts:
+                        msg = ts.get("message", {})
+                        if isinstance(msg, dict):
+                            llm_output = msg.get("content", "")
+                    
+                    # Only add if there's actual content
+                    if llm_output:
+                        steps.append({
+                            "type": "llm",
+                            "name": f"LLM Step {idx + 1}",
+                            "input": None,  # LLM inputs are typically in chat history
+                            "output": llm_output,
+                            "error": None,
+                            "timestamp": ts.get("timestamp_start", "")
+                        })
+        
         # Sort by timestamp
         steps.sort(key=lambda x: x["timestamp"] or "")
         
         if steps:
-            steps_html.append('<div style="margin-top: 20px;"><strong>Execution Steps:</strong></div>')
+            steps_html.append('<div style="margin-top: 20px;"><strong>Execution Steps (Tools & LLM Reasoning):</strong></div>')
             steps_html.append('<div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">')
             
             for step in steps:
+                s_type = step.get("type", "tool")
                 s_name = step["name"]
+                s_error = step["error"]
+                
+                # Different styling for LLM vs Tool steps
+                if s_type == "llm":
+                    border_color = "#6366f1" if not s_error else "#dc3545"
+                    bg_color = "#f5f5ff" if not s_error else "#fff5f5"
+                    icon = "🤖"
+                else:
+                    border_color = "#dc3545" if s_error else "#28a745"
+                    bg_color = "#fff5f5" if s_error else "#fafffa"
+                    icon = "🔧"
                 
                 # Format IO
                 if step["input"]:
@@ -350,29 +388,39 @@ def generate_html(data: Dict[str, Any]) -> str:
                    s_output_html = format_data_html(step["output"])
                 else:
                    s_output_html = "<span class='empty'>null</span>"
-
-                s_error = step["error"]
-                border_color = "#dc3545" if s_error else "#28a745"
-                bg_color = "#fff5f5" if s_error else "#fafffa"
                 
-                step_content = f"""
-                <div style="border: 1px solid {border_color}; background: {bg_color}; border-radius: 6px; padding: 10px; font-size: 13px;">
-                    <div style="font-weight: bold; margin-bottom: 5px; color: #333;">Tool: {s_name}</div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                # For LLM steps, show output in full width (no input column)
+                if s_type == "llm":
+                    step_content = f"""
+                    <div style="border: 1px solid {border_color}; background: {bg_color}; border-radius: 6px; padding: 10px; font-size: 13px;">
+                        <div style="font-weight: bold; margin-bottom: 5px; color: #333;">{icon} {s_name}</div>
                         <div style="overflow-x: auto;">
-                            <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 2px;">INPUT</div>
-                            <div style="background: rgba(255,255,255,0.5); padding: 5px; border-radius: 3px; max-height: 300px; overflow-y: auto;">
-                                {s_input_html}
-                            </div>
-                        </div>
-                        <div style="overflow-x: auto;">
-                            <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 2px;">OUTPUT</div>
-                            <div style="background: rgba(255,255,255,0.5); padding: 5px; border-radius: 3px; max-height: 300px; overflow-y: auto;">
+                            <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 2px;">LLM RESPONSE</div>
+                            <div style="background: rgba(255,255,255,0.5); padding: 10px; border-radius: 3px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 12px;">
                                 {s_output_html}
                             </div>
                         </div>
-                    </div>
-                """
+                    """
+                else:
+                    step_content = f"""
+                    <div style="border: 1px solid {border_color}; background: {bg_color}; border-radius: 6px; padding: 10px; font-size: 13px;">
+                        <div style="font-weight: bold; margin-bottom: 5px; color: #333;">{icon} Tool: {s_name}</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div style="overflow-x: auto;">
+                                <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 2px;">INPUT</div>
+                                <div style="background: rgba(255,255,255,0.5); padding: 5px; border-radius: 3px; max-height: 300px; overflow-y: auto;">
+                                    {s_input_html}
+                                </div>
+                            </div>
+                            <div style="overflow-x: auto;">
+                                <div style="font-size: 11px; color: #666; font-weight: bold; margin-bottom: 2px;">OUTPUT</div>
+                                <div style="background: rgba(255,255,255,0.5); padding: 5px; border-radius: 3px; max-height: 300px; overflow-y: auto;">
+                                    {s_output_html}
+                                </div>
+                            </div>
+                        </div>
+                    """
+                
                 if s_error:
                     step_content += f"""
                     <div style="margin-top: 5px; color: #dc3545; font-weight: bold; font-size: 12px;">Error: {s_error}</div>
@@ -459,7 +507,7 @@ def run(results_path: Path, output_path: Path = None) -> Path:
         return None
         
     try:
-        with open(results_path) as f:
+        with open(results_path, encoding='utf-8') as f:
             data = json.load(f)
             
         html_content = generate_html(data)
@@ -467,7 +515,7 @@ def run(results_path: Path, output_path: Path = None) -> Path:
         if output_path is None:
             output_path = results_path.with_suffix('.html')
             
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
             
         return output_path

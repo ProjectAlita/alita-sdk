@@ -56,6 +56,9 @@ from run_pipeline import (
     PipelineResult
 )
 
+# Import shared pattern matching utilities
+from pattern_matcher import matches_any_pattern
+
 
 def load_config(suite_folder: Path, pipeline_file: str | None = None) -> dict | None:
     """Load pipeline config from a suite folder.
@@ -303,7 +306,8 @@ def run_post_test_hooks(
     env_vars: dict,
     headers: dict,
     timeout: int = 120,
-    verbose: bool = False
+    verbose: bool = False,
+    quiet: bool = False
 ) -> dict:
     """Run post-test hooks for a test result.
 
@@ -316,10 +320,13 @@ def run_post_test_hooks(
         headers: Auth headers
         timeout: Execution timeout
         verbose: Verbose output
+        quiet: If True, send verbose output to stderr (JSON mode)
 
     Returns:
         Updated test result with hook outputs merged
     """
+    output_stream = sys.stderr if quiet else sys.stdout
+    
     for hook in hooks_config:
         hook_name = hook.get("name", "unnamed")
         condition = hook.get("condition", "")
@@ -327,17 +334,17 @@ def run_post_test_hooks(
 
         if not pipeline_id:
             if verbose:
-                print(f"    Skipping hook '{hook_name}': no pipeline_id")
+                print(f"    Skipping hook '{hook_name}': no pipeline_id", file=output_stream)
             continue
 
         # Evaluate condition
         if not evaluate_condition(condition, result):
             if verbose:
-                print(f"    Skipping hook '{hook_name}': condition not met")
+                print(f"    Skipping hook '{hook_name}': condition not met", file=output_stream)
             continue
 
         if verbose:
-            print(f"    Running hook: {hook_name}")
+            print(f"    Running hook: {hook_name}", file=output_stream)
 
         # Build input from result
         input_mapping = hook.get("input_mapping", {})
@@ -348,7 +355,7 @@ def run_post_test_hooks(
             pipeline_id_int = int(pipeline_id)
         except (ValueError, TypeError):
             if verbose:
-                print(f"    Warning: Invalid pipeline_id '{pipeline_id}'")
+                print(f"    Warning: Invalid pipeline_id '{pipeline_id}'", file=output_stream)
             continue
 
         hook_result = invoke_hook_pipeline(
@@ -366,10 +373,10 @@ def run_post_test_hooks(
             output_mapping = hook.get("output_mapping", {})
             result = merge_hook_output(result, hook_result.get("output", {}), output_mapping)
             if verbose:
-                print(f"    Hook '{hook_name}' completed successfully")
+                print(f"    Hook '{hook_name}' completed successfully", file=output_stream)
         else:
             if verbose:
-                print(f"    Hook '{hook_name}' failed: {hook_result.get('error')}")
+                print(f"    Hook '{hook_name}' failed: {hook_result.get('error')}", file=output_stream)
 
     return result
 
@@ -533,11 +540,6 @@ def get_pipelines_from_folder(
     return matched
 
 
-def normalize_for_matching(s: str) -> str:
-    """Normalize string for flexible matching (underscore/space/hyphen agnostic)."""
-    return s.lower().replace("_", " ").replace("-", " ")
-
-
 def get_pipelines_by_pattern(
     base_url: str,
     project_id: int,
@@ -554,15 +556,12 @@ def get_pipelines_by_pattern(
     matched = []
 
     for p in all_pipelines:
-        name = normalize_for_matching(p.get("name", ""))
-        for pattern in patterns:
-            # Use flexible substring matching (underscore/space agnostic)
-            normalized_pattern = normalize_for_matching(pattern)
-            if normalized_pattern in name:
-                full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
-                if full:
-                    matched.append(full)
-                break
+        name = p.get("name", "")
+        # Use shared pattern matching utility
+        if matches_any_pattern(name, patterns):
+            full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
+            if full:
+                matched.append(full)
 
     return matched
 
@@ -623,7 +622,8 @@ def run_suite(
         hooks = config.get("hooks", {})
         post_test_hooks = hooks.get("post_test", [])
         if post_test_hooks and verbose:
-            print(f"Post-test hooks configured: {len(post_test_hooks)}")
+            output_stream = sys.stderr if quiet else sys.stdout
+            print(f"Post-test hooks configured: {len(post_test_hooks)}", file=output_stream)
 
     def execute_one(pipeline: dict) -> PipelineResult:
         return execute_pipeline(
@@ -632,7 +632,8 @@ def run_suite(
             pipeline=pipeline,
             input_message=input_message,
             timeout=timeout,
-            verbose=verbose
+            verbose=verbose,
+            verbose_to_stderr=quiet  # When in JSON mode, send verbose to stderr
         )
 
     results = []
@@ -669,7 +670,9 @@ def run_suite(
             pipeline_name = pipeline.get('name', f"ID: {pipeline.get('id')}")
             
             if verbose:
-                print(f"Running: {pipeline_name}...")
+                # In JSON mode, write verbose to stderr so stdout stays clean JSON
+                output_stream = sys.stderr if quiet else sys.stdout
+                print(f"Running: {pipeline_name}...", file=output_stream)
             elif not quiet:
                 sys.stdout.write(f"▶ {pipeline_name}...\r")
                 sys.stdout.flush()
@@ -691,7 +694,8 @@ def run_suite(
                     env_vars=env_vars,
                     headers=headers,
                     timeout=timeout,
-                    verbose=verbose
+                    verbose=verbose,
+                    quiet=quiet
                 )
                 # Check if RCA added any results
                 # Assuming RCA hook output is merged into result['test_results']['rca'] or similar
@@ -706,8 +710,9 @@ def run_suite(
 
             # 3. Print Result
             if verbose:
+                output_stream = sys.stderr if quiet else sys.stdout
                 status = "PASS" if result.test_passed else "FAIL"
-                print(f"  [{status}] {result.execution_time:.1f}s")
+                print(f"  [{status}] {result.execution_time:.1f}s", file=output_stream)
             elif not quiet:
                 # Clear running line
                 sys.stdout.write("\033[2K\r")
@@ -876,12 +881,10 @@ def main():
             # Filter already collected pipelines by pattern
             filtered_pipelines = []
             for p in pipelines:
-                name = normalize_for_matching(p.get("name", ""))
-                for pattern in args.pattern:
-                    normalized_pattern = normalize_for_matching(pattern)
-                    if normalized_pattern in name:
-                        filtered_pipelines.append(p)
-                        break
+                name = p.get("name", "")
+                # Use shared pattern matching utility
+                if matches_any_pattern(name, args.pattern):
+                    filtered_pipelines.append(p)
             pipelines = filtered_pipelines
             suite_name = f"{suite_name} (filtered: {', '.join(args.pattern)})"
         else:
@@ -912,7 +915,8 @@ def main():
         sys.exit(1)
 
     if args.verbose:
-        print(f"Found {len(pipelines)} pipeline(s) to execute")
+        output_stream = sys.stderr if args.json else sys.stdout
+        print(f"Found {len(pipelines)} pipeline(s) to execute", file=output_stream)
 
     # Load config for hooks
     config = None
