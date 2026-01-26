@@ -1,5 +1,6 @@
 import logging
 import re
+import traceback
 from typing import Union, Any, Optional, Annotated, get_type_hints
 from uuid import uuid4
 from typing import Dict
@@ -507,6 +508,252 @@ def find_tool_by_name_or_metadata(tools: list, tool_name: str, toolkit_name: Opt
     return None
 
 
+def _build_graph_creation_error(
+    exception: Exception,
+    error_stage: str,
+    yaml_schema: str,
+    tools: list,
+    client: Any,
+    schema: Optional[dict] = None,
+    node: Optional[dict] = None,
+    node_index: Optional[int] = None,
+    lg_builder: Optional[StateGraph] = None,
+    available_nodes: Optional[list] = None,
+    **kwargs
+) -> dict:
+    """
+    Build a structured error response for graph creation failures.
+
+    Args:
+        exception: The exception that occurred
+        error_stage: Stage where error occurred (yaml_parsing, schema_validation, node_processing, etc.)
+        yaml_schema: Original YAML schema string
+        tools: Available tools list
+        client: LLM client for generating explanations
+        schema: Parsed schema dict (if available)
+        node: Specific node being processed (if applicable)
+        node_index: Index of node in nodes list (if applicable)
+        lg_builder: StateGraph builder (if available)
+        available_nodes: List of available node IDs (if applicable)
+        **kwargs: Additional context
+
+    Returns:
+        Structured error dict with human-readable explanation
+    """
+    error_type = type(exception).__name__
+    error_message = str(exception)
+
+    # Log for debugging
+    logger.error(f"Graph creation failed at stage '{error_stage}': {error_type}: {error_message}")
+    logger.error(f"Full traceback:\n{traceback.format_exc()}")
+
+    # Build rich context for LLM
+    context_parts = [
+        f"Error Stage: {error_stage}",
+        f"Error Type: {error_type}",
+        f"Error Message: {error_message}",
+        "",
+        "=== YAML Schema Structure ===",
+    ]
+
+    # Add schema structure if available
+    if schema:
+        context_parts.append(f"Schema Name: {schema.get('name', 'Unnamed')}")
+        context_parts.append(f"Entry Point: {schema.get('entry_point', 'Not defined')}")
+
+        # Node information
+        nodes_list = schema.get('nodes', [])
+        context_parts.append(f"Total Nodes: {len(nodes_list)}")
+        if nodes_list:
+            node_ids = [n.get('id', 'unknown') for n in nodes_list]
+            context_parts.append(f"Node IDs: {', '.join(node_ids)}")
+
+        # State variables
+        state_vars = schema.get('state', {})
+        if state_vars:
+            context_parts.append(f"State Variables: {', '.join(state_vars.keys())}")
+
+        # Interrupts
+        interrupt_before = schema.get('interrupt_before', [])
+        interrupt_after = schema.get('interrupt_after', [])
+        if interrupt_before:
+            context_parts.append(f"Interrupt Before: {', '.join(interrupt_before)}")
+        if interrupt_after:
+            context_parts.append(f"Interrupt After: {', '.join(interrupt_after)}")
+    else:
+        context_parts.append("(Schema parsing failed - YAML structure invalid)")
+
+    context_parts.append("")
+    context_parts.append("=== Available Tools ===")
+    tool_names = [t.name for t in tools if hasattr(t, 'name')]
+    context_parts.append(f"Total Tools: {len(tool_names)}")
+    if tool_names:
+        context_parts.append(f"Tool Names: {', '.join(tool_names[:20])}")  # Limit to first 20
+        if len(tool_names) > 20:
+            context_parts.append(f"... and {len(tool_names) - 20} more")
+
+    # Add specific error context based on stage
+    if error_stage == "node_processing" and node:
+        context_parts.append("")
+        context_parts.append("=== Problem Node ===")
+        context_parts.append(f"Node Index: {node_index}")
+        context_parts.append(f"Node ID: {node.get('id', 'unknown')}")
+        context_parts.append(f"Node Type: {node.get('type', 'unknown')}")
+        if 'tool' in node:
+            context_parts.append(f"Tool Name: {node['tool']}")
+        if 'toolkit_name' in node:
+            context_parts.append(f"Toolkit Name: {node['toolkit_name']}")
+        if 'transition' in node:
+            context_parts.append(f"Transition: {node['transition']}")
+        if 'decision' in node:
+            context_parts.append(f"Decision: {node['decision']}")
+
+    if error_stage == "entry_point_validation" and available_nodes:
+        context_parts.append("")
+        context_parts.append("=== Available Nodes for Entry Point ===")
+        context_parts.append(", ".join(available_nodes))
+
+    if lg_builder and hasattr(lg_builder, 'nodes'):
+        context_parts.append("")
+        context_parts.append("=== Graph Builder State ===")
+        context_parts.append(f"Registered Nodes: {', '.join(lg_builder.nodes.keys())}")
+        if hasattr(lg_builder, 'edges'):
+            context_parts.append(f"Edges Count: {len(lg_builder.edges)}")
+
+    error_context = "\n".join(context_parts)
+
+    # Generate human-readable explanation using LLM
+    human_explanation = _generate_graph_error_explanation(
+        error_context=error_context,
+        error_stage=error_stage,
+        client=client
+    )
+
+    # Truncate YAML for technical details if too long
+    yaml_snippet = yaml_schema[:1000] + "..." if len(yaml_schema) > 1000 else yaml_schema
+
+    return {
+        "success": False,
+        "error": {
+            "type": error_type,
+            "message": error_message,
+            "stage": error_stage,
+            "human_explanation": human_explanation,
+            "technical_details": {
+                "traceback": traceback.format_exc(),
+                "yaml_schema": yaml_snippet,
+                "schema_structure": schema if schema else "Not available",
+                "available_tools": tool_names if tool_names else [],
+                "problem_node": node if node else None,
+                "context": error_context
+            }
+        }
+    }
+
+
+def _generate_graph_error_explanation(
+    error_context: str,
+    error_stage: str,
+    client: Any
+) -> str:
+    """Generate human-readable explanation for graph creation errors using LLM."""
+
+    if not client:
+        return _fallback_graph_error_explanation(error_context, error_stage)
+
+    try:
+        prompt = f"""You are a helpful assistant explaining graph creation errors to developers.
+Given this error context, provide a clear, actionable explanation (3-4 sentences) that:
+1. Explains what went wrong in the graph creation process
+2. Identifies the likely root cause
+3. Suggests specific fixes (e.g., which field to add, which node ID to correct)
+4. Uses the YAML structure and available tools information to provide precise guidance
+
+Error Stage: {error_stage}
+
+Error Context:
+{error_context}
+
+Provide only the human-friendly explanation without any preamble:"""
+
+        response = client.invoke([HumanMessage(content=prompt)])
+        explanation = response.content if hasattr(response, 'content') else str(response)
+        return explanation.strip()
+    except Exception as e:
+        logger.warning(f"Failed to generate LLM explanation for graph error: {e}")
+        return _fallback_graph_error_explanation(error_context, error_stage)
+
+
+def _fallback_graph_error_explanation(error_context: str, error_stage: str) -> str:
+    """Provide fallback explanation when LLM is unavailable."""
+
+    stage_explanations = {
+        "yaml_parsing": (
+            "The YAML schema could not be parsed. Common issues:\n"
+            "- Invalid YAML syntax (check indentation, quotes, colons)\n"
+            "- Missing required fields\n"
+            "- Malformed node definitions\n"
+            "Review the YAML syntax at the line mentioned in the error."
+        ),
+        "schema_validation": (
+            "The schema structure is invalid. Check that:\n"
+            "- 'nodes' field is present and is a list\n"
+            "- 'entry_point' field is defined\n"
+            "- All required fields for each node are included\n"
+            "Review the schema structure in the technical details."
+        ),
+        "node_processing": (
+            "Failed to process a specific node. Common issues:\n"
+            "- Referenced tool not found in available tools\n"
+            "- Invalid node type or missing required fields\n"
+            "- Tool name mismatch or toolkit_name incorrect\n"
+            "Check the 'Problem Node' section in technical details."
+        ),
+        "entry_point_validation": (
+            "The entry_point references a non-existent node.\n"
+            "Ensure entry_point matches one of the node IDs in your schema.\n"
+            "Check 'Available Nodes for Entry Point' in technical details."
+        ),
+        "graph_validation": (
+            "The graph structure is invalid. Common issues:\n"
+            "- Nodes reference non-existent transitions\n"
+            "- Circular dependencies without proper conditions\n"
+            "- Interrupt points reference non-existent nodes\n"
+            "Review the graph structure and node connections."
+        ),
+        "graph_compilation": (
+            "Failed to compile the graph. This typically indicates:\n"
+            "- Complex issues with state management\n"
+            "- Incompatible node configurations\n"
+            "- Internal LangGraph compilation errors\n"
+            "Review the technical details and consider simplifying the graph."
+        ),
+    }
+
+    base_explanation = stage_explanations.get(
+        error_stage,
+        "An unexpected error occurred during graph creation. Review the technical details for more information."
+    )
+
+    # Add context-specific hints
+    if "tool" in error_context.lower() and "not found" in error_context.lower():
+        base_explanation += "\n\nHINT: The tool referenced in a node doesn't exist in your tools list. Check tool names and toolkit_name fields."
+
+    if "entry_point" in error_context.lower() and error_stage != "entry_point_validation":
+        base_explanation += "\n\nHINT: Verify that your entry_point field matches a valid node ID from your nodes list."
+
+    if "KeyError" in error_context and "'nodes'" in error_context:
+        base_explanation += "\n\nHINT: The 'nodes' field is required in your schema. Ensure your YAML includes a nodes list."
+
+    if "'id'" in error_context and "KeyError" in error_context:
+        base_explanation += "\n\nHINT: Each node must have an 'id' field. Check that all nodes in your schema have unique IDs."
+
+    if "transition" in error_context.lower() and error_stage == "graph_validation":
+        base_explanation += "\n\nHINT: A transition references a non-existent node. Verify all transition targets exist as node IDs."
+
+    return base_explanation
+
+
 def create_graph(
         client: Any,
         yaml_schema: str,
@@ -617,7 +864,43 @@ def create_graph(
         yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
         logger.info("Filtered PrinterNodes from subgraph YAML in create_graph")
 
-    schema = yaml.safe_load(yaml_schema)
+    # Parse YAML with detailed error handling
+    try:
+        schema = yaml.safe_load(yaml_schema)
+    except yaml.YAMLError as e:
+        return _build_graph_creation_error(
+            exception=e,
+            error_stage="yaml_parsing",
+            yaml_schema=yaml_schema,
+            tools=tools,
+            client=client,
+            **kwargs
+        )
+
+    # Validate schema is a dictionary
+    if not isinstance(schema, dict):
+        return _build_graph_creation_error(
+            exception=TypeError(f"Schema must be a dictionary, got {type(schema).__name__}"),
+            error_stage="schema_validation",
+            yaml_schema=yaml_schema,
+            schema=schema,
+            tools=tools,
+            client=client,
+            **kwargs
+        )
+
+    # Validate required 'nodes' field
+    if 'nodes' not in schema:
+        return _build_graph_creation_error(
+            exception=KeyError("'nodes' field is required in schema"),
+            error_stage="schema_validation",
+            yaml_schema=yaml_schema,
+            schema=schema,
+            tools=tools,
+            client=client,
+            **kwargs
+        )
+
     logger.debug(f"Schema: {schema}")
     logger.debug(f"Tools: {tools}")
     logger.info(f"Tools: {[tool.name for tool in tools]}")
@@ -626,39 +909,42 @@ def create_graph(
     lg_builder = StateGraph(state_class)
     interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
     interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
+
+    # Process nodes with enhanced error handling
     try:
-        for node in schema['nodes']:
-            node_type = node.get('type', 'function')
-            node_id = clean_string(node['id'])
-            toolkit_name = node.get('toolkit_name')
-            tool_name = clean_string(node.get('tool', ''))
-            # Tool names are now clean (no prefix needed)
-            logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
-            if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
-                if node_type in ['mcp', 'toolkit', 'agent'] and not tool_name:
-                    # tool is not specified
-                    raise ToolException(f"Tool name is required for {node_type} node with id '{node_id}'")
+        for node_index, node in enumerate(schema['nodes']):
+            try:
+                node_type = node.get('type', 'function')
+                node_id = clean_string(node['id'])
+                toolkit_name = node.get('toolkit_name')
+                tool_name = clean_string(node.get('tool', ''))
+                # Tool names are now clean (no prefix needed)
+                logger.info(f"Node: {node_id} : {node_type} - {tool_name}")
+                if node_type in ['function', 'toolkit', 'mcp', 'tool', 'loop', 'loop_from_tool', 'indexer', 'subgraph', 'pipeline', 'agent']:
+                    if node_type in ['mcp', 'toolkit', 'agent'] and not tool_name:
+                        # tool is not specified
+                        raise ToolException(f"Tool name is required for {node_type} node with id '{node_id}'")
 
-                # Unified validation and tool finding for toolkit, mcp, and agent node types
-                matching_tool = None
-                if node_type in ['toolkit', 'mcp', 'agent']:
-                    # Use enhanced validation that checks both direct name and metadata
-                    matching_tool = find_tool_by_name_or_metadata(tools, tool_name, toolkit_name)
-                    if not matching_tool:
-                        # tool is not found in the provided tools
-                        error_msg = f"Node `{node_id}` with type `{node_type}` has tool '{tool_name}'"
-                        if toolkit_name:
-                            error_msg += f" (toolkit: '{toolkit_name}')"
-                        error_msg += f" which is not found in the provided tools. Make sure it is connected properly. Available tools: {format_tools(tools)}"
-                        raise ToolException(error_msg)
-                else:
-                    # For other node types, find tool by direct name match
-                    for tool in tools:
-                        if tool.name == tool_name:
-                            matching_tool = tool
-                            break
+                    # Unified validation and tool finding for toolkit, mcp, and agent node types
+                    matching_tool = None
+                    if node_type in ['toolkit', 'mcp', 'agent']:
+                        # Use enhanced validation that checks both direct name and metadata
+                        matching_tool = find_tool_by_name_or_metadata(tools, tool_name, toolkit_name)
+                        if not matching_tool:
+                            # tool is not found in the provided tools
+                            error_msg = f"Node `{node_id}` with type `{node_type}` has tool '{tool_name}'"
+                            if toolkit_name:
+                                error_msg += f" (toolkit: '{toolkit_name}')"
+                            error_msg += f" which is not found in the provided tools. Make sure it is connected properly. Available tools: {format_tools(tools)}"
+                            raise ToolException(error_msg)
+                    else:
+                        # For other node types, find tool by direct name match
+                        for tool in tools:
+                            if tool.name == tool_name:
+                                matching_tool = tool
+                                break
 
-                if matching_tool:
+                    if matching_tool:
                         if node_type in ['function', 'toolkit', 'mcp']:
                             lg_builder.add_node(node_id, FunctionTool(
                                 tool=matching_tool, name=node_id, return_type='dict',
@@ -749,177 +1035,219 @@ def create_graph(
                                 output_variables=node.get('output', []),
                                 input_variables=node.get('input', ['messages']),
                                 structured_output=node.get('structured_output', False)))
-            elif node_type == 'code':
-                from ..tools.sandbox import create_sandbox_tool
-                sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
-                                                   alita_client=kwargs.get('alita_client', None))
-                code_data = node.get('code', {'type': 'fixed', 'value': "return 'Code block is empty'"})
-                lg_builder.add_node(node_id, FunctionTool(
-                    tool=sandbox_tool, name=node['id'], return_type='dict',
-                    output_variables=node.get('output', []),
-                    input_mapping={'code': code_data},
-                    input_variables=node.get('input', ['messages']),
-                    structured_output=node.get('structured_output', False),
-                    alita_client=kwargs.get('alita_client', None)
-                ))
-            elif node_type == 'llm':
-                output_vars = node.get('output', [])
-                output_vars_dict = {
-                    var: get_type_hints(state_class).get(var, str).__name__
-                    for var in output_vars
-                }
-                
-                # Check if tools should be bound to this LLM node
-                connected_tools = node.get('tool_names', {})
-                tool_names = []
-                if isinstance(connected_tools, dict):
-                    for toolkit, selected_tools in connected_tools.items():
-                        # Add tool names directly (no prefix)
-                        tool_names.extend(selected_tools)
-                elif isinstance(connected_tools, list):
-                    # Use provided tool names as-is
-                    tool_names = connected_tools
-                
-                if tool_names:
-                    # Filter tools by name
-                    tool_dict = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
-                    available_tools = [tool_dict[name] for name in tool_names if name in tool_dict]
-                    if len(available_tools) != len(tool_names):
-                        missing_tools = [name for name in tool_names if name not in tool_dict]
-                        logger.warning(f"Some tools not found for LLM node {node_id}: {missing_tools}")
-                else:
-                    # Use all available tools
-                    available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
+                elif node_type == 'llm':
+                    output_vars = node.get('output', [])
+                    output_vars_dict = {
+                        var: get_type_hints(state_class).get(var, str).__name__
+                        for var in output_vars
+                    }
 
-                # Determine if we should use lazy tools mode for this LLM node
-                # Use lazy mode when:
-                # 1. lazy_tools_mode is enabled globally
-                # 2. We have a tool_registry
-                # 3. No specific tool_names are requested (indicating "use all tools")
-                use_lazy_for_node = (
-                    lazy_tools_mode and
-                    tool_registry is not None and
-                    not tool_names  # If specific tools requested, use direct binding
-                )
+                    # Check if tools should be bound to this LLM node
+                    connected_tools = node.get('tool_names', {})
+                    tool_names = []
+                    if isinstance(connected_tools, dict):
+                        for toolkit, selected_tools in connected_tools.items():
+                            # Add tool names directly (no prefix)
+                            tool_names.extend(selected_tools)
+                    elif isinstance(connected_tools, list):
+                        # Use provided tool names as-is
+                        tool_names = connected_tools
 
-                if use_lazy_for_node:
-                    logger.info(f"[LazyTools] LLM node '{node_id}' using lazy tools mode")
+                    if tool_names:
+                        # Filter tools by name
+                        tool_dict = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
+                        available_tools = [tool_dict[name] for name in tool_names if name in tool_dict]
+                        if len(available_tools) != len(tool_names):
+                            missing_tools = [name for name in tool_names if name not in tool_dict]
+                            logger.warning(f"Some tools not found for LLM node {node_id}: {missing_tools}")
+                    else:
+                        # Use all available tools
+                        available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
 
-                lg_builder.add_node(node_id, LLMNode(
-                    client=client,
-                    input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
-                    name=node_id,
-                    return_type='dict',
-                    structured_output_dict=output_vars_dict,
-                    output_variables=output_vars,
-                    input_variables=node.get('input', ['messages']),
-                    structured_output=node.get('structured_output', False),
-                    tool_execution_timeout=node.get('tool_execution_timeout', 900),
-                    available_tools=available_tools,
-                    tool_names=tool_names,
-                    steps_limit=kwargs.get('steps_limit', 25),
-                    # Lazy tools mode parameters
-                    lazy_tools_mode=use_lazy_for_node,
-                    tool_registry=tool_registry if use_lazy_for_node else None,
+                    # Determine if we should use lazy tools mode for this LLM node
+                    # Use lazy mode when:
+                    # 1. lazy_tools_mode is enabled globally
+                    # 2. We have a tool_registry
+                    # 3. No specific tool_names are requested (indicating "use all tools")
+                    use_lazy_for_node = (
+                        lazy_tools_mode and
+                        tool_registry is not None and
+                        not tool_names  # If specific tools requested, use direct binding
+                    )
+
+                    if use_lazy_for_node:
+                        logger.info(f"[LazyTools] LLM node '{node_id}' using lazy tools mode")
+
+                    lg_builder.add_node(node_id, LLMNode(
+                        client=client,
+                        input_mapping=node.get('input_mapping', {'messages': {'type': 'variable', 'value': 'messages'}}),
+                        name=node_id,
+                        return_type='dict',
+                        structured_output_dict=output_vars_dict,
+                        output_variables=output_vars,
+                        input_variables=node.get('input', ['messages']),
+                        structured_output=node.get('structured_output', False),
+                        tool_execution_timeout=node.get('tool_execution_timeout', 900),
+                        available_tools=available_tools,
+                        tool_names=tool_names,
+                        steps_limit=kwargs.get('steps_limit', 25),
+                        # Lazy tools mode parameters
+                        lazy_tools_mode=use_lazy_for_node,
+                        tool_registry=tool_registry if use_lazy_for_node else None,
                     # Always-bind tools (e.g., middleware/planning tools)
                     always_bind_tools=always_bind_tools if use_lazy_for_node else None,
                 ))
-            elif node_type in ['router', 'decision']:
-                if node_type == 'router':
-                    # Add a RouterNode as an independent node
-                    lg_builder.add_node(node_id, RouterNode(
-                        name=node_id,
-                        condition=node.get('condition', ''),
-                        routes=node.get('routes', []),
-                        default_output=node.get('default_output', 'END'),
-                        input_variables=node.get('input', ['messages'])
-                    ))
-                elif node_type == 'decision':
-                    logger.info(f'Adding decision: {node["nodes"]}')
-                    # fallback to old-style decision node
-                    decisional_inputs = node.get('decisional_inputs')
-                    decisional_inputs = node.get('input', ['messages']) if not decisional_inputs else decisional_inputs
-                    lg_builder.add_node(node_id, DecisionEdge(
-                        client, node['nodes'],
-                        node.get('description', ""),
-                        decisional_inputs=decisional_inputs,
-                        default_output=node.get('default_output', 'END'),
-                        is_node=True
-                    ))
+                elif node_type in ['router', 'decision']:
+                    if node_type == 'router':
+                        # Add a RouterNode as an independent node
+                        lg_builder.add_node(node_id, RouterNode(
+                            name=node_id,
+                            condition=node.get('condition', ''),
+                            routes=node.get('routes', []),
+                            default_output=node.get('default_output', 'END'),
+                            input_variables=node.get('input', ['messages'])
+                        ))
+                    elif node_type == 'decision':
+                        logger.info(f'Adding decision: {node["nodes"]}')
+                        # fallback to old-style decision node
+                        decisional_inputs = node.get('decisional_inputs')
+                        decisional_inputs = node.get('input', ['messages']) if not decisional_inputs else decisional_inputs
+                        lg_builder.add_node(node_id, DecisionEdge(
+                            client, node['nodes'],
+                            node.get('description', ""),
+                            decisional_inputs=decisional_inputs,
+                            default_output=node.get('default_output', 'END'),
+                            is_node=True
+                        ))
 
-                # Add a single conditional edge for all routes
-                lg_builder.add_conditional_edges(
-                    node_id,
-                    ConditionalEdge(
-                        condition="{{router_output}}",  # router node returns the route key in 'router_output'
-                        condition_inputs=["router_output"],
-                        conditional_outputs=node.get('routes', []),
-                        default_output=node.get('default_output', 'END')
+                    # Add a single conditional edge for all routes
+                    lg_builder.add_conditional_edges(
+                        node_id,
+                        ConditionalEdge(
+                            condition="{{router_output}}",  # router node returns the route key in 'router_output'
+                            condition_inputs=["router_output"],
+                            conditional_outputs=node.get('routes', []),
+                            default_output=node.get('default_output', 'END')
+                        )
                     )
+                    continue
+                elif node_type == 'state_modifier':
+                    lg_builder.add_node(node_id, StateModifierNode(
+                        template=node.get('template', ''),
+                        variables_to_clean=node.get('variables_to_clean', []),
+                        input_variables=node.get('input', ['messages']),
+                        output_variables=node.get('output', [])
+                    ))
+                elif node_type == 'printer':
+                    lg_builder.add_node(node_id, PrinterNode(
+                        input_mapping=node.get('input_mapping', {'printer': {'type': 'fixed', 'value': ''}}),
+                        final_message=node.get('final_message'),
+                    ))
+
+                    # add interrupts after printer node if specified
+                    interrupt_after.append(clean_string(node_id))
+
+                    # reset printer output variable to avoid carrying over
+                    reset_node_id = f"{node_id}_reset"
+                    lg_builder.add_node(reset_node_id, PrinterNode(
+                        input_mapping={'printer': {'type': 'fixed', 'value': PRINTER_COMPLETED_STATE}}
+                    ))
+                    lg_builder.add_conditional_edges(node_id, TransitionalEdge(reset_node_id))
+                    lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
+                    continue
+                elif node_type == 'code':
+                    from ..tools.sandbox import create_sandbox_tool
+                    sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
+                                                       alita_client=kwargs.get('alita_client', None))
+                    code_data = node.get('code', {'type': 'fixed', 'value': "return 'Code block is empty'"})
+                    lg_builder.add_node(node_id, FunctionTool(
+                        tool=sandbox_tool, name=node['id'], return_type='dict',
+                        output_variables=node.get('output', []),
+                        input_mapping={'code': code_data},
+                        input_variables=node.get('input', ['messages']),
+                        structured_output=node.get('structured_output', False),
+                        alita_client=kwargs.get('alita_client', None)
+                    ))
+
+                # Handle transitions, decisions, and conditions
+                if node.get('transition'):
+                    next_step = clean_string(node['transition'])
+                    logger.info(f'Adding transition: {next_step}')
+                    lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
+                elif node.get('decision'):
+                    logger.info(f'Adding decision: {node["decision"]["nodes"]}')
+                    lg_builder.add_conditional_edges(node_id, DecisionEdge(
+                        client, node['decision']['nodes'],
+                        node['decision'].get('description', ""),
+                        decisional_inputs=node['decision'].get('decisional_inputs', ['messages']),
+                        default_output=node['decision'].get('default_output', 'END')))
+                elif node.get('condition') and node_type != 'router':
+                    logger.info(f'Adding condition: {node["condition"]}')
+                    condition_input = node['condition'].get('condition_input', ['messages'])
+                    condition_definition = node['condition'].get('condition_definition', '')
+                    lg_builder.add_conditional_edges(node_id, ConditionalEdge(
+                        condition=condition_definition, condition_inputs=condition_input,
+                        conditional_outputs=node['condition'].get('conditional_outputs', []),
+                        default_output=node['condition'].get('default_output', 'END')))
+            except Exception as e:
+                # Node-specific error handling
+                return _build_graph_creation_error(
+                    exception=e,
+                    error_stage="node_processing",
+                    node=node,
+                    node_index=node_index,
+                    yaml_schema=yaml_schema,
+                    schema=schema,
+                    tools=tools,
+                    client=client,
+                    lg_builder=lg_builder,
+                    **kwargs
                 )
-                continue
-            elif node_type == 'state_modifier':
-                lg_builder.add_node(node_id, StateModifierNode(
-                    template=node.get('template', ''),
-                    variables_to_clean=node.get('variables_to_clean', []),
-                    input_variables=node.get('input', ['messages']),
-                    output_variables=node.get('output', [])
-                ))
-            elif node_type == 'printer':
-                lg_builder.add_node(node_id, PrinterNode(
-                    input_mapping=node.get('input_mapping', {'printer': {'type': 'fixed', 'value': ''}}),
-                    final_message=node.get('final_message'),
-                ))
+    except Exception as e:
+        # Catch any errors during node iteration
+        return _build_graph_creation_error(
+            exception=e,
+            error_stage="nodes_iteration",
+            yaml_schema=yaml_schema,
+            schema=schema,
+            tools=tools,
+            client=client,
+            lg_builder=lg_builder,
+            **kwargs
+        )
 
-                # add interrupts after printer node if specified
-                interrupt_after.append(clean_string(node_id))
+    # Validate and set entry point
+    try:
+        entry_point = clean_string(schema['entry_point'])
+    except KeyError:
+        return _build_graph_creation_error(
+            exception=KeyError("'entry_point' field is required in schema"),
+            error_stage="entry_point_validation",
+            yaml_schema=yaml_schema,
+            schema=schema,
+            tools=tools,
+            client=client,
+            available_nodes=list(lg_builder.nodes.keys()) if lg_builder else [],
+            lg_builder=lg_builder,
+            **kwargs
+        )
 
-                # reset printer output variable to avoid carrying over
-                reset_node_id = f"{node_id}_reset"
-                lg_builder.add_node(reset_node_id, PrinterNode(
-                    input_mapping={'printer': {'type': 'fixed', 'value': PRINTER_COMPLETED_STATE}}
-                ))
-                lg_builder.add_conditional_edges(node_id, TransitionalEdge(reset_node_id))
-                lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
-                continue
-            if node.get('transition'):
-                next_step = clean_string(node['transition'])
-                logger.info(f'Adding transition: {next_step}')
-                lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
-            elif node.get('decision'):
-                logger.info(f'Adding decision: {node["decision"]["nodes"]}')
-                lg_builder.add_conditional_edges(node_id, DecisionEdge(
-                    client, node['decision']['nodes'],
-                    node['decision'].get('description', ""),
-                    decisional_inputs=node['decision'].get('decisional_inputs', ['messages']),
-                    default_output=node['decision'].get('default_output', 'END')))
-            elif node.get('condition') and node_type != 'router':
-                logger.info(f'Adding condition: {node["condition"]}')
-                condition_input = node['condition'].get('condition_input', ['messages'])
-                condition_definition = node['condition'].get('condition_definition', '')
-                lg_builder.add_conditional_edges(node_id, ConditionalEdge(
-                    condition=condition_definition, condition_inputs=condition_input,
-                    conditional_outputs=node['condition'].get('conditional_outputs', []),
-                    default_output=node['condition'].get('default_output', 'END')))
+    # Set up entry point (still within the outer try block started at "Process nodes")
+    if state.items():
+        state_default_node = StateDefaultNode(default_vars=set_defaults(state))
+        lg_builder.add_node(state_default_node.name, state_default_node)
+        lg_builder.set_entry_point(state_default_node.name)
+        lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
+    else:
+        # if no state variables are defined, set the entry point directly
+        lg_builder.set_entry_point(entry_point)
 
-        # set default value for state variable at START
+    interrupt_before = interrupt_before or []
+    interrupt_after = interrupt_after or []
+
+    # Validate the graph
+    if not for_subgraph:
         try:
-            entry_point = clean_string(schema['entry_point'])
-        except KeyError:
-            raise ToolException("Entry point is not defined in the schema. Please define 'entry_point' in the schema.")
-        if state.items():
-            state_default_node = StateDefaultNode(default_vars=set_defaults(state))
-            lg_builder.add_node(state_default_node.name, state_default_node)
-            lg_builder.set_entry_point(state_default_node.name)
-            lg_builder.add_conditional_edges(state_default_node.name, TransitionalEdge(entry_point))
-        else:
-            # if no state variables are defined, set the entry point directly
-            lg_builder.set_entry_point(entry_point)
-
-        interrupt_before = interrupt_before or []
-        interrupt_after = interrupt_after or []
-
-        if not for_subgraph:
             # validate the graph for LangGraphAgentRunnable before the actual construction
             lg_builder.validate(
                 interrupt=(
@@ -928,8 +1256,20 @@ def create_graph(
                     else []
                 )
             )
+        except ValueError as e:
+            return _build_graph_creation_error(
+                exception=e,
+                    error_stage="graph_validation",
+                    yaml_schema=yaml_schema,
+                    schema=schema,
+                    tools=tools,
+                client=client,
+                lg_builder=lg_builder,
+                **kwargs
+            )
 
-        # Compile into a CompiledStateGraph  for the subgraph
+    # Compile into a CompiledStateGraph
+    try:
         graph = lg_builder.compile(
             checkpointer=True,
             interrupt_before=interrupt_before,
@@ -937,21 +1277,18 @@ def create_graph(
             store=store,
             debug=debug,
         )
-    except ValueError as e:
-        # Build a clearer debug message without complex f-string expressions
-        debug_nodes = "\n*".join(lg_builder.nodes.keys()) if lg_builder and lg_builder.nodes else ""
-        debug_message = (
-            "Validation of the schema failed. {err}\n\n"
-            "DEBUG INFO:**Schema Nodes:**\n\n*{nodes}\n\n"
-            "**Schema Edges:**\n\n{edges}\n\n"
-            "**Tools Available:**\n\n{tools}"
-        ).format(
-            err=e,
-            nodes=debug_nodes,
-            edges=lg_builder.edges if lg_builder else {},
-            tools=format_tools(tools),
+    except Exception as e:
+        return _build_graph_creation_error(
+            exception=e,
+            error_stage="graph_compilation",
+            yaml_schema=yaml_schema,
+            schema=schema,
+            tools=tools,
+            client=client,
+            lg_builder=lg_builder,
+            **kwargs
         )
-        raise ValueError(debug_message)
+
     # If building a nested subgraph, return the raw CompiledStateGraph
     if for_subgraph:
         return graph

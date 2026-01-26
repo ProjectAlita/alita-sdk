@@ -259,8 +259,12 @@ class BaseToolApiWrapper(BaseModel):
             if tool["name"] == mode:
                 try:
                     execution = tool["ref"](*args, **kwargs)
-                    # if not isinstance(execution, str):
-                    #     execution = str(execution)
+
+                    # Check if execution itself is a ToolException returned (not raised)
+                    if isinstance(execution, ToolException):
+                        # Convert returned ToolException to structured error
+                        return self._build_error_response(execution, mode, args, kwargs, tool)
+
                     return execution
                 except Exception as e:
                     # Re-raise McpAuthorizationRequired directly without wrapping
@@ -268,75 +272,124 @@ class BaseToolApiWrapper(BaseModel):
                     if isinstance(e, McpAuthorizationRequired):
                         raise
                     
-                    # Catch all tool execution exceptions and provide user-friendly error messages
-                    error_type = type(e).__name__
-                    error_message = str(e)
-                    full_traceback = traceback.format_exc()
-                    
-                    # Log the full exception details for debugging
-                    logger.error(f"Tool execution failed for '{mode}': {error_type}: {error_message}")
-                    logger.error(f"Full traceback:\n{full_traceback}")
-                    logger.debug(f"Tool execution parameters - args: {args}, kwargs: {kwargs}")
-                    
-                    # Provide specific error messages for common issues
-                    if isinstance(e, TypeError) and "unexpected keyword argument" in error_message:
-                        # Extract the problematic parameter name from the error message
-                        import re
-                        match = re.search(r"unexpected keyword argument '(\w+)'", error_message)
-                        if match:
-                            bad_param = match.group(1)
-                            # Try to get expected parameters from the tool's args_schema if available
-                            expected_params = "unknown"
-                            if "args_schema" in tool and hasattr(tool["args_schema"], "__fields__"):
-                                expected_params = list(tool["args_schema"].__fields__.keys())
-                            
-                            user_friendly_message = (
-                                f"Parameter error in tool '{mode}': unexpected parameter '{bad_param}'. "
-                                f"Expected parameters: {expected_params}\n\n"
-                                f"Full traceback:\n{full_traceback}"
-                            )
-                        else:
-                            user_friendly_message = (
-                                f"Parameter error in tool '{mode}': {error_message}\n\n"
-                                f"Full traceback:\n{full_traceback}"
-                            )
-                    elif isinstance(e, TypeError):
-                        user_friendly_message = (
-                            f"Parameter error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, ValueError):
-                        user_friendly_message = (
-                            f"Value error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, KeyError):
-                        user_friendly_message = (
-                            f"Missing required configuration or data in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, ConnectionError):
-                        user_friendly_message = (
-                            f"Connection error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, TimeoutError):
-                        user_friendly_message = (
-                            f"Timeout error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    else:
-                        user_friendly_message = (
-                            f"Tool '{mode}' execution failed: {error_type}: {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    
-                    # Re-raise with the user-friendly message while preserving the original exception
-                    raise ToolException(user_friendly_message) from e
+                    # Build structured error response for all other exceptions
+                    return self._build_error_response(e, mode, args, kwargs, tool)
         else:
             raise ValueError(f"Unknown mode: {mode}. "
                              f"Available modes: {', '.join([tool['name'] for tool in self.get_available_tools()])}. "
                              f"Review the tool's name in your request.")
+
+    def _build_error_response(self, exception: Exception, tool_name: str, args: tuple, kwargs: dict, tool: dict) -> dict:
+        """Build a structured error response with LLM-generated human-readable explanation."""
+        error_type = type(exception).__name__
+        error_message = str(exception)
+        full_traceback = traceback.format_exc() if not isinstance(exception, ToolException) else str(exception)
+
+        # Log the full exception details for debugging
+        logger.error(f"Tool execution failed for '{tool_name}': {error_type}: {error_message}")
+        logger.error(f"Full traceback:\n{full_traceback}")
+        logger.debug(f"Tool execution parameters - args: {args}, kwargs: {kwargs}")
+
+        # Build context for LLM
+        error_context = self._build_error_context(exception, tool_name, args, kwargs, tool)
+
+        # Generate human-readable explanation
+        human_explanation = self._generate_human_explanation(error_context, tool_name)
+
+        return {
+            "success": False,
+            "error": {
+                "type": error_type,
+                "message": error_message,
+                "tool_name": tool_name,
+                "human_explanation": human_explanation,
+                "technical_details": {
+                    "traceback": full_traceback,
+                    "args": str(args) if args else None,
+                    "kwargs": str(kwargs) if kwargs else None
+                }
+            }
+        }
+
+    def _build_error_context(self, exception: Exception, tool_name: str, args: tuple, kwargs: dict, tool: dict) -> str:
+        """Build context string for LLM to generate explanation."""
+        error_type = type(exception).__name__
+        error_message = str(exception)
+
+        context_parts = [
+            f"Tool: {tool_name}",
+            f"Error Type: {error_type}",
+            f"Error Message: {error_message}",
+        ]
+
+        # Add specific context based on error type
+        if isinstance(exception, TypeError) and "unexpected keyword argument" in error_message:
+            import re
+            match = re.search(r"unexpected keyword argument '(\w+)'", error_message)
+            if match:
+                bad_param = match.group(1)
+                context_parts.append(f"Invalid parameter: {bad_param}")
+
+                # Try to get expected parameters from the tool's args_schema
+                if "args_schema" in tool and hasattr(tool["args_schema"], "__fields__"):
+                    expected_params = list(tool["args_schema"].__fields__.keys())
+                    context_parts.append(f"Expected parameters: {', '.join(expected_params)}")
+
+        if kwargs:
+            context_parts.append(f"Parameters used: {', '.join(kwargs.keys())}")
+
+        return "\n".join(context_parts)
+
+    def _generate_human_explanation(self, error_context: str, tool_name: str) -> str:
+        """Generate human-readable error explanation using LLM if available."""
+        # Check if LLM is available (some subclasses have it, like BaseVectorStoreToolApiWrapper)
+        llm = getattr(self, 'llm', None)
+
+        if not llm:
+            return self._fallback_explanation(error_context)
+
+        try:
+            prompt = f"""You are a helpful assistant explaining technical errors to users in a clear and actionable way.
+
+Given this error context from tool execution, provide a clear, concise explanation (2-3 sentences) that:
+1. Explains what went wrong in simple, non-technical terms
+2. Suggests specific actions the user should take to fix it
+3. Avoids excessive technical jargon
+
+Error Context:
+{error_context}
+
+Provide only the human-friendly explanation without any preamble:"""
+
+            response = llm.invoke(prompt)
+            explanation = response.content if hasattr(response, 'content') else str(response)
+
+            # Clean up the response
+            return explanation.strip()
+        except Exception as e:
+            logger.warning(f"Failed to generate LLM explanation for tool '{tool_name}': {e}")
+            return self._fallback_explanation(error_context)
+
+    def _fallback_explanation(self, error_context: str) -> str:
+        """Provide fallback explanation when LLM is unavailable or fails."""
+        if "unexpected keyword argument" in error_context:
+            return "The tool was called with an incorrect parameter name. Please check the tool's documentation for valid parameter names and try again."
+        elif "TypeError" in error_context:
+            return "The tool was called with incorrect parameter types or values. Please verify that all parameters match the expected format and types."
+        elif "ValueError" in error_context:
+            return "One or more parameter values are invalid or out of range. Please check the parameter constraints and expected value formats."
+        elif "KeyError" in error_context:
+            return "A required configuration value or data field is missing. Please ensure all required parameters and configurations are provided."
+        elif "ConnectionError" in error_context or "connection" in error_context.lower():
+            return "A network connection issue occurred while executing the tool. Please check your internet connectivity and any required service credentials."
+        elif "TimeoutError" in error_context or "timeout" in error_context.lower():
+            return "The operation took too long to complete and timed out. This may be due to network issues or the service being slow. Please try again."
+        elif "PermissionError" in error_context or "permission" in error_context.lower():
+            return "The operation failed due to insufficient permissions. Please check that you have the necessary access rights and credentials."
+        elif "AuthenticationError" in error_context or "authentication" in error_context.lower() or "unauthorized" in error_context.lower():
+            return "Authentication failed. Please verify your credentials and ensure they are valid and not expired."
+        else:
+            return "An unexpected error occurred during tool execution. Please review the technical details below or contact support if the issue persists."
 
 
 class BaseVectorStoreToolApiWrapper(BaseToolApiWrapper):
