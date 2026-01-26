@@ -1203,7 +1203,8 @@ class AlitaClient:
         """
         import asyncio
         import time
-        from ..utils.mcp_client import McpClient
+        # Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters) instead of custom McpClient
+        from ..utils.mcp_adapter import UnifiedMcpClient as McpClient
         from ..utils.mcp_oauth import canonical_resource
 
         toolkit_name = toolkit_config.get('toolkit_name', 'unknown')
