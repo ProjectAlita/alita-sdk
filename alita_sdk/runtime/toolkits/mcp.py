@@ -16,7 +16,8 @@ from ..tools.mcp_server_tool import McpServerTool
 from ..tools.mcp_remote_tool import McpRemoteTool
 from ..tools.mcp_inspect_tool import McpInspectTool
 from ..models.mcp_models import McpConnectionConfig
-from ..utils.mcp_client import McpClient
+# Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters) instead of custom McpClient
+from ..utils.mcp_adapter import UnifiedMcpClient as McpClient
 from ..utils.mcp_oauth import (
     McpAuthorizationRequired,
     canonical_resource,
