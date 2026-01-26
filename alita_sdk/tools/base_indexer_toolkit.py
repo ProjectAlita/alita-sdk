@@ -320,8 +320,9 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
     def _collect_dependencies(self, documents: Generator[Document, None, None]):
         for document in documents:
+            doc_id = document.metadata.get('id') or document.metadata.get('file_path') or document.metadata.get('source', 'unknown')
             self._log_tool_event(message=f"Collecting the dependencies for document ID "
-                                         f"'{document.metadata.get('id', 'N/A')}' to collect dependencies if any...")
+                                         f"'{doc_id}' to collect dependencies if any...")
             dependencies = self._process_document(document)
             yield document
             for dep in dependencies:
