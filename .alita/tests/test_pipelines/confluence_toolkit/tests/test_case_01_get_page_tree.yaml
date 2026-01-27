@@ -1,0 +1,74 @@
+name: "CF01 - Get Page Tree with Descendants"
+description: "Verify get_page_tree tool retrieves complete hierarchical structure including all descendant pages"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_id:
+    type: str
+    value: '104038676'
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+entry_point: invoke_get_page_tree
+nodes:
+  - id: invoke_get_page_tree
+    type: toolkit
+    input:
+      - page_id
+    input_mapping:
+      page_id:
+        type: variable
+        value: page_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_page_tree
+    toolkit_name: confluence-testing
+    transition: process_results
+  - id: process_results
+    type: llm
+    input:
+      - tool_result
+      - page_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_page_tree' tool.
+
+          Tool Result: {tool_result}
+          Page ID: {page_id}
+
+          Perform the following checks:
+
+          1. Confirm the tool executed successfully (the result is not empty or null).
+          2. Determine if the tool returned valid data (must be blank object)
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and returned valid data),
+            "tool_executed": boolean (true if tool ran without errors),
+            "has_tree_data": boolean (true if result contains page tree structure),
+            "result_type": string (describe what was returned: "page_tree", "empty", "error", etc.),
+            "page_count": integer (number of pages in tree if detectable, 0 otherwise),
+            "failed_checks": [string] // list of failed assertions
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

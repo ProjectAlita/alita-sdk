@@ -1,0 +1,33 @@
+{
+  "type": "confluence",
+  "toolkit_name": "AT",
+  "cloud": true,
+  "limit": 5,
+  "space": "AT",
+  "selected_tools": [
+    "index_data",
+    "search_index",
+    "stepback_search_index",
+    "stepback_summary_index",
+    "remove_index",
+    "list_collections",
+    "create_page",
+    "create_pages",
+    "delete_page",
+    "update_page_by_id",
+    "update_page_by_title",
+    "update_pages",
+    "update_labels",
+    "get_page_tree",
+    "get_pages_with_label",
+    "list_pages_with_label",
+    "read_page_by_id",
+    "search_pages",
+    "search_by_title",
+    "site_search",
+    "get_page_with_image_descriptions",
+    "execute_generic_confluence",
+    "get_page_id_by_title",
+    "get_page_attachments"
+  ]
+}

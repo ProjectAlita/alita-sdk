@@ -693,6 +693,23 @@ def run(
     if timestamp:
         env_substitutions["TIMESTAMP"] = timestamp
 
+    # Load pipeline config early to get execution.substitutions
+    config = load_config(folder_path, pipeline_file)
+    
+    # Merge substitutions from config (allows any toolkit or custom variables)
+    if config and "execution" in config and "substitutions" in config["execution"]:
+        config_subs = config["execution"]["substitutions"]
+        for key, value in config_subs.items():
+            # Resolve ${VAR} references from environment
+            if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+                var_name = value[2:-1]  # Extract VAR from ${VAR}
+                env_value = load_from_env(var_name)
+                if env_value:
+                    env_substitutions[key] = env_value
+            else:
+                # Direct value
+                env_substitutions[key] = value
+
     if not folder_path.exists():
         raise FileNotFoundError(f"Folder '{folder_path}' does not exist")
 
@@ -707,9 +724,6 @@ def run(
         raise ValueError("Authentication required. Provide token (API key) or session (cookie)")
 
     auth_method = "Bearer token" if bearer_token else "Session cookie"
-
-    # Load pipeline config if it exists (for composable pipelines and test_directory)
-    config = load_config(folder_path, pipeline_file)
 
     # Get YAML files (will look in test_directory if specified in config)
     yaml_files = get_yaml_files(folder_path, config)

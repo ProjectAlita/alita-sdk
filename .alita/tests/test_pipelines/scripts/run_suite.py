@@ -959,7 +959,9 @@ def main():
 
     # Output results
     if args.output_json:
-        with open(args.output_json, "w") as f:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w") as f:
             f.write(result.to_json())
 
     if args.json:
