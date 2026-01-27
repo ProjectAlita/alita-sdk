@@ -404,13 +404,16 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         interrupt_after = []
     if interrupt_before is None:
         interrupt_before = []
+    # Get output schema from schemas dict (LangGraph 0.4+ doesn't have output_schema attribute)
+    output_schema_key = getattr(lg_builder, 'output_schema', None) or list(lg_builder.schemas.keys())[0]
+    output_schema_channels = lg_builder.schemas[output_schema_key]
     output_channels = (
         "__root__"
-        if len(lg_builder.schemas[lg_builder.output_schema]) == 1
-           and "__root__" in lg_builder.schemas[lg_builder.output_schema]
+        if len(output_schema_channels) == 1
+           and "__root__" in output_schema_channels
         else [
             key
-            for key, val in lg_builder.schemas[lg_builder.output_schema].items()
+            for key, val in output_schema_channels.items()
             if not is_managed_value(val)
         ]
     )
@@ -422,13 +425,15 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         ]
     )
 
+    # Get input schema (same as output schema in typical StateGraph)
+    input_schema_key = getattr(lg_builder, 'input_schema', None) or output_schema_key
     compiled = LangGraphAgentRunnable(
         builder=lg_builder,
         nodes={},
         channels={
             **lg_builder.channels,
             **lg_builder.managed,
-            START: EphemeralValue(lg_builder.input_schema),
+            START: EphemeralValue(input_schema_key),
         },
         input_channels=START,
         stream_mode="updates",
