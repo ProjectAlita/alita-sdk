@@ -1,7 +1,8 @@
 
 services:
   alita-sdk:
-    image: ghcr.io/projectalita/alita-sdk:latest
+    image: ghcr.io/projectalita/alita-sdk:pyodide
+    platform: linux/amd64
     container_name: alita-sdk-dev
     environment:
       - GIT_TOOL_ACCESS_TOKEN=${GIT_TOOL_ACCESS_TOKEN}
@@ -22,9 +23,12 @@ services:
     volumes:
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk
-    command: >
-      sh -c "alita agent execute-test-cases
-      --test-cases-dir .alita/tests/testcases/$${TEST_CASES_DIR}"
+    working_dir: /app/.alita/tests/test_pipelines
+#    command: >
+#      sh -c "alita agent execute-test-cases
+#      --test-cases-dir .alita/tests/testcases/$${TEST_CASES_DIR}"
+#    command: ["bash", "./run_test.sh", "--setup", "--seed", "github_toolkit", "list_branches"]
+    command: ["bash", "./run_test.sh", "--local", "github_toolkit", "test_case_01"]
 
   pgvector-db:
     image: ankane/pgvector

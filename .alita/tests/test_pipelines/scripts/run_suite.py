@@ -1074,11 +1074,9 @@ def main():
 
     # Output results
     if args.output_json:
-        # Ensure output directory exists for output_json
-        output_dir = os.path.dirname(args.output_json)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-        with open(args.output_json, "w") as f:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w") as f:
             f.write(result.to_json())
 
     if args.json:
