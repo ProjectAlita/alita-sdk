@@ -21,6 +21,7 @@ from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplat
 from ..utils.mcp_oauth import McpAuthorizationRequired
 from ...tools import get_available_toolkit_models, instantiate_toolkit
 from ...tools.base_indexer_toolkit import IndexTools
+from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,148 @@ class AlitaClient:
             return data.get('items', [])
         return []
 
+    def get_filtered_models(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        Get filtered list of available models based on flexible criteria.
+
+        Args:
+            filters: Dictionary where keys are model field names and values define filter criteria.
+                    Supports multiple filter types:
+
+                    String fields (name, display_name, etc.):
+                    - Simple string: exact match (case-insensitive)
+                    - String with '*': wildcard match (e.g., '*claude*')
+                    - Regex pattern object: regex match
+
+                    Boolean fields (low_tier, high_tier, supports_vision, supports_reasoning, default, shared):
+                    - True/False: exact match
+
+                    Numeric fields (context_window, max_output_tokens, project_id):
+                    - Number: exact match
+                    - Dict with '<', '>', '<=', '>=': comparison
+                      e.g., {'context_window': {'>=': 200000}}
+
+                    Special filters:
+                    - name_contains: partial match in name (case-insensitive)
+                    - display_name_contains: partial match in display_name (case-insensitive)
+
+        Returns:
+            List of model dictionaries matching all filter criteria.
+
+        Example:
+            >>> # Boolean filters
+            >>> models = client.get_filtered_models({'low_tier': True})
+            >>> models = client.get_filtered_models({'low_tier': True, 'project_id': 1})
+            >>>
+            >>> # String filters
+            >>> models = client.get_filtered_models({'name': 'claude-sonnet-4-5'})
+            >>> models = client.get_filtered_models({'name': '*claude*'})
+            >>> models = client.get_filtered_models({'display_name': '*Sonnet*'})
+            >>>
+            >>> # Numeric comparisons
+            >>> models = client.get_filtered_models({
+            ...     'context_window': {'>=': 200000},
+            ...     'max_output_tokens': {'>': 50000}
+            ... })
+            >>>
+            >>> # Mixed filters
+            >>> models = client.get_filtered_models({
+            ...     'low_tier': True,
+            ...     'name': '*claude*',
+            ...     'context_window': {'>=': 200000}
+            ... })
+        """
+        import re
+
+        if filters is None:
+            filters = {}
+
+        all_models = self.get_available_models()
+        if not all_models:
+            return []
+
+        filtered = all_models
+
+        for key, value in filters.items():
+            if value is None:
+                continue
+
+            # Handle special string contains filters
+            if key == 'name_contains':
+                search_term = value.lower()
+                filtered = [m for m in filtered if search_term in m.get('name', '').lower()]
+                continue
+
+            if key == 'display_name_contains':
+                search_term = value.lower()
+                filtered = [m for m in filtered if search_term in m.get('display_name', '').lower()]
+                continue
+
+            # Filter models based on field type
+            new_filtered = []
+            for model in filtered:
+                field_value = model.get(key)
+
+                # Handle missing fields
+                if field_value is None:
+                    continue
+
+                # Boolean fields - exact match
+                if isinstance(value, bool):
+                    if field_value == value:
+                        new_filtered.append(model)
+
+                # Numeric fields with comparison operators
+                elif isinstance(value, dict) and any(op in value for op in ['<', '>', '<=', '>=']):
+                    if not isinstance(field_value, (int, float)):
+                        continue
+
+                    match = True
+                    for op, threshold in value.items():
+                        if op == '<' and not (field_value < threshold):
+                            match = False
+                            break
+                        elif op == '>' and not (field_value > threshold):
+                            match = False
+                            break
+                        elif op == '<=' and not (field_value <= threshold):
+                            match = False
+                            break
+                        elif op == '>=' and not (field_value >= threshold):
+                            match = False
+                            break
+
+                    if match:
+                        new_filtered.append(model)
+
+                # String fields
+                elif isinstance(value, str):
+                    if not isinstance(field_value, str):
+                        continue
+
+                    # Wildcard pattern matching
+                    if '*' in value:
+                        pattern = re.escape(value).replace(r'\*', '.*')
+                        if re.search(pattern, field_value, re.IGNORECASE):
+                            new_filtered.append(model)
+                    # Exact match (case-insensitive for strings)
+                    elif field_value.lower() == value.lower():
+                        new_filtered.append(model)
+
+                # Regex pattern matching
+                elif hasattr(value, 'match'):  # regex pattern object
+                    if isinstance(field_value, str) and value.search(field_value):
+                        new_filtered.append(model)
+
+                # Numeric fields - exact match
+                elif isinstance(value, (int, float)):
+                    if field_value == value:
+                        new_filtered.append(model)
+
+            filtered = new_filtered
+
+        return filtered
+
     def get_embeddings(self, embedding_model: str) -> OpenAIEmbeddings:
         """
         Get an instance of OpenAIEmbeddings configured with the project ID and auth token.
@@ -357,7 +500,74 @@ class AlitaClient:
             
             llm = ChatOpenAI(**target_kwargs)
         return llm
-        
+
+    def get_low_tier_llm(self, max_tokens: int = 1024, temperature: float = 0.7,
+                         top_p: Optional[float] = None, additional_filters: Optional[Dict[str, Any]] = None):
+        """
+        Get a low-tier LLM instance automatically selected from available models.
+
+        Args:
+            max_tokens: Maximum number of tokens to generate (default: 1024)
+            temperature: Temperature for generation (default: 0.7)
+            top_p: Top-p sampling parameter (optional)
+            additional_filters: Additional filters to apply when selecting the model (optional)
+                              e.g., {'supports_vision': True, 'name': '*claude*'}
+
+        Returns:
+            An instance of ChatOpenAI or ChatAnthropic configured as a low-tier model.
+
+        Raises:
+            ValueError: If no low-tier models are available.
+
+        Example:
+            >>> # Get a basic low-tier model
+            >>> llm = client.get_low_tier_llm()
+            >>>
+            >>> # Get a low-tier model with custom tokens
+            >>> llm = client.get_low_tier_llm(max_tokens=2048)
+            >>>
+            >>> # Get a low-tier Claude model with vision support
+            >>> llm = client.get_low_tier_llm(
+            ...     max_tokens=2048,
+            ...     additional_filters={'name': '*claude*', 'supports_vision': True}
+            ... )
+        """
+        # Build filters starting with low_tier requirement
+        filters = {'low_tier': True}
+
+        # Add any additional filters
+        if additional_filters:
+            filters.update(additional_filters)
+
+        # Get filtered models
+        low_tier_models = self.get_filtered_models(filters)
+
+        if not low_tier_models:
+            raise ValueError("No low-tier models available matching the specified criteria")
+
+        # Select the first available low-tier model
+        selected_model = low_tier_models[0]
+        model_name = selected_model['name']
+
+        logger.info(f"Selected low-tier model: {model_name} (display_name: {selected_model.get('display_name', 'N/A')})")
+
+        # Build model configuration
+        model_config = {
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        # Add top_p if provided
+        if top_p is not None:
+            model_config["top_p"] = top_p
+
+        return None
+        # Return the LLM instance
+        try:
+            return self.get_llm(model_name, model_config)
+        except Exception:
+            return None
+
     def generate_image(self,
                        prompt: str,
                        n: int = 1,
@@ -496,6 +706,14 @@ class AlitaClient:
             )
             middleware_list.append(planning_middleware)
             logger.info(f"Auto-created PlanningMiddleware for conversation_id={conversation_id}")
+
+        # add ToolExceptionHandlerMiddleware to handle tool errors with LLM messages
+        error_handler = ToolExceptionHandlerMiddleware(
+            use_llm_for_errors=True,  # Enable LLM error messages
+            llm=self.get_low_tier_llm(),
+            conversation_id=conversation_id
+        )
+        middleware_list.append(error_handler)
 
         # Extract lazy_tools_mode from internal_tools (it's a mode flag, not an actual tool)
         # UI stores it in meta.internal_tools array, not as meta.lazy_tools_mode boolean
