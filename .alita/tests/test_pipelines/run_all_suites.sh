@@ -333,7 +333,7 @@ run_suite_local() {
     mkdir -p "$suite_output_dir"
 
     # Step 1: Setup (with --local flag)
-    print_step "Step 1/: Running setup for $suite_spec (local)"
+    print_step "Step 1/3: Running setup for $suite_spec (local)"
     if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env --local > "$suite_output_dir/setup.log" 2>&1; then
         print_success "Setup completed"
     else
