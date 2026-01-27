@@ -57,7 +57,7 @@ def execute_single_test_case(
         setup_executor_func: Function to setup executor
         
     Returns:
-        Execution output string, or None if execution failed
+        Tuple of (execution_output, thread_id) or (None, None) if execution failed
     """
     from .parser import resolve_toolkit_config_path
     from .prompts import build_single_test_execution_prompt
@@ -81,6 +81,7 @@ def execute_single_test_case(
     
     # Use cache key (None if no config)
     cache_key = toolkit_config_path if toolkit_config_path else '__no_config__'
+    # Shared thread ID for both execution and validation
     thread_id = f"test_case_{idx}_{uuid.uuid4().hex[:8]}"
     
     # Log test case header to master log
@@ -125,7 +126,7 @@ def execute_single_test_case(
     master_log.print(f"[green]✓ Test case executed[/green]")
     master_log.print(f"[dim]{execution_output}[/dim]\n")
     
-    return execution_output
+    return execution_output, thread_id
 
 
 def validate_single_test_case(
@@ -146,6 +147,7 @@ def validate_single_test_case(
     work_dir: str,
     master_log,
     setup_executor_func,
+    thread_id: Optional[str] = None,
     verbose: bool = True,
     debug: bool = False,
 ) -> Dict[str, Any]:
@@ -169,6 +171,7 @@ def validate_single_test_case(
         work_dir: Working directory
         master_log: Log capture instance
         setup_executor_func: Function to setup executor
+        thread_id: Optional shared thread ID from test execution
         
     Returns:
         Test result dict with validation results
@@ -202,8 +205,11 @@ def validate_single_test_case(
     else:
         master_log.print(f"[dim]Using cached validation executor[/dim]")
     
-    # For validation, use a separate thread with accumulated chat history (data gen + execution)
-    validation_thread_id = f"validation_{idx}_{uuid.uuid4().hex[:8]}"
+    # Use shared thread ID from execution (so validator sees execution history)
+    # Fall back to creating new thread if not provided
+    validation_thread_id = thread_id if thread_id else f"validation_{idx}_{uuid.uuid4().hex[:8]}"
+    if thread_id:
+        master_log.print(f"[dim]Using shared thread ID: {validation_thread_id}[/dim]")
     
     if not validation_executor:
         master_log.print(f"[red]✗ No validation executor available[/red]")

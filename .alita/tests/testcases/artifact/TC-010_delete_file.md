@@ -12,7 +12,7 @@ Verify that the `deleteFile` tool correctly removes files from artifact buckets.
 |-----------|-------|-------------|
 | **Tool** | `deleteFile` | Artifact tool to execute for file deletion |
 | **Bucket Name** | `test-artifacts` | Target bucket for cleanup |
-| **Primary Input(s)** | `{{TC_010_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_010_TXT_FILENAME}}={{RANDOM_STRING}}.txt` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `TC_010_MD_FILENAME={{RANDOM_STRING}}.md, TC_010_TXT_FILENAME={{RANDOM_STRING}}.txt` | Required and optional inputs derived from args_schema |
 
 ## Config
 
@@ -24,9 +24,7 @@ generateTestData: true
 - Alita instance is accessible and configured
 - Valid API key with artifact delete permissions
 - Create bucket `tc-010-delete-file` if missing. If it already exists, bucket creation must be treated as a non-error (idempotent).
-- Ensure the bucket exists
-
-Tool: `createNewBucket`
+- Execute tool `createNewBucket`
 
 Input:
 ```json
@@ -37,11 +35,11 @@ Input:
 }
 ```
 
-- Create files used for partial reads
+- Create files
 
 Tool: `createFile`
 
-Inputs:
+Input:
 ```json
 {
   "filename": "{{TC_010_TXT_FILENAME}}",
@@ -49,10 +47,13 @@ Inputs:
   "bucket_name": "tc-010-delete-file"
 }
 ```
+Tool: `createFile`
+Input: 
 ```json
 {
-  "filename": "{{TC_010_TXT_FILENAME}}",
-  "filedata": "This is a test document.\nLine 2: Testing partial reads.\nLine 3: More content here.\nLine 4: Final line.",
+  "filename": "{{TC_010_MD_FILENAME}}",
+  "filedata": "TC-010\n\nThis is the README used for delete file tests.",
+  "bucket_name": "test-artifacts"
 }
 ```
 
@@ -96,7 +97,7 @@ Execute the `deleteFile` tool on an already-deleted file.
   "bucket_name": "tc-010-delete-file"
 }
 ```
-**Expectation:** The tool returns an appropriate error message indicating the file doesn't exist.
+**Expectation:** The tool returns exception regaring resource unavailability.
 
 ### Step 4: Delete File from Default Bucket
 
@@ -106,7 +107,7 @@ Execute the `deleteFile` tool without specifying bucket_name.
 
 ```json
 {
-  "filename": "{{TC_010_TXT_FILENAME}}"
+  "filename": "{{TC_010_MD_FILENAME}}"
 }
 ```
 
@@ -119,8 +120,8 @@ List files to confirm the file was removed.
 **Input:**
 ```json
 {
-  "bucket_name": "tc-010-delete-file"
+  "bucket_name": "test-artifacts"
 }
 ```
 
-**Expectation:** The file list no longer includes `{{TC_010_TXT_FILENAME}}`.
+**Expectation:** The file list no longer includes `{{TC_010_MD_FILENAME}}`.

@@ -16,7 +16,7 @@ Ensure updating content and labels using page title returns a success message vi
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `update_page_by_title` | Exact Python tool name |
-| **Primary Input(s)** | `{{TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE}}, {{TC_020_NEW_BODY_OF_THE_PAGE}}, {{TC_020_NEW_LABEL}}` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `TC_020_PAGE_TITLE_OF_PAGE_TO_UPDATE`, `TC_020_NEW_BODY_OF_THE_PAGE`, `TC_020_NEW_LABEL` | Required and optional inputs derived from args_schema |
 
 ## Config
 

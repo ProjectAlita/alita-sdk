@@ -16,7 +16,7 @@ Validate that create_pages works when underlying create_page handles different r
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `create_pages` | Exact Python tool name |
-| **Primary Input(s)** | `{{SPACE}}=AT`, `{{TC_16_PAGES_INFO_JSON}}`, `{{STATUS}}=current`. `{{TC_16_PARENT_ID}}` | Inputs derived from args_schema: space, pages_info, status, parent_id |
+| **Primary Input(s)** | `SPACE=AT`, `TC_16_PAGES_INFO_JSON`, `STATUS=current`. `TC_16_PARENT_ID` | Inputs derived from args_schema: space, pages_info, status, parent_id |
 
 ## Config
 

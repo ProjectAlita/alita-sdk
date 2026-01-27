@@ -16,7 +16,7 @@ Validate that create_page publishes a new page with HTML body in the specified s
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `create_page` | Exact Python tool name |
-| **Primary Input(s)** | `{{SPACE}}=AT`, `{{TC_13_PAGE_TITLE}}=TC_13 page {{RANDOM_STRING}}`, `{{PAGE_BODY_TEXT}}={{RANDOM_STRING}}`, `{{STATUS}}=current`, `{{REPRESENTATION}}=storage`, `{{LABEL}}=automation` | Inputs derived from args_schema: space, title, body, status, parent_id, representation, label |
+| **Primary Input(s)** | `SPACE=AT`, `TC_13_PAGE_TITLE=TC_13 page {{RANDOM_STRING}}`, `PAGE_BODY_TEXT={{RANDOM_STRING}}`, `STATUS=current`, `REPRESENTATION=storage`, `LABEL=automation` | Inputs derived from args_schema: space, title, body, status, parent_id, representation, label |
 
 ## Config
 

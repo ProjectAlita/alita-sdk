@@ -15,8 +15,7 @@ Verify that the `search_file` tool correctly searches for patterns in file conte
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | **Tools Used** | `createNewBucket`, `createFile`, `search_file`, `deleteFile` | Tools required for setup, verification, and cleanup |
-| **Bucket Name** | `TC-006-search-file` | Dedicated bucket for this test case (created if missing) |
-| **Primary Input(s)** | `{{TC_006_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_006_TXT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_006_CSV_FILENAME}}={{RANDOM_STRING}}.csv` | Required and optional inputs derived from args_schema |
+| **Bucket Name** | `tc-006-search-file` | Dedicated bucket for this test case (created if missing) |
 
 ## Config
 
@@ -28,7 +27,7 @@ generateTestData: true
 - Alita instance is accessible and configured
 - Valid API key with artifact read/write permissions
 - User has permission to manage files and create buckets in the project
-- Create bucket `TC-006-search-file` if missing. If it already exists, bucket creation must be treated as a non-error (idempotent).
+- Create bucket `tc-006-search-file` if missing. If it already exists, bucket creation must be treated as a non-error (idempotent).
 - Ensure the bucket exists
 
 Tool: `createNewBucket`
@@ -36,36 +35,36 @@ Tool: `createNewBucket`
 Input:
 ```json
 {
-  "bucket_name": "TC-006-search-file",
+  "bucket_name": "tc-006-search-file",
   "expiration_measure": "weeks",
   "expiration_value": 1
 }
 ```
 
-- Create files to search
+- Create files to search if aleaady existing - do not do anything 
 
 Tool: `createFile`
 
 Inputs:
 ```json
 {
-  "filename": "{{TC_006_TXT_FILENAME}}",
+  "filename": "tc-006-search-file.txt",
   "filedata": "This is a test document for TC-006.\nLine 2: Testing partial reads.\nLine 3: More content here.\nLine 4: Final line.",
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 ```json
 {
-  "filename": "{{TC_006_MD_FILENAME}}",
+  "filename": "tc-006-search-file.md",
   "filedata": "# TC-006 README\n\n## Section A\nIntro text.\n\n## Section B\nMore text.",
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 ```json
 {
-  "filename": "{{TC_006_CSV_FILENAME}}",
+  "filename": "tc-006-search-file.csv",
   "filedata": "email,age\njohn@example.com,31\njane@example.com,29",
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
@@ -78,11 +77,11 @@ Execute the `search_file` tool to search for literal text.
 **Input:**
 ```json
 {
-  "file_path": "{{TC_006_TXT_FILENAME}}",
+  "file_path": "tc-006-search-file.txt",
   "pattern": "partial reads",
   "is_regex": false,
   "context_lines": 1,
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
@@ -104,11 +103,11 @@ Execute the `search_file` tool using a regex pattern.
 **Input:**
 ```json
 {
-  "file_path": "test-document.txt",
-  "pattern": "Line \\d+:",
+  "file_path": "tc-006-search-file.txt",
+  "pattern": "Line\\s\\d+",
   "is_regex": true,
   "context_lines": 0,
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
@@ -121,11 +120,11 @@ Execute the `search_file` tool to find markdown headers.
 **Input:**
 ```json
 {
-  "file_path": "test-readme.md",
-  "pattern": "^##\\s+",
+  "file_path": "tc-006-search-file.md",
+  "pattern": "#\\s+TC-\\d{1,3}",
   "is_regex": true,
   "context_lines": 2,
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
@@ -142,7 +141,7 @@ Execute the `search_file` tool to find specific data in CSV.
   "pattern": "john@example.com",
   "is_regex": false,
   "context_lines": 1,
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
@@ -159,7 +158,7 @@ Execute the `search_file` tool with a pattern that doesn't exist.
   "pattern": "nonexistent pattern",
   "is_regex": false,
   "context_lines": 1,
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
@@ -176,7 +175,7 @@ Execute the `search_file` tool with case variation.
   "pattern": "TEST",
   "is_regex": false,
   "context_lines": 0,
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
@@ -184,7 +183,7 @@ Execute the `search_file` tool with case variation.
 
 ### Cleanup — Delete Created Files (Bucket remains)
 
-Delete the files created during setup from `TC-006-search-file`. Buckets are intentionally left in place.
+Delete the files created during setup from `tc-006-search-file`. Buckets are intentionally left in place.
 
 Tool: `deleteFile`
 
@@ -192,20 +191,20 @@ Inputs:
 ```json
 {
   "filename": "test-document.txt",
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 ```json
 {
   "filename": "test-readme.md",
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 ```json
 {
   "filename": "test-data.csv",
-  "bucket_name": "TC-006-search-file"
+  "bucket_name": "tc-006-search-file"
 }
 ```
 
-**Expectation:** All specified files are deleted successfully or `None` response.
+**Expectation:** All specified files are deleted successfully.
