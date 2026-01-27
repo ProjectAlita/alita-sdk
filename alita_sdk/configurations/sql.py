@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from typing import Optional
 
 
 class SqlConfiguration(BaseModel):
