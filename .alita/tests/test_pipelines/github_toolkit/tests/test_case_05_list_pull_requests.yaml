@@ -33,67 +33,47 @@ nodes:
     transition: process_results
 
   - id: process_results
-    type: code
-    code:
-      type: fixed
-      value: |
-        # Process the result from toolkit node
-        prs_result = alita_state.get('tool_result')
-        pr_state = alita_state.get('pr_state', 'open')
-
-        tool_executed = prs_result is not None
-        error_message = None
-        prs_list = []
-
-        try:
-            # Parse result
-            if isinstance(prs_result, list):
-                prs_list = prs_result
-            elif isinstance(prs_result, str):
-                import json
-                try:
-                    prs_list = json.loads(prs_result)
-                except:
-                    # May be text format
-                    prs_list = []
-        except Exception as e:
-            error_message = str(e)
-
-        # Verify structure - PRs should have number, title, state
-        has_prs = isinstance(prs_list, list)
-        prs_count = len(prs_list) if has_prs else 0
-
-        # Check PR structure
-        prs_have_numbers = all('number' in pr for pr in prs_list[:5]) if prs_list else True
-
-        # Extract summary
-        prs_summary = []
-        if isinstance(prs_list, list):
-            for pr in prs_list[:5]:
-                if isinstance(pr, dict):
-                    prs_summary.append({
-                        "number": pr.get('number'),
-                        "title": pr.get('title', '')[:50] if pr.get('title') else None,
-                        "state": pr.get('state'),
-                        "head": pr.get('head', {}).get('ref') if isinstance(pr.get('head'), dict) else None
-                    })
-
-        test_results = {
-            "test_passed": tool_executed and has_prs,
-            "tool_executed": tool_executed,
-            "pr_state_filter": pr_state,
-            "prs_count": prs_count,
-            "prs_have_numbers": prs_have_numbers,
-            "prs_sample": prs_summary,
-            "raw_result_type": type(prs_result).__name__ if prs_result else None,
-            "error": error_message
-        }
-        test_results
-        # Add results to messages
+    type: llm
+    model: gpt-4o
     input:
-      - pr_state
       - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_open_pull_requests' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+
+          Confirm the tool executed successfully (the result is not empty or null).
+          Confirm pr numeber 163 is in the list.
+          Determine if any pull requests were found (PRs count >= 0).
+          Check if pull requests have proper structure with 'number' and 'title' fields.
+          Extract a sample of the first 5 pull requests with their number, title (first 50 chars), and state.
+          If there is an error, return the error message in the error field.
+
+          Return a JSON object named test_results with the following structure: 
+
+          { "test_passed": boolean (true if all checks pass), 
+          "tool_executed": boolean, 
+          "prs_count": integer, 
+          "prs_have_numbers": boolean, 
+          "prs_sample": list of dicts with keys: number, title, state, head 
+          "error": error_message (if any)
+          "failed_checks": list of strings (failed checks)
+          }
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
     output:
-      - messages
-    structured_output: false
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
     transition: END

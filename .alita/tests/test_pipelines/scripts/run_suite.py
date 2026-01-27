@@ -44,89 +44,39 @@ from pathlib import Path
 from typing import Optional, List, Any, Dict
 from datetime import datetime, timezone
 
+# Import shared pattern matching utilities
+from pattern_matcher import matches_any_pattern
+
 import requests
 import yaml
 
 # Import from run_pipeline module
 from run_pipeline import (
-    load_from_env,
     get_auth_headers,
     get_pipeline_by_id,
     execute_pipeline,
     PipelineResult
 )
 
+# Import shared utilities
+from utils_common import (
+    load_config,
+    parse_suite_spec,
+    resolve_env_value,
+    load_from_env,
+    load_token_from_env,
+    load_base_url_from_env,
+    load_project_id_from_env,
+)
 
-def load_config(suite_folder: Path, pipeline_file: str | None = None) -> dict | None:
-    """Load pipeline config from a suite folder.
+from utils_local import (
+    IsolatedPipelineTestRunner,
+    find_tests_in_suite,
+)
 
-    Args:
-        suite_folder: Path to the suite directory
-        pipeline_file: Optional specific pipeline file name (e.g., 'pipeline_validation.yaml').
-                      If None, uses 'pipeline.yaml' or 'config.yaml' as fallback.
-
-    Returns:
-        Parsed YAML config dict, or None if not found.
-    """
-    if pipeline_file:
-        config_path = suite_folder / pipeline_file
-        if not config_path.exists():
-            return None
-    else:
-        # Try pipeline.yaml first (new convention)
-        config_path = suite_folder / "pipeline.yaml"
-        if not config_path.exists():
-            # Fall back to config.yaml for backwards compatibility
-            config_path = suite_folder / "config.yaml"
-            if not config_path.exists():
-                return None
-
-    with open(config_path) as f:
-        return yaml.safe_load(f)
-
-
-def parse_suite_spec(suite_spec: str) -> tuple[str, str | None]:
-    """Parse suite specification into folder and optional pipeline file.
-
-    Format: 'suite_name' or 'suite_name:pipeline_file.yaml'
-
-    Examples:
-        'github_toolkit' -> ('github_toolkit', None)
-        'github_toolkit_negative:pipeline_validation.yaml' -> ('github_toolkit_negative', 'pipeline_validation.yaml')
-
-    Returns:
-        Tuple of (folder_name, pipeline_file or None)
-    """
-    if ':' in suite_spec:
-        folder, pipeline_file = suite_spec.split(':', 1)
-        return folder, pipeline_file
-    return suite_spec, None
-
-
-def resolve_env_value(value: Any, env_vars: dict) -> Any:
-    """Resolve environment variable references in a value."""
-    if isinstance(value, str):
-        pattern = r'\$\{([^}:]+)(?::([^}]*))?\}'
-
-        def replacer(match):
-            var_name = match.group(1)
-            default = match.group(2)
-
-            if var_name in env_vars:
-                return str(env_vars[var_name])
-            env_value = load_from_env(var_name)
-            if env_value:
-                return env_value
-            if default is not None:
-                return default
-            return match.group(0)
-
-        return re.sub(pattern, replacer, value)
-    elif isinstance(value, dict):
-        return {k: resolve_env_value(v, env_vars) for k, v in value.items()}
-    elif isinstance(value, list):
-        return [resolve_env_value(v, env_vars) for v in value]
-    return value
+# Import setup utilities for local execution
+from setup import execute_setup, SetupContext
+from setup_strategy import LocalSetupStrategy
 
 
 def evaluate_condition(condition: str, result: dict) -> bool:
@@ -303,7 +253,8 @@ def run_post_test_hooks(
     env_vars: dict,
     headers: dict,
     timeout: int = 120,
-    verbose: bool = False
+    verbose: bool = False,
+    quiet: bool = False
 ) -> dict:
     """Run post-test hooks for a test result.
 
@@ -316,28 +267,31 @@ def run_post_test_hooks(
         headers: Auth headers
         timeout: Execution timeout
         verbose: Verbose output
+        quiet: If True, send verbose output to stderr (JSON mode)
 
     Returns:
         Updated test result with hook outputs merged
     """
+    output_stream = sys.stderr if quiet else sys.stdout
+    
     for hook in hooks_config:
         hook_name = hook.get("name", "unnamed")
         condition = hook.get("condition", "")
-        pipeline_id = resolve_env_value(hook.get("pipeline_id"), env_vars)
+        pipeline_id = resolve_env_value(hook.get("pipeline_id"), env_vars, env_loader=load_from_env)
 
         if not pipeline_id:
             if verbose:
-                print(f"    Skipping hook '{hook_name}': no pipeline_id")
+                print(f"    Skipping hook '{hook_name}': no pipeline_id", file=output_stream)
             continue
 
         # Evaluate condition
         if not evaluate_condition(condition, result):
             if verbose:
-                print(f"    Skipping hook '{hook_name}': condition not met")
+                print(f"    Skipping hook '{hook_name}': condition not met", file=output_stream)
             continue
 
         if verbose:
-            print(f"    Running hook: {hook_name}")
+            print(f"    Running hook: {hook_name}", file=output_stream)
 
         # Build input from result
         input_mapping = hook.get("input_mapping", {})
@@ -348,7 +302,7 @@ def run_post_test_hooks(
             pipeline_id_int = int(pipeline_id)
         except (ValueError, TypeError):
             if verbose:
-                print(f"    Warning: Invalid pipeline_id '{pipeline_id}'")
+                print(f"    Warning: Invalid pipeline_id '{pipeline_id}'", file=output_stream)
             continue
 
         hook_result = invoke_hook_pipeline(
@@ -366,10 +320,10 @@ def run_post_test_hooks(
             output_mapping = hook.get("output_mapping", {})
             result = merge_hook_output(result, hook_result.get("output", {}), output_mapping)
             if verbose:
-                print(f"    Hook '{hook_name}' completed successfully")
+                print(f"    Hook '{hook_name}' completed successfully", file=output_stream)
         else:
             if verbose:
-                print(f"    Hook '{hook_name}' failed: {hook_result.get('error')}")
+                print(f"    Hook '{hook_name}' failed: {hook_result.get('error')}", file=output_stream)
 
     return result
 
@@ -533,11 +487,6 @@ def get_pipelines_from_folder(
     return matched
 
 
-def normalize_for_matching(s: str) -> str:
-    """Normalize string for flexible matching (underscore/space/hyphen agnostic)."""
-    return s.lower().replace("_", " ").replace("-", " ")
-
-
 def get_pipelines_by_pattern(
     base_url: str,
     project_id: int,
@@ -554,15 +503,12 @@ def get_pipelines_by_pattern(
     matched = []
 
     for p in all_pipelines:
-        name = normalize_for_matching(p.get("name", ""))
-        for pattern in patterns:
-            # Use flexible substring matching (underscore/space agnostic)
-            normalized_pattern = normalize_for_matching(pattern)
-            if normalized_pattern in name:
-                full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
-                if full:
-                    matched.append(full)
-                break
+        name = p.get("name", "")
+        # Use shared pattern matching utility
+        if matches_any_pattern(name, patterns):
+            full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
+            if full:
+                matched.append(full)
 
     return matched
 
@@ -623,7 +569,8 @@ def run_suite(
         hooks = config.get("hooks", {})
         post_test_hooks = hooks.get("post_test", [])
         if post_test_hooks and verbose:
-            print(f"Post-test hooks configured: {len(post_test_hooks)}")
+            output_stream = sys.stderr if quiet else sys.stdout
+            print(f"Post-test hooks configured: {len(post_test_hooks)}", file=output_stream)
 
     def execute_one(pipeline: dict) -> PipelineResult:
         return execute_pipeline(
@@ -632,7 +579,8 @@ def run_suite(
             pipeline=pipeline,
             input_message=input_message,
             timeout=timeout,
-            verbose=verbose
+            verbose=verbose,
+            verbose_to_stderr=quiet  # When in JSON mode, send verbose to stderr
         )
 
     results = []
@@ -669,7 +617,9 @@ def run_suite(
             pipeline_name = pipeline.get('name', f"ID: {pipeline.get('id')}")
             
             if verbose:
-                print(f"Running: {pipeline_name}...")
+                # In JSON mode, write verbose to stderr so stdout stays clean JSON
+                output_stream = sys.stderr if quiet else sys.stdout
+                print(f"Running: {pipeline_name}...", file=output_stream)
             elif not quiet:
                 sys.stdout.write(f"▶ {pipeline_name}...\r")
                 sys.stdout.flush()
@@ -691,7 +641,8 @@ def run_suite(
                     env_vars=env_vars,
                     headers=headers,
                     timeout=timeout,
-                    verbose=verbose
+                    verbose=verbose,
+                    quiet=quiet
                 )
                 # Check if RCA added any results
                 # Assuming RCA hook output is merged into result['test_results']['rca'] or similar
@@ -706,8 +657,9 @@ def run_suite(
 
             # 3. Print Result
             if verbose:
+                output_stream = sys.stderr if quiet else sys.stdout
                 status = "PASS" if result.test_passed else "FAIL"
-                print(f"  [{status}] {result.execution_time:.1f}s")
+                print(f"  [{status}] {result.execution_time:.1f}s", file=output_stream)
             elif not quiet:
                 # Clear running line
                 sys.stdout.write("\033[2K\r")
@@ -759,6 +711,137 @@ def run_suite(
     return suite
 
 
+def run_suite_local(
+    suite_folder: Path,
+    config: dict,
+    test_files: List[Path],
+    suite_name: str = "Local",
+    input_message: str = "",
+    timeout: int = 120,
+    verbose: bool = False,
+    quiet: bool = False,
+) -> SuiteResult:
+    """
+    Run a suite of pipelines locally without backend.
+    
+    Uses LocalSetupStrategy to execute setup steps locally, then runs
+    test pipelines using IsolatedPipelineTestRunner.
+    
+    Args:
+        suite_folder: Path to suite folder
+        config: Suite configuration dict
+        test_files: List of test file paths to execute
+        suite_name: Name for the suite
+        input_message: Input message for pipelines
+        timeout: Execution timeout per pipeline
+        verbose: Enable verbose output
+        quiet: Suppress non-JSON output
+        
+    Returns:
+        SuiteResult with aggregated results
+    """
+    start_time = time.time()
+    suite = SuiteResult(
+        suite_name=suite_name,
+        total=len(test_files),
+    )
+    
+    # Create local setup strategy
+    local_strategy = LocalSetupStrategy()
+    
+    # Create a minimal SetupContext for local execution
+    # No backend auth needed, but we need env_vars for substitution
+    ctx = SetupContext(
+        base_url="local://",  # Placeholder, not used in local mode
+        project_id=0,         # Placeholder, not used in local mode
+        bearer_token="",      # Not needed for local
+        verbose=verbose and not quiet,
+        dry_run=False,
+    )
+    
+    # Execute setup steps using local strategy
+    if not quiet and verbose:
+        print(f"\n{'='*60}")
+        print("Executing local setup...")
+        print('='*60)
+    
+    setup_result = execute_setup(
+        config=config,
+        ctx=ctx,
+        base_path=suite_folder,
+        strategy=local_strategy,
+    )
+    
+    if not setup_result.get("success"):
+        if not quiet:
+            print(f"Error: Local setup failed: {setup_result}")
+        suite.errors = 1
+        suite.execution_time = time.time() - start_time
+        return suite
+    
+    # Get env_vars from setup (includes toolkit IDs, names, etc.)
+    env_vars = setup_result.get("env_vars", {})
+    
+    # Get tools created by local strategy
+    tools = local_strategy.get_tools()
+    
+    if not quiet and verbose:
+        print(f"Setup completed. Env vars: {list(env_vars.keys())}")
+        print(f"Created {len(tools)} toolkit tools")
+    
+    if not tools:
+        if not quiet:
+            print("Warning: No toolkit tools were created during setup")
+    
+    # Create runner with pre-created tools from strategy
+    runner = IsolatedPipelineTestRunner(
+        tools=tools,  # Pass pre-created tools from strategy
+        env_vars=env_vars,  # Pass setup env_vars for substitution
+        verbose=verbose and not quiet,
+    )
+    
+    # Run all tests
+    for test_file in test_files:
+        if not quiet:
+            print(f"\n{'='*60}")
+            print(f"Running: {test_file.name}")
+            print('='*60)
+        
+        result = runner.run_test(
+            test_yaml_path=str(test_file),
+            input_message=input_message or 'execute',
+            timeout=timeout,
+            dry_run=False,
+        )
+        
+        # Use PipelineResult.to_dict() directly
+        suite.results.append(result.to_dict())
+        
+        # Update counters
+        if result.error or not result.success:
+            suite.errors += 1
+            if not quiet:
+                print(f"💥 EXECUTION ERROR: {result.error}")
+        elif result.test_passed is False:
+            suite.failed += 1
+            if not quiet:
+                print("❌ TEST FAILED")
+        elif result.test_passed is True:
+            suite.passed += 1
+            if not quiet:
+                print("✅ TEST PASSED")
+        else:
+            # success=True but test_passed=None means execution succeeded, treat as passed
+            suite.passed += 1
+            if not quiet:
+                print("✅ TEST PASSED")
+        
+        if not quiet and result.execution_time > 0:
+            print(f"Execution time: {result.execution_time:.2f}s")
+    
+    suite.execution_time = time.time() - start_time
+    return suite
+
 def main():
     parser = argparse.ArgumentParser(
         description="Execute a suite of pipelines and report results",
@@ -780,6 +863,8 @@ def main():
     parser.add_argument("--exit-code", "-e", action="store_true",
                         help="Use exit code to indicate suite result (0=all pass, 1=failures)")
     parser.add_argument("--env-file", help="Load environment variables from file")
+    parser.add_argument("--local", action="store_true",
+                        help="Local mode: run pipelines on localsource code without backend")
 
     args = parser.parse_args()
 
@@ -798,105 +883,136 @@ def main():
     if not args.folder and not args.pattern and not args.ids:
         parser.error("Either folder, --pattern, or --ids is required")
 
-    # Load configuration
-    base_url = args.base_url or load_from_env("BASE_URL") or load_from_env("DEPLOYMENT_URL") or "http://192.168.68.115"
-    project_id = args.project_id or int(load_from_env("PROJECT_ID") or "2")
-    headers = get_auth_headers()
-
-    if not headers:
-        if args.json:
-            print(json.dumps({"success": False, "error": "No authentication token found"}))
-        else:
-            print("Error: No authentication token found in environment")
-        sys.exit(1)
-
-    # Get pipelines to execute
-    pipelines = []
-    suite_name = "Custom"
+    # Parse suite specification
     folder_name = None
     pipeline_file = None
-
-    if args.folder:
-        # Parse suite specification: 'folder' or 'folder:pipeline_file.yaml'
-        folder_name, pipeline_file = parse_suite_spec(args.folder)
-        suite_name = args.folder  # Keep full spec as suite name for clarity
-        pipelines = get_pipelines_from_folder(base_url, project_id, folder_name, headers, pipeline_file)
-        if not pipelines:
-            # Try to get by pattern matching folder name prefix
-            import yaml
-            # Go up from scripts/ to test_pipelines/ directory
-            folder_path = Path(__file__).parent.parent / folder_name
-            if folder_path.exists():
-                # Check if there's a pipeline config with test_directory setting
-                test_dir = folder_path
-                config_file = pipeline_file or "pipeline.yaml"
-                config_path = folder_path / config_file
-                if not config_path.exists():
-                    config_path = folder_path / "config.yaml"
-                if config_path.exists():
-                    try:
-                        with open(config_path) as f:
-                            config = yaml.safe_load(f)
-                            if config and "execution" in config:
-                                test_subdir = config["execution"].get("test_directory")
-                                if test_subdir:
-                                    test_dir = folder_path / test_subdir
-                    except Exception:
-                        pass
-
-                # Get names from YAML files in test directory
-                names = []
-                for yaml_file in sorted(test_dir.glob("test_case_*.yaml")):
-                    try:
-                        with open(yaml_file) as f:
-                            data = yaml.safe_load(f)
-                            if data and "name" in data:
-                                names.append(data["name"])
-                    except Exception:
-                        continue
-
-                if names:
-                    # Match by exact names
-                    url = f"{base_url}/api/v2/elitea_core/applications/prompt_lib/{project_id}?limit=500"
-                    response = requests.get(url, headers=headers)
-                    if response.status_code == 200:
-                        all_pipelines = response.json().get("rows", [])
-                        for name in names:
-                            for p in all_pipelines:
-                                if p.get("name") == name:
-                                    full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
-                                    if full:
-                                        pipelines.append(full)
-                                    break
-
-    if args.pattern:
-        suite_name = f"Pattern: {', '.join(args.pattern)}"
-        pipelines.extend(get_pipelines_by_pattern(base_url, project_id, args.pattern, headers))
-
-    if args.ids:
-        suite_name = f"IDs: {', '.join(map(str, args.ids))}"
-        pipelines.extend(get_pipelines_by_ids(base_url, project_id, args.ids, headers))
-
-    if not pipelines:
-        error_msg = "No pipelines found matching criteria"
-        if args.json:
-            print(json.dumps({"success": False, "error": error_msg}))
-        else:
-            print(f"Error: {error_msg}")
-        sys.exit(1)
-
-    if args.verbose:
-        print(f"Found {len(pipelines)} pipeline(s) to execute")
-
-    # Load config for hooks
+    folder_path = None
     config = None
     env_vars = {}
-    if folder_name:
-        # Go up from scripts/ to test_pipelines/ directory
-        folder_path = Path(__file__).parent.parent / folder_name
-        config = load_config(folder_path, pipeline_file)
+    suite_name = "Custom"
+    pipelines = []  # For remote mode
+    test_files = []  # For local mode
+    pattern = args.pattern[0] if args.pattern else "*"
+    
+    # Remote mode variables (initialized here to avoid warnings)
+    base_url = None
+    project_id = None
+    headers = None
 
-        # Build env_vars from environment and config
+    if args.folder:
+        folder_name, pipeline_file = parse_suite_spec(args.folder)
+        suite_name = args.folder
+        folder_path = Path(__file__).parent.parent / folder_name
+        
+        if not folder_path.exists():
+            error_msg = f"Suite folder not found: {folder_path}"
+            if args.json:
+                print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
+            else:
+                print(f"Error: {error_msg}")
+            sys.exit(1)
+        
+        # Load config
+        config = load_config(folder_path, pipeline_file)
+        if not config:
+            error_msg = f"Config not found in {folder_path}"
+            if args.json:
+                print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
+            else:
+                print(f"Error: {error_msg}")
+            sys.exit(1)
+
+    # ========================================
+    # PIPELINE DISCOVERY: Local vs Remote
+    # ========================================
+    if args.local:
+        # LOCAL: Get test files from folder (stored as pipelines for unified handling)
+        if not args.folder:
+            parser.error("--local mode requires a folder argument")
+        
+        pipelines = find_tests_in_suite(folder_path, pattern, config)
+    else:
+        # REMOTE: Get pipelines from folder and match with backend
+        base_url = args.base_url or load_from_env("BASE_URL") or load_from_env("DEPLOYMENT_URL") or "http://192.168.68.115"
+        project_id = args.project_id or int(load_from_env("PROJECT_ID") or "2")
+        headers = get_auth_headers()
+
+        if not headers:
+            if args.json:
+                print(json.dumps({"success": False, "error": "No authentication token found"}))
+            else:
+                print("Error: No authentication token found in environment")
+            sys.exit(1)
+
+        if args.folder:
+            pipelines = get_pipelines_from_folder(base_url, project_id, folder_name, headers, pipeline_file)
+            if not pipelines:
+                # Try to get by pattern matching folder name prefix
+                if folder_path.exists():
+                    test_dir = folder_path
+                    if config and "execution" in config:
+                        test_subdir = config["execution"].get("test_directory")
+                        if test_subdir:
+                            test_dir = folder_path / test_subdir
+
+                    # Get names from YAML files in test directory
+                    names = []
+                    for yaml_file in sorted(test_dir.glob("test_case_*.yaml")):
+                        try:
+                            with open(yaml_file) as f:
+                                data = yaml.safe_load(f)
+                                if data and "name" in data:
+                                    names.append(data["name"])
+                        except Exception:
+                            continue
+
+                    if names:
+                        # Match by exact names
+                        url = f"{base_url}/api/v2/elitea_core/applications/prompt_lib/{project_id}?limit=500"
+                        response = requests.get(url, headers=headers)
+                        if response.status_code == 200:
+                            all_pipelines = response.json().get("rows", [])
+                            for name in names:
+                                for p in all_pipelines:
+                                    if p.get("name") == name:
+                                        full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
+                                        if full:
+                                            pipelines.append(full)
+                                        break
+
+        # If pattern is specified along with folder, filter the folder's pipelines
+        # Otherwise, pattern acts as a standalone filter across all pipelines
+        if args.pattern:
+            if args.folder:
+                # Filter already collected pipelines by pattern
+                filtered_pipelines = []
+                for p in pipelines:
+                    name = p.get("name", "")
+                    # Use shared pattern matching utility
+                    if matches_any_pattern(name, args.pattern):
+                        filtered_pipelines.append(p)
+                pipelines = filtered_pipelines
+                suite_name = f"{suite_name} (filtered: {', '.join(args.pattern)})"
+            else:
+                # Pattern as standalone filter
+                suite_name = f"Pattern: {', '.join(args.pattern)}"
+                pipelines = get_pipelines_by_pattern(base_url, project_id, args.pattern, headers)
+
+        if args.ids:
+            suite_name = f"IDs: {', '.join(map(str, args.ids))}"
+            pipelines.extend(get_pipelines_by_ids(base_url, project_id, args.ids, headers))
+
+        # Deduplicate pipelines by ID (in case any got added multiple times)
+        seen_ids = set()
+        unique_pipelines = []
+        for p in pipelines:
+            pid = p.get('id')
+            if pid not in seen_ids:
+                seen_ids.add(pid)
+                unique_pipelines.append(p)
+        pipelines = unique_pipelines
+
+        # Build env_vars from environment and config (remote only)
         if config:
             # Load env from config's env_mapping section
             for key, value in config.get("env_mapping", {}).items():
@@ -911,25 +1027,56 @@ def main():
                         if env_value:
                             env_vars[key] = env_value
 
-    # Execute suite
-    result = run_suite(
-        base_url=base_url,
-        project_id=project_id,
-        pipelines=pipelines,
-        suite_name=suite_name,
-        input_message=args.input,
-        timeout=args.timeout,
-        parallel=args.parallel,
-        verbose=args.verbose,
-        config=config,
-        env_vars=env_vars,
-        headers=headers,
-        quiet=args.json,
-    )
+    # ========================================
+    # VALIDATE: Common for both modes
+    # ========================================
+    if not pipelines:
+        error_msg = f"No pipelines found matching pattern '{pattern}'" if args.local else "No pipelines found matching criteria"
+        if args.json:
+            print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
+        else:
+            print(f"Error: {error_msg}")
+        sys.exit(1)
+
+    if args.verbose:
+        output_stream = sys.stderr if args.json else sys.stdout
+        print(f"Found {len(pipelines)} pipeline(s) to execute", file=output_stream)
+
+    # ========================================
+    # EXECUTION: Local vs Remote
+    # ========================================
+    if args.local:
+        result = run_suite_local(
+            suite_folder=folder_path,
+            config=config,
+            test_files=pipelines,  # pipelines contains test file paths in local mode
+            suite_name=suite_name,
+            input_message=args.input,
+            timeout=args.timeout,
+            verbose=args.verbose,
+            quiet=args.json,
+        )
+    else:
+        result = run_suite(
+            base_url=base_url,
+            project_id=project_id,
+            pipelines=pipelines,
+            suite_name=suite_name,
+            input_message=args.input,
+            timeout=args.timeout,
+            parallel=args.parallel,
+            verbose=args.verbose,
+            config=config,
+            env_vars=env_vars,
+            headers=headers,
+            quiet=args.json,
+        )
 
     # Output results
     if args.output_json:
-        with open(args.output_json, "w") as f:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w") as f:
             f.write(result.to_json())
 
     if args.json:

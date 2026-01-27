@@ -44,68 +44,66 @@ nodes:
     transition: process_results
 
   - id: process_results
-    type: code
-    code:
-      type: fixed
-      value: |
-        # Process the result from toolkit node
-        api_result = alita_state.get('tool_result')
-        method_name = alita_state.get('method_name', 'get_repo')
-
-        tool_executed = api_result is not None
-        error_message = None
-        repo_data = {}
-
-        try:
-            # Parse result
-            if isinstance(api_result, dict):
-                repo_data = api_result
-            elif isinstance(api_result, str):
-                import json
-                try:
-                    repo_data = json.loads(api_result)
-                except:
-                    repo_data = {'raw': api_result}
-        except Exception as e:
-            error_message = str(e)
-
-        # Check for expected repository fields
-        has_id = 'id' in repo_data
-        has_name = 'name' in repo_data
-        has_full_name = 'full_name' in repo_data
-        has_owner = 'owner' in repo_data
-        has_private = 'private' in repo_data
-
-        # Check owner structure
-        owner = repo_data.get('owner', {})
-        owner_has_login = 'login' in owner if isinstance(owner, dict) else False
-
-        test_results = {
-            "test_passed": tool_executed and (has_id or has_name or has_full_name),
-            "tool_executed": tool_executed,
-            "method_name": method_name,
-            "repo_info": {
-                "id": repo_data.get('id'),
-                "name": repo_data.get('name'),
-                "full_name": repo_data.get('full_name'),
-                "owner_login": owner.get('login') if isinstance(owner, dict) else None,
-                "private": repo_data.get('private')
-            },
-            "structure_check": {
-                "has_id": has_id,
-                "has_name": has_name,
-                "has_full_name": has_full_name,
-                "has_owner": has_owner,
-                "has_private": has_private,
-                "owner_has_login": owner_has_login
-            },
-            "error": error_message
-        }
-        test_results
+    type: llm
+    model: gpt-4o
     input:
       - method_name
       - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'generic_github_api_call' tool.
+
+          Method Name: {method_name}
+          Tool Result: {tool_result}
+
+          Perform the following checks for the "{method_name}" API call:
+
+          1. Confirm the tool executed successfully (result is not empty or null)
+          2. Parse the result (could be a dict or JSON string)
+          3. For get_repo method, verify repository data structure:
+             - Has 'id' field
+             - Has 'name' field
+             - Has 'full_name' field
+             - Has 'owner' field (and owner has 'login')
+             - Has 'private' field
+          4. Extract repository information (id, name, full_name, owner_login, private)
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and has valid repo data),
+            "tool_executed": boolean,
+            "method_name": string,
+            "repo_info": {{
+              "id": integer or null,
+              "name": string or null,
+              "full_name": string or null,
+              "owner_login": string or null,
+              "private": boolean or null
+            }},
+            "structure_check": {{
+              "has_id": boolean,
+              "has_name": boolean,
+              "has_full_name": boolean,
+              "has_owner": boolean,
+              "has_private": boolean,
+              "owner_has_login": boolean
+            }},
+            "error": string or null (error message if any),
+            "failed_checks": list of strings (failed checks if any)
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
     output:
-      - messages
-    structured_output: false
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
     transition: END

@@ -26,7 +26,6 @@ Suite Specification Format:
 """
 
 import argparse
-import fnmatch
 import json
 import re
 import sys
@@ -39,14 +38,24 @@ import yaml
 from seed_pipelines import (
     DEFAULT_BASE_URL,
     DEFAULT_PROJECT_ID,
+)
+
+# Import shared utilities
+from utils_common import (
+    load_config,
+    parse_suite_spec,
+    resolve_env_value,
+    set_env_file,
     load_from_env,
     load_token_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
-    set_env_file,
 )
 
 from delete_pipelines import delete_pipeline, list_pipelines
+
+# Import shared pattern matching utilities
+from pattern_matcher import matches_pattern
 
 
 class CleanupContext:
@@ -77,31 +86,6 @@ class CleanupContext:
             headers["Content-Type"] = "application/json"
         return headers
 
-    def resolve_env(self, value: Any) -> Any:
-        """Resolve environment variable references in a value."""
-        if isinstance(value, str):
-            pattern = r'\$\{([^}:]+)(?::([^}]*))?\}'
-
-            def replacer(match):
-                var_name = match.group(1)
-                default = match.group(2)
-
-                if var_name in self.env_vars:
-                    return str(self.env_vars[var_name])
-                env_value = load_from_env(var_name)
-                if env_value:
-                    return env_value
-                if default is not None:
-                    return default
-                return match.group(0)
-
-            return re.sub(pattern, replacer, value)
-        elif isinstance(value, dict):
-            return {k: self.resolve_env(v) for k, v in value.items()}
-        elif isinstance(value, list):
-            return [self.resolve_env(v) for v in value]
-        return value
-
     def log(self, message: str, level: str = "info"):
         """Log a message if verbose mode is enabled or it's an error/warning."""
         if self.quiet and level not in ("error"):
@@ -112,52 +96,6 @@ class CleanupContext:
             print(f"{prefix.get(level, '  ')} {message}")
         elif level in ("error", "warning"):
              print(f"{message}")
-
-
-def parse_suite_spec(suite_spec: str) -> tuple[str, str | None]:
-    """Parse suite specification into folder and optional pipeline file.
-
-    Format: 'suite_name' or 'suite_name:pipeline_file.yaml'
-
-    Examples:
-        'github_toolkit' -> ('github_toolkit', None)
-        'github_toolkit_negative:pipeline_validation.yaml' -> ('github_toolkit_negative', 'pipeline_validation.yaml')
-
-    Returns:
-        Tuple of (folder_name, pipeline_file or None)
-    """
-    if ':' in suite_spec:
-        folder, pipeline_file = suite_spec.split(':', 1)
-        return folder, pipeline_file
-    return suite_spec, None
-
-
-def load_config(suite_folder: Path, pipeline_file: str | None = None) -> dict:
-    """Load pipeline config from a suite folder.
-
-    Args:
-        suite_folder: Path to the suite directory
-        pipeline_file: Optional specific pipeline file name (e.g., 'pipeline_validation.yaml').
-                      If None, uses 'pipeline.yaml' or 'config.yaml' as fallback.
-
-    Returns:
-        Parsed YAML config dict.
-    """
-    if pipeline_file:
-        config_path = suite_folder / pipeline_file
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-    else:
-        # Try pipeline.yaml first (new convention)
-        config_path = suite_folder / "pipeline.yaml"
-        if not config_path.exists():
-            # Fall back to config.yaml for backwards compatibility
-            config_path = suite_folder / "config.yaml"
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_path) as f:
-        return yaml.safe_load(f)
 
 
 # =============================================================================
@@ -176,7 +114,7 @@ def handle_toolkit_invoke(step: dict, ctx: CleanupContext) -> dict:
       - tool_params: Parameters to pass to the tool (optional)
       - result_filter: Optional pattern to filter/process results
     """
-    config = ctx.resolve_env(step.get("config", {}))
+    config = resolve_env_value(step.get("config", {}), ctx.env_vars, env_loader=load_from_env)
 
     toolkit_id = config.get("toolkit_id") or config.get("toolkit_ref")
     tool_name = config.get("tool_name")
@@ -254,7 +192,7 @@ def invoke_toolkit_tool(ctx: CleanupContext, toolkit_id: int, tool_name: str, pa
 
 def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
     """Handle pipeline deletion cleanup."""
-    config = ctx.resolve_env(step.get("config", {}))
+    config = resolve_env_value(step.get("config", {}), ctx.env_vars, env_loader=load_from_env)
     pattern = config.get("pattern")
 
     ctx.log(f"Pipeline cleanup with pattern: {pattern}")
@@ -266,7 +204,8 @@ def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
             ctx.project_id,
             bearer_token=ctx.bearer_token,
         )
-        matching = [p for p in pipelines if fnmatch.fnmatch(p.get("name", ""), pattern)]
+        # Use pattern matching with wildcard support
+        matching = [p for p in pipelines if matches_pattern(p.get("name", ""), pattern, use_wildcards=True)]
         ctx.log(f"[DRY RUN] Would delete {len(matching)} pipelines: {[p['name'] for p in matching]}")
         return {"success": True, "dry_run": True, "count": len(matching)}
 
@@ -281,7 +220,8 @@ def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
         ctx.log("No pipelines found", "info")
         return {"success": True, "deleted": 0}
 
-    matching = [p for p in pipelines if fnmatch.fnmatch(p.get("name", ""), pattern)]
+    # Use pattern matching with wildcard support
+    matching = [p for p in pipelines if matches_pattern(p.get("name", ""), pattern, use_wildcards=True)]
 
     if not matching:
         ctx.log(f"No pipelines matching pattern: {pattern}", "info")
@@ -312,7 +252,7 @@ def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
 
 def handle_toolkit_cleanup(step: dict, ctx: CleanupContext) -> dict:
     """Handle toolkit deletion cleanup."""
-    config = ctx.resolve_env(step.get("config", {}))
+    config = resolve_env_value(step.get("config", {}), ctx.env_vars, env_loader=load_from_env)
     toolkit_id = config.get("toolkit_id")
 
     if not toolkit_id:
@@ -367,7 +307,7 @@ def handle_composable_cleanup(config: dict, ctx: CleanupContext) -> dict:
         # Build env for name resolution
         cp_env = {}
         for key, value in cp_config.get("env", {}).items():
-            cp_env[key] = ctx.resolve_env(value)
+            cp_env[key] = resolve_env_value(value, ctx.env_vars, env_loader=load_from_env)
 
         # Get pipeline name from file or derive from env
         if yaml_path and yaml_path.exists():
@@ -411,11 +351,10 @@ def handle_composable_cleanup(config: dict, ctx: CleanupContext) -> dict:
     failed = 0
 
     for target_name in pipeline_names:
-        # Check if it's a pattern or exact match
-        if "*" in target_name or "?" in target_name:
-            matching = [p for p in pipelines if fnmatch.fnmatch(p.get("name", ""), target_name)]
-        else:
-            matching = [p for p in pipelines if p.get("name") == target_name]
+        # Use pattern matching with wildcard support
+        # matches_pattern will handle both wildcards and flexible substring matching
+        use_wildcards = "*" in target_name or "?" in target_name
+        matching = [p for p in pipelines if matches_pattern(p.get("name", ""), target_name, use_wildcards=use_wildcards)]
 
         for pipeline in matching:
             result = delete_pipeline(
@@ -600,7 +539,7 @@ def run(
     # Pre-populate env vars from config's env section if present
     env_config = config.get("env", {})
     for var_name, var_value in env_config.items():
-        ctx.env_vars[var_name] = ctx.resolve_env(var_value)
+        ctx.env_vars[var_name] = resolve_env_value(var_value, ctx.env_vars, env_loader=load_from_env)
 
     # Also load any env vars referenced in cleanup steps from actual environment
     cleanup_steps = config.get("cleanup", [])
@@ -656,10 +595,23 @@ def main():
     parser.add_argument("--skip-toolkit-invoke", action="store_true", help="Skip toolkit tool invocation steps")
     parser.add_argument("--skip-toolkit", action="store_true", help="Skip toolkit entity deletion steps")
     parser.add_argument("--skip-composable", action="store_true", help="Skip composable pipeline cleanup")
+    parser.add_argument("--local", action="store_true", 
+                        help="Local mode: skip cleanup (no resources to clean in local mode)")
     parser.add_argument("--json", "-j", action="store_true", help="Output results as JSON")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     args = parser.parse_args()
+
+    # In local mode, there are no backend resources to clean up
+    if args.local:
+        if args.verbose:
+            print("[LOCAL MODE] No backend resources to clean up")
+        results = {"success": True, "steps": [], "message": "Local mode - no cleanup needed"}
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            print("Local mode - no backend resources to clean up")
+        sys.exit(0)
 
     try:
         results = run(

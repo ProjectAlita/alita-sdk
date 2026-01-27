@@ -1,0 +1,198 @@
+name: "CF07 - Create and Delete Page"
+description: "Verify create_page creates a new page and delete_page removes it"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  create_result:
+    type: str
+  delete_result:
+    type: str
+  label:
+    type: str
+    value: automation
+  page_body:
+    type: str
+    value: <p>This is a test page created by automated tests.</p>
+  page_title:
+    type: str
+    value: TC_07_Test_Page_20260126-172621
+  read_page_result:
+    type: str
+    value: ''
+  representation:
+    type: str
+    value: storage
+  space:
+    type: str
+    value: AT
+  status:
+    type: str
+    value: current
+  test_results:
+    type: dict
+
+entry_point: create_page
+
+nodes:
+  - id: create_page
+    type: toolkit
+    input:
+      - space
+      - page_title
+      - page_body
+      - status
+      - representation
+      - label
+    input_mapping:
+      body:
+        type: variable
+        value: page_body
+      label:
+        type: variable
+        value: label
+      representation:
+        type: variable
+        value: representation
+      space:
+        type: variable
+        value: space
+      status:
+        type: variable
+        value: status
+      title:
+        type: variable
+        value: page_title
+    output:
+      - create_result
+    structured_output: true
+    tool: create_page
+    toolkit_name: confluence-testing
+    transition: validate_creation
+
+  - id: validate_creation
+    type: llm
+    input:
+      - create_result
+      - page_title
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_page' tool.
+
+          Tool Result: {create_result}
+          Page Title: {page_title}
+
+          Perform the following checks:
+
+          1. Confirm the page was created successfully.
+          2. Verify the output contains success message mentioning the page title.
+          3. Check if the output includes page details (title, id, space key, author, link).
+          4. Validate that label information is present if applicable.
+
+          Return a JSON object with the following structure:
+
+          {{
+            "create_result": {{
+              "page_created": boolean (true if page was created successfully),
+              "has_page_details": boolean (true if output includes title, id, link),
+              "has_label": boolean (true if label information is present)
+            }}
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: delete_page
+
+  - id: delete_page
+    type: toolkit
+    input:
+      - page_title
+    input_mapping:
+      page_title:
+        type: variable
+        value: page_title
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_page
+    toolkit_name: confluence-testing
+    transition: read_page_to
+
+  - id: read_page_to
+    type: toolkit
+    input:
+      - page_title
+    input_mapping:
+      skip_images:
+        type: fixed
+        value: false
+    output:
+      - read_page_result
+    structured_output: false
+    tool: search_by_title
+    toolkit_name: confluence-testing
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    input:
+      - delete_result
+      - test_results
+      - page_title
+      - read_page_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the complete workflow results.
+
+          Delete Result: {delete_result}
+          Create Results: {test_results}
+          Page Title: {page_title}
+          Read Page results: {read_page_result}
+
+          Perform the following checks:
+
+          1. Verify the page was deleted successfully.
+          2. Check if the delete result contains confirmation message.
+          3. Evaluate overall test success (both create and delete succeeded).
+          4. Read page result is blank
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if both create and delete succeeded),
+            "tool_executed": boolean (true if both tools ran without errors),
+            "page_created": boolean (from previous results),
+            "page_deleted": boolean (true if delete was successful),
+            "delete_confirmation": boolean (true if delete result contains confirmation)
+            "failed_checks": [string] // list of failed assertions
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

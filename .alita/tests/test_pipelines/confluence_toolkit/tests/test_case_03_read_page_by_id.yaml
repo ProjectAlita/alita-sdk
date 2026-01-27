@@ -1,0 +1,79 @@
+name: "CF03 - Read Page by ID"
+description: "Verify read_page_by_id tool retrieves page content using page ID"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_id:
+    type: str
+    value: '104038676'
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+entry_point: invoke_read_page_by_id
+
+nodes:
+  - id: invoke_read_page_by_id
+    type: toolkit
+    input:
+      - page_id
+    input_mapping:
+      page_id:
+        type: variable
+        value: page_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: read_page_by_id
+    toolkit_name: confluence-testing
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output {tool_result} from the 'read_page_by_id' tool and validate the page content according to the specified criteria.
+
+          Validation Criteria
+          Tool Execution: Confirm the tool executed successfully (result is not empty or null).
+          Content Format: Verify the output contains structured content in markdown format.
+          Content Presence: Ensure the following elements are present anywhere in the content (you may skip markdown), all fields should be empty:
+          "Driver"
+          "Approver"
+          "Contributors"
+          "Due date"
+          Expected JSON Output
+
+            
+          Return a JSON object named test_results with the following structure:
+          json
+
+
+          {
+            "test_passed": boolean, // true if all checks are satisfied
+            "tool_executed": boolean, // true if tool ran without errors
+            "content_length": integer, // total length of content in characters
+            "actual_response": {tool_result},
+            "failed_checks": [string] // list of failed assertions
+          }
+
+          Important: Return EXACTLY and ONLY the test_results JSON object. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

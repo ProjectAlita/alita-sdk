@@ -138,8 +138,56 @@ nodes:
     structured_output: true
     transition: validate_create
 
-  # Step 6: Validate file creation and prepare patch
+  # Step 6: Validate file creation with LLM
   - id: validate_create
+    type: llm
+    model: gpt-4o
+    input:
+      - file_path
+      - file_contents
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the file creation operation results.
+
+          Expected File Path: {file_path}
+          Expected File Contents: {file_contents}
+          Read Result: {read_result}
+
+          Perform the following checks:
+
+          1. Confirm the file was read successfully (read_result is not empty or null)
+          2. Verify the read content matches the expected file contents (exact match or contains the key lines)
+          3. Check if the original content is preserved correctly
+
+          Return a JSON object named validation_results with the following structure:
+
+          {{
+            "create_file_ok": boolean (true if file was created and read successfully),
+            "content_matches": boolean (true if content matches expected),
+            "original_length": integer (length of expected content),
+            "read_length": integer (length of read content),
+            "error": string or null (error message if any),
+            "failed_checks": list of strings (failed checks if any)
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `validation_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - validation_results
+    structured_output_dict:
+        validation_results: "dict"
+    transition: prepare_patch
+
+  # Step 6b: Prepare git patch
+  - id: prepare_patch
     type: code
     code:
       type: fixed
@@ -150,12 +198,6 @@ nodes:
 
         file_path = alita_state.get('file_path')
         file_contents = alita_state.get('file_contents', '')
-        read_result = alita_state.get('read_result', '')
-
-        # Verify file was created correctly
-        create_ok = False
-        if read_result and file_contents:
-            create_ok = file_contents.strip() in read_result.strip() or read_result.strip() in file_contents.strip()
 
         # Prepare git patch to add new lines to the file
         timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -180,19 +222,11 @@ nodes:
         # Expected content after patch
         patched_content = f"Patch Applied"
 
-        validation_results = {
-            "create_file_ok": create_ok,
-            "original_length": len(file_contents),
-            "read_length": len(read_result) if read_result else 0
-        }
-
-        {"validation_results": validation_results, "patch_content": patch_content, "commit_message": commit_message, "patched_content": patched_content}
+        {"patch_content": patch_content, "commit_message": commit_message, "patched_content": patched_content}
     input:
       - file_path
       - file_contents
-      - read_result
     output:
-      - validation_results
       - patch_content
       - commit_message
       - patched_content
@@ -235,51 +269,10 @@ nodes:
     structured_output: true
     transition: process_results
 
-  # Step 9: Process and validate all results
+  # Step 9: Validate patch application with LLM
   - id: process_results
-    type: code
-    code:
-      type: fixed
-      value: |
-        file_path = alita_state.get('file_path')
-        file_contents = alita_state.get('file_contents', '')
-        read_result = alita_state.get('read_result', '')
-        patched_content = alita_state.get('patched_content', '')
-        tool_result = alita_state.get('tool_result', '')
-        validation_results = alita_state.get('validation_results', {})
-
-        # Check if patch was applied
-        patch_result_str = str(tool_result).lower() if tool_result else ''
-        patch_executed = tool_result is not None
-        patch_success = 'success' in patch_result_str or 'applied' in patch_result_str
-
-        # Verify patched content exists in file
-        patch_content_found = patched_content in read_result if read_result and patched_content else False
-        original_preserved = file_contents.split(chr(10))[0] in read_result if read_result and file_contents else False
-
-        patch_ok = patch_executed and (patch_success or patch_content_found)
-
-        # Overall results
-        create_ok = validation_results.get('create_file_ok', False)
-        all_ok = create_ok and patch_ok
-
-        test_results = {
-            "test_passed": all_ok,
-            "operations": {
-                "create_file": create_ok,
-                "read_file_verify_create": create_ok,
-                "apply_git_patch": patch_ok,
-                "read_file_verify_patch": patch_content_found or patch_success
-            },
-            "details": {
-                "file_path": file_path,
-                "original_content_length": len(file_contents),
-                "final_content_length": len(read_result) if read_result else 0,
-                "patch_content_found": patch_content_found,
-                "original_preserved": original_preserved
-            }
-        }
-        {"test_results": test_results}
+    type: llm
+    model: gpt-4o
     input:
       - file_path
       - file_contents
@@ -287,9 +280,59 @@ nodes:
       - patched_content
       - tool_result
       - validation_results
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete file operations workflow results.
+
+          File Path: {file_path}
+          Original File Contents: {file_contents}
+          File After Patch: {read_result}
+          Expected Patch Content: {patched_content}
+          Patch Tool Result: {tool_result}
+          Create Validation Results: {validation_results}
+
+          Perform the following checks:
+
+          1. Verify the file was created successfully (from validation_results)
+          2. Check if the patch tool executed successfully (tool_result not empty/null)
+          3. Confirm the patch content "{patched_content}" exists in the file after patching
+          4. Verify the original content is still preserved in the patched file
+          5. Check if the file grew in size after patching (final_length > original_length)
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if all operations succeeded),
+            "operations": {{
+              "create_file": boolean,
+              "read_file_verify_create": boolean,
+              "apply_git_patch": boolean,
+              "read_file_verify_patch": boolean
+            }},
+            "details": {{
+              "file_path": string,
+              "original_content_length": integer,
+              "final_content_length": integer,
+              "patch_content_found": boolean,
+              "original_preserved": boolean
+            }},
+            "error": string or null (error message if any),
+            "failed_checks": list of strings (failed checks if any)
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
     output:
       - test_results
-    structured_output: true
+    structured_output_dict:
+        test_results: "dict"
     transition: delete_file
 
   # Step 10: Delete the test file

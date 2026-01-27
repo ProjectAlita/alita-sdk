@@ -1,0 +1,76 @@
+name: "CF06 - Get Page ID by Title"
+description: "Verify get_page_id_by_title tool retrieves page ID using page title"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  test_results:
+    type: dict
+  title:
+    type: str
+    value: Template - Project plan
+  tool_result:
+    type: str
+entry_point: invoke_get_page_id_by_title
+nodes:
+  - id: invoke_get_page_id_by_title
+    type: toolkit
+    input:
+      - title
+    input_mapping:
+      title:
+        type: variable
+        value: title
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_page_id_by_title
+    toolkit_name: confluence-testing
+    transition: process_results
+  - id: process_results
+    type: llm
+    input:
+      - tool_result
+      - title
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_page_id_by_title' tool.
+
+          Tool Result: {tool_result}
+          Title: {title}
+
+          Perform the following checks:
+
+          1. Confirm the tool executed successfully (the result is not empty or null).
+          2. Verify the output contains a page ID (numeric string or integer).
+          3. Check if the page ID is valid (non-empty, numeric) and is exactly 104038676
+          4. Validate that the response is not an error message.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and returned valid page ID),
+            "tool_executed": boolean (true if tool ran without errors),
+            "page_id_found": boolean (true if a page ID was returned),
+            "page_id": string (the page ID returned, or null if not found),
+            "is_numeric": boolean (true if page ID is numeric),
+             "failed_checks": [string] // list of failed assertions
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

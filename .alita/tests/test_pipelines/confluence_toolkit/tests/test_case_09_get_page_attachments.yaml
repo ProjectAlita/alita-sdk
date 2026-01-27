@@ -1,0 +1,92 @@
+name: "CF09 - Get Page Attachments"
+description: "Verify get_page_attachments tool retrieves attachments with metadata, comments, content, and analysis"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_id:
+    type: str
+    value: '140869772'
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+
+entry_point: invoke_get_page_attachments
+
+nodes:
+  - id: invoke_get_page_attachments
+    type: toolkit
+    input:
+      - page_id
+    input_mapping:
+      page_id:
+        type: variable
+        value: page_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_page_attachments
+    toolkit_name: confluence-testing
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    input:
+      - tool_result
+      - page_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from the 'get_page_attachments' tool.
+
+          Tool Result: {tool_result}
+          Page ID: {page_id}
+
+          Perform the following checks:
+
+          1. Confirm the tool executed successfully (the result is not empty, null, or an error message).
+          2. Verify the output is a list of dictionaries, where each dictionary represents an attachment.
+          3. Check if at least one attachment is present in the output.
+          4. Validate that each attachment contains metadata fields: 'name', 'size', 'creator', 'created', 'updated', and 'media_type'.
+          5. Ensure the 'download_url' field is present and valid (e.g., non-empty and starts with "http").
+          6. Confirm the 'content' field exists and is not null for each attachment.
+          7. Count the total number of attachments returned.
+          8. Check if the 'comments' field exists and is a list (even if empty).
+          9. Verify the 'labels' field exists and is a list (even if empty).
+          10. Confirm the 'llm_analysis' field exists (even if its value is null).
+
+          Return a JSON object named test_results with the following structure:
+
+          {
+            "test_passed": boolean (true if all validation checks passed),
+            "tool_executed": boolean (true if tool ran without errors),
+            "attachments_found": boolean (true if at least one attachment was returned),
+            "attachment_count": integer (number of attachments),
+            "has_metadata": boolean (true if all required metadata fields are present),
+            "valid_download_url": boolean (true if all attachments have valid download URLs),
+            "has_content": boolean (true if all attachments have non-null content),
+            "has_comments_field": boolean (true if all attachments have a 'comments' field that is a list),
+            "has_labels_field": boolean (true if all attachments have a 'labels' field that is a list),
+            "has_llm_analysis_field": boolean (true if all attachments have an 'llm_analysis' field),
+            "sample_attachment_name": string (name of the first attachment, or null if none),
+            "sample_download_url": string (download URL of the first attachment, or null if none),
+            "failed_checks": [string] // list of failed assertions
+          }
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown when returning the json. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

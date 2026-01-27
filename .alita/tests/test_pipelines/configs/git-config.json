@@ -38,7 +38,6 @@
       "generic_github_api_call",
       "read_file_chunk",
       "read_multiple_files",
-      "search_file",
       "edit_file",
       "create_issue_on_project",
       "update_issue_on_project",

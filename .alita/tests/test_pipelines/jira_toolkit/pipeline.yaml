@@ -1,0 +1,77 @@
+# JIRA Toolkit Test Suite Configuration
+# This file defines setup, execution, and cleanup for the test suite
+
+name: jira_toolkit
+description: JIRA toolkit integration tests
+
+# Environment variable mappings
+# These map .env variables to config values used in setup
+env_mapping:
+  toolkit_config: ${JIRA_CONFIG_PATH:../configs/jira-config.json}
+  base_url: ${JIRA_BASE_URL}
+  username: ${JIRA_USERNAME}
+  api_key: ${JIRA_API_KEY}
+  project_key: ${JIRA_PROJECT_KEY}
+
+# Setup steps executed before running tests
+# Steps are executed in order; if a step fails, setup stops
+setup:
+  # Step 1: Ensure JIRA credentials configuration exists
+  - name: Setup JIRA Configuration
+    type: configuration
+    config:
+      config_type: jira
+      alita_title: ${JIRA_SECRET_NAME:jira}
+      data:
+        base_url: ${JIRA_BASE_URL}
+        username: ${JIRA_USERNAME}
+        api_key: ${JIRA_API_KEY}
+
+  # Step 2: Create or update the JIRA toolkit on the platform
+  - name: Create JIRA Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      # Load base config from shared jira-config.json
+      config_file: ../configs/jira-config.json
+      toolkit_type: jira
+      # Override/substitute values from environment
+      overrides:
+        # Credentials must use secret reference format (platform requirement)
+        jira_configuration:
+          private: true
+          alita_title: ${JIRA_SECRET_NAME:jira}
+        base_url: ${JIRA_BASE_URL}
+        cloud: ${JIRA_CLOUD:true}
+        api_version: ${JIRA_API_VERSION:3}
+      # Name for the toolkit on platform
+      toolkit_name: ${JIRA_TOOLKIT_NAME:testing}
+    # Save created toolkit ID to environment for pipeline substitution
+    save_to_env:
+      - key: JIRA_TOOLKIT_ID
+        value: $.id
+      - key: JIRA_TOOLKIT_NAME
+        value: $.name
+
+# Test execution configuration
+execution:
+  # Order of test execution (by file pattern or explicit list)
+  # Tests are located in tests/ subdirectory
+  test_directory: tests
+  order:
+    - test_case_01_*.yaml  # JR01 - Search Issues by JQL
+
+  # Variables to substitute in test YAML files
+  substitutions:
+    JIRA_TOOLKIT_ID: ${JIRA_TOOLKIT_ID}
+    JIRA_TOOLKIT_NAME: ${JIRA_TOOLKIT_NAME}
+    JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:TEST}
+
+# Cleanup steps executed after all tests complete
+cleanup:
+  # No cleanup needed for read-only search test
+  []
+
+# Hooks for post-test actions
+hooks:
+  post_test: []

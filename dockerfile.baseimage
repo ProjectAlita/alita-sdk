@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
 WORKDIR /app
+
 ENV PYTHONPATH=/app
 
 RUN apt-get update && apt-get install -y \
@@ -11,13 +12,37 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libcairo2-dev \
     libgirepository1.0-dev \
+    curl \
+    unzip \
+    ca-certificates \
+    bzip2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno v2.5.6
+RUN mkdir -p /app/bin && \
+    cd /tmp && \
+    curl -LOJ https://github.com/denoland/deno/releases/download/v2.5.6/deno-x86_64-unknown-linux-gnu.zip && \
+    unzip deno-x86_64-unknown-linux-gnu.zip && \
+    mv deno /app/bin/deno && \
+    chmod a+x /app/bin/deno && \
+    rm deno-x86_64-unknown-linux-gnu.zip
+
+ENV PATH="/app/bin:$PATH"
+
+# Install Pyodide 0.29.0 with required packages
+RUN cd /app && \
+    curl -LOJ https://github.com/pyodide/pyodide/releases/download/0.29.0/pyodide-0.29.0.tar.bz2 && \
+    tar xf pyodide-0.29.0.tar.bz2 && \
+    rm pyodide-0.29.0.tar.bz2
 
 COPY pyproject.toml ./
 COPY README.md ./
 COPY LICENSE ./
 
 RUN pip install --no-cache-dir -U pip setuptools wheel
+
+# Build wheels for Pyodide packages
+RUN pip wheel -w /app/pyodide dill chardet
 
 # Install dependencies in stages to avoid resolution-too-deep error
 RUN pip install --no-cache-dir -e ".[cli]"

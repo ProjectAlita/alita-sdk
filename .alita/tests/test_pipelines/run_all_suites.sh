@@ -33,10 +33,12 @@ DEFAULT_SUITES=("github_toolkit" "state_retrieval" "structured_output")
 # Parse arguments
 SUITES=()
 VERBOSE=""
+SHOW_OUTPUT=false
 SKIP_CLEANUP=false
 SKIP_SETUP=false
 SKIP_INITIAL_CLEANUP=false
 STOP_ON_FAILURE=false
+LOCAL_MODE=false
 OUTPUT_DIR="test_results"
 
 print_usage() {
@@ -46,6 +48,8 @@ print_usage() {
     echo ""
     echo "Options:"
     echo "  -v, --verbose           Enable verbose output"
+    echo "  --show-output           Show verbose test execution in real-time (implies -v)"
+    echo "  --local                 Run tests locally without backend (isolated mode)"
     echo "  --skip-initial-cleanup  Skip cleanup before starting (not recommended)"
     echo "  --skip-cleanup          Skip cleanup after tests"
     echo "  --skip-setup            Skip setup (use existing environment)"
@@ -64,6 +68,8 @@ print_usage() {
     echo "Examples:"
     echo "  $0                              # Run all suites with initial cleanup"
     echo "  $0 -v github_toolkit            # Run GitHub toolkit with verbose output"
+    echo "  $0 --show-output github_toolkit # Show live test execution"
+    echo "  $0 --local github_toolkit       # Run GitHub toolkit locally (no backend)"
     echo "  $0 --skip-cleanup               # Run all but skip post-test cleanup"
     echo "  $0 --skip-initial-cleanup       # Skip cleanup before starting"
     echo "  $0 --stop-on-failure state_retrieval structured_output"
@@ -74,6 +80,15 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -v|--verbose)
             VERBOSE="--verbose"
+            shift
+            ;;
+        --show-output)
+            VERBOSE="--verbose"
+            SHOW_OUTPUT=true
+            shift
+            ;;
+        --local)
+            LOCAL_MODE=true
             shift
             ;;
         --skip-initial-cleanup)
@@ -209,27 +224,46 @@ run_suite() {
     print_step "Step 3/4: Running tests for $suite_spec"
     local results_file="$suite_output_dir/results.json"
 
-    # Run tests with JSON output redirected to results file
-    if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
-        print_success "Tests completed"
+    # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
+    # Now verbose output goes to stderr, so we can use both --json and $VERBOSE together
+    if [ "$SHOW_OUTPUT" = true ]; then
+        # Show verbose output in real-time while also capturing to log
+        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+            print_success "Tests completed"
+        else
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
+            return 1
+        fi
+    else
+        # Capture verbose output to log file only
+        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
+            print_success "Tests completed"
+        else
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
+            return 1
+        fi
+    fi
 
-        # Parse results
-        if [ -f "$results_file" ]; then
-            local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
-            local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
-            local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total_tests', 0))" 2>/dev/null || echo "0")
+    # Parse results
+    if [ -f "$results_file" ]; then
+        local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
+        local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+        local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total', 0))" 2>/dev/null || echo "0")
 
-            SUITE_PASSED[$suite_spec]=$passed
-            SUITE_FAILED[$suite_spec]=$failed
+        SUITE_PASSED[$suite_spec]=$passed
+        SUITE_FAILED[$suite_spec]=$failed
 
-            echo "  Results: $passed passed, $failed failed (total: $total)"
+        echo "  Results: $passed passed, $failed failed (total: $total)"
 
-            if [ "$failed" -gt 0 ]; then
-                SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
-                print_error "Some tests failed"
-            else
-                SUITE_RESULTS[$suite_spec]="PASSED"
-            fi
+        if [ "$failed" -gt 0 ]; then
+            SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
+            print_error "Some tests failed"
+        else
+            SUITE_RESULTS[$suite_spec]="PASSED"
         fi
     else
         print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -260,10 +294,118 @@ run_suite() {
     return 0
 }
 
+run_suite_local() {
+    # Run suite in local mode (no backend) - same flow as remote
+    local suite_spec=$1
+    local suite_start=$(date +%s)
+
+    # Parse suite specification: 'folder' or 'folder:pipeline_file.yaml'
+    local suite_dir
+    local pipeline_file
+    if [[ "$suite_spec" == *":"* ]]; then
+        suite_dir="${suite_spec%%:*}"
+        pipeline_file="${suite_spec#*:}"
+    else
+        suite_dir="$suite_spec"
+        pipeline_file=""
+    fi
+
+    print_header "Running Test Suite (LOCAL): $suite_spec"
+
+    # Check if suite directory exists
+    if [ ! -d "$suite_dir" ]; then
+        print_error "Suite directory not found: $suite_dir"
+        SUITE_RESULTS[$suite_spec]="FAILED"
+        return 1
+    fi
+
+    # Check if pipeline config exists
+    local config_file="${pipeline_file:-pipeline.yaml}"
+    if [ ! -f "$suite_dir/$config_file" ]; then
+        print_error "$config_file not found in $suite_dir/"
+        SUITE_RESULTS[$suite_spec]="FAILED"
+        return 1
+    fi
+
+    # Create output directory using sanitized suite name (replace : with _)
+    local suite_output_name="${suite_spec//:/_}"
+    local suite_output_dir="$OUTPUT_DIR/$suite_output_name"
+    mkdir -p "$suite_output_dir"
+
+    # Step 1: Setup (with --local flag)
+    print_step "Step 1/3: Running setup for $suite_spec (local)"
+    if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env --local > "$suite_output_dir/setup.log" 2>&1; then
+        print_success "Setup completed"
+    else
+        print_error "Setup failed - see $suite_output_dir/setup.log"
+        SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
+        cat "$suite_output_dir/setup.log"
+        return 1
+    fi
+
+    # Step 3: Run tests (with --local flag)
+    print_step "Step 2/3: Running tests for $suite_spec (local)"
+    local results_file="$suite_output_dir/results.json"
+
+    if python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> "$suite_output_dir/run.log"; then
+        print_success "Tests completed"
+
+        # Parse results
+        if [ -f "$results_file" ]; then
+            local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
+            local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+            local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total_tests', 0))" 2>/dev/null || echo "0")
+
+            SUITE_PASSED[$suite_spec]=$passed
+            SUITE_FAILED[$suite_spec]=$failed
+
+            echo "  Results: $passed passed, $failed failed (total: $total)"
+
+            if [ "$failed" -gt 0 ]; then
+                SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
+                print_error "Some tests failed"
+            else
+                SUITE_RESULTS[$suite_spec]="PASSED"
+            fi
+        fi
+    else
+        print_error "Test execution failed - see $suite_output_dir/run.log"
+        SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+        cat "$suite_output_dir/run.log"
+        return 1
+    fi
+
+    # Step 3: Cleanup (with --local flag)
+    if [ "$SKIP_CLEANUP" = false ]; then
+        print_step "Step 3/3: Cleaning up $suite_spec (local)"
+        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local > "$suite_output_dir/cleanup.log" 2>&1; then
+            print_success "Cleanup completed"
+        else
+            print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
+            # Don't fail suite on cleanup failure
+        fi
+    else
+        echo "  Skipping cleanup"
+    fi
+
+    local suite_end=$(date +%s)
+    local suite_duration=$((suite_end - suite_start))
+    SUITE_DURATION[$suite_spec]=$suite_duration
+
+    print_success "Suite $suite_spec (LOCAL) completed in ${suite_duration}s"
+
+    return 0
+}
+
 # Main execution
 print_header "Test Suites Execution"
 echo "Suites to run: ${SUITES[*]}"
 echo "Output directory: $OUTPUT_DIR"
+if [ "$LOCAL_MODE" = true ]; then
+    echo "Mode: LOCAL (no backend)"
+else
+    echo "Mode: REMOTE (backend API)"
+fi
 echo ""
 
 # Initial cleanup - remove leftover resources from previous runs
@@ -306,7 +448,14 @@ fi
 
 # Run each suite
 for suite_spec in "${SUITES[@]}"; do
-    if run_suite "$suite_spec"; then
+    # Choose execution function based on mode
+    if [ "$LOCAL_MODE" = true ]; then
+        run_func="run_suite_local"
+    else
+        run_func="run_suite"
+    fi
+
+    if $run_func "$suite_spec"; then
         if [ "${SUITE_RESULTS[$suite_spec]}" = "PASSED" ]; then
             print_success "✓ $suite_spec: ALL TESTS PASSED"
         else
