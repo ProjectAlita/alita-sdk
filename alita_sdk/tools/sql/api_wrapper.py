@@ -33,7 +33,8 @@ class SQLApiWrapper(BaseToolApiWrapper):
     @model_validator(mode='before')
     @classmethod
     def validate_toolkit(cls, values):
-        for field in SQLConfig.model_fields:
+        required_fields = ['dialect', 'host', 'username', 'password', 'database_name']
+        for field in required_fields:
             if field not in values or not values[field]:
                 raise ValueError(f"{field} is a required field and must be provided.")
         return values
