@@ -979,7 +979,8 @@ class LLMNode(BaseTool):
                     tool_call, 'id', '')
 
                 # Find the tool in filtered tools
-                filtered_tools = self.get_filtered_tools()
+                # Pass config to ensure dynamically selected tools are available
+                filtered_tools = self.get_filtered_tools(config=config)
                 tool_to_execute = None
                 for tool in filtered_tools:
                     if tool.name == tool_name:
@@ -989,7 +990,7 @@ class LLMNode(BaseTool):
                 if tool_to_execute:
                     try:
                         logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
-                        
+
                         # Try async invoke first (for MCP tools), fallback to sync
                         tool_result = None
                         if hasattr(tool_to_execute, 'ainvoke'):
