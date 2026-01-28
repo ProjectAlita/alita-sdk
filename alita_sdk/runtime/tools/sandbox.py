@@ -191,9 +191,7 @@ class PyodideSandboxTool(BaseTool):
             if self._sandbox is None:
                 self._initialize_sandbox()
 
-            # Prepare code with state and client injection
-            prepared_code = self._prepare_pyodide_input(code)
-
+            # Note: _arun() handles code preparation (alita_client injection)
             # Check if we're already in an async context
             try:
                 loop = asyncio.get_running_loop()
@@ -201,11 +199,11 @@ class PyodideSandboxTool(BaseTool):
                 # We'll need to use a different approach
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, self._arun(prepared_code))
+                    future = executor.submit(asyncio.run, self._arun(code))
                     return future.result()
             except RuntimeError:
                 # No running loop, safe to use asyncio.run
-                return asyncio.run(self._arun(prepared_code))
+                return asyncio.run(self._arun(code))
         except (ImportError, RuntimeError) as e:
             # Handle specific dependency errors gracefully
             error_msg = str(e)
@@ -227,9 +225,13 @@ class PyodideSandboxTool(BaseTool):
             if self._sandbox is None:
                 self._initialize_sandbox()
 
+            # Prepare code with state and client injection
+            # This is needed when _arun is called directly via ainvoke()
+            prepared_code = self._prepare_pyodide_input(code)
+
             # Execute the code with session state if available
             result = await self._sandbox.execute(
-                code,
+                prepared_code,
                 session_bytes=self.session_bytes,
                 session_metadata=self.session_metadata
             )
