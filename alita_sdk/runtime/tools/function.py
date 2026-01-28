@@ -2,7 +2,6 @@ import base64
 import json
 import logging
 from copy import deepcopy
-from json import dumps
 
 from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import ToolCall
@@ -13,9 +12,31 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
 from ..langchain.utils import propagate_the_input_mapping
-from ..utils.serialization import safe_serialize
 
 logger = logging.getLogger(__name__)
+
+
+def safe_serialize(obj: Any) -> str:
+    """
+    Safely serialize any object to a JSON string.
+    Falls back to str() conversion if json.dumps fails.
+
+    Args:
+        obj: Any object to serialize
+
+    Returns:
+        JSON string representation of the object
+    """
+    try:
+        return json.dumps(obj, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        # If json.dumps fails, convert to string
+        logger.debug(f"JSON serialization failed for {type(obj).__name__}: {e}. Falling back to str() conversion.")
+        try:
+            return json.dumps(str(obj), ensure_ascii=False)
+        except Exception:
+            # Ultimate fallback - just return string representation
+            return str(obj)
 
 
 def replace_escaped_newlines(data):
@@ -82,7 +103,7 @@ alita_state = json.loads(state_json)
             for var in self.output_variables:
                 if var == "messages":
                     tool_result_converted.update(
-                        {"messages": [{"role": "assistant", "content": dumps(tool_result)}]})
+                        {"messages": [{"role": "assistant", "content": safe_serialize(tool_result)}]})
                     continue
                 if isinstance(tool_result, dict) and var in tool_result:
                     tool_result_converted[var] = tool_result[var]
@@ -92,7 +113,7 @@ alita_state = json.loads(state_json)
                                                                  tool_result.get('error') if tool_result.get('error')
                                                                  else 'Execution result is missing')
         else:
-            tool_result_converted.update({"messages": [{"role": "assistant", "content": dumps(tool_result)}]})
+            tool_result_converted.update({"messages": [{"role": "assistant", "content": safe_serialize(tool_result)}]})
 
         if self.structured_output:
             # execute code tool and update state variables
@@ -150,7 +171,7 @@ alita_state = json.loads(state_json)
                 return self._handle_pyodide_output(tool_result)
 
             if not self.output_variables:
-                return {"messages": [{"role": "assistant", "content": dumps(tool_result)}]}
+                return {"messages": [{"role": "assistant", "content": safe_serialize(tool_result)}]}
             else:
                 if "messages" in self.output_variables:
                     if isinstance(tool_result, dict) and 'messages' in tool_result:
@@ -160,7 +181,7 @@ alita_state = json.loads(state_json)
                         messages_dict = {
                             "messages": [{
                                 "role": "assistant",
-                                "content": dumps(tool_result)
+                                "content": safe_serialize(tool_result)
                                 if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
                                 else str(tool_result)
                             }]
@@ -177,7 +198,7 @@ alita_state = json.loads(state_json)
         except ValidationError:
             return {"messages": [
                 {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
-        \n\nTool schema is {dumps(params)} \n\nand the input to LLM was 
+        \n\nTool schema is {safe_serialize(params)} \n\nand the input to LLM was 
         {func_args}"""}]}
 
     def _run(self, *args, **kwargs):
