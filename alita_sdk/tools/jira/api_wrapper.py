@@ -16,7 +16,7 @@ import requests
 
 from ..llm.img_utils import ImageDescriptionCache
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
-from ..utils import is_cookie_token, parse_cookie_string
+from ..utils import is_cookie_token, parse_cookie_string, get_file_bytes_from_artifact, detect_mime_type
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..utils.content_parser import file_extension_by_chunker, process_content_by_type
 from ...runtime.utils.utils import IndexerKeywords
@@ -852,12 +852,9 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
 
     def _upload_file_from_artifact(self, issue_key: str, artifact_id: str, filename: str = None) -> Dict[str, Any]:
         """Upload file from artifact storage to Jira issue."""
-        # Get artifact client on the fly - bucket doesn't matter for download by ID
-        artifact_client = self.alita.artifact('__temp__')
-        
-        # Get raw file bytes from artifact storage
+        # Get raw file bytes from artifact storage using shared utility
         try:
-            file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, artifact_id)
         except Exception as e:
             raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
         
@@ -867,20 +864,8 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         if not file_bytes:
             raise ToolException(f"Artifact '{artifact_id}' not found or empty")
         
-        # Detect MIME type
-        try:
-            import filetype
-            kind = filetype.guess(file_bytes)
-            mime_type = kind.mime if kind else 'application/octet-stream'
-        except Exception:
-            # Fallback to basic detection from extension
-            mime_type = 'application/octet-stream'
-            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                mime_type = 'image/jpeg' if filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
-            elif filename.lower().endswith('.gif'):
-                mime_type = 'image/gif'
-            elif filename.lower().endswith('.pdf'):
-                mime_type = 'application/pdf'
+        # Detect MIME type using shared utility
+        mime_type = detect_mime_type(file_bytes, filename)
         
         # Upload to Jira as attachment
         file_io = BytesIO(file_bytes)
