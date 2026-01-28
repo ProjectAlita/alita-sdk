@@ -1,0 +1,143 @@
+name: "CF17 - Delete Page by Title"
+description: "Verify delete_page resolves page_id from page_title and deletes the page successfully"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_title_to_create:
+    type: str
+    value: "TC_18_DeleteByTitle_Test"
+  page_body:
+    type: str
+    value: "<p>This page will be deleted by title</p>"
+  space:
+    type: str
+    value: "AT"
+  create_result:
+    type: str
+  delete_result:
+    type: str
+  verify_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: setup_create_page
+
+nodes:
+  - id: setup_create_page
+    type: toolkit
+    tool: create_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - space
+      - page_title_to_create
+      - page_body
+    input_mapping:
+      space:
+        type: variable
+        value: space
+      title:
+        type: variable
+        value: page_title_to_create
+      body:
+        type: variable
+        value: page_body
+      status:
+        type: fixed
+        value: "current"
+      representation:
+        type: fixed
+        value: "storage"
+    output:
+      - create_result
+    structured_output: true
+    transition: invoke_delete_page
+
+  - id: invoke_delete_page
+    type: toolkit
+    tool: delete_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title_to_create
+    input_mapping:
+      page_title:
+        type: variable
+        value: page_title_to_create
+    output:
+      - delete_result
+    structured_output: true
+    transition: verify_deletion
+
+  - id: verify_deletion
+    type: toolkit
+    tool: search_by_title
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title_to_create
+    input_mapping:
+      title:
+        type: variable
+        value: page_title_to_create
+    output:
+      - verify_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - create_result
+      - delete_result
+      - verify_result
+      - page_title_to_create
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete workflow results.
+          
+          Create Result: {create_result}
+          Delete Result: {delete_result}
+          Verify Result: {verify_result}
+          Page Title: {page_title_to_create}
+          
+          Perform the following checks:
+          
+          1. Confirm the page was created successfully.
+          2. Verify the delete_page tool executed successfully.
+          3. Check if delete output contains success message with page ID.
+          4. Validate message states "Page with ID ... has been successfully deleted."
+          5. Confirm the tool resolved page_title to page_id correctly.
+          6. Verify the search_by_title returns empty/not found (page no longer exists).
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if page created, deleted successfully AND verified as deleted),
+            "tool_executed": boolean (true if tool ran without errors),
+            "has_success_message": boolean (true if deletion success message present),
+            "has_page_id": boolean (true if message includes resolved page ID),
+            "page_created": boolean (true if page was created),
+            "page_deleted": boolean (true if page was deleted),
+            "deletion_verified": boolean (true if search confirms page is gone),
+            "failed_checks": [string] // list of failed assertions
+          }}
+          
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object.
+          Do not use markdown ```json when returning the json.
+          Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
+    transition: END

@@ -1,0 +1,92 @@
+name: "CF13 - Execute Generic Confluence API"
+description: "Verify execute_generic_confluence tool executes generic Confluence REST API calls with specified method, URL, and parameters"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  method:
+    type: str
+    value: "GET"
+  relative_url:
+    type: str
+    value: "/rest/api/space/AT"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_execute_generic_confluence
+
+nodes:
+  - id: invoke_execute_generic_confluence
+    type: toolkit
+    tool: execute_generic_confluence
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - method
+      - relative_url
+    input_mapping:
+      method:
+        type: variable
+        value: method
+      relative_url:
+        type: variable
+        value: relative_url
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - method
+      - relative_url
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'execute_generic_confluence' tool.
+
+          Tool Result: {tool_result}
+          Method: {method}
+          Relative URL: {relative_url}
+
+          Perform the following checks:
+
+          1. Confirm the tool executed successfully (the result is not empty or null).
+          2. Verify the output is formatted as: "HTTP: {{method}}{{url}} -> {{status_code}}{{reason}}{{response_text}}".
+          3. Check if the HTTP status code is successful (200).
+          4. Validate the response contains valid API data (JSON or text).
+          5. For space endpoint, verify response includes space information (key, name, type).
+          6. Ensure the method and URL are correctly reflected in the response.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and returned successful API response),
+            "tool_executed": boolean (true if tool ran without errors),
+            "has_valid_format": boolean (true if output follows expected format),
+            "status_code": string (extracted HTTP status code, e.g., "200", or null if not found),
+            "is_successful": boolean (true if status code is 200),
+            "has_response_data": boolean (true if response contains data),
+            "response_preview": string (first 200 characters of response_text for verification),
+            "failed_checks": [string] // list of failed assertions
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
+    transition: END

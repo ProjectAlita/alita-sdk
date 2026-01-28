@@ -1,0 +1,83 @@
+name: "CF12 - Get Page with Image Descriptions"
+description: "Verify get_page_with_image_descriptions tool retrieves page and replaces images with LLM-generated textual descriptions"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_id:
+    type: str
+    value: "139395168"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_page_with_image_descriptions
+
+nodes:
+  - id: invoke_get_page_with_image_descriptions
+    type: toolkit
+    tool: get_page_with_image_descriptions
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_id
+    input_mapping:
+      page_id:
+        type: variable
+        value: page_id
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - page_id
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_page_with_image_descriptions' tool.
+
+          Tool Result: {tool_result}
+          Page ID: {page_id}
+
+          Perform the following checks:
+
+          1. Confirm the tool executed successfully (the result is not empty or null).
+          2. Verify the output is in markdown format with text content.
+          3. Check if the content contains image descriptions instead of image references.
+          4. Look for contextual descriptions related to forests, woods, or green trees (expected content).
+          5. Verify that image placeholders or references have been replaced with descriptions.
+          6. Validate the content length is reasonable (not just empty or error message).
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and returned page content with image descriptions),
+            "tool_executed": boolean (true if tool ran without errors),
+            "has_content": boolean (true if result contains text content),
+            "content_length": integer (length of content in characters),
+            "has_image_descriptions": boolean (true if content appears to have textual descriptions instead of image tags),
+            "contextually_valid": boolean (true if descriptions mention expected keywords like forest, wood, trees, green),
+            "content_preview": string (first 200 characters of content for verification),
+            "failed_checks": [string] // list of failed assertions
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
+    transition: END

@@ -1,0 +1,135 @@
+name: "CF15 - Bulk Create Pages from JSON"
+description: "Verify create_pages creates multiple pages from JSON list and returns success for each page"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  space:
+    type: str
+    value: "AT"
+  pages_info:
+    type: str
+    value: '[{"TC_15_Page_A": "<h1>Page A Content</h1>"}, {"TC_15_Page_B": "<p>Page B Content</p>"}]'
+  status:
+    type: str
+    value: "current"
+  create_result:
+    type: str
+  delete_result_a:
+    type: str
+  delete_result_b:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_pages
+
+nodes:
+  - id: invoke_create_pages
+    type: toolkit
+    tool: create_pages
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - space
+      - pages_info
+      - status
+    input_mapping:
+      space:
+        type: variable
+        value: space
+      pages_info:
+        type: variable
+        value: pages_info
+      status:
+        type: variable
+        value: status
+    output:
+      - create_result
+    structured_output: true
+    transition: cleanup_delete_page_a
+
+  - id: cleanup_delete_page_a
+    type: toolkit
+    tool: delete_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      page_title:
+        type: fixed
+        value: "TC_15_Page_A"
+    output:
+      - delete_result_a
+    structured_output: true
+    transition: cleanup_delete_page_b
+
+  - id: cleanup_delete_page_b
+    type: toolkit
+    tool: delete_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      page_title:
+        type: fixed
+        value: "TC_15_Page_B"
+    output:
+      - delete_result_b
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - create_result
+      - delete_result_a
+      - delete_result_b
+      - pages_info
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete workflow results.
+          
+          Create Result: {create_result}
+          Delete Result A: {delete_result_a}
+          Delete Result B: {delete_result_b}
+          Pages Info: {pages_info}
+          
+          Perform the following checks:
+          
+          1. Confirm the tool executed successfully (the result is not empty or null).
+          2. Verify the output is a stringified list with per-page success messages.
+          3. Check if each message includes page details (title, id, space key, author, link).
+          4. Count the number of pages created (should be 2).
+          5. Validate all pages have success confirmations.
+          6. Confirm both pages were deleted successfully in cleanup.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if all pages created successfully AND deleted),
+            "tool_executed": boolean (true if tool ran without errors),
+            "is_list_format": boolean (true if output is list format),
+            "pages_created_count": integer (number of pages created),
+            "all_have_details": boolean (true if all pages have detail keys),
+            "expected_count": 2,
+            "pages_deleted": boolean (true if both pages deleted in cleanup),
+            "failed_checks": [string] // list of failed assertions
+          }}
+          
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object.
+          Do not use markdown ```json when returning the json.
+          Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
+    transition: END
