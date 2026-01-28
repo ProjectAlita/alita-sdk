@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse, quote
+import base64
 
 import jwt
 import requests
@@ -18,6 +19,22 @@ class SharepointAuthorizationHelper:
         self.token_json = token_json
         self.state = "12345"  # Static state for this example
         self.redirect_url = None
+    
+    def _extract_tenant_from_token(self) -> str:
+        """Extract tenant ID from access token if available."""
+        if self.tenant:
+            return self.tenant
+        
+        # Try to extract from token_json or access_token
+        if self.access_token:
+            try:
+                # Decode JWT without verification to extract tenant
+                decoded = jwt.decode(self.access_token, options={"verify_signature": False})
+                return decoded.get('tid', 'common')
+            except Exception:
+                pass
+        
+        return 'common'
 
     def refresh_access_token(self) -> str:
         url = f"https://login.microsoftonline.com/{self.tenant}/oauth2/v2.0/token"
@@ -202,6 +219,198 @@ class SharepointAuthorizationHelper:
         except Exception as e:
             raise RuntimeError(f"Error in get_file_content: {e}")
 
+    def get_lists(self, site_url: str):
+        """Get all SharePoint lists on a site using Graph API.
+        
+        Returns a list of dictionaries with list metadata (Title, Id, Description, ItemCount).
+        """
+        if not site_url or not site_url.startswith("https://"):
+            raise ValueError(f"Invalid site_url format: {site_url}")
+        try:
+            access_token, site_id = self.generate_token_and_site_id(site_url)
+            headers = {"Authorization": f"Bearer {access_token}"}
+            lists_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
+            response = requests.get(lists_url, headers=headers)
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"Lists request failed: {response.status_code} {response.text}")
+            
+            lists_json = response.json()
+            lists = lists_json.get("value", [])
+            
+            result = []
+            for lst in lists:
+                # Skip hidden system lists
+                if lst.get('list', {}).get('hidden', False):
+                    continue
+                    
+                result.append({
+                    'Title': lst.get('displayName', lst.get('name', '')),
+                    'Id': lst.get('id', ''),
+                    'Description': lst.get('description', ''),
+                    'ItemCount': lst.get('list', {}).get('itemCount', 0),
+                    'BaseTemplate': lst.get('list', {}).get('template', '')
+                })
+            
+            return result
+        except Exception as e:
+            raise RuntimeError(f"Error getting lists: {e}")
+
+    def get_list_columns(self, site_url: str, list_title: str):
+        """Get column metadata for a SharePoint list using Graph API.
+        
+        Returns array of column objects with name, displayName, columnType, required, and choice metadata.
+        Lookup columns are excluded.
+        """
+        if not site_url or not site_url.startswith("https://"):
+            raise ValueError(f"Invalid site_url format: {site_url}")
+        if not list_title:
+            raise ValueError("list_title is required")
+        
+        try:
+            access_token, site_id = self.generate_token_and_site_id(site_url)
+            headers = {"Authorization": f"Bearer {access_token}"}
+            
+            # First, get the list ID
+            lists_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
+            lists_response = requests.get(lists_url, headers=headers)
+            
+            if lists_response.status_code != 200:
+                raise RuntimeError(f"Lists request failed: {lists_response.status_code} {lists_response.text}")
+            
+            lists_json = lists_response.json()
+            lists = lists_json.get("value", [])
+            
+            list_id = None
+            for lst in lists:
+                if lst.get('displayName', '').lower() == list_title.lower() or lst.get('name', '').lower() == list_title.lower():
+                    list_id = lst.get('id')
+                    break
+            
+            if not list_id:
+                raise RuntimeError(f"List '{list_title}' not found on site")
+            
+            # Get columns for the list
+            columns_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/columns"
+            columns_response = requests.get(columns_url, headers=headers)
+            
+            if columns_response.status_code != 200:
+                raise RuntimeError(f"Columns request failed: {columns_response.status_code} {columns_response.text}")
+            
+            columns_json = columns_response.json()
+            columns = columns_json.get("value", [])
+            
+            result = []
+            for col in columns:
+                # Skip hidden columns
+                if col.get('hidden', False):
+                    continue
+                
+                # Skip read-only columns (system fields like Created, Modified)
+                if col.get('readOnly', False):
+                    continue
+                
+                # Skip lookup columns (too complex for now)
+                if 'lookup' in col:
+                    continue
+                
+                column_info = {
+                    'name': col.get('name', ''),
+                    'displayName': col.get('displayName', col.get('name', '')),
+                    'columnType': col.get('text', col.get('number', col.get('boolean', col.get('dateTime', col.get('choice', {}))))).get('__type__', 'text') if isinstance(col.get('text', col.get('number', col.get('boolean', col.get('dateTime', col.get('choice', {}))))), dict) else 'text',
+                    'required': col.get('required', False)
+                }
+                
+                # Extract column type from the column definition
+                if 'text' in col:
+                    column_info['columnType'] = 'text'
+                elif 'number' in col:
+                    column_info['columnType'] = 'number'
+                elif 'boolean' in col:
+                    column_info['columnType'] = 'boolean'
+                elif 'dateTime' in col:
+                    column_info['columnType'] = 'dateTime'
+                elif 'choice' in col:
+                    column_info['columnType'] = 'choice'
+                    choice_info = col.get('choice', {})
+                    if 'choices' in choice_info:
+                        column_info['choice'] = {
+                            'choices': choice_info.get('choices', [])
+                        }
+                
+                result.append(column_info)
+            
+            return result
+        except Exception as e:
+            raise RuntimeError(f"Error getting list columns: {e}")
+
+    def create_list_item(self, site_url: str, list_title: str, fields: dict):
+        """Create a new item in a SharePoint list using Graph API.
+        
+        Args:
+            site_url: SharePoint site URL
+            list_title: Title of the list
+            fields: Dictionary of field name -> value pairs
+            
+        Returns:
+            Dictionary with created item metadata (id, fields, webUrl)
+        """
+        if not site_url or not site_url.startswith("https://"):
+            raise ValueError(f"Invalid site_url format: {site_url}")
+        if not list_title:
+            raise ValueError("list_title is required")
+        if not fields or not isinstance(fields, dict):
+            raise ValueError("fields must be a non-empty dictionary")
+        
+        try:
+            access_token, site_id = self.generate_token_and_site_id(site_url)
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # First, get the list ID
+            lists_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
+            lists_response = requests.get(lists_url, headers=headers)
+            
+            if lists_response.status_code != 200:
+                raise RuntimeError(f"Lists request failed: {lists_response.status_code} {lists_response.text}")
+            
+            lists_json = lists_response.json()
+            lists = lists_json.get("value", [])
+            
+            list_id = None
+            for lst in lists:
+                if lst.get('displayName', '').lower() == list_title.lower() or lst.get('name', '').lower() == list_title.lower():
+                    list_id = lst.get('id')
+                    break
+            
+            if not list_id:
+                raise RuntimeError(f"List '{list_title}' not found on site")
+            
+            # Create the list item
+            items_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
+            payload = {
+                "fields": fields
+            }
+            
+            items_response = requests.post(items_url, headers=headers, json=payload)
+            
+            if items_response.status_code not in [200, 201]:
+                raise RuntimeError(f"Create item failed: {items_response.status_code} {items_response.text}")
+            
+            item_data = items_response.json()
+            
+            # TODO: Filter out internal/system fields (@odata.etag, AuthorLookupId, _ComplianceFlags, etc.)
+            # to reduce LLM context pollution. Return only id, user-defined fields, and essential metadata.
+            return {
+                'id': item_data.get('id', ''),
+                'fields': item_data.get('fields', {}),
+                'webUrl': item_data.get('webUrl', '')
+            }
+        except Exception as e:
+            raise RuntimeError(f"Error creating list item: {e}")
+
     def get_list_items(self, site_url: str, list_title: str, limit: int = 1000):
         """Fallback Graph API method to read SharePoint list items by list title.
 
@@ -241,7 +450,248 @@ class SharepointAuthorizationHelper:
             for item in values:
                 fields = item.get('fields', {})
                 if fields:
+                    # TODO: Filter out internal/system fields (@odata.etag, AuthorLookupId, _ComplianceFlags, etc.)
+                    # to reduce LLM context pollution. Return only user-defined fields and essential metadata.
                     result.append(fields)
             return result
         except Exception as e:
             raise RuntimeError(f"Error in get_list_items: {e}")
+
+    def upload_file_to_library(self, site_url: str, folder_path: str, filename: str, file_bytes: bytes, replace: bool = True) -> dict:
+        """Upload file to SharePoint document library via Microsoft Graph API.
+        
+        Supports both small files (≤4MB) via simple PUT and large files via chunked upload session.
+        
+        Args:
+            site_url: SharePoint site URL
+            folder_path: Server-relative folder path (e.g., '/sites/MySite/Shared Documents/folder')
+            filename: Target filename
+            file_bytes: File content as bytes
+            replace: If True, overwrite existing file. If False, raise error on conflict
+            
+        Returns:
+            dict with file metadata: {id, webUrl, path, size, mime_type}
+            
+        Raises:
+            RuntimeError: If upload fails or file exists when replace=False
+        """
+        SIZE_THRESHOLD = 4 * 1024 * 1024  # 4 MB
+        CHUNK_SIZE = 5 * 1024 * 1024  # 5 MB (must be multiple of 320 KB for Graph API)
+        
+        try:
+            # Get access token and site ID
+            access_token, site_id = self.generate_token_and_site_id(site_url)
+            headers = {"Authorization": f"Bearer {access_token}"}
+            
+            # Get drives for the site
+            drives_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
+            drives_response = requests.get(drives_url, headers=headers)
+            drives = self._validate_response(drives_response, required_field="value", error_prefix="Drives request")
+            
+            # Find matching drive for the folder path
+            for drive in drives:
+                drive_path = unquote(urlparse(drive.get("webUrl")).path).strip('/') if drive.get("webUrl") else ""
+                folder_path_clean = folder_path.strip('/')
+                
+                if folder_path_clean.startswith(drive_path):
+                    drive_id = drive.get("id")
+                    if not drive_id:
+                        continue
+                    
+                    # Calculate relative path within drive
+                    relative_path = folder_path_clean.replace(drive_path, '').strip('/')
+                    item_path = f"{relative_path}/{filename}".strip('/')
+                    safe_item_path = quote(item_path, safe="/")
+                    
+                    # Check if file exists (for replace=False handling)
+                    if not replace:
+                        check_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{safe_item_path}"
+                        check_response = requests.get(check_url, headers=headers)
+                        if check_response.status_code == 200:
+                            raise RuntimeError(
+                                f"File '{filename}' already exists at '{folder_path}'. "
+                                f"Set replace=True to overwrite."
+                            )
+                    
+                    file_size = len(file_bytes)
+                    
+                    # Small file: simple PUT
+                    if file_size <= SIZE_THRESHOLD:
+                        upload_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{safe_item_path}:/content"
+                        upload_response = requests.put(upload_url, headers=headers, data=file_bytes)
+                        
+                        if upload_response.status_code not in (200, 201):
+                            raise RuntimeError(
+                                f"File upload failed: HTTP {upload_response.status_code} - {upload_response.text}"
+                            )
+                        
+                        result = upload_response.json()
+                        return {
+                            'id': result.get('id'),
+                            'webUrl': result.get('webUrl'),
+                            'path': result.get('parentReference', {}).get('path', '') + '/' + result.get('name', filename),
+                            'size': result.get('size', file_size),  # SharePoint's reported storage size (includes metadata overhead)
+                            'original_size': file_size,  # Actual uploaded file size in bytes
+                            'mime_type': result.get('file', {}).get('mimeType', 'application/octet-stream')
+                        }
+                    
+                    # Large file: chunked upload session
+                    else:
+                        # Create upload session
+                        session_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{safe_item_path}:/createUploadSession"
+                        session_body = {
+                            "item": {
+                                "@microsoft.graph.conflictBehavior": "replace" if replace else "fail"
+                            }
+                        }
+                        session_response = requests.post(session_url, headers=headers, json=session_body)
+                        
+                        if session_response.status_code not in (200, 201):
+                            raise RuntimeError(
+                                f"Failed to create upload session: HTTP {session_response.status_code} - {session_response.text}"
+                            )
+                        
+                        upload_url = session_response.json().get('uploadUrl')
+                        if not upload_url:
+                            raise RuntimeError("Failed to create upload session: No uploadUrl returned")
+                        
+                        # Upload chunks
+                        offset = 0
+                        
+                        while offset < file_size:
+                            chunk_end = min(offset + CHUNK_SIZE, file_size)
+                            chunk = file_bytes[offset:chunk_end]
+                            
+                            chunk_headers = {
+                                "Content-Length": str(len(chunk)),
+                                "Content-Range": f"bytes {offset}-{chunk_end - 1}/{file_size}"
+                            }
+                            
+                            chunk_response = requests.put(upload_url, headers=chunk_headers, data=chunk)
+                            
+                            # Final chunk returns 201/200 with file metadata
+                            if chunk_response.status_code in (200, 201):
+                                result = chunk_response.json()
+                                return {
+                                    'id': result.get('id'),
+                                    'webUrl': result.get('webUrl'),
+                                    'path': result.get('parentReference', {}).get('path', '') + '/' + result.get('name', filename),
+                                    'size': result.get('size', file_size),  # SharePoint's reported storage size (includes metadata overhead)
+                                    'original_size': file_size,  # Actual uploaded file size in bytes
+                                    'mime_type': result.get('file', {}).get('mimeType', 'application/octet-stream')
+                                }
+                            # Intermediate chunks return 202
+                            elif chunk_response.status_code != 202:
+                                raise RuntimeError(
+                                    f"Chunk upload failed: HTTP {chunk_response.status_code} - {chunk_response.text}"
+                                )
+                            
+                            offset = chunk_end
+                        
+                        raise RuntimeError("Chunked upload completed but no final response received")
+            
+            raise RuntimeError(f"Could not find drive for folder path: {folder_path}")
+            
+        except Exception as e:
+            raise RuntimeError(f"Error uploading file to library: {e}")
+
+    def add_attachment_to_list_item(self, site_url: str, list_title: str, item_id: int, filename: str, file_bytes: bytes, replace: bool = True) -> dict:
+        """Add attachment to SharePoint list item via Microsoft Graph API.
+        
+        Args:
+            site_url: SharePoint site URL
+            list_title: Name of the SharePoint list
+            item_id: Internal item ID (not the display ID)
+            filename: Attachment filename
+            file_bytes: File content as bytes
+            replace: If True, delete existing attachment with same name first. If False, raise error on conflict
+            
+        Returns:
+            dict with attachment metadata: {id, name, size}
+            
+        Raises:
+            RuntimeError: If attachment fails or file exists when replace=False
+        """
+        try:
+            # Get access token and site ID
+            access_token, site_id = self.generate_token_and_site_id(site_url)
+            headers = {"Authorization": f"Bearer {access_token}"}
+            
+            # Get lists for the site
+            lists_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
+            lists_response = requests.get(lists_url, headers=headers)
+            if lists_response.status_code != 200:
+                raise RuntimeError(f"Lists request failed: {lists_response.status_code} {lists_response.text}")
+            
+            lists = lists_response.json().get("value", [])
+            
+            # Find target list
+            target_list = None
+            normalized_title = list_title.strip().lower()
+            for lst in lists:
+                display_name = (lst.get("displayName") or lst.get("name") or '').strip().lower()
+                if display_name == normalized_title:
+                    target_list = lst
+                    break
+            
+            if not target_list:
+                raise RuntimeError(f"List '{list_title}' not found")
+            
+            list_id = target_list.get('id')
+            if not list_id:
+                raise RuntimeError(f"List '{list_title}' missing id field")
+            
+            # Check for existing attachment (for replace=False or replace=True with deletion)
+            attachments_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items/{item_id}/attachments"
+            attachments_response = requests.get(attachments_url, headers=headers)
+            
+            if attachments_response.status_code == 200:
+                existing_attachments = attachments_response.json().get("value", [])
+                existing_attachment = next(
+                    (att for att in existing_attachments if att.get("name", "").lower() == filename.lower()),
+                    None
+                )
+                
+                if existing_attachment:
+                    if not replace:
+                        raise RuntimeError(
+                            f"Attachment '{filename}' already exists on list item {item_id}. "
+                            f"Set replace=True to overwrite."
+                        )
+                    # Delete existing attachment
+                    attachment_id = existing_attachment.get('id')
+                    if attachment_id:
+                        delete_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items/{item_id}/attachments/{attachment_id}"
+                        delete_response = requests.delete(delete_url, headers=headers)
+                        if delete_response.status_code not in (200, 204):
+                            raise RuntimeError(
+                                f"Failed to delete existing attachment: HTTP {delete_response.status_code} - {delete_response.text}"
+                            )
+            
+            # Add new attachment
+            file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+            
+            attachment_data = {
+                "name": filename,
+                "contentBytes": file_base64
+            }
+            
+            add_headers = headers.copy()
+            add_headers["Content-Type"] = "application/json"
+            
+            add_response = requests.post(attachments_url, headers=add_headers, json=attachment_data)
+            
+            if add_response.status_code not in (200, 201):
+                raise RuntimeError(
+                    f"Failed to add attachment: HTTP {add_response.status_code} - {add_response.text}"
+                )
+            
+            result = add_response.json()
+            return {
+                'id': result.get('id'),
+                'name': result.get('name', filename),
+                'size': len(file_bytes)
+            }
+                
+        except Exception as e:
+            raise RuntimeError(f"Error adding attachment to list item: {e}")
