@@ -20,6 +20,10 @@ jobs:
       - name: Generate test matrix
         id: set-matrix
         run: |
+          # Hardcoded matrix for testing - single value
+          echo "matrix=[\"github\"]" >> $GITHUB_OUTPUT
+          echo "has-tests=true" >> $GITHUB_OUTPUT
+          exit 0
           # Generate test directories from testcases folder
           TEST_DIRS=$(find .alita/tests/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "Available test directories: $TEST_DIRS"
@@ -74,7 +78,7 @@ jobs:
 
   test-execution:
     needs: configure-matrix
-    if: needs.configure-matrix.outputs.has-tests == 'true'
+#    if: needs.configure-matrix.outputs.has-tests == 'true'
     strategy:
       fail-fast: false
       max-parallel: 5

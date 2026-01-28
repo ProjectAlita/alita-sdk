@@ -24,11 +24,10 @@ services:
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk
     working_dir: /app/.alita/tests/test_pipelines
+    command: ["bash", "./run_test.sh", "--local", "confluence_toolkit", "test_case_01"]
 #    command: >
 #      sh -c "alita agent execute-test-cases
 #      --test-cases-dir .alita/tests/testcases/$${TEST_CASES_DIR}"
-#    command: ["bash", "./run_test.sh", "--setup", "--seed", "github_toolkit", "list_branches"]
-    command: ["bash", "./run_test.sh", "--local", "github_toolkit", "test_case_01"]
 
   pgvector-db:
     image: ankane/pgvector

@@ -28,6 +28,19 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: USAGEDATA
+        run: |
+          disk_usage=$(df -BG / | tail -1)
+          echo "Disk usage percentage: $disk_usage%"
+      - name: CLEAN UP WORKSPACE
+        if: always()
+        run: |
+          sudo rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*
+      - name: USAGEDATA-2
+        run: |
+          disk_usage=$(df -BG / | tail -1)
+          echo "Disk usage percentage: $disk_usage%"
+      
       - name: Checkout repository
         uses: actions/checkout@v4
 
