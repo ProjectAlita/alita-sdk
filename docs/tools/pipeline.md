@@ -44,6 +44,7 @@ nodes:
 | `id` | string | Yes | - | Unique identifier for the node                                                                                     |
 | `type` | string | Yes | - | Must be "code"                                                                                                     |
 | `code` | string | Yes | "'Code block is empty'" | Python code to execute: 'Code block is empty' will be returned                                                     |
+| `input` | list[string] | No | ['messages'] | Controls which state variables are injected into `alita_state`. If empty or only `['messages']`, ALL state variables are injected. If specific variables are listed, ONLY those are injected (excluding 'messages') |
 | `output` | list[string] | No | [] | Output variables to store in pipeline state                                                                        |
 | `structured_output` | boolean | No | false | Whether to parse output as structured data. `true` - will update state variables that matches to return statement* |
 
@@ -63,7 +64,51 @@ IMPORTANT:
 
 #### State Variables Access
 
-The Code Node automatically injects the current pipeline state into the execution environment as `alita_state`. This allows your code to access and manipulate state variables:
+The Code Node automatically injects the current pipeline state into the execution environment as `alita_state`. This allows your code to access and manipulate state variables.
+
+**Selective State Injection:**
+
+The `input` parameter controls which state variables are available in `alita_state`:
+
+- **Default behavior (no `input` or `input: ["messages"]`)**: ALL state variables are injected into `alita_state`
+- **Specific variables (`input: ["var1", "var2"]`)**: ONLY the specified variables are injected into `alita_state`
+- The `messages` variable is never injected into `alita_state` (always excluded)
+
+**Example - Access all state variables:**
+
+```yaml
+- id: "code_with_all_vars"
+  type: "code"
+  code:
+    type: fixed
+    value: |
+      # All state variables are available
+      user_id = alita_state.get('user_id')
+      settings = alita_state.get('settings')
+      score = alita_state.get('score')
+      {"result": f"User {user_id} with score {score}"}
+  # No input specified = all variables injected
+  output: ["result"]
+```
+
+**Example - Access only specific variables:**
+
+```yaml
+- id: "code_with_filtered_vars"
+  type: "code"
+  code:
+    type: fixed
+    value: |
+      # Only user_id and score are available in alita_state
+      user_id = alita_state.get('user_id')  # ✓ Available
+      score = alita_state.get('score')      # ✓ Available
+      settings = alita_state.get('settings')  # ✗ Not available (returns None)
+      {"result": f"User {user_id} with score {score}"}
+  input: ["user_id", "score"]  # Only inject these variables
+  output: ["result"]
+```
+
+**Basic example:**
 
 ```python
 # Access pipeline state variables

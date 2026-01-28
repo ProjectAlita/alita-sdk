@@ -62,8 +62,12 @@ class FunctionTool(BaseTool):
     structured_output: Optional[bool] = False
     alita_client: Optional[Any] = None
 
-    def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall]) -> str:
+    def _prepare_pyodide_input(self, state: Union[str, dict, ToolCall], input_variables: Optional[list[str]] = None) -> str:
         """Prepare input for PyodideSandboxTool by injecting state into the code block.
+
+        Logic for state variable injection:
+        - If input_variables is None, empty, or only contains 'messages': inject ALL state variables
+        - If input_variables contains specific variable names: inject ONLY those variables (excluding 'messages')
 
         Uses base64 encoding to avoid string escaping issues when passing JSON
         through multiple layers of parsing (Python -> Deno -> Pyodide) and compression to minimize args list
@@ -72,11 +76,28 @@ class FunctionTool(BaseTool):
         import zlib
 
         state_copy = replace_escaped_newlines(deepcopy(state))
+
+        # Always remove 'messages' from state injection
         if 'messages' in state_copy:
             del state_copy['messages']
 
+        # Filter state variables based on input_variables
+        # If no input_variables specified or only 'messages', include all state vars
+        # Otherwise, include only specified variables (excluding 'messages')
+        if input_variables is None or len(input_variables) == 0 or (len(input_variables) == 1 and input_variables[0] == 'messages'):
+            # Include all state variables (messages already removed above)
+            filtered_state = state_copy
+            logger.debug("Code node: injecting ALL state variables into alita_state")
+        else:
+            # Include only specified variables, excluding 'messages'
+            filtered_state = {}
+            for var in input_variables:
+                if var != 'messages' and var in state_copy:
+                    filtered_state[var] = state_copy[var]
+            logger.debug(f"Code node: injecting ONLY specified variables into alita_state: {list(filtered_state.keys())}")
+
         # Use safe_serialize to handle Pydantic models, datetime, and other non-JSON types
-        state_json = safe_serialize(state_copy)
+        state_json = safe_serialize(filtered_state)
 
         # Use base64 encoding to avoid all string escaping issues
         # This is more robust than repr() when the code passes through multiple parsers
@@ -153,7 +174,7 @@ alita_state = json.loads(state_json)
         if self._is_pyodide_tool():
             # replace new lines in strings in code block
             code = func_args['code'].replace('\\n', '\\\\n')
-            func_args['code'] = f"{self._prepare_pyodide_input(state)}\n{code}"
+            func_args['code'] = f"{self._prepare_pyodide_input(state, self.input_variables)}\n{code}"
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
             dispatch_custom_event(
