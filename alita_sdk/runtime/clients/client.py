@@ -584,24 +584,24 @@ class AlitaClient:
         """Parse filename from Content-Disposition header."""
         if not header:
             return ""
-        
+
         # Try to extract filename from header
         # Format: 'inline; filename="image.png"' or 'attachment; filename="image.png"'
         import re
-        
+
         # Try filename*= first (RFC 5987 extended format)
         match = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", header)
         if match:
             from urllib.parse import unquote
             return unquote(match.group(1).strip('"\''))
-        
+
         # Try regular filename=
         match = re.search(r'filename="?([^";]+)"?', header)
         if match:
             return match.group(1).strip('"\'')
-        
+
         return ""
-    
+
     def download_artifact_by_id(self, artifact_id: str) -> tuple:
         """Download artifact by ID and return (file_bytes, filename) tuple."""
         url = f"{self.artifact_by_id_url}/{artifact_id}"
@@ -615,11 +615,11 @@ class AlitaClient:
                 "error": "An error occurred while fetching the resource",
                 "content": data.content
             }
-        
+
         # Extract filename from Content-Disposition header
         content_disposition = data.headers.get('Content-Disposition', '')
         filename = self._parse_content_disposition(content_disposition)
-        
+
         # Fallback filename if header parsing fails
         if not filename:
             # Try to detect extension from file content
@@ -629,9 +629,9 @@ class AlitaClient:
                 extension = f".{kind.extension}" if kind else ""
             except Exception:
                 extension = ""
-            
+
             filename = f"file_{artifact_id[:8]}{extension}"
-        
+
         return data.content, filename
 
     @staticmethod

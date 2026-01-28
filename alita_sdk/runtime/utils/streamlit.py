@@ -492,7 +492,7 @@ def run_streamlit(st, ai_icon=None, user_icon=None):
                             agent = next((a for a in st.session_state.agents if a['name'] == options), None)
                             if agent:
                                 agent_id = agent['id']
-                                agent_details = st.session_state.client.get_app_details(agent_id)
+                                agent_details = st.session_state.client.get_app_details(agent_id, agent_version_name)
                                 latest_version = next((v for v in agent_details['versions'] if v['name'] == agent_version_name), None)
                                 if latest_version:
                                     agent_version_id = latest_version['id']
