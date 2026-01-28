@@ -155,17 +155,13 @@ class PyodideSandboxTool(BaseTool):
             sandbox_tmp = os.path.join(sandbox_base, "tmp")
             deno_cache = os.environ.get("DENO_DIR", os.path.expanduser('~/.cache/deno'))
 
-            # Get the project node_modules path
-            node_modules_path = '/Users/mikalai_biazruchka/workspace/epam/elitea/sdk/alita-sdk/node_modules'
-            pyodide_cache_path = os.path.join(node_modules_path, '.deno/pyodide@0.27.7/node_modules/pyodide')
-
             # Configure sandbox with performance optimizations
             self._sandbox = PyodideSandbox(
                 stateful=self.stateful,
                 #
                 allow_env=["SANDBOX_BASE"],
-                allow_read=[sandbox_base, sandbox_tmp, deno_cache, node_modules_path],
-                allow_write=[sandbox_tmp, deno_cache, pyodide_cache_path],
+                allow_read=[sandbox_base, sandbox_tmp, deno_cache],
+                allow_write=[sandbox_tmp, deno_cache],
                 #
                 allow_net=self.allow_net,
                 # Use auto node_modules_dir for better caching
