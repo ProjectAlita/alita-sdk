@@ -238,6 +238,7 @@ class GraphQLTemplates(Enum):
                 {
                     id
                     title
+                    number
                     fields(first: 30) { 
                         nodes {
                             ... on ProjectV2SingleSelectField { 

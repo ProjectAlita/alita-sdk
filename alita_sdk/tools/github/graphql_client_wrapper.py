@@ -1498,7 +1498,78 @@ class GraphQLClientWrapper(BaseModel):
 
         return f"{base_message}\n{fields_message}"
     
-    def update_issue_on_project(self, board_repo: str, issue_number: str, project_title: str, 
+    def _find_issue_in_project(self, owner: str, repo_name: str, project_number: int,
+                               issue_number: str) -> Union[Dict[str, Any], str]:
+        """
+        Finds a specific issue in a project by paginating through all project items.
+
+        This method handles projects with more than 100 issues by paginating through
+        all items until the target issue is found. It stops as soon as the issue is located.
+
+        Args:
+            owner: Repository owner.
+            repo_name: Repository name.
+            project_number: The project number (from project data).
+            issue_number: The issue number to find.
+
+        Returns:
+            Dict with issue data (item_id, issue_item_id, item_labels, item_assignees) or error string.
+        """
+        has_next_page = True
+        after_cursor = None
+        max_per_page = 100
+
+        while has_next_page:
+            page_result = self._run_graphql_query(
+                query=GraphQLTemplates.QUERY_LIST_PROJECT_ISSUES_PAGINATED.value.template,
+                variables={
+                    "owner": owner,
+                    "repo_name": repo_name,
+                    "project_number": project_number,
+                    "items_count": max_per_page,
+                    "after_cursor": after_cursor
+                }
+            )
+
+            if page_result['error']:
+                return f"Error occurred while searching for issue: {page_result['details']}"
+
+            page_repository = page_result.get('data', {}).get('repository')
+            if not page_repository:
+                return "No repository data found during pagination."
+
+            page_project = page_repository.get('projectV2')
+            if not page_project:
+                return "No project data found during pagination."
+
+            items_connection = page_project.get('items', {})
+            items = items_connection.get('nodes', [])
+
+            # Search for the issue in this page
+            for item in items:
+                content = item.get('content')
+                if content and str(content.get('number')) == issue_number:
+                    # Found the issue!
+                    return {
+                        'item_id': item['id'],
+                        'issue_item_id': content['id'],
+                        'item_labels': content.get('labels', {}).get('nodes', []),
+                        'item_assignees': content.get('assignees', {}).get('nodes', [])
+                    }
+
+            # Check if there are more pages
+            page_info = items_connection.get('pageInfo', {})
+            has_next_page = page_info.get('hasNextPage', False)
+            after_cursor = page_info.get('endCursor')
+
+            # Safety check: if no more pages and no cursor, stop
+            if not has_next_page or not after_cursor:
+                break
+
+        # Issue not found after checking all pages
+        return f"Issue number {issue_number} not found in project."
+
+    def update_issue_on_project(self, board_repo: str, issue_number: str, project_title: str,
                                title: str, body: str, fields: Optional[Dict[str, str]] = None,
                                issue_repo: Optional[str] = None) -> str:
         """
@@ -1559,19 +1630,43 @@ class GraphQLClientWrapper(BaseModel):
             except Exception as e:
                 return f"Project fields are not returned. Error: {str(e)}"
 
+        # Try to find issue in the first 100 items (from get_project)
         issue_item_id = None
+        item_id = None
+        item_labels = []
+        item_assignees = []
+
         items = project['items']['nodes']
         for item in items:
             content = item.get('content')
-            if content and str(content['number']) == issue_number:
+            if content and str(content.get('number')) == issue_number:
                 item_labels = content.get('labels', {}).get('nodes', [])
                 item_assignees = content.get('assignees', {}).get('nodes', [])
                 item_id = item['id']
                 issue_item_id = content['id']
                 break
 
+        # If not found in first 100, use pagination to search through all items
         if not issue_item_id:
-            return f"Issue number {issue_number} not found in project."
+            project_number = project.get('number')
+            if not project_number:
+                return "Project number not available for pagination search."
+
+            find_result = self._find_issue_in_project(
+                owner=owner_name,
+                repo_name=repo_name,
+                project_number=project_number,
+                issue_number=issue_number
+            )
+
+            if isinstance(find_result, str):
+                return find_result  # Error message
+
+            # Extract the found issue data
+            item_id = find_result['item_id']
+            issue_item_id = find_result['issue_item_id']
+            item_labels = find_result['item_labels']
+            item_assignees = find_result['item_assignees']
 
         try:
             self.update_issue(
