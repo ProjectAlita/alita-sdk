@@ -9,9 +9,10 @@ Middleware provides modular extensions for agents, including:
 
 Available middleware:
 - PlanningMiddleware: Task planning and progress tracking
+- ToolExceptionHandlerMiddleware: Smart tool error handling with retry and LLM-powered error messages
 
 Usage:
-    from alita_sdk.runtime.middleware import PlanningMiddleware, MiddlewareManager
+    from alita_sdk.runtime.middleware import PlanningMiddleware, ToolExceptionHandlerMiddleware, MiddlewareManager
 
     # Create middleware
     planning = PlanningMiddleware(
@@ -19,9 +20,16 @@ Usage:
         connection_string="postgresql://...",
     )
 
+    error_handler = ToolExceptionHandlerMiddleware(
+        conversation_id="session-123",
+        llm=llm,
+        use_llm_for_errors=True
+    )
+
     # Use with MiddlewareManager for multiple middleware
     manager = MiddlewareManager()
     manager.add(planning)
+    manager.add(error_handler)
 
     # Get tools and prompts
     tools = manager.get_all_tools()
@@ -30,9 +38,11 @@ Usage:
 
 from .base import Middleware, MiddlewareManager
 from .planning import PlanningMiddleware
+from .tool_exception_handler import ToolExceptionHandlerMiddleware
 
 __all__ = [
     "Middleware",
     "MiddlewareManager",
     "PlanningMiddleware",
+    "ToolExceptionHandlerMiddleware",
 ]
