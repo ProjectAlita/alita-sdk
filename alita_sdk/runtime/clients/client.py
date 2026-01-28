@@ -146,8 +146,8 @@ class AlitaClient:
             data = requests.get(url, headers=self.headers, verify=False).json()
             return AlitaPrompt(self, template, data['name'], data['description'], model_settings)
 
-    def get_app_details(self, application_id: int):
-        url = f"{self.app}/{application_id}"
+    def get_app_details(self, application_id: int, version_name: Optional[str] = None):
+        url = f"{self.app}/{application_id}" if version_name is None else f"{self.app}/{application_id}/{version_name}"
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
 

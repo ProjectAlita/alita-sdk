@@ -477,16 +477,27 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         return [{'id': page['page_id'], 'title': page['page_title']} for page in self._get_labeled_page(label)]
 
     def _get_labeled_page(self, label: str):
-        """Gets pages with specific label in the Confluence space."""
+        """Gets pages with specific label in the Confluence space.
+
+        Uses pagination with deduplication to handle cases where:
+        - The API returns exactly 'limit' pages (avoids infinite loop)
+        - Duplicate page IDs appear across pagination boundaries
+        - The actual page count equals or is less than max_pages
+        """
 
         start = 0
         pages_info: List[Dict[str, Any]] = []
         seen_ids: set[str] = set()
 
+        # Calculate maximum iterations to prevent infinite loops
+        # Add 1 to handle edge cases where division doesn't account for partial pages
+        max_iterations = (self.max_pages + self.limit - 1) // self.limit + 1
+        iteration = 0
+
         # Use a while-loop driven by unique pages collected and
         # presence of additional results instead of a fixed number
         # of iterations based purely on max_pages/limit.
-        while len(pages_info) < (self.max_pages or 0):
+        while len(pages_info) < (self.max_pages or 0) and iteration < max_iterations:
             pages = self.client.get_all_pages_by_label(
                 label,
                 start=start,
@@ -507,6 +518,11 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                     continue
                 seen_ids.add(page_id)
                 new_ids.append(page_id)
+
+            # Break if no new unique pages were found - prevents infinite loop
+            # when API returns duplicate pages or all pages have been processed
+            if not new_ids:
+                break
 
             if new_ids:
                 for page in self.get_pages_by_id(new_ids):
@@ -532,13 +548,13 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                     if len(pages_info) >= (self.max_pages or 0):
                         break
 
+            # Break if we've collected enough pages after processing new_ids
+            if len(pages_info) >= (self.max_pages or 0):
+                break
+
             # Advance the offset by the requested page size.
             start += self.limit
-
-            # Defensive break: if the API returns fewer items than
-            # requested, there are likely no more pages to fetch.
-            if len(pages) < self.limit:
-                break
+            iteration += 1
 
         # Slice as an extra safety net in case of any race conditions
         # around the max_pages guard in the loop above.
@@ -632,6 +648,10 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                 if page_id not in seen_ids:
                     seen_ids.add(page_id)
                     page_ids.append(page_id)
+            # Break if no new unique pages were found - prevents processing
+            # when all returned pages are duplicates
+            if not page_ids:
+                break
             for page in self.get_pages_by_id(page_ids, skip_images):
                 page_info = {
                     'content': page.page_content,
