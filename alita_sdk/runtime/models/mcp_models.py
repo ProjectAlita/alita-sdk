@@ -23,6 +23,10 @@ class McpConnectionConfig(BaseModel):
         default=None,
         description="MCP session ID for stateful SSE servers (managed by client)"
     )
+    ssl_verify: bool = Field(
+        default=True,
+        description="Whether to verify SSL certificates (set to False for self-signed certs)"
+    )
 
     @validator('url')
     def validate_url(cls, v):

@@ -152,6 +152,16 @@ class McpToolkit(BaseToolkit):
                     description="Cache TTL in seconds (60-3600)"
                 )
             ),
+            ssl_verify=(
+                bool,
+                Field(
+                    default=True,
+                    description="Verify SSL certificates (disable for self-signed certs)",
+                    json_schema_extra={
+                        'tooltip': 'Disable SSL verification when connecting to servers with self-signed certificates'
+                    }
+                )
+            ),
             __config__=ConfigDict(
                 json_schema_extra={
                     'metadata': {
@@ -174,6 +184,7 @@ class McpToolkit(BaseToolkit):
         selected_tools: List[str] = None,
         enable_caching: bool = True,
         cache_ttl: int = 300,
+        ssl_verify: bool = True,
         toolkit_name: str = None,
         client = None,
         **kwargs
@@ -240,7 +251,12 @@ class McpToolkit(BaseToolkit):
         
         # Create MCP connection configuration
         try:
-            connection_config = McpConnectionConfig(url=url, headers=parsed_headers, session_id=session_id)
+            connection_config = McpConnectionConfig(
+                url=url,
+                headers=parsed_headers,
+                session_id=session_id,
+                ssl_verify=ssl_verify
+            )
         except Exception as e:
             logger.error(f"Invalid MCP connection configuration: {e}")
             raise ValueError(f"Invalid MCP connection configuration: {e}")
@@ -254,7 +270,8 @@ class McpToolkit(BaseToolkit):
             connection_config=connection_config,
             timeout=timeout,
             selected_tools=selected_tools,
-            client=client
+            client=client,
+            ssl_verify=ssl_verify
         )
 
         return toolkit
@@ -266,7 +283,8 @@ class McpToolkit(BaseToolkit):
         connection_config: McpConnectionConfig,
         timeout: int,
         selected_tools: List[str],
-        client
+        client,
+        ssl_verify: bool = True
     ) -> List[BaseTool]:
         """
         Create tools from a single MCP server. Always performs live discovery when connection config is provided.
@@ -281,7 +299,8 @@ class McpToolkit(BaseToolkit):
             tool_metadata_list, session_id = cls._discover_tools_sync(
                 toolkit_name=toolkit_name,
                 connection_config=connection_config,
-                timeout=timeout
+                timeout=timeout,
+                ssl_verify=ssl_verify
             )
 
             # Filter tools if specific ones are selected
@@ -304,7 +323,8 @@ class McpToolkit(BaseToolkit):
                     connection_config=connection_config,
                     timeout=timeout,
                     client=client,
-                    session_id=session_id  # Use session from discovery
+                    session_id=session_id,  # Use session from discovery
+                    ssl_verify=ssl_verify  # Pass SSL verification setting
                 )
 
                 if server_tool:
@@ -351,26 +371,28 @@ class McpToolkit(BaseToolkit):
         cls,
         toolkit_name: str,
         connection_config: McpConnectionConfig,
-        timeout: int
+        timeout: int,
+        ssl_verify: bool = True
     ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """
         Discover tools and prompts from MCP server using SSE client.
-        
+
         Returns:
             Tuple of (tool_list, server_session_id) - session_id may be server-provided
         """
         initial_session_id = connection_config.session_id
-        
+
         if not initial_session_id:
             logger.warning(f"[MCP Session] No session_id provided for '{toolkit_name}' - will generate one")
-        
+
         # Run async discovery in sync context
         try:
             all_tools, server_session_id = asyncio.run(
                 cls._discover_tools_async(
                     toolkit_name=toolkit_name,
                     connection_config=connection_config,
-                    timeout=timeout
+                    timeout=timeout,
+                    ssl_verify=ssl_verify
                 )
             )
             # Return tools and the session_id (server-provided or generated)
@@ -389,37 +411,39 @@ class McpToolkit(BaseToolkit):
         cls,
         toolkit_name: str,
         connection_config: McpConnectionConfig,
-        timeout: int
+        timeout: int,
+        ssl_verify: bool = True
     ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """
         Async implementation of tool discovery using SSE client.
-        
+
         Returns:
             Tuple of (tool_list, server_session_id)
         """
         all_tools = []
         session_id = connection_config.session_id
-        
+
         # Generate temporary session_id if not provided (for OAuth flow)
         # The real session_id should come from frontend after OAuth completes
         if not session_id:
             import uuid
             session_id = str(uuid.uuid4())
             logger.info(f"[MCP SSE] Generated temporary session_id for OAuth: {session_id}")
-        
-        logger.info(f"[MCP] Discovering from {connection_config.url} with session {session_id}")
-        
+
+        logger.info(f"[MCP] Discovering from {connection_config.url} with session {session_id} (ssl_verify={ssl_verify})")
+
         # Prepare headers
         headers = {}
         if connection_config.headers:
             headers.update(connection_config.headers)
-        
+
         # Create unified MCP client (auto-detects SSE vs Streamable HTTP)
         client = McpClient(
             url=connection_config.url,
             session_id=session_id,
             headers=headers,
-            timeout=timeout
+            timeout=timeout,
+            ssl_verify=ssl_verify
         )
         
         server_session_id = None
@@ -484,7 +508,8 @@ class McpToolkit(BaseToolkit):
         connection_config: McpConnectionConfig,
         timeout: int,
         client,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        ssl_verify: bool = True
     ) -> Optional[BaseTool]:
         """Create a BaseTool from a tool/prompt dictionary (from direct HTTP discovery)."""
         try:
@@ -518,6 +543,7 @@ class McpToolkit(BaseToolkit):
                 prompt_name=tool_dict.get("_mcp_prompt_name") if is_prompt else None,
                 original_tool_name=tool_name,  # Store original name for MCP server invocation
                 session_id=session_id,  # Pass session ID for stateful SSE servers
+                ssl_verify=ssl_verify,  # Pass SSL verification setting
                 metadata={"toolkit_name": toolkit_name, "toolkit_type": "mcp"}
             )
         except Exception as e:
@@ -752,6 +778,7 @@ def get_tools(tool_config: dict, alita_client, llm=None, memory_store=None) -> L
         selected_tools=settings.get('selected_tools', []),
         enable_caching=settings.get('enable_caching', True),
         cache_ttl=safe_int(settings.get('cache_ttl'), 300),
+        ssl_verify=settings.get('ssl_verify', True),
         toolkit_name=toolkit_name,
         client=alita_client
     ).get_tools()

@@ -44,7 +44,8 @@ class UnifiedMcpClient:
         session_id: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: int = 300,
-        transport: str = "auto"
+        transport: str = "auto",
+        ssl_verify: bool = True
     ):
         """
         Initialize the unified MCP client.
@@ -55,12 +56,14 @@ class UnifiedMcpClient:
             headers: HTTP headers (e.g., Authorization)
             timeout: Request timeout in seconds
             transport: Transport type - "auto", "sse", "streamable_http", "stdio"
+            ssl_verify: Whether to verify SSL certificates (default: True)
         """
         self.url = url
         self.session_id = session_id or str(uuid.uuid4())
         self.headers = headers or {}
         self.timeout = timeout
         self.transport = transport
+        self.ssl_verify = ssl_verify
 
         # Internal state
         self._client = None
@@ -70,7 +73,7 @@ class UnifiedMcpClient:
         self._initialized = False
         self._detected_transport = None
 
-        logger.info(f"[Unified MCP] Created client for {url} (transport={transport})")
+        logger.info(f"[Unified MCP] Created client for {url} (transport={transport}, ssl_verify={ssl_verify})")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -100,6 +103,7 @@ class UnifiedMcpClient:
             await self._preflight_auth_check()
 
         # Build server config for langchain-mcp-adapters
+        # Note: SSL verification is handled via httpx_client_factory in _build_server_config
         server_config = self._build_server_config(detected_transport)
 
         logger.debug(f"[Unified MCP] Connecting with config: {server_config}")
@@ -149,11 +153,31 @@ class UnifiedMcpClient:
             config['url'] = self.url
             if self.headers:
                 config['headers'] = self.headers
+            # Use httpx_client_factory to disable SSL verification
+            # This is the proper way to configure SSL in langchain-mcp-adapters
+            if not self.ssl_verify:
+                config['httpx_client_factory'] = self._create_insecure_httpx_client
+                logger.warning("[Unified MCP] Using custom httpx client with SSL verification disabled")
         elif transport == 'stdio':
             # Not typically used via this adapter, but support it
             raise ValueError("stdio transport not supported via UnifiedMcpClient URL interface")
 
         return config
+
+    def _create_insecure_httpx_client(self, headers=None, timeout=None, auth=None):
+        """
+        Create an httpx.AsyncClient with SSL verification disabled.
+
+        This factory is passed to langchain-mcp-adapters when ssl_verify=False.
+        """
+        import httpx
+
+        return httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            verify=False  # Disable SSL certificate verification
+        )
 
     async def _preflight_auth_check(self):
         """
@@ -167,11 +191,25 @@ class UnifiedMcpClient:
             McpAuthorizationRequired: If server returns 401 with OAuth metadata
         """
         import aiohttp
+        import ssl
         from ..utils.mcp_oauth import McpAuthorizationRequired
 
+        # Configure SSL context based on ssl_verify setting
+        ssl_context = None
+        if not self.ssl_verify:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            logger.warning("[Unified MCP] SSL verification disabled for preflight check")
+
         try:
+            # Create connector with SSL settings
+            connector = aiohttp.TCPConnector(ssl=ssl_context) if not self.ssl_verify else None
             # Make a test request to check for 401
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10),
+                connector=connector
+            ) as session:
                 headers = {
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
@@ -502,7 +540,8 @@ def create_mcp_client(
     url: str,
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 300,
-    transport: str = "auto"
+    transport: str = "auto",
+    ssl_verify: bool = True
 ) -> UnifiedMcpClient:
     """
     Create a unified MCP client.
@@ -514,6 +553,7 @@ def create_mcp_client(
         headers: HTTP headers (authentication, etc.)
         timeout: Request timeout in seconds
         transport: Transport type ("auto", "sse", "streamable_http")
+        ssl_verify: Whether to verify SSL certificates (default: True)
 
     Returns:
         UnifiedMcpClient instance
@@ -522,5 +562,6 @@ def create_mcp_client(
         url=url,
         headers=headers,
         timeout=timeout,
-        transport=transport
+        transport=transport,
+        ssl_verify=ssl_verify
     )
