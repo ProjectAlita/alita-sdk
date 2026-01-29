@@ -45,9 +45,11 @@ class LangfuseConfiguration(BaseModel):
             return "Missing required credentials: base_url, public_key, and secret_key are required"
 
         try:
-            # Test connection by calling Langfuse health endpoint
+            # Test connection by calling Langfuse projects endpoint (requires authentication)
+            # Note: /api/public/health is unauthenticated and always returns 200,
+            # so we use /api/public/projects which properly validates credentials
             response = requests.get(
-                f"{base_url}/api/public/health",
+                f"{base_url}/api/public/projects",
                 auth=(public_key, secret_key),
                 timeout=10
             )
