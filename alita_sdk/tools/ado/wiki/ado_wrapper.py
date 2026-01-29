@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 
 GetWikiInput = create_model(
     "GetWikiInput",
-    wiki_identified=(str, Field(description="Wiki ID or wiki name"))
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration."))
 )
 
 GetPageByPathInput = create_model(
     "GetPageByPathInput",
-    wiki_identified=(str, Field(description="Wiki ID or wiki name")),
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     page_name=(str, Field(description="Wiki page path")),
     image_description_prompt=(Optional[str],
                               Field(description="Prompt which is used for image description", default=None))
@@ -42,7 +42,7 @@ GetPageByPathInput = create_model(
 
 GetPageByIdInput = create_model(
     "GetPageByIdInput",
-    wiki_identified=(str, Field(description="Wiki ID or wiki name")),
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     page_id=(int, Field(description="Wiki page ID")),
     image_description_prompt=(Optional[str],
                               Field(description="Prompt which is used for image description", default=None))
@@ -51,7 +51,7 @@ GetPageByIdInput = create_model(
 
 class GetPageInput(BaseModel):
     """Input schema for get_wiki_page tool with validation."""
-    wiki_identified: str = Field(description="Wiki ID or wiki name")
+    wiki_identified: Optional[str] = Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")
     page_path: Optional[str] = Field(default=None, description="Wiki page path (e.g., '/MB_Heading/MB_2')")
     page_id: Optional[int] = Field(default=None, description="Wiki page ID")
     include_content: Optional[bool] = Field(default=False, description="Whether to include page content in the response. If True, content will be processed for image descriptions.")
@@ -71,7 +71,7 @@ class GetPageInput(BaseModel):
 
 ModifyPageInput = create_model(
     "ModifyPageInput",
-    wiki_identified=(str, Field(description="Wiki ID or wiki name")),
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     page_name=(str, Field(description="Wiki page name")),
     page_content=(str, Field(description="Wiki page content")),
     version_identifier=(str, Field(description="Version string identifier (name of tag/branch, SHA1 of commit). Usually for wiki the branch is 'wikiMaster'")),
@@ -81,7 +81,7 @@ ModifyPageInput = create_model(
 
 RenamePageInput = create_model(
     "RenamePageInput",
-    wiki_identified=(str, Field(description="Wiki ID or wiki name")),
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     old_page_name=(str, Field(description="Old Wiki page name to be renamed", examples= ["/TestPageName"])),
     new_page_name=(str, Field(description="New Wiki page name", examples= ["/RenamedName"])),
     version_identifier=(str, Field(description="Version string identifier (name of tag/branch, SHA1 of commit)")),
@@ -164,6 +164,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     organization_url: str
     project: str
     token: SecretStr
+    default_wiki_identifier: Optional[str] = None
     _client: Optional[WikiClient] = PrivateAttr()  # Private attribute for the wiki client
     _core_client: Optional[CoreClient] = PrivateAttr()  # Private attribute for the CoreClient client
 
@@ -210,35 +211,61 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
 
         return super().validate_toolkit(values)
 
-    def get_wiki(self, wiki_identified: str):
+    def _resolve_wiki_identifier(self, wiki_identified: Optional[str] = None) -> str:
+        """Resolve wiki identifier from parameter or default configuration.
+
+        Args:
+            wiki_identified: Optional wiki identifier parameter passed to the tool
+
+        Returns:
+            Resolved wiki identifier string
+
+        Raises:
+            ToolException: If neither parameter nor default wiki identifier is provided
+        """
+        if wiki_identified:
+            return wiki_identified
+
+        if self.default_wiki_identifier:
+            return self.default_wiki_identifier
+
+        raise ToolException(
+            "Wiki identifier must be provided either as a parameter or configured as default in toolkit settings. "
+            "Please either pass 'wiki_identified' parameter or configure 'default_wiki_identifier' in the toolkit."
+        )
+
+    def get_wiki(self, wiki_identified: Optional[str] = None):
         """Extract ADO wiki information."""
         try:
-            return self._client.get_wiki(project=self.project, wiki_identifier=wiki_identified)
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
+            return self._client.get_wiki(project=self.project, wiki_identifier=wiki_id)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki: {str(e)}")
 
-    def get_wiki_page_by_path(self, wiki_identified: str, page_name: str, image_description_prompt=None):
+    def get_wiki_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None):
         """Extract ADO wiki page content."""
         try:
-            return self._process_images(self._client.get_page(project=self.project, wiki_identifier=wiki_identified, path=page_name,
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
+            return self._process_images(self._client.get_page(project=self.project, wiki_identifier=wiki_id, path=page_name,
                                          include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_identified)
+                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
-    def get_wiki_page_by_id(self, wiki_identified: str, page_id: int, image_description_prompt=None):
+    def get_wiki_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None):
         """Extract ADO wiki page content."""
         try:
-            return self._process_images(self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_identified, id=page_id,
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
+            return self._process_images(self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id,
                                                 include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_identified)
+                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
-    def get_wiki_page(self, wiki_identified: str, page_path: Optional[str] = None, page_id: Optional[int] = None,
+    def get_wiki_page(self, wiki_identified: Optional[str] = None, page_path: Optional[str] = None, page_id: Optional[int] = None,
                       include_content: bool = False, image_description_prompt: Optional[str] = None,
                       recursion_level: str = "oneLevel"):
         """Get wiki page metadata and optionally content.
@@ -248,7 +275,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         Supports lookup by either page_id (takes precedence) or page_path.
 
         Args:
-            wiki_identified: Wiki ID or wiki name
+            wiki_identified: Wiki ID or wiki name. If not provided, uses default from toolkit configuration.
             page_path: Wiki page path (e.g., '/MB_Heading/MB_2'). Optional if page_id is provided.
             page_id: Wiki page ID. Optional if page_path is provided. Takes precedence over page_path.
             include_content: Whether to include page content in response. Defaults to False (metadata only).
@@ -264,25 +291,28 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             ToolException: If page/wiki not found, authentication fails, or other errors occur.
         """
         try:
+            # Resolve wiki identifier
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
+
             # Validate that at least one identifier is provided
             if not page_path and not page_id:
                 raise ToolException("At least one of 'page_path' or 'page_id' must be provided")
 
             # Fetch page using page_id (priority) or page_path
             if page_id:
-                logger.info(f"Fetching wiki page by ID: {page_id} from wiki: {wiki_identified}")
+                logger.info(f"Fetching wiki page by ID: {page_id} from wiki: {wiki_id}")
                 wiki_page_response = self._client.get_page_by_id(
                     project=self.project,
-                    wiki_identifier=wiki_identified,
+                    wiki_identifier=wiki_id,
                     id=page_id,
                     include_content=include_content,
                     recursion_level=recursion_level
                 )
             else:
-                logger.info(f"Fetching wiki page by path: {page_path} from wiki: {wiki_identified}")
+                logger.info(f"Fetching wiki page by path: {page_path} from wiki: {wiki_id}")
                 wiki_page_response = self._client.get_page(
                     project=self.project,
-                    wiki_identifier=wiki_identified,
+                    wiki_identifier=wiki_id,
                     path=page_path,
                     include_content=include_content,
                     recursion_level=recursion_level
@@ -300,7 +330,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 processed_content = self._process_images(
                     result['page']['content'],
                     image_description_prompt=image_description_prompt,
-                    wiki_identified=wiki_identified
+                    wiki_identified=wiki_id
                 )
                 result['page']['content'] = processed_content
 
@@ -312,37 +342,42 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             # Page not found errors
             if "404" in error_msg or "not found" in error_msg or "does not exist" in error_msg:
                 identifier = f"ID {page_id}" if page_id else f"path '{page_path}'"
-                logger.error(f"Page {identifier} not found in wiki '{wiki_identified}': {str(e)}")
+                wiki_id = wiki_identified or self.default_wiki_identifier or "unknown"
+                logger.error(f"Page {identifier} not found in wiki '{wiki_id}': {str(e)}")
                 return ToolException(
-                    f"Page {identifier} not found in wiki '{wiki_identified}'. "
+                    f"Page {identifier} not found in wiki '{wiki_id}'. "
                     f"Please verify the page exists and the identifier is correct."
                 )
 
             # Path validation errors
             elif "path" in error_msg and ("correct" in error_msg or "invalid" in error_msg):
-                logger.error(f"Invalid page path '{page_path}' in wiki '{wiki_identified}': {str(e)}")
+                wiki_id = wiki_identified or self.default_wiki_identifier or "unknown"
+                logger.error(f"Invalid page path '{page_path}' in wiki '{wiki_id}': {str(e)}")
                 return ToolException(
                     f"Invalid page path '{page_path}'. Please ensure the path format is correct (e.g., '/PageName')."
                 )
 
             # Wiki not found errors
             elif "wiki" in error_msg and ("not found" in error_msg or "does not exist" in error_msg):
-                logger.error(f"Wiki '{wiki_identified}' not found: {str(e)}")
+                wiki_id = wiki_identified or self.default_wiki_identifier or "unknown"
+                logger.error(f"Wiki '{wiki_id}' not found: {str(e)}")
                 return ToolException(
-                    f"Wiki '{wiki_identified}' not found. Please verify the wiki identifier is correct."
+                    f"Wiki '{wiki_id}' not found. Please verify the wiki identifier is correct."
                 )
 
             # Authentication/authorization errors
             elif "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg:
-                logger.error(f"Authentication failed for wiki '{wiki_identified}': {str(e)}")
+                wiki_id = wiki_identified or self.default_wiki_identifier or "unknown"
+                logger.error(f"Authentication failed for wiki '{wiki_id}': {str(e)}")
                 return ToolException(
-                    f"Authentication failed. Please check your access token is valid and has permission to access wiki '{wiki_identified}'."
+                    f"Authentication failed. Please check your access token is valid and has permission to access wiki '{wiki_id}'."
                 )
 
             elif "403" in error_msg or "forbidden" in error_msg or "permission" in error_msg:
-                logger.error(f"Permission denied for wiki '{wiki_identified}': {str(e)}")
+                wiki_id = wiki_identified or self.default_wiki_identifier or "unknown"
+                logger.error(f"Permission denied for wiki '{wiki_id}': {str(e)}")
                 return ToolException(
-                    f"Permission denied. You do not have access to wiki '{wiki_identified}' or page {page_id if page_id else page_path}."
+                    f"Permission denied. You do not have access to wiki '{wiki_id}' or page {page_id if page_id else page_path}."
                 )
 
             # Generic Azure DevOps service errors
@@ -435,30 +470,32 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             prompt=image_description_prompt
         )
 
-    def delete_page_by_path(self, wiki_identified: str, page_name: str):
+    def delete_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None):
         """Extract ADO wiki page content."""
         try:
-            self._client.delete_page(project=self.project, wiki_identifier=wiki_identified, path=page_name)
-            return f"Page '{page_name}' in wiki '{wiki_identified}' has been deleted"
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
+            self._client.delete_page(project=self.project, wiki_identifier=wiki_id, path=page_name)
+            return f"Page '{page_name}' in wiki '{wiki_id}' has been deleted"
         except Exception as e:
             logger.error(f"Unable to delete wiki page: {str(e)}")
             return ToolException(f"Unable to delete wiki page: {str(e)}")
 
-    def delete_page_by_id(self, wiki_identified: str, page_id: str):
+    def delete_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None):
         """Extract ADO wiki page content."""
         try:
-            self._client.delete_page_by_id(project=self.project, wiki_identifier=wiki_identified, id=page_id)
-            return f"Page with id '{page_id}' in wiki '{wiki_identified}' has been deleted"
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
+            self._client.delete_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id)
+            return f"Page with id '{page_id}' in wiki '{wiki_id}' has been deleted"
         except Exception as e:
             logger.error(f"Unable to delete wiki page: {str(e)}")
             return ToolException(f"Unable to delete wiki page: {str(e)}")
 
-    def rename_wiki_page(self, wiki_identified: str, old_page_name: str, new_page_name: str, version_identifier: str,
+    def rename_wiki_page(self, wiki_identified: Optional[str] = None, old_page_name: str = None, new_page_name: str = None, version_identifier: str = None,
                          version_type: str = "branch"):
         """Rename page
 
         Args:
-         wiki_identified (str): The identifier for the wiki.
+         wiki_identified (str): The identifier for the wiki. If not provided, uses default from toolkit configuration.
          old_page_name (str): The current name of the page to be renamed (e.g. '/old_page_name').
          new_page_name (str): The new name for the page (e.g. '/new_page_name').
          version_identifier (str): The identifier for the version (e.g., branch or commit). Defaults to None.
@@ -466,10 +503,11 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
      """
 
         try:
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
             try:
                 return self._client.create_page_move(
                     project=self.project,
-                    wiki_identifier=wiki_identified,
+                    wiki_identifier=wiki_id,
                     comment=f"Page rename from '{old_page_name}' to '{new_page_name}'",
                     page_move_parameters=WikiPageMoveParameters(new_path=new_page_name, path=old_page_name),
                     version_descriptor=GitVersionDescriptor(version=version_identifier, version_type=version_type)
@@ -479,7 +517,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                     # Retry the request without version_descriptor
                     return self._client.create_page_move(
                         project=self.project,
-                        wiki_identifier=wiki_identified,
+                        wiki_identifier=wiki_id,
                         comment=f"Page rename from '{old_page_name}' to '{new_page_name}'",
                         page_move_parameters=WikiPageMoveParameters(new_path=new_page_name, path=old_page_name),
                     )
@@ -489,12 +527,13 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Unable to rename wiki page: {str(e)}")
             return ToolException(f"Unable to rename wiki page: {str(e)}")
 
-    def modify_wiki_page(self, wiki_identified: str, page_name: str, page_content: str, version_identifier: str, version_type: str = "branch", expanded: Optional[bool] = False):
+    def modify_wiki_page(self, wiki_identified: Optional[str] = None, page_name: str = None, page_content: str = None, version_identifier: str = None, version_type: str = "branch", expanded: Optional[bool] = False):
         """Create or Update ADO wiki page content."""
         try:
+            wiki_id = self._resolve_wiki_identifier(wiki_identified)
             all_wikis = [wiki.name for wiki in self._client.get_all_wikis(project=self.project)]
-            if wiki_identified not in all_wikis:
-                logger.info(f"wiki name '{wiki_identified}' doesn't exist. New wiki will be created.")
+            if wiki_id not in all_wikis:
+                logger.info(f"wiki name '{wiki_id}' doesn't exist. New wiki will be created.")
                 try:
                     project_id = None
                     projects = self._core_client.get_projects()
@@ -504,13 +543,13 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                             project_id = project.id
                             break
                     if project_id:
-                        self._client.create_wiki(project=self.project, wiki_create_params=WikiCreateParametersV2(name=wiki_identified, project_id=project_id))
+                        self._client.create_wiki(project=self.project, wiki_create_params=WikiCreateParametersV2(name=wiki_id, project_id=project_id))
                     else:
                         return "Project ID has not been found."
                 except Exception as create_wiki_e:
                     return ToolException(f"Unable to create new wiki due to error: {create_wiki_e}")
             try:
-                page = self._client.get_page(project=self.project, wiki_identifier=wiki_identified, path=page_name)
+                page = self._client.get_page(project=self.project, wiki_identifier=wiki_id, path=page_name)
                 version = page.eTag
             except Exception as get_page_e:
                 if "Ensure that the path of the page is correct and the page exists" in str(get_page_e):
@@ -522,7 +561,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             try:
                 return _format_wiki_page_response(self._client.create_or_update_page(
                     project=self.project,
-                    wiki_identifier=wiki_identified,
+                    wiki_identifier=wiki_id,
                     path=page_name,
                     parameters=WikiPageCreateOrUpdateParameters(content=page_content),
                     version=version,
@@ -533,7 +572,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                     # Retry the request without version_descriptor
                     return _format_wiki_page_response(wiki_page_response=self._client.create_or_update_page(
                         project=self.project,
-                        wiki_identifier=wiki_identified,
+                        wiki_identifier=wiki_id,
                         path=page_name,
                         parameters=WikiPageCreateOrUpdateParameters(content=page_content),
                         version=version
@@ -579,52 +618,55 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     @extend_with_parent_available_tools
     def get_available_tools(self):
         """Return a list of available tools."""
+        # Add default wiki identifier info to descriptions if configured
+        default_wiki_info = f"\nDefault wiki: {self.default_wiki_identifier}" if self.default_wiki_identifier else ""
+
         return [
             {
                 "name": "get_wiki",
-                "description": self.get_wiki.__doc__,
+                "description": (self.get_wiki.__doc__ or "") + default_wiki_info,
                 "args_schema": GetWikiInput,
                 "ref": self.get_wiki,
             },
             {
                 "name": "get_wiki_page",
-                "description": self.get_wiki_page.__doc__,
+                "description": (self.get_wiki_page.__doc__ or "") + default_wiki_info,
                 "args_schema": GetPageInput,
                 "ref": self.get_wiki_page,
             },
             {
                 "name": "get_wiki_page_by_path",
-                "description": self.get_wiki_page_by_path.__doc__,
+                "description": (self.get_wiki_page_by_path.__doc__ or "") + default_wiki_info,
                 "args_schema": GetPageByPathInput,
                 "ref": self.get_wiki_page_by_path,
             },
             {
                 "name": "get_wiki_page_by_id",
-                "description": self.get_wiki_page_by_id.__doc__,
+                "description": (self.get_wiki_page_by_id.__doc__ or "") + default_wiki_info,
                 "args_schema": GetPageByIdInput,
                 "ref": self.get_wiki_page_by_id,
             },
             {
                 "name": "delete_page_by_path",
-                "description": self.delete_page_by_path.__doc__,
+                "description": (self.delete_page_by_path.__doc__ or "") + default_wiki_info,
                 "args_schema": GetPageByPathInput,
                 "ref": self.delete_page_by_path,
             },
             {
                 "name": "delete_page_by_id",
-                "description": self.delete_page_by_id.__doc__,
+                "description": (self.delete_page_by_id.__doc__ or "") + default_wiki_info,
                 "args_schema": GetPageByIdInput,
                 "ref": self.delete_page_by_id,
             },
             {
                 "name": "modify_wiki_page",
-                "description": self.modify_wiki_page.__doc__,
+                "description": (self.modify_wiki_page.__doc__ or "") + default_wiki_info,
                 "args_schema": ModifyPageInput,
                 "ref": self.modify_wiki_page,
             },
             {
                 "name": "rename_wiki_page",
-                "description": self.rename_wiki_page.__doc__,
+                "description": (self.rename_wiki_page.__doc__ or "") + default_wiki_info,
                 "args_schema": RenamePageInput,
                 "ref": self.rename_wiki_page,
             }

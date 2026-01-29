@@ -19,6 +19,7 @@ def get_toolkit(tool):
     return AzureDevOpsWikiToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         ado_configuration=tool['settings']['ado_configuration'],
+        default_wiki_identifier=tool['settings'].get('default_wiki_identifier'),
         limit=tool['settings'].get('limit', 5),
         toolkit_name=tool.get('toolkit_name', ''),
         alita=tool['settings'].get('alita', None),
@@ -39,6 +40,7 @@ class AzureDevOpsWikiToolkit(BaseToolkit):
         m = create_model(
             name_alias,
             ado_configuration=(AdoConfiguration, Field(description="Ado configuration", json_schema_extra={'configuration_types': ['ado']})),
+            default_wiki_identifier=(Optional[str], Field(default=None, description="Default Wiki Identifier (Wiki ID or wiki name). If provided, this identifier will be used when tools are invoked without explicitly specifying a wiki identifier.")),
             # indexer settings
             pgvector_configuration=(Optional[PgVectorConfiguration], Field(default=None,
                                                                            description="PgVector Configuration", json_schema_extra={'configuration_types': ['pgvector']})),
