@@ -426,10 +426,15 @@ if [ "$SKIP_INITIAL_CLEANUP" = false ]; then
 
         if [ -d "$suite_dir" ] && [ -f "$suite_dir/pipeline.yaml" ]; then
             echo "  Cleaning up $suite_spec..."
-            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$OUTPUT_DIR/${log_name}_initial_cleanup.log" 2>&1; then
+            
+            # Create suite-specific output directory
+            suite_output_dir="$OUTPUT_DIR/suites/$log_name"
+            mkdir -p "$suite_output_dir"
+            
+            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/initial_cleanup.log" 2>&1; then
                 echo "    ✓ Cleaned"
             else
-                echo "    ⚠ Cleanup had issues (see $OUTPUT_DIR/${log_name}_initial_cleanup.log)"
+                echo "    ⚠ Cleanup had issues (see $suite_output_dir/initial_cleanup.log)"
                 CLEANUP_FAILED=true
             fi
         fi
