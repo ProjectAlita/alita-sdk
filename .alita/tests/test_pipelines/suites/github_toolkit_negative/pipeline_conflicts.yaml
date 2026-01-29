@@ -24,7 +24,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:

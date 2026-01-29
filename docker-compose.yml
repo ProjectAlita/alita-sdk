@@ -4,28 +4,34 @@ services:
     image: ghcr.io/projectalita/alita-sdk:pyodide
     platform: linux/amd64
     container_name: alita-sdk-dev
-    environment:
-      - GIT_TOOL_ACCESS_TOKEN=${GIT_TOOL_ACCESS_TOKEN}
-      - DEPLOYMENT_URL=${DEPLOYMENT_URL}
-      - API_KEY=${ALITA_API_KEY}
-      - PROJECT_ID=${PROJECT_ID}
-      - TEST_CASES_DIR=${TEST_CASES_DIR:-github}
-      - CONFLUENCE_API_KEY=${CONFLUENCE_API_KEY}
-      - CONFLUENCE_BASE_URL=${CONFLUENCE_BASE_URL}
-      - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
-      - ADO_TOKEN=${ADO_TOKEN}
-      - ADO_REPOSITORY_ID=${ADO_REPOSITORY_ID}
-      - ADO_ORGANIZATION_URL=${ADO_ORGANIZATION_URL}
-      - ADO_PROJECT=${ADO_PROJECT}
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-      - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
+    env_file:
+      - .env
+    # environment:
+    #   - GIT_TOOL_ACCESS_TOKEN=${GIT_TOOL_ACCESS_TOKEN}
+    #   - DEPLOYMENT_URL=${DEPLOYMENT_URL}
+    #   - API_KEY=${ALITA_API_KEY}
+    #   - PROJECT_ID=${PROJECT_ID}
+    #   - TEST_CASES_DIR=${TEST_CASES_DIR:-github}
+    #   - DOCKER_COMMAND=${DOCKER_COMMAND}
+    #   - CONFLUENCE_API_KEY=${CONFLUENCE_API_KEY}
+    #   - CONFLUENCE_BASE_URL=${CONFLUENCE_BASE_URL}
+    #   - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
+    #   - ADO_TOKEN=${ADO_TOKEN}
+    #   - ADO_REPOSITORY_ID=${ADO_REPOSITORY_ID}
+    #   - ADO_ORGANIZATION_URL=${ADO_ORGANIZATION_URL}
+    #   - ADO_PROJECT=${ADO_PROJECT}
+    #   - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
+    #   - SANDBOX_BASE=/app/
+    #   - NODE_MODULES_PATH=/app/
+    #   - DENO_DIR=/app/
+    #   - PYTHONPATH=/app
+    #   - PYTHONDONTWRITEBYTECODE=1
+    #   - PYTHONUNBUFFERED=1
     volumes:
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk
     command: >
-      sh -c "alita agent execute-test-cases
-      --test-cases-dir .alita/tests/testcases/$${TEST_CASES_DIR}"
+      sh -c "$${DOCKER_COMMAND:-.alita/tests/test_pipelines/run_all_suites.sh --local suites/github}"
 
   pgvector-db:
     image: ankane/pgvector
