@@ -20,6 +20,7 @@ def discover_mcp_tools(
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 60,
     session_id: Optional[str] = None,
+    ssl_verify: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Discover available tools from a remote MCP server.
@@ -56,7 +57,7 @@ def discover_mcp_tools(
     try:
         # Run the async discovery in a new event loop
         tools_list = asyncio.run(
-            _discover_tools_async(url, headers, timeout, session_id)
+            _discover_tools_async(url, headers, timeout, session_id, ssl_verify)
         )
         logger.info(f"[MCP Discovery] Successfully discovered {len(tools_list)} tools from {url}")
         return tools_list
@@ -76,6 +77,7 @@ async def _discover_tools_async(
     headers: Optional[Dict[str, str]],
     timeout: int,
     session_id: Optional[str],
+    ssl_verify: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Async implementation of tool discovery using unified MCP client.
@@ -87,7 +89,8 @@ async def _discover_tools_async(
         url=url,
         session_id=session_id,
         headers=headers,
-        timeout=timeout
+        timeout=timeout,
+        ssl_verify=ssl_verify
     )
     
     async with client:
@@ -116,10 +119,11 @@ async def discover_mcp_tools_async(
     headers: Optional[Dict[str, str]] = None,
     timeout: int = 60,
     session_id: Optional[str] = None,
+    ssl_verify: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Async version of discover_mcp_tools.
-    
+
     See discover_mcp_tools for full documentation.
     """
-    return await _discover_tools_async(url, headers, timeout, session_id)
+    return await _discover_tools_async(url, headers, timeout, session_id, ssl_verify)
