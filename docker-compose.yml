@@ -18,6 +18,7 @@ services:
       - ADO_REPOSITORY_ID=${ADO_REPOSITORY_ID}
       - ADO_ORGANIZATION_URL=${ADO_ORGANIZATION_URL}
       - ADO_PROJECT=${ADO_PROJECT}
+      - ENV_NAME=${ENV_NAME:-local}
       - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
       - SANDBOX_BASE=/app/
       - DENO_DIR=/app/
