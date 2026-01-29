@@ -96,12 +96,14 @@ jobs:
           TIMEOUT=10000
           ELAPSED=0
           INTERVAL=20
+          CONTAINER_EXIT_CODE=0
           
           while [ $ELAPSED -lt $TIMEOUT ]; do
             STATUS=$(docker inspect alita-sdk-dev --format='{{.State.Status}}' 2>/dev/null || echo "not-found")
             
             if [ "$STATUS" = "exited" ]; then
               EXIT_CODE=$(docker inspect alita-sdk-dev --format='{{.State.ExitCode}}')
+              CONTAINER_EXIT_CODE=$EXIT_CODE
               echo "Container exited with code: $EXIT_CODE"
               
               if [ "$EXIT_CODE" -eq 0 ]; then
@@ -129,6 +131,12 @@ jobs:
           if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "⚠️ Timeout reached after $TIMEOUT seconds"
             docker-compose logs alita-sdk
+            exit 1
+          fi
+          
+          if [ $CONTAINER_EXIT_CODE -ne 0 ]; then
+            echo "::error::Tests failed with exit code $CONTAINER_EXIT_CODE"
+            exit $CONTAINER_EXIT_CODE
           fi
 
       - name: Copy test results
@@ -139,6 +147,10 @@ jobs:
         run: |
           echo "Generating test report..."
           python .alita/tests/test_pipelines/scripts/generate_report.py ./results.json
+
+      - name: Generate test report
+        run: |
+          ls -la
       
       - name: Save Docker logs
         if: always()
@@ -155,10 +167,10 @@ jobs:
         with:
           name: test-results-${{ inputs.test_cases_dir }}
           path: |
-            .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.html
+            ./results.html
             ./docker-logs.txt
           retention-days: 1
-          
+
       - name: CLEAN UP WORKSPACE AFTER RUN
         if: always()
         run: |
