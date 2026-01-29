@@ -62,9 +62,9 @@ jobs:
       - name: Calculate and run test command
         run: |
           if [ "${{ inputs.environment }}" = "local" ]; then
-            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --local suites/${{ inputs.test_cases_dir }}"
+            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --local --show-output  suites/${{ inputs.test_cases_dir }}"
           else
-            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --all suites/${{ inputs.test_cases_dir }}"
+            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --all --show-output  suites/${{ inputs.test_cases_dir }}"
           fi
 
           echo "DOCKER_COMMAND_COMPOSED=$TEST_COMMAND" >> $GITHUB_ENV  
@@ -131,14 +131,14 @@ jobs:
             docker-compose logs alita-sdk
           fi
 
+      - name: Copy test results
+        run: |
+          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json ./results.json || echo "{}" > ./results.json
+          
       - name: Generate test report
         run: |
           echo "Generating test report..."
-          docker exec alita-sdk-dev python scripts/generate_report.py test_results/suites/${{ inputs.test_cases_dir }}/results.json
-          
-      - name: Copy test results
-        run: |
-          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.html ./final_result.html || echo "{}" > ./final_result.html
+          python .alita/tests/test_pipelines/scripts/generate_report.py ./results.json
       
       - name: Save Docker logs
         if: always()
