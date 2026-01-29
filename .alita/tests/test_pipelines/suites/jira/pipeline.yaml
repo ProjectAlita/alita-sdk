@@ -7,7 +7,7 @@ description: JIRA toolkit integration tests
 # Environment variable mappings
 # These map .env variables to config values used in setup
 env_mapping:
-  toolkit_config: ${JIRA_CONFIG_PATH:../configs/jira-config.json}
+  toolkit_config: ${JIRA_CONFIG_PATH:../../configs/jira-config.json}
   base_url: ${JIRA_BASE_URL}
   username: ${JIRA_USERNAME}
   api_key: ${JIRA_API_KEY}
@@ -33,7 +33,7 @@ setup:
     action: create_or_update
     config:
       # Load base config from shared jira-config.json
-      config_file: ../configs/jira-config.json
+      config_file: ../../configs/jira-config.json
       toolkit_type: jira
       # Override/substitute values from environment
       overrides:

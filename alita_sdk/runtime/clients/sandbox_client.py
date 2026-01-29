@@ -76,7 +76,7 @@ class SandboxArtifact:
                 return 'Data appended successfully'
             else:
                 # Return error as before
-                return f"Error: Cannot append to file '{artifact_name}'. {raw_data["error"]}"
+                return f"Error: Cannot append to file '{artifact_name}'. {raw_data['error']}"
 
         # Get the parsed content
         data = self.get(artifact_name, bucket_name)
@@ -84,7 +84,8 @@ class SandboxArtifact:
             return data
 
         # Append the new data
-        data += f'\n{additional_data}' if len(data) > 0 else additional_data
+        newline = chr(10)
+        data += newline + str(additional_data) if len(data) > 0 else additional_data
         self.client.create_artifact(bucket_name, artifact_name, data)
         return 'Data appended successfully'
 
