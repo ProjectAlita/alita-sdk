@@ -145,11 +145,11 @@ class AlitaClient:
         else:
             return f"Error: Could not determine user ID for MCP tool call"
 
-    def get_app_details(self, application_id: int):
-        """Get application details for the client's project."""
-        url = f"{self.base_app_url}{self.project_id}/{application_id}"
+    def get_app_details(self, application_id: int, version_name: Optional[str] = None):
+        url = f"{self.app}/{application_id}" if version_name is None else f"{self.app}/{application_id}/{version_name}"
         data = requests.get(url, headers=self.headers, verify=False).json()
         return data
+
 
     def get_public_app_details(self, application_id: int, version_name: str = None) -> dict:
         """
