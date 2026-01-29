@@ -372,6 +372,24 @@ def parse_pipeline_yaml(yaml_path: Path, env_substitutions: dict = None) -> dict
     }
 
 
+def get_version_name() -> str:
+    """Resolve version name based on environment.
+    
+    Returns:
+        - "base" for dev and local environments
+        - "latest" for stage and production environments
+    """
+    env_name = os.environ.get("ENV_NAME", "").lower()
+    
+    if env_name in ("dev", "local"):
+        return "base"
+    elif env_name == "stage":
+        return "latest"
+    else:
+        # Default to "base" for unknown/unset environments
+        return "base"
+
+
 def create_application_payload(pipeline_data: dict, llm_settings: dict = None) -> dict:
     """Create the API payload for creating an application."""
     settings = llm_settings or DEFAULT_LLM_SETTINGS.copy()
@@ -381,7 +399,7 @@ def create_application_payload(pipeline_data: dict, llm_settings: dict = None) -
         "description": pipeline_data["description"],
         "versions": [
             {
-                "name": "latest",
+                "name": get_version_name(),
                 "llm_settings": settings,
                 "instructions": pipeline_data["yaml_content"],
                 "agent_type": "pipeline",

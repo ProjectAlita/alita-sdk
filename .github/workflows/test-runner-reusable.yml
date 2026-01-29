@@ -87,6 +87,7 @@ jobs:
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"
           export DOCKER_COMMAND="${{ env.DOCKER_COMMAND_COMPOSED }}"
+          export ENV_NAME="${{ inputs.environment }}"
           docker-compose up -d
 
       - name: Wait for tests to complete
