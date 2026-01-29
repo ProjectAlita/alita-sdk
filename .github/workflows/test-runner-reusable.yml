@@ -155,6 +155,11 @@ jobs:
         with:
           name: test-results-${{ inputs.test_cases_dir }}
           path: |
-            ./final_result.html
+            .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.html
             ./docker-logs.txt
           retention-days: 1
+          
+      - name: CLEAN UP WORKSPACE AFTER RUN
+        if: always()
+        run: |
+          sudo rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*
