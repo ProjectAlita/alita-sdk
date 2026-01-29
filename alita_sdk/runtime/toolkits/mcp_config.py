@@ -598,7 +598,8 @@ class McpConfigToolkit(BaseToolkit):
         url = _substitute_placeholders(server_config.get('url', ''), user_config)
         headers = _substitute_placeholders(server_config.get('headers', {}), user_config)
         timeout = server_config.get('timeout', 60)
-        ssl_verify = server_config.get('ssl_verify', True)
+        # Check user_config first (user's toolkit settings), then server_config, default True
+        ssl_verify = user_config.get('ssl_verify', server_config.get('ssl_verify', True))
 
         logger.info(f"[MCP Config] Connecting to HTTP server {server_name} at {url} (ssl_verify={ssl_verify})")
 
