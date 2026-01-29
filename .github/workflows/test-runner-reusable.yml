@@ -62,9 +62,9 @@ jobs:
       - name: Calculate and run test command
         run: |
           if [ "${{ inputs.environment }}" = "local" ]; then
-            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --local ${{ inputs.test_cases_dir }}"
+            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --local suites/${{ inputs.test_cases_dir }}"
           else
-            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --all ${{ inputs.test_cases_dir }}"
+            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh --all suites/${{ inputs.test_cases_dir }}"
           fi
 
           echo "DOCKER_COMMAND_COMPOSED=$TEST_COMMAND" >> $GITHUB_ENV  
