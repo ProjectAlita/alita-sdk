@@ -224,7 +224,7 @@ def load_mcp_servers_config(config_path: Optional[str] = None) -> Dict[str, Any]
         worker_config = this.for_module("indexer_worker").descriptor.config
         mcp_servers = worker_config.get('mcp_servers', {})
         if mcp_servers:
-            logger.info(f"[MCP Config] Loaded {len(mcp_servers)} MCP servers from {path}")
+            logger.info(f"[MCP Config] Loaded {len(mcp_servers)} MCP servers from pylon")
             return mcp_servers
     except:  # pylint: disable=W0702
         pass
