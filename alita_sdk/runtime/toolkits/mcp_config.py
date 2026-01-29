@@ -587,14 +587,16 @@ class McpConfigToolkit(BaseToolkit):
         url = _substitute_placeholders(server_config.get('url', ''), user_config)
         headers = _substitute_placeholders(server_config.get('headers', {}), user_config)
         timeout = server_config.get('timeout', 60)
+        ssl_verify = server_config.get('ssl_verify', True)
 
-        logger.info(f"[MCP Config] Connecting to HTTP server {server_name} at {url}")
+        logger.info(f"[MCP Config] Connecting to HTTP server {server_name} at {url} (ssl_verify={ssl_verify})")
 
         # Use existing McpToolkit for HTTP servers
         mcp_toolkit = McpToolkit.get_toolkit(
             url=url,
             headers=headers,
             timeout=timeout,
+            ssl_verify=ssl_verify,
             selected_tools=selected_tools or [],
             toolkit_name=toolkit_name,
             client=client,
@@ -617,7 +619,7 @@ class McpConfigToolkit(BaseToolkit):
 
 # Utility functions for toolkit registration
 
-def _discover_tools_for_http_server(url: str, headers: Optional[Dict[str, Any]] = None, timeout: int = 30) -> List[Dict[str, Any]]:
+def _discover_tools_for_http_server(url: str, headers: Optional[Dict[str, Any]] = None, timeout: int = 30, ssl_verify: bool = True) -> List[Dict[str, Any]]:
     """
     Attempt to discover tools from an HTTP MCP server.
 
@@ -632,7 +634,8 @@ def _discover_tools_for_http_server(url: str, headers: Optional[Dict[str, Any]] 
             client = UnifiedMcpClient(
                 url=url,
                 headers=headers or {},
-                timeout=timeout
+                timeout=timeout,
+                ssl_verify=ssl_verify
             )
             tools = []
             try:
@@ -786,11 +789,13 @@ def _create_check_connection_for_http(server_name: str, server_config: Dict[str,
         url = server_config.get('url', '')
         headers_template = server_config.get('headers', {})
         timeout = server_config.get('timeout', 60)
+        # Get ssl_verify from settings (user config) or server_config, default to True
+        ssl_verify = settings.get('ssl_verify', server_config.get('ssl_verify', True))
 
         # Substitute placeholders in headers with user-provided values
         headers = _substitute_placeholders(headers_template, settings)
 
-        logger.info(f"[MCP Config] Discovering tools from {server_name} at {url}")
+        logger.info(f"[MCP Config] Discovering tools from {server_name} at {url} (ssl_verify={ssl_verify})")
 
         try:
             # Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters)
@@ -801,7 +806,8 @@ def _create_check_connection_for_http(server_name: str, server_config: Dict[str,
                 client = McpClient(
                     url=url,
                     headers=headers,
-                    timeout=timeout
+                    timeout=timeout,
+                    ssl_verify=ssl_verify
                 )
                 tools = []
                 args_schemas = {}
