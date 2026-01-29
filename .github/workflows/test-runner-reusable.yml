@@ -140,15 +140,18 @@ jobs:
           fi
 
       - name: Copy test results
+        if: always()
         run: |
           docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json ./results.json || echo "{}" > ./results.json
           
       - name: Generate test report
+        if: always()
         run: |
           echo "Generating test report..."
           python .alita/tests/test_pipelines/scripts/generate_report.py ./results.json
 
-      - name: Generate test report
+      - name: LS
+        if: always()
         run: |
           ls -la
       
