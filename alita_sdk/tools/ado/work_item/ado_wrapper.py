@@ -5,6 +5,7 @@ import urllib.parse
 from typing import Dict, List, Generator, Optional
 
 from azure.devops.connection import Connection
+from azure.devops.exceptions import AzureDevOpsServiceError
 from azure.devops.v7_1.core import CoreClient
 from azure.devops.v7_1.wiki import WikiClient
 from azure.devops.v7_1.work_item_tracking import TeamContext, Wiql, WorkItemTrackingClient
@@ -98,6 +99,12 @@ ADOUnlinkWorkItemsFromWikiPage = create_model(
     page_name=(str, Field(description="Wiki page path to unlink the work items from", examples=["/TargetPage"]))
 )
 
+ADOGetWorkItemTypeFields = create_model(
+    "ADOGetWorkItemTypeFields",
+    work_item_type=(Optional[str], Field(description="Work item type to get fields for (e.g., 'Task', 'Bug', 'Test Case', 'Epic'). Default is 'Task'.", default="Task")),
+    force_refresh=(Optional[bool], Field(description="If True, reload field definitions from Azure DevOps. Use this if project configuration has changed.", default=False))
+)
+
 class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     # TODO use ado_configuration instead of organization_url, project and token
     organization_url: str
@@ -108,6 +115,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     _wiki_client: Optional[WikiClient] = PrivateAttr() # Add WikiClient instance
     _core_client: Optional[CoreClient] = PrivateAttr() # Add CoreClient instance
     _relation_types: Dict = PrivateAttr(default_factory=dict) # track actual relation types for instance
+    _work_item_type_fields_cache: Dict[str, Dict] = PrivateAttr(default_factory=dict)  # Cache for work item type field definitions
 
     class Config:
         arbitrary_types_allowed = True  # Allow arbitrary types (e.g., WorkItemTrackingClient, WikiClient, CoreClient)
@@ -181,6 +189,65 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
 
         return parsed_items
 
+    def _parse_validation_error(self, error_message: str) -> str:
+        """
+        Parse Azure DevOps validation errors and return a human-readable message.
+
+        Args:
+            error_message: The raw error message from Azure DevOps
+
+        Returns:
+            A formatted, human-readable error message
+        """
+        error_str = str(error_message)
+
+        # Extract error code (e.g., TF401320)
+        error_code_match = re.search(r'(TF\d+)', error_str)
+        error_code = error_code_match.group(1) if error_code_match else "Validation Error"
+
+        # Extract field name
+        field_match = re.search(r'field\s+([^\s.]+(?:\s+[^\s.]+)*?)[\s.]', error_str, re.IGNORECASE)
+        field_name = field_match.group(1) if field_match else "Unknown field"
+
+        # Extract validation rule violations
+        rule_violations = []
+        if "Required" in error_str or "InvalidEmpty" in error_str:
+            rule_violations.append("This field is required and cannot be empty")
+        if "LimitedToValues" in error_str or "HasValues" in error_str:
+            rule_violations.append("The value must be from the predefined allowed list")
+        if "InvalidValue" in error_str:
+            rule_violations.append("The provided value is invalid")
+        if "InvalidFormat" in error_str:
+            rule_violations.append("The value format is incorrect")
+        if "InvalidType" in error_str:
+            rule_violations.append("The value type is incorrect")
+
+        # Count additional errors
+        additional_errors_match = re.search(r'(\d+)\s+additional\s+errors?', error_str, re.IGNORECASE)
+        additional_errors = int(additional_errors_match.group(1)) if additional_errors_match else 0
+
+        # Build human-readable message
+        message_parts = [
+            f"❌ Work item validation failed ({error_code})",
+            f"\n\n📋 Field: '{field_name}'"
+        ]
+
+        if rule_violations:
+            message_parts.append("\n\n⚠️  Validation issues:")
+            for i, violation in enumerate(rule_violations, 1):
+                message_parts.append(f"\n  {i}. {violation}")
+
+        if additional_errors > 0:
+            message_parts.append(f"\n\n❗ {additional_errors} additional field(s) also have validation errors")
+
+        message_parts.append("\n\n💡 Suggestions:")
+        message_parts.append("\n  • Check that all required fields for this work item type are provided")
+        message_parts.append("\n  • Ensure field values match the allowed values defined in your Azure DevOps process template")
+        message_parts.append("\n  • Verify field names are correct (including custom fields)")
+        message_parts.append(f"\n\n🔍 Original error: {error_str}")
+
+        return "".join(message_parts)
+
     def _transform_work_item(self, work_item_json):
         try:
             # Convert the input JSON to a Python dictionary
@@ -221,12 +288,43 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 "id": work_item.id,
                 "message": f"Work item {work_item.id} created successfully. View it at {work_item.url}."
             }
-        except Exception as e:
-            if "unknown value" in str(e):
+        except AzureDevOpsServiceError as e:
+            error_str = str(e).lower()
+
+            # Handle validation errors (TF401320, TF401316, etc.)
+            if "rule error" in error_str or "validation" in error_str or any(code in str(e) for code in ["TF401320", "TF401316", "TF401319"]):
+                readable_error = self._parse_validation_error(str(e))
+                logger.error(f"Work item validation failed: {e}")
+                return ToolException(readable_error)
+
+            # Handle incorrect assignee errors
+            if "unknown value" in error_str or "assigned to" in error_str:
                 logger.error(f"Unable to create work item due to incorrect assignee: {e}")
-                return ToolException(f"Unable to create work item due to incorrect assignee: {e}")
+                return ToolException(
+                    f"❌ Unable to create work item: Invalid assignee specified.\n\n"
+                    f"💡 Please verify the assignee email or display name exists in your Azure DevOps organization.\n\n"
+                    f"🔍 Original error: {e}"
+                )
+
+            # Handle work item type errors
+            if "type" in error_str and ("not found" in error_str or "does not exist" in error_str):
+                logger.error(f"Unable to create work item: Invalid work item type: {e}")
+                return ToolException(
+                    f"❌ Unable to create work item: Work item type '{wi_type}' does not exist in project '{self.project}'.\n\n"
+                    f"💡 Please use a valid work item type (e.g., 'Task', 'Bug', 'User Story', 'Epic').\n\n"
+                    f"🔍 Original error: {e}"
+                )
+
+            # Generic Azure DevOps service error
             logger.error(f"Error creating work item: {e}")
-            return ToolException(f"Error creating work item: {e}")
+            return ToolException(
+                f"❌ Failed to create work item in Azure DevOps.\n\n"
+                f"🔍 Error details: {e}\n\n"
+                f"💡 Please check your work item fields and try again."
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error creating work item: {e}")
+            return ToolException(f"Unexpected error creating work item: {e}")
 
     def update_work_item(self, id: str, work_item_json: str):
         """Updates existing work item per defined data"""
@@ -234,9 +332,47 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         try:
             patch_document = self._transform_work_item(work_item_json)
             work_item = self._client.update_work_item(id=id, document=patch_document, project=self.project)
+            return f"Work item ({work_item.id}) was updated."
+        except AzureDevOpsServiceError as e:
+            error_str = str(e).lower()
+
+            # Handle validation errors
+            if "rule error" in error_str or "validation" in error_str or any(code in str(e) for code in ["TF401320", "TF401316", "TF401319"]):
+                readable_error = self._parse_validation_error(str(e))
+                logger.error(f"Work item validation failed: {e}")
+                raise ToolException(readable_error)
+
+            # Handle work item not found errors
+            if "404" in error_str or "not found" in error_str or "does not exist" in error_str:
+                logger.error(f"Work item not found: {e}")
+                return ToolException(
+                    f"❌ Work item with ID '{id}' not found in project '{self.project}'.\n\n"
+                    f"💡 Please verify the work item ID exists and you have permission to access it.\n\n"
+                    f"🔍 Original error: {e}"
+                )
+
+            # Handle incorrect assignee errors
+            if "unknown value" in error_str or "assigned to" in error_str:
+                logger.error(f"Unable to update work item due to incorrect assignee: {e}")
+                return ToolException(
+                    f"❌ Unable to update work item: Invalid assignee specified.\n\n"
+                    f"💡 Please verify the assignee email or display name exists in your Azure DevOps organization.\n\n"
+                    f"🔍 Original error: {e}"
+                )
+
+            # Generic Azure DevOps service error
+            logger.error(f"Error updating work item: {e}")
+            return ToolException(
+                f"❌ Failed to update work item {id} in Azure DevOps.\n\n"
+                f"🔍 Error details: {e}\n\n"
+                f"💡 Please check your work item fields and try again."
+            )
+        except ToolException:
+            # Re-raise ToolException as-is
+            raise
         except Exception as e:
-            return ToolException(f"Issues during attempt to parse work_item_json: {str(e)}")
-        return f"Work item ({work_item.id}) was updated."
+            logger.error(f"Unexpected error updating work item: {e}")
+            return ToolException(f"Issues during attempt to update work item: {str(e)}")
 
     def get_relation_types(self) -> dict:
         """Returns dict of possible relation types per syntax: 'relation name': 'relation reference name'.
@@ -248,6 +384,129 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             for relation in relations:
                 self._relation_types.update({relation.name: relation.reference_name})
         return self._relation_types
+
+    def _get_work_item_type_fields(self, work_item_type: str) -> Dict:
+        """
+        Get field definitions for a specific work item type using the Azure DevOps client.
+
+        Args:
+            work_item_type: The work item type (e.g., 'Task', 'Bug', 'Test Case')
+
+        Returns:
+            dict: Mapping of field reference names to their metadata (name, type, required, allowed values)
+        """
+        try:
+            # Use the WorkItemTrackingClient to get work item type fields
+            work_item_type_obj = self._client.get_work_item_type(self.project, work_item_type)
+
+            # Get fields for this work item type
+            fields = work_item_type_obj.fields
+
+            field_definitions = {}
+            for field in fields:
+                field_ref_name = field.reference_name
+                field_definitions[field_ref_name] = {
+                    'name': field.name,
+                    'type': field.type if hasattr(field, 'type') else 'Unknown',
+                    'required': field.always_required if hasattr(field, 'always_required') else False,
+                    'allowed_values': field.allowed_values if hasattr(field, 'allowed_values') else [],
+                    'description': field.help_text if hasattr(field, 'help_text') else ''
+                }
+
+            return field_definitions
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch field definitions for work item type '{work_item_type}' using client: {e}")
+            return {}
+
+    def _format_work_item_type_fields_for_display(self, work_item_type: str, field_definitions: Dict) -> str:
+        """
+        Format field definitions in human-readable format for LLM.
+
+        Args:
+            work_item_type: The work item type name
+            field_definitions: Output from _get_work_item_type_fields()
+
+        Returns:
+            Formatted string with field information
+        """
+        if not field_definitions:
+            return f"Unable to retrieve field definitions for work item type '{work_item_type}'. Please check your Azure DevOps connection and permissions."
+
+        output = [f"Available Fields for Work Item Type '{work_item_type}' in Project '{self.project}':\n"]
+        output.append("=" * 80)
+
+        # Separate required and optional fields
+        required_fields = []
+        optional_fields = []
+
+        for ref_name, field_info in sorted(field_definitions.items()):
+            field_entry = {
+                'ref_name': ref_name,
+                'name': field_info.get('name', ref_name),
+                'type': field_info.get('type', 'Unknown'),
+                'required': field_info.get('required', False),
+                'allowed_values': field_info.get('allowed_values', [])
+            }
+
+            if field_entry['required']:
+                required_fields.append(field_entry)
+            else:
+                optional_fields.append(field_entry)
+
+        # Display required fields first
+        if required_fields:
+            output.append("\n📋 REQUIRED FIELDS:")
+            output.append("-" * 80)
+            for field in required_fields:
+                output.append(f"\n✓ {field['name']} (Reference: {field['ref_name']})")
+                output.append(f"  Type: {field['type']}")
+                if field['allowed_values']:
+                    output.append(f"  Allowed Values: {', '.join(str(v) for v in field['allowed_values'])}")
+
+        # Display optional fields (common ones only)
+        if optional_fields:
+            output.append("\n\n📝 OPTIONAL FIELDS (Common):")
+            output.append("-" * 80)
+            # Show only commonly used optional fields
+            common_fields = ['System.AssignedTo', 'System.AreaPath', 'System.IterationPath',
+                           'Microsoft.VSTS.Common.Priority', 'System.Tags', 'System.State']
+            for field in optional_fields:
+                if field['ref_name'] in common_fields:
+                    output.append(f"\n  {field['name']} (Reference: {field['ref_name']})")
+                    output.append(f"    Type: {field['type']}")
+                    if field['allowed_values']:
+                        output.append(f"    Allowed Values: {', '.join(str(v) for v in field['allowed_values'])}")
+
+        output.append("\n\n" + "=" * 80)
+        output.append("\n💡 Usage Instructions:")
+        output.append("  • Use the 'Reference' name (e.g., 'System.Title') as the field key in work_item_json")
+        output.append("  • Provide all required fields when creating work items")
+        output.append("  • For fields with allowed values, use exact value from the list")
+        output.append(f"  • Example for {work_item_type}: " + '{"fields": {"System.Title": "My title", "CustomField": "Value"}}')
+
+        return '\n'.join(output)
+
+    def get_work_item_type_fields(self, work_item_type: str = "Task", force_refresh: bool = False) -> str:
+        """
+        Get formatted information about available fields for a specific work item type.
+        This method helps discover which fields are required for work item creation.
+
+        Args:
+            work_item_type: The work item type to get fields for (e.g., 'Task', 'Bug', 'Test Case', 'Epic').
+                           Default is 'Task'.
+            force_refresh: If True, reload field definitions from Azure DevOps instead of using cache.
+                          Use this if project configuration has changed (new fields added, etc.).
+
+        Returns:
+            Formatted string with field names, types, and requirements
+        """
+        cache_key = work_item_type
+
+        if force_refresh or cache_key not in self._work_item_type_fields_cache:
+            self._work_item_type_fields_cache[cache_key] = self._get_work_item_type_fields(work_item_type)
+
+        return self._format_work_item_type_fields_for_display(work_item_type, self._work_item_type_fields_cache[cache_key])
 
     def link_work_items(self, source_id, target_id, link_type, attributes: dict = None):
         """Add the relation to the source work item with an appropriate attributes if any. User may pass attributes like name, etc."""
@@ -695,5 +954,11 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 "description": self.unlink_work_items_from_wiki_page.__doc__,
                 "args_schema": ADOUnlinkWorkItemsFromWikiPage,
                 "ref": self.unlink_work_items_from_wiki_page,
+            },
+            {
+                "name": "get_work_item_type_fields",
+                "description": self.get_work_item_type_fields.__doc__,
+                "args_schema": ADOGetWorkItemTypeFields,
+                "ref": self.get_work_item_type_fields,
             }
         ]
