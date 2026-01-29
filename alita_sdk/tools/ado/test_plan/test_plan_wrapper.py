@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import xml.etree.ElementTree as ET
-from typing import Generator, Literal, Optional, List
+from typing import Generator, Literal, Optional, List, Dict
 
 from azure.devops.connection import Connection
 from azure.devops.v7_0.test_plan.models import TestPlanCreateParams, TestSuiteCreateParams, \
@@ -125,6 +125,7 @@ TestCasesCreateModel = create_model(
             description: str
             test_steps: str
             test_steps_format: str
+            additional_fields: str (optional)
         {'}'}
         ...
     ]
@@ -135,6 +136,7 @@ TestCasesCreateModel = create_model(
     description - Test case description;
     test_steps - {test_steps_description}
     test_steps_format - Format of provided test steps. Possible values: json, xml
+    additional_fields - (Optional) JSON string of additional custom fields as key-value pairs. Example: '{{"SDLC": "Development", "Priority": "High"}}'
     """))
 )
 
@@ -145,20 +147,28 @@ TestCaseCreateModel = create_model(
     title=(str, Field(description="Test case title")),
     description=(str, Field(description="Test case description")),
     test_steps=(str, Field(description=test_steps_description)),
-    test_steps_format=(Optional[str], Field(description="Format of provided test steps. Possible values: json, xml", default='json'))
+    test_steps_format=(Optional[str], Field(description="Format of provided test steps. Possible values: json, xml", default='json')),
+    additional_fields=(Optional[str], Field(description="JSON string of additional custom fields as key-value pairs. Example: '{\"SDLC\": \"Development\", \"Priority\": \"High\"}'. Use get_all_test_case_fields_for_project to discover required fields.", default=None))
 )
 
 TestCaseGetModel = create_model(
     "TestCaseGetModel",
     plan_id=(int, Field(description="ID of the test plan for which test cases are requested")),
     suite_id=(int, Field(description="ID of the test suite for which test cases are requested")),
-    test_case_id=(str, Field(description="Test Case Id to be fetched"))
+    test_case_id=(str, Field(description="Test Case Id to be fetched")),
+    fields=(Optional[List[str]], Field(description="List of specific work item field names to return. If not provided, all fields are returned. Example: ['System.Title', 'System.State', 'Custom.SDLC']", default=None))
 )
 
 TestCasesGetModel = create_model(
     "TestCasesGetModel",
     plan_id=(int, Field(description="ID of the test plan for which test cases are requested")),
-    suite_id=(int, Field(description="ID of the test suite for which test cases are requested"))
+    suite_id=(int, Field(description="ID of the test suite for which test cases are requested")),
+    fields=(Optional[List[str]], Field(description="List of specific work item field names to return. If not provided, all fields are returned. Example: ['System.Title', 'System.State', 'Custom.SDLC']", default=None))
+)
+
+GetAllTestCaseFieldsModel = create_model(
+    "GetAllTestCaseFieldsModel",
+    force_refresh=(Optional[bool], Field(description="If True, reload field definitions from Azure DevOps API. Use this if project configuration has changed.", default=False))
 )
 
 class TestPlanApiWrapper(NonCodeIndexerToolkit):
@@ -169,6 +179,7 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
     token: SecretStr
     limit: Optional[int] = 5
     _client: Optional[TestPlanClient] = PrivateAttr()
+    _work_item_wrapper: Optional[AzureDevOpsApiWrapper] = PrivateAttr()
 
     class Config:
         arbitrary_types_allowed = True
@@ -179,6 +190,14 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             credentials = BasicAuthentication('', values['token'])
             connection = Connection(base_url=values['organization_url'], creds=credentials)
             cls._client = connection.clients.get_test_plan_client()
+
+            # Initialize work item wrapper at class level
+            cls._work_item_wrapper = AzureDevOpsApiWrapper(
+                organization_url=values['organization_url'],
+                token=values['token'],
+                project=values['project'],
+                llm=values.get('llm', None)
+            )
         except Exception as e:
             error_msg = str(e).lower()
             if "expired" in error_msg or "token" in error_msg and ("invalid" in error_msg or "unauthorized" in error_msg):
@@ -204,6 +223,22 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             else:
                 raise ValueError(f"Azure DevOps connection failed: {e}")
         return super().validate_toolkit(values)
+
+    def get_all_test_case_fields_for_project(self, force_refresh: bool = False) -> str:
+        """
+        Get formatted information about available Test Case fields and their metadata.
+        This method helps discover which fields are required for Test Case creation.
+        Delegates to the work_item wrapper's get_work_item_type_fields method.
+
+        Args:
+            force_refresh: If True, reload field definitions from Azure DevOps instead of using cache.
+                          Use this if project configuration has changed (new fields added, etc.).
+
+        Returns:
+            Formatted string with field names, types, and requirements
+        """
+        # Use the class-level work_item wrapper instance
+        return self._work_item_wrapper.get_work_item_type_fields(work_item_type="Test Case", force_refresh=force_refresh)
 
     def create_test_plan(self, test_plan_create_params: str):
         """Create a test plan in Azure DevOps."""
@@ -294,41 +329,78 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
             title=test_case['title'],
             description=test_case['description'],
             test_steps=test_case['test_steps'],
-            test_steps_format=test_case['test_steps_format']) for test_case in test_cases]
+            test_steps_format=test_case['test_steps_format'],
+            additional_fields=test_case.get('additional_fields', None)) for test_case in test_cases]
 
     def create_test_case(self, plan_id: int, suite_id: int, title: str, description: str, test_steps: str,
-                         test_steps_format: str = 'json'):
+                         test_steps_format: str = 'json', additional_fields: Optional[str] = None):
         """Creates a new test case in specified suite in Azure DevOps."""
-        work_item_wrapper = AzureDevOpsApiWrapper(organization_url=self.organization_url,
-                                                  token=self.token.get_secret_value(), project=self.project, llm=self.llm)
         if test_steps_format == 'json':
             steps_xml = self.get_test_steps_xml(json.loads(test_steps))
         elif test_steps_format == 'xml':
             steps_xml = self.convert_steps_tag_to_ado_steps(test_steps)
         else:
             return ToolException("Unknown test steps format: " + test_steps_format)
-        work_item_json = self.build_ado_test_case(title, description, steps_xml)
+
+        # Parse additional fields if provided
+        additional_fields_dict = None
+        if additional_fields:
+            try:
+                additional_fields_dict = json.loads(additional_fields) if isinstance(additional_fields, str) else additional_fields
+            except json.JSONDecodeError as e:
+                return ToolException(f"Invalid JSON format for additional_fields: {e}")
+
+        work_item_json = self.build_ado_test_case(title, description, steps_xml, additional_fields_dict)
+
+        # Use the class-level work_item wrapper instance
         create_work_item_result = \
-        work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")
+        self._work_item_wrapper.create_work_item(work_item_json=json.dumps(work_item_json), wi_type="Test Case")
         if isinstance(create_work_item_result, ToolException):
-            # issue creating work item, return error
+            # issue creating work item, return error with helpful context
+            error_msg = str(create_work_item_result)
+            if "TF401320" in error_msg or "validation" in error_msg.lower():
+                # Add helpful suggestion about field discovery
+                enhanced_error = (
+                    f"{error_msg}\n\n"
+                    "💡 To discover all required fields for Test Case work items in your project:\n"
+                    "   • Use the get_all_test_case_fields_for_project() tool\n"
+                    "   • Provide missing required fields via the additional_fields parameter\n"
+                    "   • Example: additional_fields='{\"Custom.SDLC\": \"Development\"}'"
+                )
+                return ToolException(enhanced_error)
             return create_work_item_result
         created_work_item_id = create_work_item_result['id']
         return self.add_test_case([{"work_item": {"id": created_work_item_id}}], plan_id, suite_id)
 
-    def build_ado_test_case(self, title, description, steps_xml):
+    def build_ado_test_case(self, title, description, steps_xml, additional_fields: Optional[Dict] = None):
         """
+        Build Test Case work item JSON with standard and custom fields.
+
         :param title: test title
         :param description: test description
         :param steps_xml: steps xml
+        :param additional_fields: optional dictionary of additional custom fields
         :return: JSON with ADO fields
         """
+        # Standard required fields for Test Case
+        standard_fields = {
+            "System.Title": title,
+            "System.Description": description,
+            "Microsoft.VSTS.TCM.Steps": steps_xml
+        }
+
+        # Merge additional fields if provided
+        if additional_fields:
+            # Ensure additional fields don't override standard fields
+            protected_fields = ["System.Title", "System.Description", "Microsoft.VSTS.TCM.Steps"]
+            for field_name, field_value in additional_fields.items():
+                if field_name in protected_fields:
+                    logger.warning(f"Ignoring attempt to override protected field: {field_name}")
+                else:
+                    standard_fields[field_name] = field_value
+
         return {
-            "fields": {
-                "System.Title": title,
-                "System.Description": description,
-                "Microsoft.VSTS.TCM.Steps": steps_xml
-            }
+            "fields": standard_fields
         }
 
     def get_test_steps_xml(self, steps: dict):
@@ -367,24 +439,85 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
         expected_elem.text = expected_result or ""
         return step_elem
 
-    def get_test_case(self, plan_id: int, suite_id: int, test_case_id: str):
-        """Get a test case from a suite in Azure DevOps."""
+    def get_test_case(self, plan_id: int, suite_id: int, test_case_id: str, fields: Optional[List[str]] = None):
+        """Get a test case from a suite in Azure DevOps with all custom fields."""
         try:
+            # Get test case reference from test plan client (basic info only)
             test_cases = self._client.get_test_case(self.project, plan_id, suite_id, test_case_id)
-            if test_cases:  # This checks if the list is not empty
-                test_case = test_cases[0]
-                return test_case.as_dict()
-            else:
+            if not test_cases:
                 return f"No test cases found per given criteria: project {self.project}, plan {plan_id}, suite {suite_id}, test case id {test_case_id}"
+
+            test_case = test_cases[0]
+            test_case_dict = test_case.as_dict()
+
+            # Extract work item ID from the test case reference
+            work_item_id = test_case_dict.get('work_item', {}).get('id')
+
+            if work_item_id:
+                # Fetch full work item details (including all custom fields) using work item wrapper
+                # Note: Azure DevOps API does not allow using expand with fields parameter
+                if fields:
+                    # When specific fields requested, cannot use expand
+                    full_work_item = self._work_item_wrapper.get_work_item(
+                        id=work_item_id,
+                        fields=fields
+                    )
+                else:
+                    # When all fields requested, can use expand for relations
+                    full_work_item = self._work_item_wrapper.get_work_item(
+                        id=work_item_id,
+                        expand='Relations'
+                    )
+
+                # Add full work item details to the response
+                if isinstance(full_work_item, dict):
+                    test_case_dict['work_item_full_details'] = full_work_item
+                else:
+                    logger.warning(f"Failed to fetch full work item details for ID {work_item_id}")
+
+            return test_case_dict
         except Exception as e:
             logger.error(f"Error getting test case: {e}")
             return ToolException(f"Error getting test case: {e}")
 
-    def get_test_cases(self, plan_id: int, suite_id: int):
-        """Get test cases from a suite in Azure DevOps."""
+    def get_test_cases(self, plan_id: int, suite_id: int, fields: Optional[List[str]] = None):
+        """Get test cases from a suite in Azure DevOps with all custom fields."""
         try:
+            # Get test case references from test plan client (basic info only)
             test_cases = self._client.get_test_case_list(self.project, plan_id, suite_id)
-            return [test_case.as_dict() for test_case in test_cases]
+            result = []
+
+            for test_case in test_cases:
+                test_case_dict = test_case.as_dict()
+
+                # Extract work item ID from the test case reference
+                work_item_id = test_case_dict.get('work_item', {}).get('id')
+
+                if work_item_id:
+                    # Fetch full work item details (including all custom fields) using work item wrapper
+                    # Note: Azure DevOps API does not allow using expand with fields parameter
+                    if fields:
+                        # When specific fields requested, cannot use expand
+                        full_work_item = self._work_item_wrapper.get_work_item(
+                            id=work_item_id,
+                            fields=fields
+                        )
+                    else:
+                        # When all fields requested, can use expand for relations
+                        full_work_item = self._work_item_wrapper.get_work_item(
+                            id=work_item_id,
+                            expand='Relations'
+                        )
+
+                    # Add full work item details to the response
+                    if isinstance(full_work_item, dict):
+                        test_case_dict['work_item_full_details'] = full_work_item
+                    else:
+                        logger.warning(f"Failed to fetch full work item details for ID {work_item_id}")
+
+                result.append(test_case_dict)
+
+            return result
         except Exception as e:
             self._log_tool_event(f"Error getting test cases: {e}", 'get_test_cases')
             logger.error(f"Error getting test cases: {e}")
@@ -518,5 +651,11 @@ class TestPlanApiWrapper(NonCodeIndexerToolkit):
                 "description": self.get_test_cases.__doc__,
                 "args_schema": TestCasesGetModel,
                 "ref": self.get_test_cases,
+            },
+            {
+                "name": "get_all_test_case_fields_for_project",
+                "description": self.get_all_test_case_fields_for_project.__doc__,
+                "args_schema": GetAllTestCaseFieldsModel,
+                "ref": self.get_all_test_case_fields_for_project,
             }
         ]
