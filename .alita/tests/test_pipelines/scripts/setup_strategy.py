@@ -180,6 +180,17 @@ class LocalSetupStrategy(SetupStrategy):
         if self._alita_client is None:
             self._alita_client = self._create_alita_client()
         
+        # Import DEFAULT_LLM_SETTINGS from seed_pipelines
+        from seed_pipelines import DEFAULT_LLM_SETTINGS
+        
+        # Create LLM with settings from DEFAULT_LLM_SETTINGS
+        llm_model_name = DEFAULT_LLM_SETTINGS.get("model_name", "gpt-4o-2024-11-20")
+        llm_config = {
+            "max_tokens": DEFAULT_LLM_SETTINGS.get("max_tokens", 4096),
+            "temperature": DEFAULT_LLM_SETTINGS.get("temperature", 0.5),
+        }
+        llm = self._alita_client.get_llm(llm_model_name, model_config=llm_config)
+        
         # Build tool configuration in the format expected by get_tools
         # This matches the structure used by the backend
         tool_config = {
@@ -196,7 +207,7 @@ class LocalSetupStrategy(SetupStrategy):
             tools = get_tools(
                 tools_list=[tool_config],
                 alita_client=self._alita_client,
-                llm=None,
+                llm=llm,
                 memory_store=None,
                 debug_mode=False,
             )
