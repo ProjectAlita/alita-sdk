@@ -10,7 +10,7 @@ description: Confluence toolkit integration tests
 # Environment variable mappings
 # These map .env variables to config values used in setup
 env_mapping:
-  toolkit_config: ${CONFLUENCE_CONFIG_PATH:../configs/confluence-config.json}
+  toolkit_config: ${CONFLUENCE_CONFIG_PATH:../../configs/confluence-config.json}
   space: ${CONFLUENCE_SPACE:AT}
   base_url: ${CONFLUENCE_BASE_URL:https://epamelitea.atlassian.net/}
   api_key: ${CONFLUENCE_API_KEY}
@@ -36,7 +36,7 @@ setup:
     action: create_or_update
     config:
       # Load base config from tool_configs
-      config_file: ../configs/confluence-config.json
+      config_file: ../../configs/confluence-config.json
       toolkit_type: confluence
       # Override/substitute values from environment
       overrides:

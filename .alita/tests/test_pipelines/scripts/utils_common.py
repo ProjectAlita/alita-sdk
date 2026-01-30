@@ -11,12 +11,16 @@ This module consolidates common functions to avoid duplication across:
 """
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Optional, Dict
 
 import yaml
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -216,21 +220,28 @@ def resolve_env_value(value: Any, env_substitutions: dict, env_loader: Optional[
 
             # Check substitutions dict first
             if var_name in env_substitutions:
+                logger.debug(f"Resolved environment variable '{var_name}' from substitutions")
                 return str(env_substitutions[var_name])
             
             # Then check using env_loader or os.environ
             if env_loader:
                 env_value = env_loader(var_name)
                 if env_value:
+                    logger.debug(f"Resolved environment variable '{var_name}' from env loader")
                     return env_value
             else:
                 env_value = os.environ.get(var_name)
                 if env_value:
+                    logger.debug(f"Resolved environment variable '{var_name}' from OS environment")
                     return env_value
             
             # Fall back to default
             if default is not None:
+                logger.info(f"Environment variable '{var_name}' not found, using default value: '{default}'")
                 return default
+            
+            # Variable not found and no default provided
+            logger.error(f"Environment variable '{var_name}' not found and no default value provided. Variable will remain unresolved: {match.group(0)}")
             return match.group(0)
 
         return re.sub(pattern, replace, value)

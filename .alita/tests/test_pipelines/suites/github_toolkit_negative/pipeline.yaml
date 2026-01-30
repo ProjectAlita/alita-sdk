@@ -52,7 +52,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:
@@ -73,7 +73,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:
@@ -126,7 +126,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:
@@ -145,7 +145,7 @@ setup:
 # Composable pipelines - seeded alongside test pipelines
 composable_pipelines:
   # RCA pipeline for negative test failures - suggests error handling improvements
-  - file: ../composable/rca_negative_test.yaml
+  - file: ../../composable/rca_negative_test.yaml
     env:
       SUITE_NAME: github_toolkit_negative
       RCA_MODEL: ${RCA_MODEL:gpt-5-mini}

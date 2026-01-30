@@ -24,7 +24,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:
@@ -45,7 +45,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:
@@ -63,7 +63,7 @@ setup:
 
 # RCA pipeline for failure analysis
 composable_pipelines:
-  - file: ../composable/rca_negative_test.yaml
+  - file: ../../composable/rca_negative_test.yaml
     env:
       SUITE_NAME: github_toolkit_negative_validation
       RCA_MODEL: ${RCA_MODEL:gpt-5-mini}

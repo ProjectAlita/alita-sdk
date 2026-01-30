@@ -23,7 +23,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:
@@ -65,7 +65,7 @@ execution:
 
 # Composable pipelines - RCA for failure analysis
 composable_pipelines:
-  - file: ../composable/rca_on_failure.yaml
+  - file: ../../composable/rca_on_failure.yaml
     env:
       SUITE_NAME: structured_output
       RCA_MODEL: ${RCA_MODEL:gpt-4o-mini}

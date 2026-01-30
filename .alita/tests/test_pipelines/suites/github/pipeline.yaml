@@ -34,7 +34,7 @@ setup:
     action: create_or_update
     config:
       # Load base config from shared git-config.json
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       # Override/substitute values from environment
       overrides:
@@ -93,7 +93,7 @@ setup:
     type: toolkit
     action: create_or_update
     config:
-      config_file: ../configs/git-config.json
+      config_file: ../../configs/git-config.json
       toolkit_type: github
       overrides:
         github_configuration:
@@ -113,7 +113,7 @@ setup:
 # These are reusable pipeline components that can be invoked conditionally
 composable_pipelines:
   # RCA (Root Cause Analysis) pipeline - invoked when tests fail
-  - file: ../composable/rca_on_failure.yaml
+  - file: ../../composable/rca_on_failure.yaml
     env:
       SUITE_NAME: github_toolkit
       RCA_MODEL: ${RCA_MODEL:gpt-5-mini}
