@@ -6,7 +6,7 @@ The Code Node is a specialized node type in LangGraph agent pipelines that enabl
 
 ### Overview
 
-The Code Node leverages Pyodide (Python compiled to WebAssembly) through the `langchain-sandbox` library to provide a secure, isolated environment for Python code execution. This ensures that code runs safely without access to the host system while maintaining full Python capabilities.
+The Code Node leverages Pyodide (Python compiled to WebAssembly) to provide a secure, isolated environment for Python code execution. This ensures that code runs safely without access to the host system while maintaining full Python capabilities.
 
 ### Features
 
@@ -391,17 +391,16 @@ By default, the Code Node runs in stateless mode for better performance:
 
 #### Required
 
-- `langchain-sandbox`: Provides the Pyodide sandbox environment
-- `Deno`: JavaScript runtime required by langchain-sandbox
+- `Deno`: JavaScript runtime required for sandbox execution
 
 #### Installation
 
 ```bash
-# Install langchain-sandbox
-pip install langchain-sandbox
-
-# Install Deno (if not already installed)
+# Install Deno (macOS/Linux)
 curl -fsSL https://deno.land/install.sh | sh
+
+# Or on macOS with Homebrew
+brew install deno
 ```
 
 #### Performance Optimization
