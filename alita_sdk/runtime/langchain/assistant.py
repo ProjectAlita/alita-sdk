@@ -176,7 +176,14 @@ class Assistant:
             from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
             exception_handlers = [mw for mw in middleware if isinstance(mw, ToolExceptionHandlerMiddleware)]
             if exception_handlers:
-                # Use the first exception handler middleware (typically only one)
+                # Validate only one exception handler is present
+                if len(exception_handlers) > 1:
+                    raise ValueError(
+                        f"Only one ToolExceptionHandlerMiddleware is supported per assistant. "
+                        f"Found {len(exception_handlers)} instances."
+                    )
+
+                # Use the exception handler middleware
                 exception_handler = exception_handlers[0]
                 wrapped_tools = []
                 for tool in self.tools:

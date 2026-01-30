@@ -18,6 +18,7 @@ from langchain_anthropic import ChatAnthropic
 from ..langchain.assistant import Assistant as LangChainAssistant
 from .artifact import Artifact
 from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
+from ..middleware import TransformErrorStrategy, LoggingStrategy
 from ..utils.mcp_oauth import McpAuthorizationRequired
 from ...tools import get_available_toolkit_models, instantiate_toolkit
 from ...tools.base_indexer_toolkit import IndexTools
@@ -561,7 +562,6 @@ class AlitaClient:
         if top_p is not None:
             model_config["top_p"] = top_p
 
-        return None
         # Return the LLM instance
         try:
             return self.get_llm(model_name, model_config)
@@ -709,8 +709,15 @@ class AlitaClient:
 
         # add ToolExceptionHandlerMiddleware to handle tool errors with LLM messages
         error_handler = ToolExceptionHandlerMiddleware(
-            use_llm_for_errors=True,  # Enable LLM error messages
-            llm=self.get_low_tier_llm(),
+            strategies=[
+                TransformErrorStrategy(
+                    llm=self.get_low_tier_llm() or llm,
+                    use_llm=True,
+                    return_detailed_errors=True
+                ),
+                # TODO: add required callback is needed
+                LoggingStrategy(callbacks=[])
+            ],
             conversation_id=conversation_id
         )
         middleware_list.append(error_handler)

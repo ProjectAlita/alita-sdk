@@ -1,63 +1,93 @@
 """
 Tool Exception Handler Middleware
 
-Provides intelligent error handling for tool execution with:
-- LLM-powered human-readable error messages
+Provides intelligent error handling for tool execution using pluggable strategies:
+- Transform errors into human-readable messages (LLM-powered)
 - Circuit breaker pattern for repeatedly failing tools
 - Error tracking and monitoring
-- Graceful degradation strategies
+- Composable strategy pipeline
+
+Example:
+    from alita_sdk.runtime.middleware import (
+        ToolExceptionHandlerMiddleware,
+        TransformErrorStrategy,
+        CircuitBreakerStrategy,
+        LoggingStrategy
+    )
+
+    # Using factory method (recommended)
+    middleware = ToolExceptionHandlerMiddleware.create_default(
+        llm=my_llm,
+        threshold=3
+    )
+
+    # Or explicit strategies
+    middleware = ToolExceptionHandlerMiddleware(
+        strategies=[
+            LoggingStrategy(),
+            CircuitBreakerStrategy(threshold=3),
+            TransformErrorStrategy(llm=my_llm, use_llm=True)
+        ]
+    )
 """
 
 import logging
-import traceback
 from functools import wraps
-from typing import List, Optional, Dict, Any, Callable, Type, Union
+from typing import List, Optional, Dict, Any, Callable
 
-from alita_sdk.runtime.langchain.constants import FAQ_BY_TOOLKIT_TYPE
 from alita_sdk.runtime.utils.mcp_oauth import McpAuthorizationRequired
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from .base import Middleware
+from .strategies import (
+    ExceptionHandlerStrategy,
+    ExceptionContext,
+    TransformErrorStrategy,
+    CircuitBreakerStrategy,
+    LoggingStrategy
+)
 
 logger = logging.getLogger(__name__)
 
 
 class ToolExceptionHandlerMiddleware(Middleware):
     """
-    Wraps agent tools with intelligent exception handling.
+    Wraps agent tools with intelligent exception handling using pluggable strategies.
 
-    Features:
-    - LLM-powered human-readable error messages
-    - Circuit breaker to prevent repeated failures
-    - Error logging and callbacks
-    - Configurable exception handling strategies
+    Uses a strategy pattern to allow flexible error handling configurations.
+    Each strategy processes exceptions in sequence, allowing composition of
+    behaviors like logging, circuit breaking, and error transformation.
 
     Example:
         ```python
-        error_handler = ToolExceptionHandlerMiddleware(
-            conversation_id=conv_id,
-            llm=llm,  # LLM for generating human-readable errors
-            use_llm_for_errors=True,
-            circuit_breaker_threshold=5
+        # Using factory method (recommended)
+        middleware = ToolExceptionHandlerMiddleware.create_default(
+            llm=my_llm,
+            threshold=3
+        )
+
+        # Or explicit strategies
+        middleware = ToolExceptionHandlerMiddleware(
+            strategies=[
+                LoggingStrategy(),
+                CircuitBreakerStrategy(threshold=3),
+                TransformErrorStrategy(llm=my_llm, use_llm=True)
+            ]
         )
 
         assistant = client.application(
             application_id='app_123',
-            middleware=[error_handler]
+            middleware=[middleware]
         )
         ```
     """
 
     def __init__(
         self,
+        strategies: List[ExceptionHandlerStrategy],
         conversation_id: Optional[str] = None,
         callbacks: Optional[Dict[str, Callable]] = None,
-        llm: Optional[BaseChatModel] = None,
-        use_llm_for_errors: bool = True,
-        return_detailed_errors: bool = False,
-        circuit_breaker_threshold: int = 5,
         excluded_tools: Optional[List[str]] = None,
         **kwargs
     ):
@@ -65,34 +95,82 @@ class ToolExceptionHandlerMiddleware(Middleware):
         Initialize Tool Exception Handler Middleware.
 
         Args:
+            strategies: List of exception handler strategies to apply (in sequence)
             conversation_id: Conversation ID for state tracking
             callbacks: Optional dict of callback functions for events
-            llm: LLM instance for generating human-readable error messages
-            use_llm_for_errors: Use LLM to generate human-readable error messages
-            return_detailed_errors: Include stack traces in error messages (for debugging)
-            circuit_breaker_threshold: Number of consecutive failures before disabling tool
             excluded_tools: List of tool names to not wrap with error handling
         """
         super().__init__(conversation_id, callbacks, **kwargs)
 
-        self.llm = llm
-        self.use_llm_for_errors = use_llm_for_errors and llm is not None
-        self.return_detailed_errors = return_detailed_errors
-        self.circuit_breaker_threshold = circuit_breaker_threshold
-        self.excluded_tools = set(excluded_tools or [])
+        if not strategies:
+            raise ValueError(
+                "At least one strategy is required. "
+                "Use ToolExceptionHandlerMiddleware.create_default() for default configuration."
+            )
 
-        # Error tracking
-        self.error_counts: Dict[str, int] = {}  # Total errors per tool
-        self.consecutive_errors: Dict[str, int] = {}  # Consecutive errors (resets on success)
-        self.circuit_breakers: Dict[str, bool] = {}  # Circuit breaker state per tool
+        self.strategies = strategies
+        self.excluded_tools = set(excluded_tools or [])
 
         # Wrapped tools cache to avoid double-wrapping
         self._wrapped_tools_cache: Dict[str, BaseTool] = {}
 
         logger.info(
-            f"ToolExceptionHandlerMiddleware initialized: "
-            f"use_llm={self.use_llm_for_errors}, "
-            f"circuit_breaker_threshold={circuit_breaker_threshold}"
+            f"ToolExceptionHandlerMiddleware initialized with {len(strategies)} strategies: "
+            f"{[s.__class__.__name__ for s in strategies]}"
+        )
+
+    @classmethod
+    def create_default(
+        cls,
+        llm: Optional[BaseChatModel] = None,
+        threshold: int = 5,
+        use_llm: bool = True,
+        return_detailed_errors: bool = False,
+        conversation_id: Optional[str] = None,
+        callbacks: Optional[Dict[str, Callable]] = None,
+        excluded_tools: Optional[List[str]] = None,
+        **kwargs
+    ) -> "ToolExceptionHandlerMiddleware":
+        """
+        Create middleware with default strategy configuration.
+
+        This factory method provides a convenient way to create middleware
+        with standard logging, circuit breaker, and error transformation strategies.
+
+        Strategy execution order:
+        1. TransformErrorStrategy - Generates human-readable error messages (runs first)
+        2. CircuitBreakerStrategy - Checks failure threshold
+        3. LoggingStrategy - Logs both original and transformed errors (runs last)
+
+        Args:
+            llm: LLM instance for generating human-readable error messages
+            threshold: Number of consecutive failures before opening circuit breaker
+            use_llm: Whether to use LLM for error transformation
+            return_detailed_errors: Include stack traces in error messages (debug mode)
+            conversation_id: Conversation ID for state tracking
+            callbacks: Optional dict of callback functions for events
+            excluded_tools: List of tool names to not wrap with error handling
+            **kwargs: Additional arguments passed to middleware
+
+        Returns:
+            Configured ToolExceptionHandlerMiddleware instance
+        """
+        strategies = [
+            TransformErrorStrategy(
+                llm=llm,
+                use_llm=use_llm,
+                return_detailed_errors=return_detailed_errors
+            ),
+            CircuitBreakerStrategy(threshold=threshold, callbacks=callbacks),
+            LoggingStrategy(callbacks=callbacks),
+        ]
+
+        return cls(
+            strategies=strategies,
+            conversation_id=conversation_id,
+            callbacks=callbacks,
+            excluded_tools=excluded_tools,
+            **kwargs
         )
 
     def get_tools(self) -> List[BaseTool]:
@@ -133,11 +211,6 @@ When a tool fails with an error:
             logger.debug(f"Tool '{tool.name}' already wrapped, returning cached version")
             return self._wrapped_tools_cache[tool.name]
 
-        # Check circuit breaker
-        if self.circuit_breakers.get(tool.name, False):
-            logger.warning(f"Circuit breaker open for tool '{tool.name}', returning disabled version")
-            return self._create_disabled_tool(tool)
-
         # Get the original function to wrap
         original_func = self._get_tool_function(tool)
 
@@ -149,41 +222,49 @@ When a tool fails with an error:
                 # Execute original tool
                 result = original_func(*args, **kwargs)
 
-                # Success - reset consecutive error counter
-                if tool.name in self.consecutive_errors:
-                    prev_errors = self.consecutive_errors[tool.name]
-                    self.consecutive_errors[tool.name] = 0
-                    if prev_errors > 0:
-                        logger.info(f"Tool '{tool.name}' recovered after {prev_errors} consecutive errors")
+                # Check if result is a ToolException object (not raised, but returned)
+                if isinstance(result, ToolException):
+                    logger.warning(
+                        f"Tool '{tool.name}' returned ToolException object instead of raising it, raising now"
+                    )
+                    raise result
+
+                # Success - notify all strategies
+                for strategy in self.strategies:
+                    try:
+                        strategy.on_success(tool.name)
+                    except Exception as e:
+                        logger.error(
+                            f"Strategy {strategy.__class__.__name__} on_success failed: {e}"
+                        )
 
                 return result
 
             except McpAuthorizationRequired:
                 # MCP authorization required - re-raise to be handled by agent
+                # This is a cross-cutting auth concern, not delegated to strategies
                 raise
 
             except Exception as e:
-                # Track error
-                self._track_error(tool.name)
-
-                logger.error(
-                    f"Tool '{tool.name}' failed: {type(e).__name__}: {e}"
+                # Create exception context
+                context = ExceptionContext(
+                    tool=tool,
+                    error=e,
+                    args=args,
+                    kwargs=kwargs
                 )
 
-                # Fire callback
-                self._fire_callback('tool_error', {
-                    'tool_name': tool.name,
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'args': args,
-                    'kwargs': kwargs,
-                })
+                # Execute strategies in sequence
+                try:
+                    for strategy in self.strategies:
+                        context = strategy.handle_exception(context)
+                except ToolException:
+                    # Strategy raised ToolException (e.g., circuit breaker)
+                    # Re-raise as-is
+                    raise
 
-                # Check circuit breaker
-                self._check_circuit_breaker(tool.name)
-
-                # Return formatted error message
-                return self._format_error_message(tool, e, args, kwargs)
+                # Return formatted error message from context
+                return context.error_message or str(e)
 
         # Create wrapped tool with same metadata
         try:
@@ -220,238 +301,47 @@ When a tool fails with an error:
         else:
             raise ValueError(f"Cannot extract callable from tool '{tool.name}'")
 
-    def _track_error(self, tool_name: str) -> None:
-        """Track error occurrence for a tool."""
-        # Increment total error count
-        self.error_counts[tool_name] = self.error_counts.get(tool_name, 0) + 1
-
-        # Increment consecutive error count
-        self.consecutive_errors[tool_name] = self.consecutive_errors.get(tool_name, 0) + 1
-
-    def _check_circuit_breaker(self, tool_name: str) -> None:
-        """Check if circuit breaker should be opened for a tool."""
-        consecutive = self.consecutive_errors.get(tool_name, 0)
-
-        if consecutive >= self.circuit_breaker_threshold:
-            self.circuit_breakers[tool_name] = True
-            logger.error(
-                f"Circuit breaker OPENED for tool '{tool_name}' after "
-                f"{consecutive} consecutive failures"
-            )
-            self._fire_callback('circuit_breaker_opened', {
-                'tool_name': tool_name,
-                'consecutive_failures': consecutive,
-            })
-
-    def _format_error_message(
-        self,
-        tool,
-        error: Exception,
-        args: tuple,
-        kwargs: dict
-    ) -> str:
-        """
-        Format user-friendly error message, optionally using LLM.
-
-        Args:
-            tool_name: Name of failed tool
-            error: Exception that occurred
-            args: Positional arguments passed to tool
-            kwargs: Keyword arguments passed to tool
-
-        Returns:
-            Formatted error message
-        """
-        error_type = type(error).__name__
-        error_msg = str(error)
-
-        # If LLM-powered error messages are enabled, use LLM
-        if self.use_llm_for_errors:
-            try:
-                human_error = self._generate_human_readable_error(
-                    tool.name, tool.description, tool.metadata, error_type, error_msg, args, kwargs
-                )
-                if human_error:
-                    return human_error
-            except Exception as llm_error:
-                logger.warning(
-                    f"Failed to generate LLM error message: {llm_error}, falling back to default"
-                )
-
-        # Default error message format
-        base_msg = f"Tool '{tool.name}' failed"
-
-        if self.return_detailed_errors:
-            # Include full stack trace (for debugging)
-            stack_trace = ''.join(
-                traceback.format_exception(type(error), error, error.__traceback__)
-            )
-            return (
-                f"{base_msg}.\n\n"
-                f"Error Type: {error_type}\n"
-                f"Error Message: {error_msg}\n\n"
-                f"Stack Trace:\n{stack_trace}\n\n"
-                f"Arguments: args={args}, kwargs={kwargs}"
-            )
-        else:
-            # User-friendly message without stack trace
-            return (
-                f"{base_msg}.\n\n"
-                f"Error: {error_msg}\n\n"
-                f"Please check the input parameters and try again, "
-                f"or use an alternative approach."
-            )
-
-    def _generate_human_readable_error(
-        self,
-        tool_name: str,
-        tool_description: Optional[str],
-        tool_metadata: Optional[Dict[str, Any]],
-        error_type: str,
-        error_msg: str,
-        args: tuple,
-        kwargs: dict
-    ) -> Optional[str]:
-        """
-        Use LLM to generate a human-readable error message.
-
-        Args:
-            tool_name: Name of failed tool
-            error_type: Type of exception
-            error_msg: Exception message
-            args: Tool arguments
-            kwargs: Tool keyword arguments
-
-        Returns:
-            Human-readable error message, or None if generation fails
-        """
-        if not self.llm:
-            return None
-
-        try:
-            # Create prompt for LLM
-            system_prompt = """You are a helpful assistant that explains technical errors in simple terms.
-Your job is to translate technical error messages into clear, actionable guidance for users.
-
-IMPORTANT:
-- Usually the errors are related to 3rd party APIs used by the tools (don't suggest code changes)
-- If the error suggests a fix (e.g., missing or invalid parameter), reply with suggested fix
-- Avoid suggesting actions that are not related API configuration (like browser cache clearing, etc) since it is not sessions related
-
-
-Guidelines:
-- Be concise and clear
-- Explain what went wrong in simple terms
-- Suggest concrete next steps or fixes
-- Avoid technical jargon unless necessary
-- Be empathetic and helpful
-- Keep response under 150 words
-- Suggest contacting support if issue persists: https://elitea.ai/docs/support/contact-support/
-"""
-
-            user_prompt = f"""A tool called "{tool_name}" failed with the following error:
-
-Error Type: {error_type}
-Error Message: {error_msg}
-
-Tool Arguments:
-{self._format_args_for_llm(args, kwargs)}
-
-Tool Description:
-{tool_description or "N/A"}
-
-Tool Metadata:
-{tool_metadata or "N/A"}
-
-FAQ by a tool type:
-{FAQ_BY_TOOLKIT_TYPE.get(tool_metadata.get('toolkit_type') if tool_metadata else None, 'general')}
-
-Please explain this error in simple terms and suggest what the user should do next."""
-
-            # Invoke LLM
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_prompt)
-            ]
-
-            response = self.llm.invoke(messages)
-
-            # Extract content from response
-            if hasattr(response, 'content'):
-                human_error = response.content.strip()
-                logger.debug(f"Generated human-readable error for '{tool_name}': {human_error[:100]}...")
-                return human_error
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error generating human-readable message: {e}", exc_info=True)
-            return None
-
-    def _format_args_for_llm(self, args: tuple, kwargs: dict) -> str:
-        """Format tool arguments for LLM prompt."""
-        parts = []
-
-        if args:
-            # Truncate long args
-            args_str = str(args)
-            if len(args_str) > 200:
-                args_str = args_str[:200] + "..."
-            parts.append(f"Positional: {args_str}")
-
-        if kwargs:
-            # Truncate long kwargs
-            kwargs_str = str(kwargs)
-            if len(kwargs_str) > 200:
-                kwargs_str = kwargs_str[:200] + "..."
-            parts.append(f"Keyword: {kwargs_str}")
-
-        return "\n".join(parts) if parts else "(no arguments)"
-
-    def _create_disabled_tool(self, tool: BaseTool) -> BaseTool:
-        """Create a disabled version of a tool (for circuit breaker)."""
-        def disabled_func(*args, **kwargs) -> str:
-            return (
-                f"Tool '{tool.name}' is temporarily disabled due to repeated failures. "
-                f"Please use an alternative approach or contact support if the issue persists."
-            )
-
-        disabled_tool = StructuredTool.from_function(
-            func=disabled_func,
-            name=tool.name,
-            description=f"[DISABLED] {tool.description}",
-            args_schema=tool.args_schema if hasattr(tool, 'args_schema') else None,
-        )
-
-        return disabled_tool
-
     def on_conversation_start(self, conversation_id: str) -> Optional[str]:
-        """Reset error tracking on conversation start."""
+        """Reset strategy state on conversation start."""
         super().on_conversation_start(conversation_id)
 
-        # Reset error counters for new conversation
-        self.error_counts.clear()
-        self.consecutive_errors.clear()
-        self.circuit_breakers.clear()
+        # Reset all strategies
+        for strategy in self.strategies:
+            try:
+                strategy.reset()
+            except Exception as e:
+                logger.error(
+                    f"Strategy {strategy.__class__.__name__} reset failed: {e}",
+                    exc_info=True
+                )
+
+        # Clear wrapped tools cache
         self._wrapped_tools_cache.clear()
 
-        logger.info(f"Reset error tracking for conversation {conversation_id}")
+        logger.info(
+            f"Reset error handling state for conversation {conversation_id}, "
+            f"cleared {len(self.strategies)} strategies"
+        )
         return None
 
     def on_conversation_end(self, conversation_id: str) -> None:
         """Log error statistics on conversation end."""
         super().on_conversation_end(conversation_id)
 
-        if self.error_counts:
-            logger.info(
-                f"Tool error summary for conversation {conversation_id}: "
-                f"{dict(self.error_counts)}"
-            )
+        # Try to get error summary from LoggingStrategy if present
+        for strategy in self.strategies:
+            if isinstance(strategy, LoggingStrategy):
+                error_summary = strategy.get_error_summary()
+                if error_summary:
+                    logger.info(
+                        f"Tool error summary for conversation {conversation_id}: "
+                        f"{error_summary}"
+                    )
 
-            # Fire summary callback
-            self._fire_callback('conversation_error_summary', {
-                'conversation_id': conversation_id,
-                'error_counts': dict(self.error_counts),
-                'circuit_breakers': dict(self.circuit_breakers),
-            })
+                    # Fire summary callback
+                    self._fire_callback('conversation_error_summary', {
+                        'conversation_id': conversation_id,
+                        'error_counts': error_summary,
+                    })
+                break
 

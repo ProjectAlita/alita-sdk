@@ -9,21 +9,43 @@ Middleware provides modular extensions for agents, including:
 
 Available middleware:
 - PlanningMiddleware: Task planning and progress tracking
-- ToolExceptionHandlerMiddleware: Smart tool error handling with retry and LLM-powered error messages
+- ToolExceptionHandlerMiddleware: Smart tool error handling with strategies
+
+Available strategies (for ToolExceptionHandlerMiddleware):
+- TransformErrorStrategy: LLM-powered human-readable error messages
+- CircuitBreakerStrategy: Disable tools after consecutive failures
+- LoggingStrategy: Track error counts and fire callbacks
+- CompositeStrategy: Chain multiple strategies sequentially
 
 Usage:
-    from alita_sdk.runtime.middleware import PlanningMiddleware, ToolExceptionHandlerMiddleware, MiddlewareManager
+    from alita_sdk.runtime.middleware import (
+        PlanningMiddleware,
+        ToolExceptionHandlerMiddleware,
+        TransformErrorStrategy,
+        CircuitBreakerStrategy,
+        LoggingStrategy,
+        MiddlewareManager
+    )
 
-    # Create middleware
+    # Create planning middleware
     planning = PlanningMiddleware(
         conversation_id="session-123",
         connection_string="postgresql://...",
     )
 
-    error_handler = ToolExceptionHandlerMiddleware(
-        conversation_id="session-123",
+    # Create error handler with default strategies (recommended)
+    error_handler = ToolExceptionHandlerMiddleware.create_default(
         llm=llm,
-        use_llm_for_errors=True
+        threshold=3
+    )
+
+    # Or create with explicit strategies
+    error_handler = ToolExceptionHandlerMiddleware(
+        strategies=[
+            LoggingStrategy(),
+            CircuitBreakerStrategy(threshold=3),
+            TransformErrorStrategy(llm=llm, use_llm=True)
+        ]
     )
 
     # Use with MiddlewareManager for multiple middleware
@@ -39,10 +61,25 @@ Usage:
 from .base import Middleware, MiddlewareManager
 from .planning import PlanningMiddleware
 from .tool_exception_handler import ToolExceptionHandlerMiddleware
+from .strategies import (
+    ExceptionHandlerStrategy,
+    ExceptionContext,
+    TransformErrorStrategy,
+    CircuitBreakerStrategy,
+    LoggingStrategy,
+    CompositeStrategy
+)
 
 __all__ = [
     "Middleware",
     "MiddlewareManager",
     "PlanningMiddleware",
     "ToolExceptionHandlerMiddleware",
+    # Strategies
+    "ExceptionHandlerStrategy",
+    "ExceptionContext",
+    "TransformErrorStrategy",
+    "CircuitBreakerStrategy",
+    "LoggingStrategy",
+    "CompositeStrategy",
 ]
