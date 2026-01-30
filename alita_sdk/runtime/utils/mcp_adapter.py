@@ -473,11 +473,15 @@ class UnifiedMcpClient:
         # Call the tool
         logger.debug(f"[Unified MCP] Calling tool {tool_name} with args: {arguments}")
 
-        # LangChain tools can be invoked with .invoke() or ._run()
-        if hasattr(target_tool, 'invoke'):
-            result = await target_tool.invoke(arguments or {})
+        # LangChain tools can be invoked with .ainvoke() (async) or ._arun()
+        # Try async methods first since we're in an async context
+        if hasattr(target_tool, 'ainvoke'):
+            result = await target_tool.ainvoke(arguments or {})
         elif hasattr(target_tool, '_arun'):
             result = await target_tool._arun(**(arguments or {}))
+        elif hasattr(target_tool, 'invoke'):
+            # Fallback to invoke for tools that support sync (may fail for StructuredTool)
+            result = await target_tool.invoke(arguments or {})
         else:
             result = target_tool.run(**(arguments or {}))
 
