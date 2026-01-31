@@ -28,6 +28,11 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: USAGEDATA
+        run: |
+          disk_usage=$(df -BG / | tail -1)
+          echo "Disk usage percentage: $disk_usage%"
+      
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -119,7 +124,7 @@ jobs:
           
       - name: Stop docker-compose
         if: always()
-        run: docker-compose down
+        run: docker-compose down --remove-orphans
 
       - name: Generate Test Summary
         if: always()
@@ -184,7 +189,7 @@ jobs:
             ./test_execution_summary.json
             ./docker-logs.txt
             .github/ai_native/results/
-          retention-days: 30
+          retention-days: 5
 
       - name: Fail workflow if tests failed
         if: always()
@@ -199,3 +204,8 @@ jobs:
             echo "Test summary file not found"
             exit 1
           fi
+
+      - name: CLEAN UP WORKSPACE
+        if: always()
+        run: |
+          sudo rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*

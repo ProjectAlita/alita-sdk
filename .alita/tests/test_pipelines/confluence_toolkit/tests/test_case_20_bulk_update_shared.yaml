@@ -1,0 +1,220 @@
+name: "CF20 - Bulk Update Pages with Shared Body"
+description: "Verify update_pages updates multiple pages with same content applied to all pages"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_title_1:
+    type: str
+    value: "TC_22_SharedUpdate_Page1"
+  page_title_2:
+    type: str
+    value: "TC_22_SharedUpdate_Page2"
+  initial_body:
+    type: str
+    value: "<p>Initial content</p>"
+  shared_body:
+    type: str
+    value: '["<p>Shared updated content for all pages</p>"]'
+  space:
+    type: str
+    value: "AT"
+  create_result_1:
+    type: str
+  create_result_2:
+    type: str
+  page_ids:
+    type: str
+  update_result:
+    type: str
+  delete_result_1:
+    type: str
+  delete_result_2:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: setup_create_page_1
+
+nodes:
+  - id: setup_create_page_1
+    type: toolkit
+    tool: create_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - space
+      - page_title_1
+      - initial_body
+    input_mapping:
+      space:
+        type: variable
+        value: space
+      title:
+        type: variable
+        value: page_title_1
+      body:
+        type: variable
+        value: initial_body
+      status:
+        type: fixed
+        value: "current"
+      representation:
+        type: fixed
+        value: "storage"
+    output:
+      - create_result_1
+    structured_output: true
+    transition: setup_create_page_2
+
+  - id: setup_create_page_2
+    type: toolkit
+    tool: create_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - space
+      - page_title_2
+      - initial_body
+    input_mapping:
+      space:
+        type: variable
+        value: space
+      title:
+        type: variable
+        value: page_title_2
+      body:
+        type: variable
+        value: initial_body
+      status:
+        type: fixed
+        value: "current"
+      representation:
+        type: fixed
+        value: "storage"
+    output:
+      - create_result_2
+    structured_output: true
+    transition: get_page_id_1
+
+  - id: get_page_id_1
+    type: toolkit
+    tool: get_page_id_by_title
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title_1
+    input_mapping:
+      title:
+        type: variable
+        value: page_title_1
+    output:
+      - page_ids
+    structured_output: true
+
+  - id: invoke_update_pages
+    type: toolkit
+    tool: update_pages
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_ids
+      - shared_body
+    input_mapping:
+      page_ids:
+        type: variable
+        value: page_ids
+      new_contents:
+        type: variable
+        value: shared_body
+    output:
+      - update_result
+    structured_output: true
+    transition: cleanup_delete_page_1
+
+  - id: cleanup_delete_page_1
+    type: toolkit
+    tool: delete_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title_1
+    input_mapping:
+      page_title:
+        type: variable
+        value: page_title_1
+    output:
+      - delete_result_1
+    structured_output: true
+    transition: cleanup_delete_page_2
+
+  - id: cleanup_delete_page_2
+    type: toolkit
+    tool: delete_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title_2
+    input_mapping:
+      page_title:
+        type: variable
+        value: page_title_2
+    output:
+      - delete_result_2
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - create_result_1
+      - create_result_2
+      - update_result
+      - delete_result_1
+      - delete_result_2
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete workflow results.
+          
+          Create Result 1: {create_result_1}
+          Create Result 2: {create_result_2}
+          Update Result: {update_result}
+          Delete Result 1: {delete_result_1}
+          Delete Result 2: {delete_result_2}
+          
+          Perform the following checks:
+          
+          1. Confirm both pages were created successfully.
+          2. Verify the update_pages tool executed successfully.
+          3. Check if update output is a stringified list with per-page status messages.
+          4. Validate each status contains "was updated successfully".
+          5. Confirm that single shared body was applied to all pages.
+          6. Count the number of pages updated (should be 2).
+          7. Confirm both pages were deleted successfully in cleanup.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if all pages created, updated with shared body AND deleted),
+            "tool_executed": boolean (true if tool ran without errors),
+            "is_list_format": boolean (true if output is list format),
+            "pages_updated_count": integer (number of pages updated),
+            "all_successful": boolean (true if all updates successful),
+            "expected_count": 2,
+            "pages_deleted": boolean (true if both pages deleted),
+            "failed_checks": [string] // list of failed assertions
+          }}
+          
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object.
+          Do not use markdown ```json when returning the json.
+          Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
+    transition: END

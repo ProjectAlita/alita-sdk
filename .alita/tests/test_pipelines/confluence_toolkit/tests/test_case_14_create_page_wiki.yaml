@@ -1,0 +1,130 @@
+name: "CF14 - Create Page with Wiki Representation"
+description: "Verify create_page creates page with wiki (markdown) representation and returns success with page details"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  space:
+    type: str
+    value: "AT"
+  page_title:
+    type: str
+    value: "TC_14_AutoTest_Page"
+  page_body:
+    type: str
+    value: "# Test Page\n\nThis is a test page created with **markdown** representation."
+  status:
+    type: str
+    value: "current"
+  representation:
+    type: str
+    value: "wiki"
+  create_result:
+    type: str
+  delete_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_page
+
+nodes:
+  - id: invoke_create_page
+    type: toolkit
+    tool: create_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - space
+      - page_title
+      - page_body
+      - status
+      - representation
+    input_mapping:
+      space:
+        type: variable
+        value: space
+      title:
+        type: variable
+        value: page_title
+      body:
+        type: variable
+        value: page_body
+      status:
+        type: variable
+        value: status
+      representation:
+        type: variable
+        value: representation
+    output:
+      - create_result
+    structured_output: true
+    transition: cleanup_delete_page
+
+  - id: cleanup_delete_page
+    type: toolkit
+    tool: delete_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title
+    input_mapping:
+      page_title:
+        type: variable
+        value: page_title
+    output:
+      - delete_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - create_result
+      - delete_result
+      - page_title
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete workflow results.
+          
+          Create Result: {create_result}
+          Delete Result: {delete_result}
+          Page Title: {page_title}
+          
+          Perform the following checks:
+          
+          1. Confirm the create_page tool executed successfully (the result is not empty or null).
+          2. Verify the output contains success message "The page '{page_title}' was created".
+          3. Check if output includes details object with keys: title, id, space key, author, link.
+          4. Validate all required fields are present in the create response.
+          5. Confirm the page was deleted successfully in cleanup.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if page created successfully with all details AND deleted),
+            "tool_executed": boolean (true if tool ran without errors),
+            "has_success_message": boolean (true if success message present),
+            "has_details": boolean (true if details object with required keys present),
+            "page_created": boolean (true if page was created),
+            "page_deleted": boolean (true if page was deleted in cleanup),
+            "failed_checks": [string] // list of failed assertions
+          }}
+          
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object.
+          Do not use markdown ```json when returning the json.
+          Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
+    transition: END

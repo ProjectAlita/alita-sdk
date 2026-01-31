@@ -177,7 +177,7 @@ nodes:
         all_ok = bool(get_commits_ok and diff_valid)
 
         test_results = {
-            "test_passed": all_ok,
+            "test_passed": False,
             "operations": {
                 "get_commits": get_commits_ok,
                 "get_commits_diff": diff_valid
