@@ -360,8 +360,12 @@ class SuiteResult:
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, default=str)
 
-    def to_summary(self) -> str:
-        """Generate human-readable summary."""
+    def to_summary(self, results_file: str = None) -> str:
+        """Generate human-readable summary.
+        
+        Args:
+            results_file: Optional path to results.json file for reference in error messages
+        """
         lines = [
             f"\n{'=' * 60}",
             f"Suite: {self.suite_name}",
@@ -389,7 +393,15 @@ class SuiteResult:
                     if isinstance(result, dict):
                         error_msg = result.get("tool_response") or result.get("error")
 
-            error = f"\n      Error: {error_msg[:100]}..." if error_msg else ""
+            # Display truncated error with note about full details
+            if error_msg:
+                if len(error_msg) > 200:
+                    results_ref = f" in {results_file}" if results_file else " in results.json"
+                    error = f"\n      Error: {error_msg[:200]}...\n      (See full error{results_ref})"
+                else:
+                    error = f"\n      Error: {error_msg}"
+            else:
+                error = ""
             lines.append(f"  {status} {name} ({time_str}){error}")
 
         lines.append(f"\n{'=' * 60}")
@@ -1016,7 +1028,7 @@ def main():
         if config:
             # Load env from config's env_mapping section
             for key, value in config.get("env_mapping", {}).items():
-                env_vars[key] = resolve_env_value(value, env_vars)
+                env_vars[key] = resolve_env_value(value, env_vars, env_loader=load_from_env)
             # Load composable pipeline IDs if available
             for cp in config.get("composable_pipelines", []):
                 for save_item in cp.get("save_to_env", []):
@@ -1082,7 +1094,9 @@ def main():
     if args.json:
         print(result.to_json())
     else:
-        print(result.to_summary())
+        # Pass absolute path to results file for clearer error messages
+        results_file_abs = str(Path(args.output_json).resolve()) if args.output_json else None
+        print(result.to_summary(results_file=results_file_abs))
 
     # Exit code
     if args.exit_code:

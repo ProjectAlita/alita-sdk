@@ -505,7 +505,7 @@ def invoke_toolkit_tool(ctx: SetupContext, toolkit_id: int, tool_name: str, para
             return {"success": True, "result": tool_result}
         return {"success": True, "result": result}
     else:
-        return {"success": False, "error": response.text[:500]}
+        return {"success": False, "error": response.text}
 
 
 # =============================================================================

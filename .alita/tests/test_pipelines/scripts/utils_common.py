@@ -227,12 +227,10 @@ def resolve_env_value(value: Any, env_substitutions: dict, env_loader: Optional[
             if env_loader:
                 env_value = env_loader(var_name)
                 if env_value:
-                    logger.debug(f"Resolved environment variable '{var_name}' from env loader")
                     return env_value
             else:
                 env_value = os.environ.get(var_name)
                 if env_value:
-                    logger.debug(f"Resolved environment variable '{var_name}' from OS environment")
                     return env_value
             
             # Fall back to default
