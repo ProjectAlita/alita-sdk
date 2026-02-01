@@ -187,7 +187,7 @@ def invoke_toolkit_tool(ctx: CleanupContext, toolkit_id: int, tool_name: str, pa
             return {"success": True, "result": tool_result}
         return {"success": True, "result": result}
     else:
-        return {"success": False, "error": response.text[:500]}
+        return {"success": False, "error": response.text}
 
 
 def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:

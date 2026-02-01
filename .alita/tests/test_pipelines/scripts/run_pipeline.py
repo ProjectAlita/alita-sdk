@@ -177,7 +177,7 @@ def process_pipeline_result(
                     if isinstance(content, str) and ("Error executing code: [Errno 7]" in content or "[Errno 7] Argument list too long" in content):
                          test_passed = False
                          detected_error = "Content too large: The data payload exceeded system limits. Consider reducing the amount of data being processed."
-                         output = {"error": detected_error, "raw_content": content[:500]}
+                         output = {"error": detected_error, "raw_content": content}
                          break
 
                     if isinstance(content, str) and content.startswith("{"):
@@ -373,7 +373,7 @@ def execute_pipeline(
 
     # Handle HTTP errors
     if response.status_code not in (200, 201):
-        error_text = response.text[:500] if response.text else "No response body"
+        error_text = response.text if response.text else "No response body"
         return PipelineResult(
             success=False,
             pipeline_id=pipeline_id,
