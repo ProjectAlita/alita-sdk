@@ -37,6 +37,37 @@ from ..tools.router import RouterNode
 
 logger = logging.getLogger(__name__)
 
+
+def normalize_message_content(content: Any) -> str:
+    """
+    Normalize message content to a string.
+
+    Handles Claude model responses which return content as a list of blocks:
+    [{'type': 'text', 'text': '...'}, {'type': 'thinking', 'thinking': '...'}]
+
+    Extracts only text blocks and joins them into a single string.
+    """
+    if content is None:
+        return ''
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Filter out thinking blocks, keep only text responses
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get('type') == 'text':
+                    text_parts.append(block.get('text', ''))
+                elif 'text' in block and 'type' not in block:
+                    # Handle simple {'text': '...'} format
+                    text_parts.append(block.get('text', ''))
+            elif isinstance(block, str):
+                text_parts.append(block)
+        return ''.join(text_parts)
+    # Fallback for other types
+    return str(content)
+
+
 # Global registry for subgraph definitions
 # Structure: {'subgraph_name': {'yaml': 'yaml_def', 'tools': [tools], 'flattened': False}}
 SUBGRAPH_REGISTRY: Dict[str, Dict[str, Any]] = {}
@@ -196,18 +227,9 @@ Answer only with step name, no need to add descrip in case none of the steps are
             self.prompt.format(steps=self.steps, description=safe_format(self.description, state), additional_info=additional_info)))
         completion = self.client.invoke(decision_input)
 
-        # skip thinking steps if any
+        # skip thinking steps if any, normalize content from Claude's list format
         if hasattr(completion, 'content'):
-            if isinstance(completion.content, list):
-                # Filter out thinking blocks, keep only text responses
-                text_content = ''.join(
-                    block.get('text', '')
-                    for block in completion.content
-                    if isinstance(block, dict) and block.get('type') == 'text'
-                )
-                result = clean_string(text_content.strip())
-            else:
-                result = clean_string(completion.content.strip())
+            result = clean_string(normalize_message_content(completion.content).strip())
         else:
             result = clean_string(str(completion).strip())
 
@@ -1274,18 +1296,18 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # Printer completed, extract last AI message
                 messages = result['messages']
                 output = next(
-                    (msg.content for msg in reversed(messages)
+                    (normalize_message_content(msg.content) for msg in reversed(messages)
                      if not isinstance(msg, HumanMessage)),
-                    messages[-1].content
+                    normalize_message_content(messages[-1].content) if messages else None
                 ) if messages else result.get('output')
             elif printer_output is not None:
                 # Printer node has output (interrupted state)
-                output = printer_output
+                output = normalize_message_content(printer_output) if not isinstance(printer_output, str) else printer_output
             else:
                 # No printer node, extract last AI message from messages
                 messages = result.get('messages', [])
                 output = next(
-                    (msg.content for msg in reversed(messages)
+                    (normalize_message_content(msg.content) for msg in reversed(messages)
                      if not isinstance(msg, HumanMessage)),
                     None
                 )

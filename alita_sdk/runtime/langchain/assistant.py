@@ -111,9 +111,18 @@ class Assistant:
         # Lazy import to avoid circular dependency
         from ..toolkits.tools import get_tools
         version_tools = data['tools']
-        # Handle internal tools
+
+        # Handle internal tools from both locations:
+        # - Root level 'internal_tools' (used by predict_agent)
+        # - Meta level 'meta.internal_tools' (used by application agent)
         meta = data.get('meta', {})
-        if meta.get("internal_tools"):
+        internal_tools_list = data.get('internal_tools', []) or meta.get('internal_tools', [])
+
+        # Filter out mode flags that aren't actual tools
+        mode_flags = {'lazy_tools_mode'}
+        actual_internal_tools = [t for t in internal_tools_list if t not in mode_flags]
+
+        if actual_internal_tools:
             # Find bucket from artifact toolkit marked with is_attachment flag
             bucket_name = None
             for tool in version_tools:
@@ -127,11 +136,13 @@ class Assistant:
                         bucket_name = tool['settings']['bucket']
                         break
 
-            for internal_tool_name in meta.get("internal_tools"):
+            for internal_tool_name in actual_internal_tools:
                 tool_config = {"type": "internal_tool", "name": internal_tool_name, "settings": {}}
                 if bucket_name:
                     tool_config["settings"]["bucket_name"] = bucket_name
                 version_tools.append(tool_config)
+
+            logger.info(f"Added {len(actual_internal_tools)} internal tools: {actual_internal_tools}")
 
         self.tools = get_tools(
             version_tools,
