@@ -69,6 +69,8 @@ from utils_common import (
     load_project_id_from_env,
 )
 
+from logger import TestLogger
+
 from utils_local import (
     IsolatedPipelineTestRunner,
     find_tests_in_suite,
@@ -158,7 +160,7 @@ def invoke_hook_pipeline(
     hook_input: dict,
     headers: dict,
     timeout: int = 120,
-    verbose: bool = False
+    logger: Optional[TestLogger] = None
 ) -> dict:
     """Invoke a composable pipeline for a hook.
 
@@ -169,7 +171,7 @@ def invoke_hook_pipeline(
         hook_input: Input data for the pipeline
         headers: Auth headers
         timeout: Execution timeout
-        verbose: Verbose output
+        logger: Optional TestLogger instance
 
     Returns:
         dict with success status and output
@@ -186,7 +188,7 @@ def invoke_hook_pipeline(
         pipeline=pipeline,
         input_message=json.dumps(hook_input),
         timeout=timeout,
-        verbose=verbose
+        logger=logger
     )
 
     if not result.success:
@@ -197,10 +199,10 @@ def invoke_hook_pipeline(
     output_data = result.output
     extracted_output = {}
 
-    if verbose:
-        print(f"    RCA output_data type: {type(output_data).__name__}")
+    if logger:
+        logger.debug(f"RCA output_data type: {type(output_data).__name__}")
         if isinstance(output_data, dict):
-            print(f"    RCA output_data keys: {list(output_data.keys())}")
+            logger.debug(f"RCA output_data keys: {list(output_data.keys())}")
 
     if isinstance(output_data, dict):
         # Check if output is already the data we need
@@ -209,8 +211,8 @@ def invoke_hook_pipeline(
         # Otherwise extract from chat_history
         elif "chat_history" in output_data:
             chat_history = output_data.get("chat_history", [])
-            if verbose:
-                print(f"    RCA chat_history length: {len(chat_history)}")
+            if logger:
+                logger.debug(f"RCA chat_history length: {len(chat_history)}")
             # Look for the last message with our output
             for msg in reversed(chat_history):
                 if isinstance(msg, dict):
@@ -221,27 +223,27 @@ def invoke_hook_pipeline(
                             parsed = json.loads(content)
                             if isinstance(parsed, dict):
                                 extracted_output = parsed
-                                if verbose:
-                                    print(f"    RCA extracted from JSON string, keys: {list(parsed.keys())}")
+                                if logger:
+                                    logger.debug(f"RCA extracted from JSON string, keys: {list(parsed.keys())}")
                                 break
                         except json.JSONDecodeError:
                             pass
                     # Or if content is already a dict
                     elif isinstance(content, dict):
                         extracted_output = content
-                        if verbose:
-                            print(f"    RCA extracted from dict content, keys: {list(content.keys())}")
+                        if logger:
+                            logger.debug(f"RCA extracted from dict content, keys: {list(content.keys())}")
                         break
 
     # Unwrap 'result' envelope if present (from code nodes)
     if isinstance(extracted_output, dict) and "result" in extracted_output:
         if isinstance(extracted_output["result"], dict):
             extracted_output = extracted_output["result"]
-            if verbose:
-                print(f"    RCA unwrapped 'result' envelope, keys: {list(extracted_output.keys())}")
+            if logger:
+                logger.debug(f"RCA unwrapped 'result' envelope, keys: {list(extracted_output.keys())}")
 
-    if verbose:
-        print(f"    RCA extracted_output keys: {list(extracted_output.keys()) if extracted_output else 'None'}")
+    if logger:
+        logger.debug(f"RCA extracted_output keys: {list(extracted_output.keys()) if extracted_output else 'None'}")
     return {"success": True, "output": extracted_output}
 
 
@@ -253,8 +255,7 @@ def run_post_test_hooks(
     env_vars: dict,
     headers: dict,
     timeout: int = 120,
-    verbose: bool = False,
-    quiet: bool = False
+    logger: Optional[TestLogger] = None
 ) -> dict:
     """Run post-test hooks for a test result.
 
@@ -266,13 +267,11 @@ def run_post_test_hooks(
         env_vars: Environment variables for substitution
         headers: Auth headers
         timeout: Execution timeout
-        verbose: Verbose output
-        quiet: If True, send verbose output to stderr (JSON mode)
+        logger: Optional TestLogger instance
 
     Returns:
         Updated test result with hook outputs merged
     """
-    output_stream = sys.stderr if quiet else sys.stdout
     
     for hook in hooks_config:
         hook_name = hook.get("name", "unnamed")
@@ -280,18 +279,18 @@ def run_post_test_hooks(
         pipeline_id = resolve_env_value(hook.get("pipeline_id"), env_vars, env_loader=load_from_env)
 
         if not pipeline_id:
-            if verbose:
-                print(f"    Skipping hook '{hook_name}': no pipeline_id", file=output_stream)
+            if logger:
+                logger.debug(f"Skipping hook '{hook_name}': no pipeline_id")
             continue
 
         # Evaluate condition
         if not evaluate_condition(condition, result):
-            if verbose:
-                print(f"    Skipping hook '{hook_name}': condition not met", file=output_stream)
+            if logger:
+                logger.debug(f"Skipping hook '{hook_name}': condition not met")
             continue
 
-        if verbose:
-            print(f"    Running hook: {hook_name}", file=output_stream)
+        if logger:
+            logger.debug(f"Running hook: {hook_name}")
 
         # Build input from result
         input_mapping = hook.get("input_mapping", {})
@@ -301,8 +300,8 @@ def run_post_test_hooks(
         try:
             pipeline_id_int = int(pipeline_id)
         except (ValueError, TypeError):
-            if verbose:
-                print(f"    Warning: Invalid pipeline_id '{pipeline_id}'", file=output_stream)
+            if logger:
+                logger.debug(f"Warning: Invalid pipeline_id '{pipeline_id}'")
             continue
 
         hook_result = invoke_hook_pipeline(
@@ -312,18 +311,18 @@ def run_post_test_hooks(
             hook_input=hook_input,
             headers=headers,
             timeout=timeout,
-            verbose=verbose
+            logger=logger
         )
 
         if hook_result.get("success"):
             # Merge output back to result
             output_mapping = hook.get("output_mapping", {})
             result = merge_hook_output(result, hook_result.get("output", {}), output_mapping)
-            if verbose:
-                print(f"    Hook '{hook_name}' completed successfully", file=output_stream)
+            if logger:
+                logger.debug(f"Hook '{hook_name}' completed successfully")
         else:
-            if verbose:
-                print(f"    Hook '{hook_name}' failed: {hook_result.get('error')}", file=output_stream)
+            if logger:
+                logger.debug(f"Hook '{hook_name}' failed: {hook_result.get('error')}")
 
     return result
 
@@ -548,11 +547,10 @@ def run_suite(
     input_message: str = "",
     timeout: int = 120,
     parallel: int = 1,
-    verbose: bool = False,
+    logger: Optional[TestLogger] = None,
     config: dict = None,
     env_vars: dict = None,
     headers: dict = None,
-    quiet: bool = False,
 ) -> SuiteResult:
     """Execute multiple pipelines and aggregate results.
 
@@ -564,11 +562,10 @@ def run_suite(
         input_message: Input message for pipelines
         timeout: Execution timeout per pipeline
         parallel: Number of parallel executions
-        verbose: Verbose output
+        logger: Optional TestLogger instance for logging
         config: Suite config.yaml (optional, for hooks)
         env_vars: Environment variables for hook substitution
         headers: Auth headers (for hook pipeline invocation)
-        quiet: Suppress stdout output (useful for JSON mode)
     """
     start_time = time.time()
     suite = SuiteResult(suite_name=suite_name, total=len(pipelines))
@@ -580,9 +577,8 @@ def run_suite(
     if config:
         hooks = config.get("hooks", {})
         post_test_hooks = hooks.get("post_test", [])
-        if post_test_hooks and verbose:
-            output_stream = sys.stderr if quiet else sys.stdout
-            print(f"Post-test hooks configured: {len(post_test_hooks)}", file=output_stream)
+        if post_test_hooks and logger:
+            logger.debug(f"Post-test hooks configured: {len(post_test_hooks)}")
 
     def execute_one(pipeline: dict) -> PipelineResult:
         return execute_pipeline(
@@ -591,8 +587,7 @@ def run_suite(
             pipeline=pipeline,
             input_message=input_message,
             timeout=timeout,
-            verbose=verbose,
-            verbose_to_stderr=quiet  # When in JSON mode, send verbose to stderr
+            logger=logger
         )
 
     results = []
@@ -609,10 +604,10 @@ def run_suite(
                     r_dict['timestamp'] = datetime.now(timezone.utc).isoformat()
                     results.append(r_dict)
                     
-                    if verbose:
+                    if logger and logger.verbose:
                         status = "PASS" if result.test_passed else "FAIL"
-                        print(f"  [{status}] {result.pipeline_name}")
-                    elif not quiet:
+                        logger.info(f"[{status}] {result.pipeline_name}")
+                    elif logger and not logger.quiet:
                         status = "\033[92m✓\033[0m" if result.test_passed else "\033[91m✗\033[0m"
                         print(f"{status} {result.pipeline_name}", flush=True)
                 except Exception as e:
@@ -628,11 +623,9 @@ def run_suite(
         for pipeline in pipelines:
             pipeline_name = pipeline.get('name', f"ID: {pipeline.get('id')}")
             
-            if verbose:
-                # In JSON mode, write verbose to stderr so stdout stays clean JSON
-                output_stream = sys.stderr if quiet else sys.stdout
-                print(f"Running: {pipeline_name}...", file=output_stream)
-            elif not quiet:
+            if logger:
+                logger.debug(f"Running: {pipeline_name}...")
+            elif logger and not logger.quiet:
                 sys.stdout.write(f"▶ {pipeline_name}...\r")
                 sys.stdout.flush()
             
@@ -653,8 +646,7 @@ def run_suite(
                     env_vars=env_vars,
                     headers=headers,
                     timeout=timeout,
-                    verbose=verbose,
-                    quiet=quiet
+                    logger=logger
                 )
                 # Check if RCA added any results
                 # Assuming RCA hook output is merged into result['test_results']['rca'] or similar
@@ -668,11 +660,10 @@ def run_suite(
             results.append(result_dict) # Store dictionary with hook results
 
             # 3. Print Result
-            if verbose:
-                output_stream = sys.stderr if quiet else sys.stdout
+            if logger and logger.verbose:
                 status = "PASS" if result.test_passed else "FAIL"
-                print(f"  [{status}] {result.execution_time:.1f}s", file=output_stream)
-            elif not quiet:
+                logger.debug(f"[{status}] {result.execution_time:.1f}s")
+            elif not logger or not logger.quiet:
                 # Clear running line
                 sys.stdout.write("\033[2K\r")
                 sys.stdout.flush()
@@ -730,8 +721,7 @@ def run_suite_local(
     suite_name: str = "Local",
     input_message: str = "",
     timeout: int = 120,
-    verbose: bool = False,
-    quiet: bool = False,
+    logger: Optional[TestLogger] = None,
 ) -> SuiteResult:
     """
     Run a suite of pipelines locally without backend.
@@ -746,8 +736,7 @@ def run_suite_local(
         suite_name: Name for the suite
         input_message: Input message for pipelines
         timeout: Execution timeout per pipeline
-        verbose: Enable verbose output
-        quiet: Suppress non-JSON output
+        logger: Optional TestLogger instance for logging
         
     Returns:
         SuiteResult with aggregated results
@@ -767,15 +756,13 @@ def run_suite_local(
         base_url="local://",  # Placeholder, not used in local mode
         project_id=0,         # Placeholder, not used in local mode
         bearer_token="",      # Not needed for local
-        verbose=verbose and not quiet,
+        verbose=logger.verbose if logger else False,
         dry_run=False,
     )
     
     # Execute setup steps using local strategy
-    if not quiet and verbose:
-        print(f"\n{'='*60}")
-        print("Executing local setup...")
-        print('='*60)
+    if logger:
+        logger.section("Executing local setup...")
     
     setup_result = execute_setup(
         config=config,
@@ -785,8 +772,8 @@ def run_suite_local(
     )
     
     if not setup_result.get("success"):
-        if not quiet:
-            print(f"Error: Local setup failed: {setup_result}")
+        if logger:
+            logger.error(f"Local setup failed: {setup_result}")
         suite.errors = 1
         suite.execution_time = time.time() - start_time
         return suite
@@ -797,27 +784,27 @@ def run_suite_local(
     # Get tools created by local strategy
     tools = local_strategy.get_tools()
     
-    if not quiet and verbose:
-        print(f"Setup completed. Env vars: {list(env_vars.keys())}")
-        print(f"Created {len(tools)} toolkit tools")
+    if logger:
+        logger.info(f"Setup completed. Env vars: {list(env_vars.keys())}")
+        logger.info(f"Created {len(tools)} toolkit tools")
     
     if not tools:
-        if not quiet:
-            print("Warning: No toolkit tools were created during setup")
+        if logger:
+            logger.warning("No toolkit tools were created during setup")
     
     # Create runner with pre-created tools from strategy
     runner = IsolatedPipelineTestRunner(
         tools=tools,  # Pass pre-created tools from strategy
         env_vars=env_vars,  # Pass setup env_vars for substitution
-        verbose=verbose and not quiet,
+        verbose=logger.verbose if logger else False,
     )
     
     # Run all tests
     for test_file in test_files:
-        if not quiet:
-            print(f"\n{'='*60}")
-            print(f"Running: {test_file.name}")
-            print('='*60)
+        if logger:
+            logger.separator()
+            logger.info(f"Running: {test_file.name}")
+            logger.separator()
         
         result = runner.run_test(
             test_yaml_path=str(test_file),
@@ -832,24 +819,24 @@ def run_suite_local(
         # Update counters
         if result.error or not result.success:
             suite.errors += 1
-            if not quiet:
-                print(f"💥 EXECUTION ERROR: {result.error}")
+            if logger:
+                logger.error(f"EXECUTION ERROR: {result.error}")
         elif result.test_passed is False:
             suite.failed += 1
-            if not quiet:
-                print("❌ TEST FAILED")
+            if logger:
+                logger.error("TEST FAILED")
         elif result.test_passed is True:
             suite.passed += 1
-            if not quiet:
-                print("✅ TEST PASSED")
+            if logger:
+                logger.success("TEST PASSED")
         else:
             # success=True but test_passed=None means execution succeeded, treat as passed
             suite.passed += 1
-            if not quiet:
-                print("✅ TEST PASSED")
+            if logger:
+                logger.success("TEST PASSED")
         
-        if not quiet and result.execution_time > 0:
-            print(f"Execution time: {result.execution_time:.2f}s")
+        if logger and result.execution_time > 0:
+            logger.info(f"Execution time: {result.execution_time:.2f}s")
     
     suite.execution_time = time.time() - start_time
     return suite
@@ -1050,9 +1037,11 @@ def main():
             print(f"Error: {error_msg}")
         sys.exit(1)
 
-    if args.verbose:
-        output_stream = sys.stderr if args.json else sys.stdout
-        print(f"Found {len(pipelines)} pipeline(s) to execute", file=output_stream)
+    # Create logger instance
+    logger = TestLogger(verbose=args.verbose, quiet=args.json) if args.verbose or not args.json else None
+
+    if logger:
+        logger.info(f"Found {len(pipelines)} pipeline(s) to execute")
 
     # ========================================
     # EXECUTION: Local vs Remote
@@ -1065,8 +1054,7 @@ def main():
             suite_name=suite_name,
             input_message=args.input,
             timeout=args.timeout,
-            verbose=args.verbose,
-            quiet=args.json,
+            logger=logger,
         )
     else:
         result = run_suite(
@@ -1077,11 +1065,10 @@ def main():
             input_message=args.input,
             timeout=args.timeout,
             parallel=args.parallel,
-            verbose=args.verbose,
+            logger=logger,
             config=config,
             env_vars=env_vars,
             headers=headers,
-            quiet=args.json,
         )
 
     # Output results

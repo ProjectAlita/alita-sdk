@@ -57,6 +57,8 @@ from delete_pipelines import delete_pipeline, list_pipelines
 # Import shared pattern matching utilities
 from pattern_matcher import matches_pattern
 
+from logger import TestLogger
+
 
 class CleanupContext:
     """Context for cleanup execution, holds state and environment."""
@@ -69,6 +71,7 @@ class CleanupContext:
         verbose: bool = False,
         dry_run: bool = False,
         quiet: bool = False,
+        logger: TestLogger = None,
     ):
         self.base_url = base_url
         self.project_id = project_id
@@ -76,6 +79,7 @@ class CleanupContext:
         self.verbose = verbose
         self.dry_run = dry_run
         self.quiet = quiet
+        self.logger = logger
         self.env_vars: dict[str, Any] = {}
         self.cleanup_stats = {"deleted": 0, "failed": 0, "skipped": 0}
 
@@ -87,15 +91,21 @@ class CleanupContext:
         return headers
 
     def log(self, message: str, level: str = "info"):
-        """Log a message if verbose mode is enabled or it's an error/warning."""
-        if self.quiet and level not in ("error"):
-             return
-
-        if self.verbose:
+        """Log a message using the unified logger or fallback to print."""
+        if self.logger:
+            if level == "success":
+                self.logger.success(message)
+            elif level == "error":
+                self.logger.error(message)
+            elif level == "warning":
+                self.logger.warning(message)
+            else:  # info
+                self.logger.info(message)
+        elif self.quiet and level not in ("error"):
+            return
+        elif self.verbose or level in ("error", "warning"):
             prefix = {"info": "  ", "success": "  ✓", "error": "  ✗", "warning": "  ⚠"}
             print(f"{prefix.get(level, '  ')} {message}")
-        elif level in ("error", "warning"):
-             print(f"{message}")
 
 
 # =============================================================================
@@ -483,17 +493,21 @@ def run(
     skip_toolkit: bool = False,
     skip_composable: bool = False,
     quiet: bool = False,
-    yes: bool = True
+    yes: bool = True,
+    logger: TestLogger = None,
 ) -> dict:
     """Run cleanup programmatically."""
+    # Create logger if not provided
+    if logger is None:
+        logger = TestLogger(verbose=verbose, quiet=quiet)
+    
     # Set custom env file if provided
     if env_file:
         env_file_path = Path(env_file)
         if not env_file_path.exists():
             raise FileNotFoundError(f"Env file not found: {env_file}")
         set_env_file(env_file_path)
-        if not quiet:
-            print(f"Loading environment from: {env_file}")
+        logger.info(f"Loading environment from: {env_file}")
 
     # Parse suite specification and resolve paths
     folder_name, pipeline_file = parse_suite_spec(folder)
@@ -533,7 +547,8 @@ def run(
         bearer_token=bearer_token or "",
         verbose=verbose,
         dry_run=dry_run,
-        quiet=quiet
+        quiet=quiet,
+        logger=logger,
     )
 
     # Pre-populate env vars from config's env section if present
@@ -554,20 +569,18 @@ def run(
                     if env_value and var_name not in ctx.env_vars:
                         ctx.env_vars[var_name] = env_value
     
-    if not quiet:
-        print(f"Cleanup: {config.get('name', folder)}")
-        print(f"Target: {base_url} (Project: {project_id})")
-        if dry_run:
-            print("[DRY RUN MODE]")
-        if skip_steps:
-            print(f"Skipping: {', '.join(skip_steps)}")
-        print("=" * 60)
+    logger.section(f"Cleanup: {config.get('name', folder)}")
+    logger.info(f"Target: {base_url} (Project: {project_id})")
+    if dry_run:
+        logger.info("[DRY RUN MODE]")
+    if skip_steps:
+        logger.info(f"Skipping: {', '.join(skip_steps)}")
 
     # Confirmation
     if not dry_run and not yes:
         confirm = input("\nProceed with cleanup? [y/N]: ")
         if confirm.lower() != "y":
-            print("Aborted.")
+            logger.info("Aborted.")
             sys.exit(0)
 
     # Execute cleanup
@@ -602,15 +615,15 @@ def main():
 
     args = parser.parse_args()
 
+    # Create logger
+    logger = TestLogger(verbose=args.verbose, quiet=args.json)
+
     # In local mode, there are no backend resources to clean up
     if args.local:
-        if args.verbose:
-            print("[LOCAL MODE] No backend resources to clean up")
+        logger.info("[LOCAL MODE] No backend resources to clean up")
         results = {"success": True, "steps": [], "message": "Local mode - no cleanup needed"}
         if args.json:
             print(json.dumps(results, indent=2))
-        else:
-            print("Local mode - no backend resources to clean up")
         sys.exit(0)
 
     try:
@@ -627,25 +640,20 @@ def main():
             skip_toolkit=args.skip_toolkit,
             skip_composable=args.skip_composable,
             yes=args.yes,
-            quiet=False
+            quiet=False,
+            logger=logger,
         )
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"Error: {e}")
         sys.exit(1)
 
     # Output results
-    print("\n" + "=" * 60)
-    print("Cleanup Results")
-    print("=" * 60)
-
     if args.json:
         print(json.dumps(results, indent=2, default=str))
-    else: # Re-use the stats from the function return logic if possible, or print from results.
-        # But wait, run() returns the results dict.
-        # So I need to parse the results dict for display.
+    else:
+        logger.section("Cleanup Results")
         
-        # We need to access ctx.cleanup_stats, but ctx is local to run().
-        # However, we can re-calculate stats from results['steps']
+        # Re-calculate stats from results['steps']
         stats = {"deleted": 0, "failed": 0, "skipped": 0}
         
         for step in results["steps"]:
@@ -669,12 +677,12 @@ def main():
                 else:
                     stats["failed"] += 1 # The step itself failed
 
-            print(f"  {status} {step['name']}{detail}")
+            logger.info(f"{status} {step['name']}{detail}")
 
-        print(f"\nSummary:")
-        print(f"  Deleted: {stats['deleted']}")
-        print(f"  Failed: {stats['failed']}")
-        print(f"  Skipped: {stats['skipped']}")
+        logger.info("\nSummary:")
+        logger.info(f"Deleted: {stats['deleted']}")
+        logger.info(f"Failed: {stats['failed']}")
+        logger.info(f"Skipped: {stats['skipped']}")
 
     # Exit with appropriate code
     if not results["success"]:
