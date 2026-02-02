@@ -14,6 +14,7 @@ from .constants import (
     DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
     SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS
 )
+from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
 from ..middleware.base import Middleware, MiddlewareManager
 
 logger = logging.getLogger(__name__)
@@ -155,7 +156,8 @@ class Assistant:
         self._always_bind_tools = []  # Tools to always bind directly (not via ToolRegistry)
         if middleware:
             for mw in middleware:
-                self.middleware_manager.add(mw)
+                if not isinstance(mw, ToolExceptionHandlerMiddleware):
+                    self.middleware_manager.add(mw)
             # Get tools from all middleware - these are always-bind tools
             middleware_tools = self.middleware_manager.get_all_tools()
             if middleware_tools:
@@ -173,7 +175,6 @@ class Assistant:
                     logger.info(f"Middleware context: {context_messages}")
 
             # Apply tool wrapping from ToolExceptionHandlerMiddleware if present
-            from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
             exception_handlers = [mw for mw in middleware if isinstance(mw, ToolExceptionHandlerMiddleware)]
             if exception_handlers:
                 # Validate only one exception handler is present
