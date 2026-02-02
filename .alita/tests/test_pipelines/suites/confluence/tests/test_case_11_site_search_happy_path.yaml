@@ -1,0 +1,83 @@
+name: "CF11 - Site Search (Happy Path)"
+priority: Critical
+description: |
+  Verify `site_search` tool performs site-wide search and returns page data with preview text.
+
+  Objective: Ensure search returns matching pages with complete data structure.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Returns one or more page entries with `page_id`, `page_title`, `page_url`, and `preview` fields.
+  - Results are formatted as string with entries separated by '---'.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  query:
+    type: str
+    value: "test"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_site_search
+
+nodes:
+  - id: invoke_site_search
+    type: toolkit
+    tool: site_search
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - query
+    input_mapping:
+      query:
+        type: variable
+        value: query
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - query
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'site_search' tool.
+
+          Tool Result: {tool_result}
+          Query: {query}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or an error message starting with "Unable to find").
+          2. Verify the output contains page data with fields 'page_id', 'page_title', 'page_url', and 'preview'.
+          3. Check that results are formatted as string with entries separated by '---'.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

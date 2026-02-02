@@ -116,6 +116,7 @@ def process_pipeline_result(
     version_id: Optional[int] = None,
     execution_time: float = 0.0,
     logger: Optional[TestLogger] = None,
+    verbose: bool = False,
 ) -> PipelineResult:
     """
     Process raw pipeline output into a structured PipelineResult.
@@ -131,6 +132,7 @@ def process_pipeline_result(
         version_id: Optional version ID
         execution_time: Time taken for execution
         logger: Optional TestLogger instance for verbose logging
+        verbose: Whether to enable verbose output (ignored, for compatibility)
         
     Returns:
         PipelineResult with extracted test results and metadata

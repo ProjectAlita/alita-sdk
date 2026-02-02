@@ -1,0 +1,89 @@
+name: "JR08 - Modify Labels (Remove Labels)"
+priority: High
+description: |
+  Verify `modify_labels` tool removes labels from JIRA issue.
+
+  Objective: Ensure tool can remove labels from existing issue.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Labels are removed from the issue.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_key:
+    type: str
+    value: ${JIRA_TEST_ISSUE}
+  remove_labels:
+    type: list
+    value: ["test-automation"]
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_modify_labels
+
+nodes:
+  - id: invoke_modify_labels
+    type: toolkit
+    tool: modify_labels
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_key
+      - remove_labels
+    input_mapping:
+      issue_key:
+        type: variable
+        value: issue_key
+      add_labels:
+        type: fixed
+        value: null
+      remove_labels:
+        type: variable
+        value: remove_labels
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'modify_labels' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or null).
+          2. Verify result indicates label modification was successful.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

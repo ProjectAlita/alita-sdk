@@ -1,0 +1,81 @@
+name: "CF18 - Create Pages (Single Page in Batch)"
+priority: High
+description: |
+  Verify `create_pages` tool creates a single page using batch interface.
+
+  Objective: Ensure tool handles edge case of single-page batch creation.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Creates single page from JSON array with one entry.
+  - Returns list with one page creation detail.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  pages_info:
+    type: str
+    value: '[{"Test Page Single ${TIMESTAMP}": "Single page content for testing"}]'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_pages
+
+nodes:
+  - id: invoke_create_pages
+    type: toolkit
+    tool: create_pages
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - pages_info
+    input_mapping:
+      pages_info:
+        type: variable
+        value: pages_info
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_pages' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty, null, or error message).
+          2. Verify the output contains exactly one page creation detail.
+          3. Check that the single page was created successfully.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

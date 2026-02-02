@@ -1,29 +1,67 @@
 # JIRA Toolkit Test Suite
 
-This directory contains a test suite for validating JIRA toolkit functionality through the Alita SDK.
+Test suite for JIRA toolkit under `alita_sdk/tools/jira/`.
 
 ## Directory Structure
 
 ```
-jira_toolkit/
-├── pipeline.yaml          # Main suite configuration
-├── tests/                 # Test case files
-│   └── test_case_01_search_issues.yaml
+jira/
+├── pipeline.yaml          # Suite configuration
+├── tests/                 # Test case files (28 tests)
+│   ├── test_case_01_search_using_jql_happy_path.yaml
+│   ├── test_case_02_search_using_jql_no_results.yaml
+│   └── ... (26 more tests)
 └── README.md
 ```
 
-## Prerequisites
+## Test Coverage
 
-1. **JIRA Credentials** - Set the following environment variables in `.env`:
-   ```bash
-   JIRA_BASE_URL=https://your-instance.atlassian.net
-   JIRA_USERNAME=your-email@example.com
-   JIRA_API_KEY=your-api-key-or-token
-   JIRA_PROJECT_KEY=TEST
-   ```
+| Tool | Test Files | Priority | Status |
+|------|------------|----------|--------|
+| search_using_jql | test_case_01, test_case_02 | Critical | ✅ Created |
+| create_issue | test_case_03, test_case_04 | Critical | ✅ Created |
+| update_issue | test_case_05, test_case_06 | Critical | ✅ Created |
+| modify_labels | test_case_07, test_case_08 | Critical | ✅ Created |
+| list_comments | test_case_09, test_case_10 | Critical | ✅ Created |
+| add_comments | test_case_11, test_case_12 | Critical | ✅ Created |
+| list_projects | test_case_13, test_case_14 | Critical | ✅ Created |
+| set_issue_status | test_case_15, test_case_16 | Critical | ✅ Created |
+| get_specific_field_info | test_case_17, test_case_18 | High | ✅ Created |
+| get_field_with_images | test_case_19, test_case_20 | High | ✅ Created |
+| get_comments_with_images | test_case_21, test_case_22 | High | ✅ Created |
+| geFull Suite Execution
 
-2. **For Cloud instances** - Use username + API key authentication
-3. **For Server/DC instances** - Use personal access token
+```bash
+cd /path/to/alita-sdk/.alita/tests/test_pipelines
+
+# Run all tests with full workflow
+./run_all_suites.sh jira
+
+# Run specific test
+./run_test.sh --all suites/jira jr01
+```
+
+### Individual Test Execution
+
+```bash
+# Run with setup and seed
+./run_test.sh --setup --seed suites/jira jr01
+
+# Run specific test (after setup)
+./run_test.sh suites/jira jr01
+
+# Run test range
+./run_test.sh suites/jira "jr0[1-5]"
+
+# Verbose output
+./run_test.sh -v suites/jira jr01
+```
+
+### Local Execution (No Backend)
+
+```bash
+# Run locally without platform
+./run_test.sh --local suites/jira jrersonal access token
 
 ## Running the Suite
 
@@ -50,26 +88,73 @@ python scripts/setup.py jira_toolkit
 
 # Seed pipelines
 python scripts/seed_pipelines.py jira_toolkit
+search_using_jql (JR01-JR02)
+- **JR01**: Happy path - search with results
+- **JR02**: Edge case - search with no results (empty result set)
 
-# Run tests
-./run_test.sh jira_toolkit case_01
-```
+### create_issue (JR03-JR04)
+- **JR03**: Happy path - create issue with required fields
+- **JR04**: Edge case - create issue with invalid project
 
-## Test Cases
+### update_issue (JR05-JR06)
+- **JR05**: Happy path - update existing issue
+- **JR06**: Edge case - update nonexistent issue
 
-### JR01 - Search Issues by JQL
-**File:** `tests/test_case_01_search_issues.yaml`
+### modify_labels (JR07-JR08)
+- **JR07**: Happy path - add labels to issue
+- **JR08**: Edge case - remove labels from issue
 
-Tests the `search_issues` tool by executing a JQL query and validating:
-- Tool returns results
-- Results contain issue keys from the expected project
-- Proper parsing of issue data
+### list_comments (JR09-JR10)
+- *Pipeline Setup
 
-**JQL Used:** `project = ${JIRA_PROJECT_KEY} ORDER BY created DESC`
+The test suite performs the following setup steps:
+
+1. **JIRA Configuration**: Creates secret with API credentials
+2. **JIRA Toolkit**: Creates/updates toolkit with base configuration
+3. **Test Issue 1**: Retrieves first issue from project (for read/update operations)
+4. **Test Issue 2**: Retrieves second issue from project (for linking operations)
+
+This ensures tests have existing issues to work with for read/update/link operations.
 
 ## Configuration
 
-### jira-config.json
+The suite uses `configs/jira-config.json` which defines:
+- Base URL and authentication
+- Cloud/Server mode
+- API version
+- Available tools and their configurations
+### get_field_with_images (JR19-JR20)
+- **JR19**: Happy path - get field containing images
+- **JR20**: Edge case - get field from invalid issue
+
+### get_comments_with_images (JR21-JR22)
+- **JR21**: Happy path - retrieve comments with embedded images
+- **JR22**: Edgetool_name_scenario.yaml
+   ```
+
+2. Use the toolkit reference structure:
+   ```yaml
+   toolkits:
+     - id: ${JIRA_TOOLKIT_ID}
+       name: ${JIRA_TOOLKIT_NAME}
+   ```
+
+3. Define nodes using toolkit type with the JIRA tool
+
+4. Available test variables:
+   - `${JIRA_TOOLKIT_ID}` - Toolkit ID
+   - `${JIRA_TOOLKIT_NAME}` - Toolkit name
+   - `${JIRA_PROJECT}` - Project key
+   - `${JIRA_TEST_ISSUE}` - First test issue key
+   - `${JIRA_TEST_ISSUE_2}` - Second test issue key
+   - `${TIMESTAMP}` - Current timestamp
+
+## Notes
+
+- All test validations are derived from actual tool implementations
+- Tests use existing issues from the configured JIRA project
+- Write operations (create/update) use timestamp-based unique identifiers
+- Test isolation: Each test uses only setup artifacts, no cross-test dependencies
 Located at `../configs/jira-config.json`, this file defines:
 - Base URL
 - Cloud/Server mode

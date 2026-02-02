@@ -1,0 +1,93 @@
+name: "JR09 - List Comments (Happy Path)"
+priority: Critical
+description: |
+  Verify `list_comments` tool retrieves comments from JIRA issue.
+
+  Objective: Ensure tool can list comments on existing issue.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Returns comment data or empty list if no comments.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_key:
+    type: str
+    value: ${JIRA_TEST_ISSUE}
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_comments
+
+nodes:
+  - id: invoke_list_comments
+    type: toolkit
+    tool: list_comments
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_key
+    input_mapping:
+      issue_key:
+        type: variable
+        value: issue_key
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_comments' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or null).
+          2. Result contains comment data - can be:
+             - A list/array of comments
+             - A JSON string with comments
+             - A message indicating "no comments" or empty list (still valid)
+             - Any structured data about comments
+
+          PASS if:
+          - Tool returned without error
+          - Result is not null/empty
+          - Data structure indicates successful query (even if no comments exist)
+
+          FAIL if:
+          - Error occurred
+          - Result is null or empty
+          - Tool failed to execute
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

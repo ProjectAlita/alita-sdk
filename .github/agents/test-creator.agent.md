@@ -384,6 +384,13 @@ execution:
   test_directory: tests
   test_pattern: "test_case_*.yaml"
   parallel: false
+  substitutions:
+    TOOLKIT_ID: ${TOOLKIT_ID}
+    TOOLKIT_NAME: ${TOOLKIT_NAME}
+    TIMESTAMP: ${TIMESTAMP}
+    # Add other substitution variables from setup stage
+    # TEST_BRANCH: ${TEST_BRANCH}
+    # TEST_ISSUE: ${TEST_ISSUE}
 
 # Cleanup stage - remove created artifacts
 cleanup:

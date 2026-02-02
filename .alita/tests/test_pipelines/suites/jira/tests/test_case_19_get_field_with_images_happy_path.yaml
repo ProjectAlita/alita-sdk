@@ -1,0 +1,86 @@
+name: "JR19 - Get Field with Image Descriptions (Happy Path)"
+priority: Critical
+description: |
+  Verify `get_field_with_image_descriptions` tool retrieves field with image processing.
+
+  Objective: Ensure tool can get field and process images in it.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Returns field content with image descriptions.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_key:
+    type: str
+    value: ${JIRA_TEST_ISSUE}
+  field_name:
+    type: str
+    value: "description"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_field_with_images
+
+nodes:
+  - id: invoke_get_field_with_images
+    type: toolkit
+    tool: get_field_with_image_descriptions
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_key
+      - field_name
+    input_mapping:
+      jira_issue_key:
+        type: variable
+        value: issue_key
+      field_name:
+        type: variable
+        value: field_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_field_with_image_descriptions' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or null).
+          2. Result should contain field content or image descriptions.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

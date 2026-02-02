@@ -28,6 +28,7 @@
     "get_page_with_image_descriptions",
     "execute_generic_confluence",
     "get_page_id_by_title",
-    "get_page_attachments"
+    "get_page_attachments",
+    "add_file_to_page"
   ]
 }
