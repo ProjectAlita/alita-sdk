@@ -47,6 +47,8 @@ from utils_common import (
     write_env_vars_to_file,
 )
 
+from logger import TestLogger
+
 
 DEFAULT_BASE_URL = "http://192.168.68.115"
 DEFAULT_PROJECT_ID = 2
@@ -116,7 +118,7 @@ def seed_composable_pipelines(
     session_cookie: str = None,
     bearer_token: str = None,
     dry_run: bool = False,
-    verbose: bool = False,
+    logger: TestLogger = None,
 ) -> dict:
     """Seed composable pipelines defined in config.yaml.
 
@@ -134,7 +136,7 @@ def seed_composable_pipelines(
         session_cookie: Session cookie for auth
         bearer_token: Bearer token for auth
         dry_run: If True, don't actually create pipelines
-        verbose: If True, print detailed output
+        logger: Optional TestLogger instance
 
     Returns:
         dict with seeded pipeline info and updated env_substitutions
@@ -143,8 +145,8 @@ def seed_composable_pipelines(
     if not composable_pipelines:
         return {"success": True, "pipelines": [], "env_substitutions": env_substitutions, "generated_env_vars": {}}
 
-    print(f"\nSeeding {len(composable_pipelines)} composable pipeline(s)...")
-    print("-" * 40)
+    if logger:
+        logger.section(f"Seeding {len(composable_pipelines)} composable pipeline(s)")
 
     results = {
         "success": True,
@@ -157,7 +159,8 @@ def seed_composable_pipelines(
     for cp_config in composable_pipelines:
         file_path = cp_config.get("file")
         if not file_path:
-            print("  Warning: Composable pipeline missing 'file' key, skipping")
+            if logger:
+                logger.warning("Composable pipeline missing 'file' key, skipping")
             continue
 
         # Resolve relative path from suite folder
@@ -171,7 +174,8 @@ def seed_composable_pipelines(
             yaml_path = (script_dir / file_path.lstrip("./")).resolve()
 
         if not yaml_path.exists():
-            print(f"  Warning: Composable pipeline file not found: {file_path}")
+            if logger:
+                logger.warning(f"Composable pipeline file not found: {file_path}")
             continue
 
         # Build substitutions for this composable pipeline
@@ -181,14 +185,16 @@ def seed_composable_pipelines(
 
         # Parse and seed the pipeline
         pipeline_data = parse_pipeline_yaml(yaml_path, env_substitutions=cp_env)
-        print(f"\n[composable] {pipeline_data['name']}")
+        if logger:
+            logger.info(f"[composable] {pipeline_data['name']}")
 
         if dry_run:
             payload = create_application_payload(pipeline_data, llm_settings)
-            if verbose:
-                print(f"  Payload: {json.dumps(payload, indent=2)}")
-            else:
-                print(f"  Would create: {payload['name']}")
+            if logger:
+                if logger.verbose:
+                    logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+                else:
+                    logger.info(f"Would create: {payload['name']}")
             results["pipelines"].append({
                 "file": file_path,
                 "name": pipeline_data["name"],
@@ -209,7 +215,8 @@ def seed_composable_pipelines(
             app_id = result["data"].get("id")
             version_id = result["data"].get("versions", [{}])[0].get("id")
 
-            print(f"  Created successfully (ID: {app_id})")
+            if logger:
+                logger.success(f"Created successfully (ID: {app_id})")
 
             # Link toolkits if any are defined
             toolkit_ids = pipeline_data.get("toolkit_ids", [])
@@ -225,9 +232,11 @@ def seed_composable_pipelines(
                         bearer_token=bearer_token,
                     )
                     if link_result.get("success"):
-                        print(f"    Linked toolkit {toolkit_id}")
+                        if logger:
+                            logger.info(f"  Linked toolkit {toolkit_id}")
                     else:
-                        print(f"    Failed to link toolkit {toolkit_id}: {link_result.get('error', 'Unknown error')}")
+                        if logger:
+                            logger.warning(f"  Failed to link toolkit {toolkit_id}: {link_result.get('error', 'Unknown error')}")
 
             # Save to env_substitutions if save_to_env is defined
             for save_item in cp_config.get("save_to_env", []):
@@ -238,7 +247,8 @@ def seed_composable_pipelines(
                     if extracted is not None:
                         results["env_substitutions"][key] = extracted
                         results["generated_env_vars"][key] = extracted  # Track as generated
-                        print(f"    Saved {key}={extracted}")
+                        if logger:
+                            logger.info(f"  Saved {key}={extracted}")
 
             results["pipelines"].append({
                 "file": file_path,
@@ -247,7 +257,14 @@ def seed_composable_pipelines(
                 "version_id": version_id,
             })
         else:
-            print(f"  FAILED: {result.get('status_code', 'N/A')} - {result.get('error', 'Unknown error')}")
+            error_text = result.get('error', 'Unknown error')
+            status_code = result.get('status_code', 'N/A')
+            if logger:
+                logger.http_error(
+                    status_code=status_code if isinstance(status_code, int) else 0,
+                    response_text=error_text,
+                    context=f"seeding composable pipeline {pipeline_data['name']}"
+                )
             results["success"] = False
             results["pipelines"].append({
                 "file": file_path,
@@ -379,7 +396,7 @@ def get_version_name() -> str:
         - "base" for dev and local environments
         - "latest" for stage and production environments
     """
-    env_name = os.environ.get("ENV_NAME", "").lower()
+    env_name = (load_from_env("ENV_NAME") or "").lower()
     
     if env_name in ("dev", "local"):
         return "base"
@@ -513,8 +530,7 @@ def run(
     temperature: float = 0.1,
     github_toolkit_id: int | None = None,
     dry_run: bool = False,
-    verbose: bool = False,
-    quiet: bool = False,
+    logger: TestLogger = None,
     local: bool = False,
 ) -> dict:
     """Run seed pipelines programmatically.
@@ -531,15 +547,14 @@ def run(
         temperature: Model temperature
         github_toolkit_id: Override GitHub toolkit ID
         dry_run: Print payloads without sending requests
-        verbose: Print detailed output
-        quiet: Suppress non-error output
+        logger: Optional TestLogger instance
         local: Local mode - prepare pipelines locally without backend calls
     """
     # In local mode, skip backend calls (acts like dry_run for seeding)
     if local:
         dry_run = True  # Skip backend calls
-        if verbose and not quiet:
-            print("[LOCAL MODE] Skipping backend seeding, pipelines will be compiled locally")
+        if logger:
+            logger.info("[LOCAL MODE] Skipping backend seeding, pipelines will be compiled locally")
     
     # Set custom env file if provided (must be done before any load_from_env calls)
     if env_file:
@@ -547,8 +562,8 @@ def run(
         if not env_file_path.exists():
             raise FileNotFoundError(f"Env file not found: {env_file}")
         set_env_file(env_file_path)
-        if not quiet:
-            print(f"Loading environment from: {env_file}")
+        if logger:
+            logger.info(f"Loading environment from: {env_file}")
 
     # Resolve base URL and project ID from args or environment
     base_url = base_url or load_base_url_from_env() or DEFAULT_BASE_URL
@@ -651,22 +666,22 @@ def run(
                 pass
         
         yaml_files = filtered_files
-        if not quiet:
-            print(f"Filtered {original_count} -> {len(yaml_files)} test(s) matching: {pattern}")
+        if logger:
+            logger.info(f"Filtered {original_count} -> {len(yaml_files)} test(s) matching: {pattern}")
         if not yaml_files:
              raise FileNotFoundError(f"No test files match pattern(s): {pattern}")
 
     composable_count = len(config.get("composable_pipelines", [])) if config else 0
     
-    if not quiet:
-        print(f"Found {len(yaml_files)} test pipeline(s) in '{folder}'")
+    if logger:
+        logger.info(f"Found {len(yaml_files)} test pipeline(s) in '{folder}'")
         if composable_count > 0:
-            print(f"Found {composable_count} composable pipeline(s) in config.yaml")
-        print(f"Target: {base_url} (Project ID: {project_id})")
-        print(f"Auth: {auth_method}")
+            logger.info(f"Found {composable_count} composable pipeline(s) in config.yaml")
+        logger.info(f"Target: {base_url} (Project ID: {project_id})")
+        logger.info(f"Auth: {auth_method}")
         if env_substitutions:
-            print(f"Substitutions: {env_substitutions}")
-        print("-" * 60)
+            logger.debug(f"Substitutions: {env_substitutions}")
+        logger.separator()
 
     # Prepare LLM settings
     llm_settings = {
@@ -677,8 +692,8 @@ def run(
 
     # Seed composable pipelines first (so their IDs can be used by test pipelines)
     if config and config.get("composable_pipelines"):
-        if not quiet:
-            print("Seeding composable pipeline(s)...")
+        if logger:
+            logger.info("Seeding composable pipeline(s)...")
         composable_result = seed_composable_pipelines(
             config=config,
             suite_folder=folder_path,
@@ -689,32 +704,32 @@ def run(
             session_cookie=session_cookie,
             bearer_token=bearer_token,
             dry_run=dry_run,
-            verbose=verbose,
+            logger=logger,
         )
         # Update env_substitutions with IDs from composable pipelines
         env_substitutions = composable_result["env_substitutions"]
         # Merge generated vars from composable pipelines
         generated_env_vars.update(composable_result.get("generated_env_vars", {}))
 
-        if not composable_result["success"] and not quiet:
-            print("\nWarning: Some composable pipelines failed to seed")
+        if not composable_result["success"] and logger:
+            logger.warning("Some composable pipelines failed to seed")
 
     # Process each test pipeline
     results = {"success": 0, "failed": 0, "skipped": 0, "composable": composable_count, "details": []}
 
     for yaml_file in yaml_files:
         pipeline_data = parse_pipeline_yaml(yaml_file, env_substitutions=env_substitutions)
-        if not quiet:
-            print(f"\n[{yaml_file.name}] {pipeline_data['name']}")
+        if logger:
+            logger.info(f"[{yaml_file.name}] {pipeline_data['name']}")
 
         if dry_run:
             payload = create_application_payload(pipeline_data, llm_settings)
             msg = f"Would create: {payload['name']}"
-            if verbose:
+            if logger and logger.verbose:
                 msg = f"Payload: {json.dumps(payload, indent=2)}"
             
-            if not quiet:
-                print(f"  {msg}")
+            if logger:
+                logger.info(msg)
                 
             results["skipped"] += 1
             results["details"].append({"name": pipeline_data["name"], "status": "skipped", "reason": "dry_run"})
@@ -735,8 +750,8 @@ def run(
             versions = result["data"].get("versions", [])
             version_id = versions[0].get("id") if versions else None
 
-            if not quiet:
-                print(f"  Created successfully (ID: {app_id})")
+            if logger:
+                logger.success(f"Created successfully (ID: {app_id})")
 
             # Link toolkits if any are defined
             toolkit_ids = pipeline_data.get("toolkit_ids", [])
@@ -751,20 +766,25 @@ def run(
                         session_cookie=session_cookie,
                         bearer_token=bearer_token,
                     )
-                    if not quiet:
+                    if logger:
                         if link_result["success"]:
-                            print(f"    Linked toolkit {toolkit_id}")
+                            logger.info(f"  Linked toolkit {toolkit_id}")
                         else:
-                            print(f"    Failed to link toolkit {toolkit_id}: {link_result.get('error', 'Unknown error')}")
+                            logger.warning(f"  Failed to link toolkit {toolkit_id}: {link_result.get('error', 'Unknown error')}")
 
             results["success"] += 1
             results["details"].append({"name": pipeline_data["name"], "status": "created", "id": app_id})
         else:
-            error = result.get('error', 'Unknown error')
-            if not quiet:
-                print(f"  FAILED: {result.get('status_code', 'N/A')} - {error}")
+            error_text = result.get('error', 'Unknown error')
+            status_code = result.get('status_code', 'N/A')
+            if logger:
+                logger.http_error(
+                    status_code=status_code if isinstance(status_code, int) else 0,
+                    response_text=error_text,
+                    context=f"seeding test pipeline {pipeline_data['name']}"
+                )
             results["failed"] += 1
-            results["details"].append({"name": pipeline_data["name"], "status": "failed", "error": error})
+            results["details"].append({"name": pipeline_data["name"], "status": "failed", "error": error_text})
 
     # Write generated_env_vars back to .env file (for composable pipeline IDs, etc.)
     # Only persist values that were generated during seeding, not loaded from environment
@@ -824,6 +844,9 @@ def main():
 
     args = parser.parse_args()
 
+    # Create logger instance
+    logger = TestLogger(verbose=args.verbose, quiet=False)
+
     try:
         results = run(
             folder=args.folder,
@@ -837,22 +860,21 @@ def main():
             temperature=args.temperature,
             github_toolkit_id=args.github_toolkit_id,
             dry_run=args.dry_run,
-            verbose=args.verbose,
-            quiet=False,
+            logger=logger,
             local=args.local,
         )
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"{e}")
         sys.exit(1)
 
     # Summary
-    print("\n" + "=" * 60)
+    logger.separator('=', 60)
     summary_parts = [f"{results['success']} created", f"{results['failed']} failed"]
     if results["skipped"] > 0:
         summary_parts.append(f"{results['skipped']} skipped")
     if results.get("composable", 0) > 0:
         summary_parts.append(f"{results['composable']} composable")
-    print(f"Summary: {', '.join(summary_parts)}")
+    logger.info(f"Summary: {', '.join(summary_parts)}")
 
     if results["failed"] > 0:
         sys.exit(1)

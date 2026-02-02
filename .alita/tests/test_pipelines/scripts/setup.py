@@ -56,6 +56,8 @@ from utils_common import (
     load_project_id_from_env,
 )
 
+from logger import TestLogger
+
 
 class SetupContext:
     """Context for setup execution, holds state and environment."""
@@ -67,6 +69,7 @@ class SetupContext:
         bearer_token: str,
         verbose: bool = False,
         dry_run: bool = False,
+        logger: TestLogger = None,
     ):
         self.base_url = base_url
         self.project_id = project_id
@@ -75,6 +78,7 @@ class SetupContext:
         self.dry_run = dry_run
         self.env_vars: dict[str, Any] = {}
         self.created_resources: list[dict] = []
+        self.logger = logger
 
         # Add timestamp for unique naming
         self.env_vars["TIMESTAMP"] = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -87,8 +91,17 @@ class SetupContext:
         return headers
 
     def log(self, message: str, level: str = "info"):
-        """Log a message if verbose mode is enabled."""
-        if self.verbose or level in ("error", "warning"):
+        """Log a message using the unified logger or fallback to print."""
+        if self.logger:
+            if level == "success":
+                self.logger.success(message)
+            elif level == "error":
+                self.logger.error(message)
+            elif level == "warning":
+                self.logger.warning(message)
+            else:  # info
+                self.logger.info(message)
+        elif self.verbose or level in ("error", "warning"):
             prefix = {"info": "  ", "success": "  ✓", "error": "  ✗", "warning": "  ⚠"}
             print(f"{prefix.get(level, '  ')} {message}")
 
@@ -546,9 +559,10 @@ def execute_setup(
     setup_steps = config.get("setup", [])
     results = {"success": True, "steps": [], "env_vars": {}}
 
-    if not ctx.verbose and not ctx.dry_run: # If quiet mode essentially
-         pass
-    else:
+    if ctx.logger:
+        ctx.logger.section(f"Executing setup for: {config.get('name', 'unknown')}")
+        ctx.logger.info(f"Steps: {len(setup_steps)}")
+    elif ctx.verbose or ctx.dry_run:
         print(f"\nExecuting setup for: {config.get('name', 'unknown')}")
         print(f"Steps: {len(setup_steps)}")
         print("-" * 60)
@@ -641,6 +655,7 @@ def run(
     verbose: bool = False,
     quiet: bool = False,
     local: bool = False,
+    logger: TestLogger = None,
 ) -> dict:
     """Run set up programmatically.
     
@@ -655,13 +670,17 @@ def run(
         verbose: Enable verbose output
         quiet: Suppress non-error output
         local: Local mode - prepare environment without backend calls
+        logger: TestLogger instance for unified logging
     """
+    # Create logger if not provided
+    if logger is None:
+        logger = TestLogger(verbose=verbose, quiet=quiet)
+    
     # In local mode, we prepare environment but skip backend calls
     # This essentially acts like dry_run but still writes env file
     if local:
         dry_run = True  # Skip backend calls
-        if verbose:
-            print("[LOCAL MODE] Skipping backend calls, preparing local environment")
+        logger.info("[LOCAL MODE] Skipping backend calls, preparing local environment")
     
     # Load environment file if provided
     if env_file:
@@ -699,23 +718,13 @@ def run(
         bearer_token=bearer_token or "",
         verbose=verbose,
         dry_run=dry_run,
+        logger=logger,
     )
     
-    # Mute logging if quiet
-    if quiet: 
-        # Hack to silence logging unless it's error
-        original_log = ctx.log
-        def quiet_log(message, level="info"):
-            if level in ("error"):
-                 original_log(message, level)
-        ctx.log = quiet_log
-
-    if not quiet:
-        print(f"Setup: {config.get('name', folder)}")
-        print(f"Target: {base_url} (Project: {project_id})")
-        if dry_run:
-            print("[DRY RUN MODE]")
-        print("=" * 60)
+    logger.section(f"Setup: {config.get('name', folder)}")
+    logger.info(f"Target: {base_url} (Project: {project_id})")
+    if dry_run:
+        logger.info("[DRY RUN MODE]")
 
     # Execute setup
     results = execute_setup(config, ctx, suite_folder)
@@ -752,6 +761,9 @@ def main():
 
     args = parser.parse_args()
 
+    # Create logger
+    logger = TestLogger(verbose=args.verbose, quiet=args.json)
+    
     try:
         results = run(
             folder=args.folder,
@@ -764,6 +776,7 @@ def main():
             verbose=args.verbose,
             quiet=args.json,
             local=args.local,
+            logger=logger,
         )
     except Exception as e:
         if args.json:
@@ -773,28 +786,24 @@ def main():
         sys.exit(1)
 
     # Output results
-    if not args.json:
-        print("\n" + "=" * 60)
-        print("Setup Results")
-        print("=" * 60)
-
     if args.json:
         print(json.dumps(results, indent=2, default=str))
     else:
+        logger.section("Setup Results")
         for step in results["steps"]:
             status = "✓" if step.get("success") else ("⊘" if step.get("skipped") else "✗")
-            print(f"  {status} {step['name']}")
+            logger.info(f"{status} {step['name']}")
             if step.get("error"):
-                print(f"      Error: {step['error'][:100]}")
+                logger.error(f"  Error: {step['error'][:100]}")
 
-        print(f"\nEnvironment Variables:")
+        logger.info("\nEnvironment Variables:")
         for key, value in results["env_vars"].items():
             # Mask sensitive values
             display_value = value if "TOKEN" not in key.upper() else f"{str(value)[:4]}***"
-            print(f"  {key}={display_value}")
+            logger.info(f"{key}={display_value}")
         
         if args.output_env:
-             print(f"\nEnvironment written to: {args.output_env}")
+             logger.success(f"Environment written to: {args.output_env}")
 
     # Exit with appropriate code
     if not results["success"]:

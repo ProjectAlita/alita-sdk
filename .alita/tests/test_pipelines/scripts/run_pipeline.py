@@ -40,6 +40,7 @@ from pattern_matcher import matches_pattern
 
 # Import shared utilities
 from utils_common import load_from_env, load_token_from_env, load_base_url_from_env, load_project_id_from_env
+from logger import TestLogger
 
 
 @dataclass
@@ -114,7 +115,7 @@ def process_pipeline_result(
     pipeline_name: str = "Unknown",
     version_id: Optional[int] = None,
     execution_time: float = 0.0,
-    verbose: bool = False,
+    logger: Optional[TestLogger] = None,
 ) -> PipelineResult:
     """
     Process raw pipeline output into a structured PipelineResult.
@@ -129,7 +130,7 @@ def process_pipeline_result(
         pipeline_name: Name of the pipeline
         version_id: Optional version ID
         execution_time: Time taken for execution
-        verbose: Enable verbose logging
+        logger: Optional TestLogger instance for verbose logging
         
     Returns:
         PipelineResult with extracted test results and metadata
@@ -273,8 +274,31 @@ def process_pipeline_result(
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-    if verbose:
-        print(f"  Processed result - test_passed: {test_passed}")
+    if logger:
+        logger.debug(f"Processed result - test_passed: {test_passed}")
+        if test_passed is False:
+            # Log error details when test fails
+            if detected_error:
+                logger.error(f"Test failed: {detected_error}")
+            elif isinstance(output, dict):
+                # Try to extract error from output
+                error_msg = output.get("error") or output.get("error_message")
+                if error_msg:
+                    logger.error(f"Test failed: {error_msg}")
+                elif "result" in output:
+                    result = output.get("result")
+                    if isinstance(result, dict):
+                        error_msg = result.get("error") or result.get("error_message") or result.get("message")
+                        if error_msg:
+                            logger.error(f"Test failed: {error_msg}")
+                        else:
+                            logger.error(f"Test failed: {result}")
+                    else:
+                        logger.error(f"Test failed with result: {result}")
+                else:
+                    logger.error(f"Test failed with output: {output}")
+            else:
+                logger.error(f"Test failed with output: {output}")
 
     return PipelineResult(
         success=True,
@@ -294,13 +318,12 @@ def execute_pipeline(
     pipeline: dict,
     input_message: str = "",
     timeout: int = 120,
-    verbose: bool = False,
-    verbose_to_stderr: bool = False
+    logger: Optional[TestLogger] = None,
 ) -> PipelineResult:
     """Execute a pipeline using the v2 predict API (synchronous).
     
     Args:
-        verbose_to_stderr: If True and verbose is True, write verbose output to stderr
+        logger: Optional TestLogger instance for logging
     """
     start_time = time.time()
     headers = get_auth_headers(include_content_type=True)
@@ -321,9 +344,8 @@ def execute_pipeline(
     version = versions[0]  # Latest version
     version_id = version.get("id")
 
-    if verbose:
-        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
-        print(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})", file=output_stream)
+    if logger:
+        logger.debug(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})")
 
     # Use v2 predict API for synchronous execution
     predict_url = f"{base_url}/api/v2/elitea_core/predict/prompt_lib/{project_id}/{version_id}"
@@ -332,10 +354,9 @@ def execute_pipeline(
         "user_input": input_message or "execute"
     }
 
-    if verbose:
-        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
-        print(f"  POST {predict_url}", file=output_stream)
-        print(f"  Payload: {json.dumps(payload)}", file=output_stream)
+    if logger:
+        logger.debug(f"POST {predict_url}")
+        logger.debug(f"Payload: {json.dumps(payload)}")
 
     try:
         response = requests.post(
@@ -367,13 +388,21 @@ def execute_pipeline(
 
     execution_time = time.time() - start_time
 
-    if verbose:
-        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
-        print(f"  Response: {response.status_code}", file=output_stream)
+    if logger:
+        logger.debug(f"Response: {response.status_code}")
 
     # Handle HTTP errors
     if response.status_code not in (200, 201):
         error_text = response.text if response.text else "No response body"
+        
+        # Log the HTTP error with details
+        if logger:
+            logger.http_error(
+                response.status_code,
+                error_text,
+                context=f"POST {base_url}/api/v2/elitea_core/predict/prompt_lib/{pipeline_id}/{version_id}"
+            )
+        
         return PipelineResult(
             success=False,
             pipeline_id=pipeline_id,
@@ -404,7 +433,7 @@ def execute_pipeline(
         pipeline_name=pipeline_name,
         version_id=version_id,
         execution_time=execution_time,
-        verbose=verbose,
+        logger=logger,
     )
 
 
@@ -457,6 +486,9 @@ def main():
             print(f"Error: {error_msg}")
         sys.exit(1)
 
+    # Create logger instance
+    logger = TestLogger(verbose=args.verbose, quiet=args.json) if args.verbose else None
+
     # Execute pipeline
     result = execute_pipeline(
         base_url=base_url,
@@ -464,7 +496,7 @@ def main():
         pipeline=pipeline,
         input_message=args.input,
         timeout=args.timeout,
-        verbose=args.verbose
+        logger=logger
     )
 
     # Output results

@@ -1,7 +1,7 @@
 ---
 name: Test Failure Detector
 description: Diagnose test failures and perform root cause analysis
-model: GPT-4o (copilot)
+model: Claude Haiku 4.5 (copilot)
 tools: ['execute/runInTerminal', 'read', 'search', 'sequentialthinking/*', 'digitarald.agent-memory/memory', 'todo']
 handoffs:
   - label: Get Fix Proposals
