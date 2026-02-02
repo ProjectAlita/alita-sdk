@@ -22,11 +22,8 @@ class BaseAction(BaseTool):
         **kwargs: Any,
     ) -> ToolException | str:
         """Use the Confluence API to run an operation."""
-        try:
-            # Strip numeric suffix added for deduplication (_2, _3, etc.)
-            # to get the original tool name that exists in the wrapper
-            import re
-            tool_name = re.sub(r'_\d+$', '', self.name)
-            return self.api_wrapper.run(tool_name, *args, **kwargs)
-        except Exception as e:
-            return ToolException(f"An exception occurred: {e}")
+        # Strip numeric suffix added for deduplication (_2, _3, etc.)
+        # to get the original tool name that exists in the wrapper
+        import re
+        tool_name = re.sub(r'_\d+$', '', self.name)
+        return self.api_wrapper.run(tool_name, *args, **kwargs)

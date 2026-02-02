@@ -1716,7 +1716,7 @@ class GitHubClient(BaseModel):
         except ImportError as e:
             return f"Error processing code files: {str(e)}"
 
-    def list_branches_in_repo(self, repo_name: Optional[str] = None) -> str:
+    def list_branches_in_repo(self, repo_name: Optional[str] = None) -> str | ToolException:
         """
         Lists all branches in the repository.
 

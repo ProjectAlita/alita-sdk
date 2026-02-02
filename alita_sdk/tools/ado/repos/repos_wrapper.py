@@ -298,35 +298,29 @@ class ReposApiWrapper(CodeIndexerToolkit):
 
         credentials = BasicAuthentication("", token)
 
-        try:
-            # Initialize ADO Git client
-            ado_client = GitClient(base_url=organization_url, creds=credentials)
-            # Verify access to repository
-            ado_client.get_repository(repository_id, project=project)
+        # Initialize ADO Git client
+        ado_client = GitClient(base_url=organization_url, creds=credentials)
+        # Verify access to repository
+        ado_client.get_repository(repository_id, project=project)
 
-            # Store client instance
-            values["ado_client_instance"] = ado_client
+        # Store client instance
+        values["ado_client_instance"] = ado_client
 
-            def branch_exists(branch_name):
-                try:
-                    branch = ado_client.get_branch(
-                        repository_id=repository_id, name=branch_name, project=project
-                    )
-                    return branch is not None
-                except Exception:
-                    return False
+        def branch_exists(branch_name):
+            try:
+                branch = ado_client.get_branch(
+                    repository_id=repository_id, name=branch_name, project=project
+                )
+                return branch is not None
+            except Exception:
+                return False
 
-            if base_branch:
-                if not branch_exists(base_branch):
-                    raise ToolException(f"The base branch '{base_branch}' does not exist.")
-            if active_branch:
-                if not branch_exists(active_branch):
-                    raise ToolException(f"The active branch '{active_branch}' does not exist.")
-
-        except Exception as e:
-            if isinstance(e, ToolException):
-                raise
-            raise ToolException(f"Failed to connect to Azure DevOps: {e}")
+        if base_branch:
+            if not branch_exists(base_branch):
+                raise ToolException(f"The base branch '{base_branch}' does not exist.")
+        if active_branch:
+            if not branch_exists(active_branch):
+                raise ToolException(f"The active branch '{active_branch}' does not exist.")
 
         # Update values with configuration
         values["organization_url"] = organization_url

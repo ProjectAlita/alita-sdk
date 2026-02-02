@@ -336,12 +336,9 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         if artifact_id:
             # Copy mode: get raw bytes from existing artifact
             operation_type = "copy"
-            try:
-                file_bytes, _ = self.artifact.get_raw_content_by_artifact_id(artifact_id)
-                # Use the tuple but only need the bytes, filename comes from method parameter
-                filedata = file_bytes
-            except Exception as e:
-                raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
+            file_bytes, _ = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+            # Use the tuple but only need the bytes, filename comes from method parameter
+            filedata = file_bytes
 
             file_size = len(filedata) if isinstance(filedata, bytes) else 0
             source_artifact_id = artifact_id
@@ -504,46 +501,43 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         Returns:
             Success message
         """
+        sanitized_filename, was_modified = self._sanitize_filename(file_path)
+        if was_modified:
+            logging.warning(f"Filename sanitized: '{file_path}' -> '{sanitized_filename}'")
+
+        operation_type = "modify"
         try:
-            sanitized_filename, was_modified = self._sanitize_filename(file_path)
-            if was_modified:
-                logging.warning(f"Filename sanitized: '{file_path}' -> '{sanitized_filename}'")
-            
-            operation_type = "modify"
-            try:
-                self.artifact.get(artifact_name=sanitized_filename, bucket_name=bucket_name, llm=self.llm)
-                result = self.artifact.overwrite(sanitized_filename, content, bucket_name)
-                message = f"File '{sanitized_filename}' updated successfully"
-                return_msg = f"Updated file {sanitized_filename}"
-            except:
-                result = self.artifact.create(sanitized_filename, content, bucket_name)
-                operation_type = "create"
-                message = f"File '{sanitized_filename}' created successfully"
-                return_msg = f"Created file {sanitized_filename}"
+            self.artifact.get(artifact_name=sanitized_filename, bucket_name=bucket_name, llm=self.llm)
+            result = self.artifact.overwrite(sanitized_filename, content, bucket_name)
+            message = f"File '{sanitized_filename}' updated successfully"
+            return_msg = f"Updated file {sanitized_filename}"
+        except:
+            result = self.artifact.create(sanitized_filename, content, bucket_name)
+            operation_type = "create"
+            message = f"File '{sanitized_filename}' created successfully"
+            return_msg = f"Created file {sanitized_filename}"
 
-            response_data = json.loads(result)
-            if "error" in response_data:
-                raise ToolException(f"Failed to write file '{sanitized_filename}': {response_data['error']}")
+        response_data = json.loads(result)
+        if "error" in response_data:
+            raise ToolException(f"Failed to write file '{sanitized_filename}': {response_data['error']}")
 
-            artifact_id = response_data['artifact_id']
+        artifact_id = response_data['artifact_id']
 
-            dispatch_custom_event("file_modified", {
-                "message": message,
-                "artifact_id": artifact_id,
-                "filename": sanitized_filename,
-                "tool_name": "edit_file",
-                "toolkit": "artifact",
-                "operation_type": operation_type,
-                "meta": {
-                    "bucket": bucket_name or self.bucket,
-                    "file_size": len(content),
-                    "source": "generated"
-                }
-            })
+        dispatch_custom_event("file_modified", {
+            "message": message,
+            "artifact_id": artifact_id,
+            "filename": sanitized_filename,
+            "tool_name": "edit_file",
+            "toolkit": "artifact",
+            "operation_type": operation_type,
+            "meta": {
+                "bucket": bucket_name or self.bucket,
+                "file_size": len(content),
+                "source": "generated"
+            }
+        })
 
-            return return_msg
-        except Exception as e:
-            raise ToolException(f"Unable to write file {file_path}: {str(e)}")
+        return return_msg
 
     def delete_file(self, filename: str, bucket_name = None):
         # Check if file exists before attempting deletion
