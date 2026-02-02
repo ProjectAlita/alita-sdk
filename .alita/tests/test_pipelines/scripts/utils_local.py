@@ -295,7 +295,7 @@ class IsolatedPipelineTestRunner:
                 pipeline_id=0,  # Local execution has no backend ID
                 pipeline_name=path.stem,
                 execution_time=execution_time,
-                verbose=self.verbose,
+                logger=None,  # Use None - function handles it gracefully
             )
 
             logger.info(f"Execution completed in {execution_time:.2f}s")
