@@ -685,22 +685,3 @@ Use `stepback_summary_index` when user questions relate to documents in the atta
 **Process**: Assess relevance → search indexed content → review/cite sources → present findings with analysis.
 
 """
-
-FAQ_BY_TOOLKIT_TYPE = {
-    "general": [
-        {
-            "question": "How to authenticate the tool?",
-            "answer": "Follow the authentication instructions provided in the toolkit documentation (https://elitea.ai/docs/integrations/toolkits/) to set up valid credentials."
-        },
-        {
-            "question": "Token is expired",
-            "answer": "Configured way of tool authentication is no longer valid. Update toolkit's credentials with valid data per toolkit guidance."
-        }
-    ],
-    "github": [
-        {
-            "question": "Token is expired. Refresh it.",
-            "answer": "Your github token has expired and should be re-created or extended."
-        }
-    ]
-}
