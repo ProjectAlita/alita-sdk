@@ -648,8 +648,12 @@ for suite_spec in "${SUITES[@]}"; do
 
     # Calculate padding for status to align with 15 char column
     status_len=${#status}
-    status_padding=$((15 - status_len))
-    status_spaces=$(printf "%${status_padding}s" "")
+    if [ "$status_len" -lt 15 ]; then
+        status_padding=$((15 - status_len))
+        status_spaces=$(printf "%${status_padding}s" "")
+    else
+        status_spaces=""
+    fi
 
     # Format other columns
     printf -v passed_col "%-8s" "$passed"
