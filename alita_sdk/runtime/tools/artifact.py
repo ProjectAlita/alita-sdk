@@ -302,28 +302,28 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         
         return str(result) if return_as_string else result
 
-    def create_file(self, filename: str, bucket_name = None, filedata: str = None, artifact_id: str = None):
-        """Create a file in the artifact bucket from new content or by copying an existing artifact.
+    def create_file(self, filename: str, bucket_name = None, filedata: str = None, filepath: str = None):
+        """Create a file in the artifact bucket from new content or by copying an existing file.
 
         Args:
             filename: Target filename in destination bucket
             bucket_name: Destination bucket (uses default if None)
             filedata: Content for creating new files (text, JSON, CSV, etc.)
-            artifact_id: UUID of existing artifact to copy (preserves binary format)
+            filepath: Path of existing file to copy (/{bucket}/{filename} format, preserves binary)
 
-        Note: Provide EITHER filedata OR artifact_id, not both or neither.
+        Note: Provide EITHER filedata OR filepath, not both or neither.
         """
         # Validation: exactly one source must be provided
-        if filedata is None and artifact_id is None:
+        if filedata is None and filepath is None:
             raise ToolException(
-                "Must provide either 'filedata' (to create new content) or 'artifact_id' (to copy existing file). "
+                "Must provide either 'filedata' (to create new content) or 'filepath' (to copy existing file). "
                 "Both parameters cannot be empty."
             )
 
-        if filedata is not None and artifact_id is not None:
+        if filedata is not None and filepath is not None:
             raise ToolException(
-                "Cannot provide both 'filedata' and 'artifact_id'. "
-                "Use 'artifact_id' to copy existing files preserving binary format, "
+                "Cannot provide both 'filedata' and 'filepath'. "
+                "Use 'filepath' to copy existing files preserving binary format, "
                 "or 'filedata' to create new content from text/data."
             )
 
@@ -333,18 +333,18 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             logging.warning(f"Filename sanitized: '{filename}' -> '{sanitized_filename}'")
 
         # Determine operation type and get file content
-        if artifact_id:
-            # Copy mode: get raw bytes from existing artifact
+        if filepath:
+            # Copy mode: get raw bytes from existing file
             operation_type = "copy"
             try:
-                file_bytes, _ = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+                file_bytes, _ = self.artifact.get_raw_content_by_filepath(filepath)
                 # Use the tuple but only need the bytes, filename comes from method parameter
                 filedata = file_bytes
             except Exception as e:
-                raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
+                raise ToolException(f"Failed to retrieve file '{filepath}': {str(e)}")
 
             file_size = len(filedata) if isinstance(filedata, bytes) else 0
-            source_artifact_id = artifact_id
+            source_filepath = filepath
         else:
             # Create mode: use provided content
             operation_type = "create"
@@ -353,7 +353,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 filedata = self.create_xlsx_filedata(data)
 
             file_size = len(filedata) if isinstance(filedata, (str, bytes)) else 0
-            source_artifact_id = None
+            source_filepath = None
 
         create_response = self.artifact.create(sanitized_filename, filedata, bucket_name)
         
@@ -361,22 +361,22 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         if "error" in response_data:
             raise ToolException(f"Failed to create file '{sanitized_filename}': {response_data['error']}")
 
-        new_artifact_id = response_data['artifact_id']
+        new_filepath = response_data['filepath']
+        target_bucket = bucket_name or self.bucket
 
         # Build event metadata
         event_meta = {
-            "bucket": bucket_name or self.bucket,
+            "bucket": target_bucket,
             "file_size": file_size,
             "source": "generated"
         }
-        if source_artifact_id:
-            event_meta["source_artifact_id"] = source_artifact_id
+        if source_filepath:
+            event_meta["source_filepath"] = source_filepath
             event_meta["operation"] = "copy"
 
         dispatch_custom_event("file_modified", {
             "message": f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully",
-            "artifact_id": new_artifact_id,
-            "filename": filename,
+            "filepath": new_filepath,
             "tool_name": "createFile",
             "toolkit": "artifact",
             "operation_type": operation_type,
@@ -384,9 +384,9 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         })
 
         return json.dumps({
-            "artifact_id": new_artifact_id,
+            "filepath": new_filepath,
             "filename": sanitized_filename,
-            "bucket": bucket_name or self.bucket,
+            "bucket": target_bucket,
             "message": response_data.get('message',
                 f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully")
         })
@@ -525,12 +525,11 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             if "error" in response_data:
                 raise ToolException(f"Failed to write file '{sanitized_filename}': {response_data['error']}")
 
-            artifact_id = response_data['artifact_id']
+            new_filepath = response_data['filepath']
 
             dispatch_custom_event("file_modified", {
                 "message": message,
-                "artifact_id": artifact_id,
-                "filename": sanitized_filename,
+                "filepath": new_filepath,
                 "tool_name": "edit_file",
                 "toolkit": "artifact",
                 "operation_type": operation_type,
@@ -570,11 +569,10 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             raise ToolException(f"Failed to append to file '{filename}': {response_data['error']}")
 
         # Only dispatch custom event if append succeeded (not an error message)
-        artifact_id = response_data['artifact_id']
+        new_filepath = response_data['filepath']
         dispatch_custom_event("file_modified", {
-            "message": f"Data appended to file '{filename}' successfully",
-            "artifact_id": artifact_id,
-            "filename": filename,
+            "message": f"Data appended to file successfully at {new_filepath}",
+            "filepath": new_filepath,
             "tool_name": "appendData",
             "toolkit": "artifact",
             "operation_type": "modify",
@@ -586,7 +584,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         })
 
         return json.dumps({
-            "artifact_id": artifact_id,
+            "filepath": new_filepath,
             "filename": filename,
             "bucket": bucket_name or self.bucket,
             "message": response_data.get('message', "Data appended successfully")
@@ -599,12 +597,11 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         if "error" in response_data:
             raise ToolException(f"Failed to overwrite file '{filename}': {response_data['error']}")
 
-        artifact_id = response_data['artifact_id']
+        new_filepath = response_data['filepath']
 
         dispatch_custom_event("file_modified", {
-            "message": f"File '{filename}' overwritten successfully",
-            "artifact_id": artifact_id,
-            "filename": filename,
+            "message": f"File overwritten successfully at {new_filepath}",
+            "filepath": new_filepath,
             "tool_name": "overwriteData",
             "toolkit": "artifact",
             "operation_type": "modify",
@@ -616,25 +613,25 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         })
         
         return json.dumps({
-            "artifact_id": artifact_id,
+            "filepath": new_filepath,
             "filename": filename,
             "bucket": bucket_name or self.bucket,
             "message": response_data.get('message', f"File '{filename}' overwritten successfully")
         })
 
-    def get_file_type(self, artifact_id: str) -> str:
-        """Detect file type of an artifact using file content analysis.
+    def get_file_type(self, filepath: str) -> str:
+        """Detect file type of a file using file content analysis.
 
         Uses the `filetype` library to determine file type from magic bytes,
         which is more reliable than extension-based detection.
 
         Args:
-            artifact_id: UUID of the artifact to analyze
+            filepath: Path to the file (/{bucket}/{filename} format)
 
         Returns:
             JSON string with file type information:
             {
-                "artifact_id": str,
+                "filepath": str,
                 "extension": str,      # e.g., "jpg", "png", "pdf"
                 "mime": str,          # e.g., "image/jpeg", "application/pdf"
                 "status": "success" | "error",
@@ -645,20 +642,20 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             import filetype
         except ImportError:
             return json.dumps({
-                "artifact_id": artifact_id,
+                "filepath": filepath,
                 "status": "error",
                 "message": "filetype library not installed. Install with: pip install filetype"
             })
 
         try:
-            # Get raw file content using Artifact client's get_raw_content_by_artifact_id() method
-            file_content, artifact_filename = self.artifact.get_raw_content_by_artifact_id(artifact_id)
+            # Get raw file content using Artifact client's get_raw_content_by_filepath() method
+            file_content, filename = self.artifact.get_raw_content_by_filepath(filepath)
 
             if not file_content:
                 return json.dumps({
-                    "artifact_id": artifact_id,
+                    "filepath": filepath,
                     "status": "error",
-                    "message": "Artifact not found or empty"
+                    "message": "File not found or empty"
                 })
 
             # Detect file type from content first (more reliable)
@@ -669,38 +666,38 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 import mimetypes
                 from pathlib import Path
                 
-                ext = Path(artifact_filename).suffix.lower()
-                mime_type = mimetypes.guess_type(artifact_filename)[0]
+                ext = Path(filename).suffix.lower()
+                mime_type = mimetypes.guess_type(filename)[0]
                 
                 if mime_type:
                     return json.dumps({
-                        "artifact_id": artifact_id,
+                        "filepath": filepath,
                         "extension": ext.lstrip('.') if ext else "unknown",
                         "mime": mime_type,
-                        "filename": artifact_filename,
+                        "filename": filename,
                         "status": "success",
                         "message": f"File type detected from extension: {mime_type}"
                     })
                 else:
                     return json.dumps({
-                        "artifact_id": artifact_id,
-                        "filename": artifact_filename,
+                        "filepath": filepath,
+                        "filename": filename,
                         "status": "error",
                         "message": "Cannot guess file type from content or extension"
                     })
 
             return json.dumps({
-                "artifact_id": artifact_id,
+                "filepath": filepath,
                 "extension": kind.extension,
                 "mime": kind.mime,
-                "filename": artifact_filename,
+                "filename": filename,
                 "status": "success",
                 "message": f"File type detected: {kind.mime}"
             })
 
         except Exception as e:
             return json.dumps({
-                "artifact_id": artifact_id,
+                "filepath": filepath,
                 "status": "error",
                 "message": f"Error detecting file type: {str(e)}"
             })
@@ -815,11 +812,11 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 "name": "createFile",
                 "description": """Create a file in the artifact bucket. Supports two modes:
                 1. Create from content: Use 'filedata' parameter to create new files with text, JSON, CSV, or Excel data
-                2. Copy existing file: Use 'artifact_id' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
+                2. Copy existing file: Use 'filepath' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
                 
-                IMPORTANT: Provide EITHER 'filedata' OR 'artifact_id', never both or neither.
-                Use artifact_id when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
-                The artifact_id can be found in previous file_modified events in the conversation history.""",
+                IMPORTANT: Provide EITHER 'filedata' OR 'filepath', never both or neither.
+                Use filepath when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
+                The filepath can be found in previous file_modified events in the conversation history (format: /{bucket}/{filename}).""",
                 "args_schema": create_model(
                     "createFile", 
                     filename=(str, Field(description="Target filename in destination bucket")),
@@ -835,12 +832,12 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                                 ["Charlie", 35, "Los Angeles"]
                             ]
                         }
-                        Leave empty if using artifact_id to copy existing file.""",
+                        Leave empty if using filepath to copy existing file.""",
                         default=None
                     )),
-                    artifact_id=(Optional[str], Field(
-                        description="""UUID of existing artifact to copy. Use this to copy images, PDFs, or any binary files while preserving format.
-                        Find artifact_id in previous messages (file_modified events, generate_image responses, etc.).
+                    filepath=(Optional[str], Field(
+                        description="""Path of existing file to copy (/{bucket}/{filename} format). Use this to copy images, PDFs, or any binary files while preserving format.
+                        Find filepath in previous messages (file_modified events, generate_image responses, etc.).
                         Leave empty if using filedata to create new content.""",
                         default=None
                     ))
@@ -868,10 +865,10 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             {
                 "ref": self.get_file_type,
                 "name": "get_file_type",
-                "description": "Detect the file type of an artifact using content analysis. More reliable than extension-based detection as it analyzes file magic bytes. Useful for verifying file types before processing or after generation.",
+                "description": "Detect the file type of a file using content analysis. More reliable than extension-based detection as it analyzes file magic bytes. Useful for verifying file types before processing or after generation.",
                 "args_schema": create_model(
                     "getFileType",
-                    artifact_id=(str, Field(description="UUID of the artifact to analyze. This is the artifact_id returned when files are uploaded or generated."))
+                    filepath=(str, Field(description="Path to the file (/{bucket}/{filename} format). This filepath is returned when files are uploaded or generated."))
                 )
             },
             {

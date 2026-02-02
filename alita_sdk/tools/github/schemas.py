@@ -62,11 +62,11 @@ CreateFile = create_model(
     repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository.")),
     file_contents=(Optional[str], Field(
         default=None,
-        description="Content for creating new files. Use this for text, code, JSON, or structured data. Leave empty if using artifact_id to copy existing file."
+        description="Content for creating new files. Use this for text, code, JSON, or structured data. Leave empty if using filepath to copy existing file."
     )),
-    artifact_id=(Optional[str], Field(
+    filepath=(Optional[str], Field(
         default=None,
-        description="UUID of existing artifact to copy. Use this to copy images, PDFs, or any binary files while preserving format. Find artifact_id in previous messages (file_modified events, generate_image responses, etc.). Leave empty if using file_contents to create new content."
+        description="File path in format /{bucket}/{filename} to copy existing artifact. Use this to copy images, PDFs, or any binary files while preserving format. Find filepath in previous messages (file_modified events, generate_image responses, etc.). Leave empty if using file_contents to create new content."
     ))
 )
 

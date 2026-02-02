@@ -64,15 +64,17 @@ class Artifact:
                                       excel_by_sheets=excel_by_sheets,
                                       llm=llm)
 
-    def get_raw_content_by_artifact_id(self, artifact_id: str) -> tuple:
-        """Get artifact content and filename by artifact ID.
+    def get_raw_content_by_filepath(self, filepath: str) -> tuple:
+        """Get artifact content and filename by filepath.
+        
+        Args:
+            filepath: File path in format /{bucket}/{filename}
         
         Returns:
             tuple: (file_bytes, filename) where file_bytes is the raw content
-                   and filename is extracted from Content-Disposition header
         """
-        result = self.client.download_artifact_by_id(artifact_id)
-        # Check if result is an error dict (backward compatibility)
+        result = self.client.download_artifact_by_filepath(filepath)
+        # Check if result is an error dict
         if isinstance(result, dict) and result.get('error'):
             raise Exception(f"{result['error']}. {result.get('content', '')}")
         return result

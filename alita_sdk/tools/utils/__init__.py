@@ -122,15 +122,15 @@ def make_json_serializable(obj):
 
 
 # Artifact and file handling utilities
-def get_file_bytes_from_artifact(alita, artifact_id: str) -> tuple:
+def get_file_bytes_from_artifact(alita, filepath: str) -> tuple:
     """Get file bytes and filename from artifact storage.
     
-    Retrieves a file from Alita artifact storage using its artifact ID.
+    Retrieves a file from Alita artifact storage using its filepath.
     This is a shared utility used across multiple toolkits (Jira, Confluence, SharePoint, etc.).
     
     Args:
         alita: Alita client instance (should have artifact() method)
-        artifact_id: UUID of the artifact to retrieve
+        filepath: File path in format /{bucket}/{filename}
         
     Returns:
         tuple: (file_bytes: bytes, filename: str)
@@ -141,15 +141,15 @@ def get_file_bytes_from_artifact(alita, artifact_id: str) -> tuple:
     if not alita:
         raise ValueError("Alita client is required for artifact operations")
     
-    # Get artifact client - bucket name doesn't matter for download by ID
+    # Get artifact client - bucket name doesn't matter for download by filepath
     artifact_client = alita.artifact('__temp__')
     
     # Get raw file bytes from artifact storage
     try:
-        file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+        file_bytes, artifact_filename = artifact_client.get_raw_content_by_filepath(filepath)
         return file_bytes, artifact_filename
     except Exception as e:
-        raise Exception(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
+        raise Exception(f"Failed to retrieve artifact '{filepath}': {str(e)}")
 
 
 def detect_mime_type(file_bytes: bytes, filename: str) -> str:

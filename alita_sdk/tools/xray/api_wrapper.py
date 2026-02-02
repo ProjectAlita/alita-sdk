@@ -113,9 +113,9 @@ XrayCreateTests = create_model(
 XrayAddAttachmentToTestStep = create_model(
     "XrayAddAttachmentToTestStep",
     step_id=(str, Field(description="The ID of the test step to add the attachment to")),
-    artifact_id=(Optional[str], Field(description="Artifact ID from artifact storage. Either artifact_id or filedata must be provided.", default=None)),
-    filedata=(Optional[str], Field(description="String content to attach as a file. Either artifact_id or filedata must be provided.", default=None)),
-    filename=(Optional[str], Field(description="Attachment filename. Required when using filedata, optional when using artifact_id (uses original filename if not specified).", default=None))
+    filepath=(Optional[str], Field(description="File path in format /{bucket}/{filename} from artifact storage. Either filepath or filedata must be provided.", default=None)),
+    filedata=(Optional[str], Field(description="String content to attach as a file. Either filepath or filedata must be provided.", default=None)),
+    filename=(Optional[str], Field(description="Attachment filename. Required when using filedata, optional when using filepath (uses original filename if not specified).", default=None))
 )
 
 XrayGetTestStepAttachments = create_model(
@@ -575,7 +575,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         attachment_metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = file_name
         yield Document(page_content='', metadata=attachment_metadata)
 
-    def add_attachment_to_test_step(self, step_id: str, artifact_id: Optional[str] = None, 
+    def add_attachment_to_test_step(self, step_id: str, filepath: Optional[str] = None, 
                                     filedata: Optional[str] = None, filename: Optional[str] = None) -> str:
         """
         Add an attachment to an existing test step using GraphQL mutation.
@@ -585,9 +585,9 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         
         Args:
             step_id: The test step ID to add the attachment to
-            artifact_id: Artifact ID from artifact storage (mutually exclusive with filedata)
-            filedata: String content to attach (mutually exclusive with artifact_id)
-            filename: Attachment filename. Required with filedata, optional with artifact_id
+            filepath: File path in format /{bucket}/{filename} from artifact storage (mutually exclusive with filedata)
+            filedata: String content to attach (mutually exclusive with filepath)
+            filename: Attachment filename. Required with filedata, optional with filepath
             
         Returns:
             str: Success message with updated step info
@@ -595,15 +595,15 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         Example:
             add_attachment_to_test_step(
                 step_id="12345",
-                artifact_id="abc-123",
+                filepath="/imagelibrary/screenshot.png",
                 filename="screenshot.png"
             )
         """
         # Validate inputs
-        if not artifact_id and not filedata:
-            raise ToolException("Either artifact_id or filedata must be provided")
-        if artifact_id and filedata:
-            raise ToolException("Cannot specify both artifact_id and filedata")
+        if not filepath and not filedata:
+            raise ToolException("Either filepath or filedata must be provided")
+        if filepath and filedata:
+            raise ToolException("Cannot specify both filepath and filedata")
         if filedata and not filename:
             raise ToolException("filename is required when using filedata")
         
@@ -616,8 +616,8 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         
         try:
             # Resolve file content
-            if artifact_id:
-                file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, artifact_id)
+            if filepath:
+                file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
                 actual_filename = filename or artifact_filename
             else:
                 file_bytes = filedata.encode('utf-8')
