@@ -129,6 +129,8 @@ mkdir -p "$OUTPUT_DIR"
 declare -A SUITE_RESULTS
 declare -A SUITE_PASSED
 declare -A SUITE_FAILED
+declare -A SUITE_ERRORS
+declare -A SUITE_SKIPPED
 declare -A SUITE_DURATION
 TOTAL_START=$(date +%s)
 
@@ -172,7 +174,7 @@ run_suite() {
     # Check if suite directory exists
     if [ ! -d "$suite_dir" ]; then
         print_error "Suite directory not found: $suite_dir"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
@@ -180,7 +182,7 @@ run_suite() {
     local config_file="${pipeline_file:-pipeline.yaml}"
     if [ ! -f "$suite_dir/$config_file" ]; then
         print_error "$config_file not found in $suite_dir/"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
@@ -201,7 +203,7 @@ run_suite() {
                 print_success "Setup completed"
             else
                 print_error "Setup failed - see $suite_output_dir/setup.log"
-                SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
+                SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
                 return 1
             fi
         else
@@ -210,7 +212,7 @@ run_suite() {
                 print_success "Setup completed"
             else
                 print_error "Setup failed - see $suite_output_dir/setup.log"
-                SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
+                SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
                 cat "$suite_output_dir/setup.log"
                 return 1
             fi
@@ -228,7 +230,7 @@ run_suite() {
             print_success "Pipelines seeded"
         else
             print_error "Seeding failed - see $suite_output_dir/seed.log"
-            SUITE_RESULTS[$suite_spec]="SEED_FAILED"
+            SUITE_RESULTS["$suite_spec"]="SEED_FAILED"
             return 1
         fi
     else
@@ -237,7 +239,7 @@ run_suite() {
             print_success "Pipelines seeded"
         else
             print_error "Seeding failed - see $suite_output_dir/seed.log"
-            SUITE_RESULTS[$suite_spec]="SEED_FAILED"
+            SUITE_RESULTS["$suite_spec"]="SEED_FAILED"
             cat "$suite_output_dir/seed.log"
             return 1
         fi
@@ -256,7 +258,7 @@ run_suite() {
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
-            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
             cat "$suite_output_dir/run.log"
             return 1
         fi
@@ -266,7 +268,7 @@ run_suite() {
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
-            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
             cat "$suite_output_dir/run.log"
             return 1
         fi
@@ -280,22 +282,22 @@ run_suite() {
         local skipped=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
         local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total', 0))" 2>/dev/null || echo "0")
 
-        SUITE_PASSED[$suite_spec]=$passed
-        SUITE_FAILED[$suite_spec]=$failed
-        SUITE_ERRORS[$suite_spec]=$errors
-        SUITE_SKIPPED[$suite_spec]=$skipped
+        SUITE_PASSED["$suite_spec"]=$passed
+        SUITE_FAILED["$suite_spec"]=$failed
+        SUITE_ERRORS["$suite_spec"]=$errors
+        SUITE_SKIPPED["$suite_spec"]=$skipped
 
         echo "  Results: $passed passed, $failed failed, $errors errors, $skipped skipped (total: $total)"
 
         if [ "$failed" -gt 0 ] || [ "$errors" -gt 0 ]; then
-            SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
+            SUITE_RESULTS["$suite_spec"]="TESTS_FAILED"
             print_error "Some tests failed"
         else
-            SUITE_RESULTS[$suite_spec]="PASSED"
+            SUITE_RESULTS["$suite_spec"]="PASSED"
         fi
     else
         print_error "Test execution failed - see $suite_output_dir/run.log"
-        SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+        SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
         cat "$suite_output_dir/run.log"
         return 1
     fi
@@ -315,7 +317,7 @@ run_suite() {
 
     local suite_end=$(date +%s)
     local suite_duration=$((suite_end - suite_start))
-    SUITE_DURATION[$suite_spec]=$suite_duration
+    SUITE_DURATION["$suite_spec"]=$suite_duration
 
     print_success "Suite $suite_spec completed in ${suite_duration}s"
 
@@ -343,7 +345,7 @@ run_suite_local() {
     # Check if suite directory exists
     if [ ! -d "$suite_dir" ]; then
         print_error "Suite directory not found: $suite_dir"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
@@ -351,7 +353,7 @@ run_suite_local() {
     local config_file="${pipeline_file:-pipeline.yaml}"
     if [ ! -f "$suite_dir/$config_file" ]; then
         print_error "$config_file not found in $suite_dir/"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
@@ -371,7 +373,7 @@ run_suite_local() {
             print_success "Setup completed"
         else
             print_error "Setup failed - see $suite_output_dir/setup.log"
-            SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
+            SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
             return 1
         fi
     else
@@ -380,7 +382,7 @@ run_suite_local() {
             print_success "Setup completed"
         else
             print_error "Setup failed - see $suite_output_dir/setup.log"
-            SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
+            SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
             cat "$suite_output_dir/setup.log"
             return 1
         fi
@@ -401,23 +403,23 @@ run_suite_local() {
             local skipped=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
             local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total_tests', 0))" 2>/dev/null || echo "0")
 
-            SUITE_PASSED[$suite_spec]=$passed
-            SUITE_FAILED[$suite_spec]=$failed
-            SUITE_ERRORS[$suite_spec]=$errors
-            SUITE_SKIPPED[$suite_spec]=$skipped
+            SUITE_PASSED["$suite_spec"]=$passed
+            SUITE_FAILED["$suite_spec"]=$failed
+            SUITE_ERRORS["$suite_spec"]=$errors
+            SUITE_SKIPPED["$suite_spec"]=$skipped
 
             echo "  Results: $passed passed, $failed failed, $errors errors, $skipped skipped (total: $total)"
 
             if [ "$failed" -gt 0 ] || [ "$errors" -gt 0 ]; then
-                SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
+                SUITE_RESULTS["$suite_spec"]="TESTS_FAILED"
                 print_error "Some tests failed"
             else
-                SUITE_RESULTS[$suite_spec]="PASSED"
+                SUITE_RESULTS["$suite_spec"]="PASSED"
             fi
         fi
     else
         print_error "Test execution failed - see $suite_output_dir/run.log"
-        SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+        SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
         cat "$suite_output_dir/run.log"
         return 1
     fi
@@ -437,7 +439,7 @@ run_suite_local() {
 
     local suite_end=$(date +%s)
     local suite_duration=$((suite_end - suite_start))
-    SUITE_DURATION[$suite_spec]=$suite_duration
+    SUITE_DURATION["$suite_spec"]=$suite_duration
 
     print_success "Suite $suite_spec (LOCAL) completed in ${suite_duration}s"
 
