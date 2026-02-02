@@ -1,5 +1,5 @@
 name: Test Runner Reusable
-run-name: Executing test for ${{ inputs.test_cases_dir }}
+run-name: Executing test for ${{ inputs.test_cases_dir }} on ${{ inputs.environment }} 
 
 on:
   workflow_call:
@@ -71,12 +71,24 @@ jobs:
           
           echo "Running test command: $TEST_COMMAND"         
 
+      - name: Uppercase the environment
+        id: set-api-key
+        run: |
+          if [ "${{ inputs.environment }}" = "local" ]; then
+            ENV_UPPER="DEV"
+          else
+            ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+          fi
+          echo "ENV_UPPER=${ENV_UPPER}" >> $GITHUB_ENV
+
       - name: Run docker-compose
         run: |
+          echo "Starting docker-compose with command: ${{ env.DOCKER_COMMAND_COMPOSED }}"
+          echo "On environment: ${{ env.ENV_UPPER }}"
+          export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
+          export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
+          export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
           export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
-          export DEPLOYMENT_URL="${{ secrets.DEPLOYMENT_URL }}"
-          export ALITA_API_KEY="${{ secrets.ALITA_API_KEY }}"
-          export PROJECT_ID="${{ secrets.PROJECT_ID }}"
           export CONFLUENCE_API_KEY="${{ secrets.CONFLUENCE_API_KEY }}"
           export CONFLUENCE_BASE_URL="${{ secrets.CONFLUENCE_BASE_URL }}"
           export CONFLUENCE_USERNAME="${{ secrets.CONFLUENCE_USERNAME }}"
