@@ -236,12 +236,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
 
     def get_wiki(self, wiki_identified: Optional[str] = None):
         """Extract ADO wiki information."""
-        try:
-            wiki_id = self._resolve_wiki_identifier(wiki_identified)
-            return self._client.get_wiki(project=self.project, wiki_identifier=wiki_id)
-        except Exception as e:
-            logger.error(f"Error during the attempt to extract wiki: {str(e)}")
-            return ToolException(f"Error during the attempt to extract wiki: {str(e)}")
+        wiki_id = self._resolve_wiki_identifier(wiki_identified)
+        return self._client.get_wiki(project=self.project, wiki_identifier=wiki_id)
 
     def get_wiki_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None):
         """Extract ADO wiki page content."""

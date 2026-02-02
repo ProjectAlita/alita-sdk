@@ -221,7 +221,7 @@ Guidelines:
             faq_content = get_fallback_faq()
 
         # Extract tool source code with dependencies
-        from .tool_code_extractor import extract_tool_code
+        from alita_sdk.runtime.utils.tool_code_extractor import extract_tool_code
 
         tool_code = None
         try:
