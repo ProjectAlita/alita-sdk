@@ -888,13 +888,43 @@ class ReposApiWrapper(CodeIndexerToolkit):
             logger.error(msg)
             return ToolException(msg)
 
-    def _write_file(self, file_path: str, content: str, branch: str = None, commit_message: str = None) -> str:
-        """Write content to a file in Azure DevOps by creating an edit commit.
+    # def _write_file(self, file_path: str, content: str, branch: str = None, commit_message: str = None) -> str:
+    #     """Write content to a file in Azure DevOps by creating an edit commit.
+    #
+    #     This implementation follows the previous `update_file` behavior: it always
+    #     performs an 'edit' change (does not create the file), gets the latest
+    #     commit id for the branch and pushes a new commit containing the change.
+    #     """
+    #     try:
+    #         # Get the latest commit ID of the target branch
+    #         branch_obj = self._client.get_branch(
+    #             repository_id=self.repository_id,
+    #             project=self.project,
+    #             name=branch,
+    #         )
+    #         if branch_obj is None or not hasattr(branch_obj, 'commit') or not hasattr(branch_obj.commit, 'commit_id'):
+    #             raise ToolException(f"Branch `{branch}` does not exist or has no commits.")
+    #
+    #         latest_commit_id = branch_obj.commit.commit_id
+    #
+    #         # Build edit change and push
+    #         change = GitChange("edit", file_path, content).to_dict()
+    #
+    #         ref_update = GitRefUpdate(name=f"refs/heads/{branch}", old_object_id=latest_commit_id)
+    #         new_commit = GitCommit(comment=commit_message or ("Update " + file_path), changes=[change])
+    #         push = GitPush(commits=[new_commit], ref_updates=[ref_update])
+    #
+    #         self._client.create_push(push=push, repository_id=self.repository_id, project=self.project)
+    #         return f"Updated file {file_path}"
+    #     except ToolException:
+    #         # Re-raise known tool exceptions
+    #         raise
+    #     except Exception as e:
+    #         logger.error(f"Unable to write file {file_path}: {e}")
+    #         raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
-        This implementation follows the previous `update_file` behavior: it always
-        performs an 'edit' change (does not create the file), gets the latest
-        commit id for the branch and pushes a new commit containing the change.
-        """
+    def _write_file(self, file_path: str, content: str, branch: str = None, commit_message: str = None) -> str:
+        """Write content to a file in Azure DevOps by creating an edit commit."""
         try:
             # Get the latest commit ID of the target branch
             branch_obj = self._client.get_branch(
@@ -910,14 +940,14 @@ class ReposApiWrapper(CodeIndexerToolkit):
             # Build edit change and push
             change = GitChange("edit", file_path, content).to_dict()
 
+            # Use GitCommitRef instead of GitCommit
             ref_update = GitRefUpdate(name=f"refs/heads/{branch}", old_object_id=latest_commit_id)
-            new_commit = GitCommit(comment=commit_message or ("Update " + file_path), changes=[change])
+            new_commit = GitCommitRef(comment=commit_message or ("Update " + file_path), changes=[change])
             push = GitPush(commits=[new_commit], ref_updates=[ref_update])
 
             self._client.create_push(push=push, repository_id=self.repository_id, project=self.project)
             return f"Updated file {file_path}"
         except ToolException:
-            # Re-raise known tool exceptions
             raise
         except Exception as e:
             logger.error(f"Unable to write file {file_path}: {e}")

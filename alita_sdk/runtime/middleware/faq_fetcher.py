@@ -1,8 +1,13 @@
 """
 FAQ Fetcher Module
 
-Fetches and parses FAQ content from toolkit documentation hosted on GitHub.
-Provides fallback mechanisms when documentation is unavailable.
+Fetches and parses FAQ content from toolkit documentation.
+Supports both local (offline) and remote (GitHub) sources with automatic fallback.
+
+Priority order:
+1. Local FAQ files (alita_sdk/tools/docs/faq/{toolkit}.md)
+2. Remote GitHub documentation
+3. Generic fallback FAQ
 
 Example:
     from alita_sdk.runtime.middleware.faq_fetcher import get_toolkit_faq
@@ -14,6 +19,7 @@ Example:
 
 import logging
 import re
+from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
@@ -22,17 +28,23 @@ logger = logging.getLogger(__name__)
 # Base URL for toolkit documentation
 TOOLKIT_DOCS_BASE_URL = "https://raw.githubusercontent.com/ProjectAlita/projectalita.github.io/refs/heads/main/docs/integrations/toolkits"
 
-# Cache for FAQ content to avoid repeated network calls
+# Cache for FAQ content to avoid repeated file I/O and network calls
 _faq_cache: dict[str, Optional[str]] = {}
 
 
-def get_toolkit_faq(toolkit_type: Optional[str], use_cache: bool = True) -> Optional[str]:
+def get_toolkit_faq(toolkit_type: Optional[str], use_cache: bool = True, prefer_local: bool = True) -> Optional[str]:
     """
-    Fetch FAQ content for a specific toolkit type from GitHub documentation.
+    Fetch FAQ content for a specific toolkit type.
+
+    Tries multiple sources in order:
+    1. Local FAQ file (if prefer_local=True)
+    2. GitHub documentation
+    3. Returns None if all fail (caller should use fallback)
 
     Args:
         toolkit_type: Type of toolkit (e.g., 'github', 'jira', 'confluence')
         use_cache: Whether to use cached FAQ content
+        prefer_local: Whether to check local FAQ files first (default: True)
 
     Returns:
         FAQ content as string, or None if unavailable
@@ -51,7 +63,18 @@ def get_toolkit_faq(toolkit_type: Optional[str], use_cache: bool = True) -> Opti
         logger.debug(f"Returning cached FAQ for toolkit '{toolkit_type}'")
         return _faq_cache[toolkit_type]
 
-    # Fetch FAQ from GitHub
+    faq_content = None
+
+    # Try local file first if preferred (offline mode)
+    if prefer_local:
+        faq_content = _fetch_faq_from_local(toolkit_type)
+        if faq_content:
+            logger.debug(f"Loaded FAQ for '{toolkit_type}' from local file")
+            if use_cache:
+                _faq_cache[toolkit_type] = faq_content
+            return faq_content
+
+    # Try GitHub if local failed or not preferred
     faq_content = _fetch_faq_from_github(toolkit_type)
 
     # Cache the result (even if None)
@@ -59,6 +82,49 @@ def get_toolkit_faq(toolkit_type: Optional[str], use_cache: bool = True) -> Opti
         _faq_cache[toolkit_type] = faq_content
 
     return faq_content
+
+
+def _fetch_faq_from_local(toolkit_type: str) -> Optional[str]:
+    """
+    Fetch FAQ content from local file.
+
+    Looks for FAQ files in: alita_sdk/tools/docs/faq/{toolkit_type}.md
+
+    Args:
+        toolkit_type: Type of toolkit
+
+    Returns:
+        FAQ content as string, or None if file not found
+    """
+    try:
+        # Get the path to the FAQ directory
+        # This file is in alita_sdk/runtime/middleware/
+        # FAQ files are in alita_sdk/tools/docs/faq/
+        current_file = Path(__file__)
+        sdk_root = current_file.parent.parent.parent  # Go up to alita_sdk/
+        faq_dir = sdk_root / 'tools' / 'docs' / 'faq'
+
+        faq_file = faq_dir / f"{toolkit_type}.md"
+
+        if not faq_file.exists():
+            logger.debug(f"Local FAQ file not found: {faq_file}")
+            return None
+
+        with open(faq_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Strip any leading/trailing whitespace
+        content = content.strip()
+
+        if content:
+            logger.debug(f"Loaded local FAQ for '{toolkit_type}' ({len(content)} chars)")
+            return content
+
+        return None
+
+    except Exception as e:
+        logger.debug(f"Error loading local FAQ for '{toolkit_type}': {e}")
+        return None
 
 
 def _fetch_faq_from_github(toolkit_type: str) -> Optional[str]:
@@ -141,7 +207,7 @@ def _parse_faq_section(markdown_content: str) -> Optional[str]:
     """
     Parse FAQ section from markdown documentation.
 
-    Extracts content after '## FAQ' heading until the next heading or end of file.
+    Extracts content after '## FAQ' or '## FAQs' heading until the next heading or end of file.
 
     Args:
         markdown_content: Full markdown documentation content
@@ -149,10 +215,10 @@ def _parse_faq_section(markdown_content: str) -> Optional[str]:
     Returns:
         FAQ section content, or None if no FAQ section found
     """
-    # Pattern to match FAQ section
-    # Matches: ## FAQ (with optional whitespace/case variations)
+    # Pattern to match FAQ or FAQs section
+    # Matches: ## FAQ or ## FAQs (with optional whitespace/case variations)
     # Captures everything after it until next ## heading or end of content
-    faq_pattern = r'##\s+FAQ\s*\n(.*?)(?=\n##\s+|\Z)'
+    faq_pattern = r'##\s+FAQs?\s*\n(.*?)(?=\n##\s+|\Z)'
 
     match = re.search(faq_pattern, markdown_content, re.IGNORECASE | re.DOTALL)
 

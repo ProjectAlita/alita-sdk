@@ -182,10 +182,11 @@ class TransformErrorStrategy(ExceptionHandlerStrategy):
         if not self.llm:
             return None
 
-        tool_description = context.tool.description if hasattr(context.tool, 'description') else None
-        tool_metadata = context.tool.metadata if hasattr(context.tool, 'metadata') else {}
+        try:
+            tool_description = context.tool.description if hasattr(context.tool, 'description') else None
+            tool_metadata = context.tool.metadata if hasattr(context.tool, 'metadata') else {}
 
-        system_prompt = """You are a helpful assistant that explains technical errors in simple terms.
+            system_prompt = """You are a helpful assistant that explains technical errors in simple terms.
 Your job is to translate technical error messages into clear, actionable guidance for users.
 
 You have access to:
@@ -210,75 +211,83 @@ Guidelines:
 - Suggest contacting support if issue persists: https://elitea.ai/docs/support/contact-support/
 """
 
-        # Get FAQ for toolkit type from GitHub documentation
-        from .faq_fetcher import get_toolkit_faq, get_fallback_faq
+            # Get FAQ for toolkit type from GitHub documentation
+            from .faq_fetcher import get_toolkit_faq, get_fallback_faq
 
-        toolkit_type = tool_metadata.get('toolkit_type') if tool_metadata else None
-        faq_content = get_toolkit_faq(toolkit_type)
+            toolkit_type = tool_metadata.get('toolkit_type') if tool_metadata else None
+            faq_content = get_toolkit_faq(toolkit_type)
 
-        # Use fallback FAQ if toolkit-specific FAQ unavailable
-        if not faq_content:
-            faq_content = get_fallback_faq()
+            # Use fallback FAQ if toolkit-specific FAQ unavailable
+            if not faq_content:
+                faq_content = get_fallback_faq()
 
-        # Extract tool source code with dependencies
-        from alita_sdk.runtime.utils.tool_code_extractor import extract_tool_code
+            # Extract tool source code with dependencies
+            from .tool_code_extractor import extract_tool_code
 
-        tool_code = None
-        try:
-            tool_code = extract_tool_code(context.tool_name, toolkit_type)
+            tool_code = None
+            try:
+                tool_code = extract_tool_code(context.tool_name, toolkit_type)
+            except Exception as e:
+                logger.warning(f"Failed to extract tool code for '{context.tool_name}': {e}")
+
+            # Build user prompt with all available context
+            user_prompt_parts = [
+                f'A tool called "{context.tool_name}" failed with the following error:',
+                "",
+                "Error Information:",
+                f"Error Type: {context.error_type}",
+                f"Error Message: {context.error_str}",
+                "",
+                "Full Traceback:",
+                context.error_traceback,
+                "",
+                "Tool Arguments:",
+                self._format_args(context.args, context.kwargs),
+                "",
+                "Tool Description:",
+                tool_description or "N/A",
+                "",
+            ]
+
+            # Add toolkit FAQ if available
+            if faq_content:
+                user_prompt_parts.extend([
+                    "Toolkit FAQ:",
+                    faq_content,
+                    "",
+                ])
+
+            # Add tool source code if available
+            if tool_code:
+                user_prompt_parts.extend([
+                    "Tool Implementation Code:",
+                    tool_code,
+                    "",
+                ])
+
+            user_prompt_parts.append("Please analyze the error, tool implementation, and FAQ to explain what went wrong and suggest what the user should do next.")
+
+            user_prompt = "\n".join(user_prompt_parts)
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            # Invoke LLM with exception handling
+            response = self.llm.invoke(messages)
+
+            if hasattr(response, 'content'):
+                return response.content.strip()
+
+            return None
+
         except Exception as e:
-            logger.warning(f"Failed to extract tool code for '{context.tool_name}': {e}")
-
-        # Build user prompt with all available context
-        user_prompt_parts = [
-            f'A tool called "{context.tool_name}" failed with the following error:',
-            "",
-            "Error Information:",
-            f"Error Type: {context.error_type}",
-            f"Error Message: {context.error_str}",
-            "",
-            "Full Traceback:",
-            context.error_traceback,
-            "",
-            "Tool Arguments:",
-            self._format_args(context.args, context.kwargs),
-            "",
-            "Tool Description:",
-            tool_description or "N/A",
-            "",
-        ]
-
-        # Add toolkit FAQ if available
-        if faq_content:
-            user_prompt_parts.extend([
-                "Toolkit FAQ:",
-                faq_content,
-                "",
-            ])
-
-        # Add tool source code if available
-        if tool_code:
-            user_prompt_parts.extend([
-                "Tool Implementation Code:",
-                tool_code,
-                "",
-            ])
-
-        user_prompt_parts.append("Please analyze the error, tool implementation, and FAQ to explain what went wrong and suggest what the user should do next.")
-
-        user_prompt = "\n".join(user_prompt_parts)
-
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
-
-        response = self.llm.invoke(messages)
-
-        if hasattr(response, 'content'):
-            return response.content.strip()
-
-        return None
+            logger.warning(
+                f"Failed to generate LLM error message for tool '{context.tool_name}': {e}",
+                exc_info=True
+            )
+            return None
 
     def _generate_template_error(self, context: ExceptionContext) -> str:
         """Generate template-based error message."""
