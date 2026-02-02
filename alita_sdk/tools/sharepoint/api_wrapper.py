@@ -51,9 +51,9 @@ ReadDocument = create_model(
 UploadFile = create_model(
     "UploadFile",
     folder_path=(str, Field(description="Server-relative folder path for upload (e.g., '/sites/MySite/Shared Documents/folder')")),
-    artifact_id=(Optional[str], Field(description="Artifact ID from artifact storage. Either artifact_id or filedata must be provided.", default=None)),
-    filedata=(Optional[str], Field(description="String content to upload as a file. Either artifact_id or filedata must be provided.", default=None)),
-    filename=(Optional[str], Field(description="Target filename. Required when using filedata, optional when using artifact_id (uses original filename if not specified).", default=None)),
+    filepath=(Optional[str], Field(description="File path in format /{bucket}/{filename} from artifact storage. Either filepath or filedata must be provided.", default=None)),
+    filedata=(Optional[str], Field(description="String content to upload as a file. Either filepath or filedata must be provided.", default=None)),
+    filename=(Optional[str], Field(description="Target filename. Required when using filedata, optional when using filepath (uses original filename if not specified).", default=None)),
     replace=(Optional[bool], Field(description="If True, overwrite existing file. If False, raise error if file already exists.", default=True))
 )
 
@@ -61,9 +61,9 @@ AddAttachmentToListItem = create_model(
     "AddAttachmentToListItem",
     list_title=(str, Field(description="Name of the SharePoint list")),
     item_id=(int, Field(description="Internal item ID (not the display ID) to attach file to")),
-    artifact_id=(Optional[str], Field(description="Artifact ID from artifact storage. Either artifact_id or filedata must be provided.", default=None)),
-    filedata=(Optional[str], Field(description="String content to attach as a file. Either artifact_id or filedata must be provided.", default=None)),
-    filename=(Optional[str], Field(description="Attachment filename. Required when using filedata, optional when using artifact_id (uses original filename if not specified).", default=None)),
+    filepath=(Optional[str], Field(description="File path in format /{bucket}/{filename} from artifact storage. Either filepath or filedata must be provided.", default=None)),
+    filedata=(Optional[str], Field(description="String content to attach as a file. Either filepath or filedata must be provided.", default=None)),
+    filename=(Optional[str], Field(description="Attachment filename. Required when using filedata, optional when using filepath (uses original filename if not specified).", default=None)),
     replace=(Optional[bool], Field(description="If True, delete existing attachment with same name before adding. If False, raise error if attachment already exists.", default=True))
 )
 
@@ -585,7 +585,7 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             )
             return auth_helper.get_file_content(self.site_url, path)
 
-    def upload_file(self, folder_path: str, artifact_id: Optional[str] = None, 
+    def upload_file(self, folder_path: str, filepath: Optional[str] = None, 
                    filedata: Optional[str] = None, filename: Optional[str] = None, 
                    replace: bool = True):
         """Upload file to SharePoint document library.
@@ -595,25 +595,25 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         
         Args:
             folder_path: Server-relative folder path (e.g., '/sites/MySite/Shared Documents/folder')
-            artifact_id: Artifact ID from artifact storage (mutually exclusive with filedata)
-            filedata: String content to upload as a file (mutually exclusive with artifact_id)
-            filename: Target filename. Required with filedata, optional with artifact_id
+            filepath: File path in format /{bucket}/{filename} from artifact storage (mutually exclusive with filedata)
+            filedata: String content to upload as a file (mutually exclusive with filepath)
+            filename: Target filename. Required with filedata, optional with filepath
             replace: If True, overwrite existing file. If False, raise error on conflict
             
         Returns:
             dict with {id, webUrl, path, size, mime_type} or string with upload confirmation
         """
         # Validate inputs
-        if not artifact_id and not filedata:
-            raise ToolException("Either artifact_id or filedata must be provided")
-        if artifact_id and filedata:
-            raise ToolException("Cannot specify both artifact_id and filedata")
+        if not filepath and not filedata:
+            raise ToolException("Either filepath or filedata must be provided")
+        if filepath and filedata:
+            raise ToolException("Cannot specify both filepath and filedata")
         if filedata and not filename:
             raise ToolException("filename is required when using filedata")
         
         # Resolve file content
-        if artifact_id:
-            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, artifact_id)
+        if filepath:
+            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
             actual_filename = filename or artifact_filename
         else:
             file_bytes = filedata.encode('utf-8')
@@ -648,7 +648,7 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             raise ToolException(f"Upload failed: {str(e)}") from None
 
     def add_attachment_to_list_item(self, list_title: str, item_id: int, 
-                                    artifact_id: Optional[str] = None,
+                                    filepath: Optional[str] = None,
                                     filedata: Optional[str] = None, 
                                     filename: Optional[str] = None,
                                     replace: bool = True):
@@ -659,25 +659,25 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         Args:
             list_title: Name of the SharePoint list
             item_id: Internal item ID (not the display ID)
-            artifact_id: Artifact ID from artifact storage (mutually exclusive with filedata)
-            filedata: String content to attach as a file (mutually exclusive with artifact_id)
-            filename: Attachment filename. Required with filedata, optional with artifact_id
+            filepath: File path in format /{bucket}/{filename} from artifact storage (mutually exclusive with filedata)
+            filedata: String content to attach as a file (mutually exclusive with filepath)
+            filename: Attachment filename. Required with filedata, optional with filepath
             replace: If True, delete existing attachment with same name. If False, raise error on conflict
             
         Returns:
             dict with {id, name, size} or string with attachment confirmation
         """
         # Validate inputs
-        if not artifact_id and not filedata:
-            raise ToolException("Either artifact_id or filedata must be provided")
-        if artifact_id and filedata:
-            raise ToolException("Cannot specify both artifact_id and filedata")
+        if not filepath and not filedata:
+            raise ToolException("Either filepath or filedata must be provided")
+        if filepath and filedata:
+            raise ToolException("Cannot specify both filepath and filedata")
         if filedata and not filename:
             raise ToolException("filename is required when using filedata")
         
         # Resolve file content
-        if artifact_id:
-            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, artifact_id)
+        if filepath:
+            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
             actual_filename = filename or artifact_filename
         else:
             file_bytes = filedata.encode('utf-8')

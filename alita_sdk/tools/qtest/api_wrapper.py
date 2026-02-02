@@ -245,7 +245,7 @@ FindDefectsByTestRunId = create_model(
 addFileToTestCase = create_model(
     "addFileToTestCase",
     test_case_id=(str, Field(description="Test case ID in format TC-123 or QTest numeric ID")),
-    artifact_id=(str, Field(description="Artifact ID of file from artifact storage")),
+    filepath=(str, Field(description="File path in format /{bucket}/{filename} from artifact storage")),
     filename=(Optional[str], Field(description="Name of the file to upload. If not provided, uses the original filename from artifact.", default=None)),
     test_step_number=(Optional[int], Field(
         default=None,
@@ -1976,7 +1976,7 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
         
         return attachment_id
 
-    def add_file_to_test_case(self, test_case_id: str, artifact_id: str, filename: str = None, 
+    def add_file_to_test_case(self, test_case_id: str, filepath: str, filename: str = None, 
                                test_step_number: Optional[int] = None) -> str:
         """Upload file from artifact and attach to QTest test case or test step."""
         try:
@@ -1991,13 +1991,13 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
             
             # Download file from artifact storage
             artifact_client = self.alita.artifact('__temp__')
-            file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            file_bytes, artifact_filename = artifact_client.get_raw_content_by_filepath(filepath)
             
             # Use provided filename or fallback to artifact filename
             filename = filename or artifact_filename
             
             if not file_bytes:
-                raise ToolException(f"Failed to download artifact {artifact_id}")
+                raise ToolException(f"Failed to download artifact {filepath}")
             
             # Detect MIME type
             try:
