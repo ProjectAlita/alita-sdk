@@ -12,7 +12,10 @@ Available middleware:
 - ToolExceptionHandlerMiddleware: Smart tool error handling with strategies
 
 Available strategies (for ToolExceptionHandlerMiddleware):
-- TransformErrorStrategy: LLM-powered human-readable error messages
+- TransformErrorStrategy: LLM-powered human-readable error messages with context
+  * Includes original error traceback
+  * Toolkit-specific FAQ documentation
+  * Tool source code and dependencies (with LRU caching)
 - CircuitBreakerStrategy: Disable tools after consecutive failures
 - LoggingStrategy: Track error counts and fire callbacks
 - CompositeStrategy: Chain multiple strategies sequentially

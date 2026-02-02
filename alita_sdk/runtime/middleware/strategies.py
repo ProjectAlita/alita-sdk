@@ -68,6 +68,17 @@ class ExceptionContext:
         """Get error message string."""
         return str(self.error)
 
+    @property
+    def error_traceback(self) -> str:
+        """Get full error traceback."""
+        return ''.join(
+            traceback.format_exception(
+                type(self.error),
+                self.error,
+                self.error.__traceback__
+            )
+        )
+
 
 class ExceptionHandlerStrategy(ABC):
     """
@@ -177,18 +188,25 @@ class TransformErrorStrategy(ExceptionHandlerStrategy):
         system_prompt = """You are a helpful assistant that explains technical errors in simple terms.
 Your job is to translate technical error messages into clear, actionable guidance for users.
 
+You have access to:
+1. The original error and full traceback
+2. Toolkit-specific FAQ documentation
+3. The actual tool implementation source code
+
 IMPORTANT:
-- Usually the errors are related to 3rd party APIs used by the tools (don't suggest code changes)
+- Usually the errors are related to 3rd party APIs used by the tools (don't suggest code changes to the tool itself)
 - If the error suggests a fix (e.g., missing or invalid parameter), reply with suggested fix
-- Avoid suggesting actions that are not related API configuration (like browser cache clearing, etc) since it is not sessions related
+- Avoid suggesting actions that are not related to API configuration (like browser cache clearing, etc) since it is not sessions related
+- Analyze the tool source code to understand what it's trying to do and what might have gone wrong
+- Check if the FAQ addresses this specific error pattern
 
 Guidelines:
 - Be concise and clear
-- Explain what went wrong in simple terms
+- Explain what went wrong in simple terms based on code analysis
 - Suggest concrete next steps or fixes
 - Avoid technical jargon unless necessary
 - Be empathetic and helpful
-- Keep response under 150 words
+- Keep response under 200 words
 - Suggest contacting support if issue persists: https://elitea.ai/docs/support/contact-support/
 """
 
@@ -202,24 +220,53 @@ Guidelines:
         if not faq_content:
             faq_content = get_fallback_faq()
 
-        user_prompt = f"""A tool called "{context.tool_name}" failed with the following error:
+        # Extract tool source code with dependencies
+        from .tool_code_extractor import extract_tool_code
 
-Error Type: {context.error_type}
-Error Message: {context.error_str}
+        tool_code = None
+        try:
+            tool_code = extract_tool_code(context.tool_name, toolkit_type)
+        except Exception as e:
+            logger.warning(f"Failed to extract tool code for '{context.tool_name}': {e}")
 
-Tool Arguments:
-{self._format_args(context.args, context.kwargs)}
+        # Build user prompt with all available context
+        user_prompt_parts = [
+            f'A tool called "{context.tool_name}" failed with the following error:',
+            "",
+            "Error Information:",
+            f"Error Type: {context.error_type}",
+            f"Error Message: {context.error_str}",
+            "",
+            "Full Traceback:",
+            context.error_traceback,
+            "",
+            "Tool Arguments:",
+            self._format_args(context.args, context.kwargs),
+            "",
+            "Tool Description:",
+            tool_description or "N/A",
+            "",
+        ]
 
-Tool Description:
-{tool_description or "N/A"}
+        # Add toolkit FAQ if available
+        if faq_content:
+            user_prompt_parts.extend([
+                "Toolkit FAQ:",
+                faq_content,
+                "",
+            ])
 
-Tool Metadata:
-{tool_metadata or "N/A"}
+        # Add tool source code if available
+        if tool_code:
+            user_prompt_parts.extend([
+                "Tool Implementation Code:",
+                tool_code,
+                "",
+            ])
 
-FAQ by a tool type:
-{faq_content}
+        user_prompt_parts.append("Please analyze the error, tool implementation, and FAQ to explain what went wrong and suggest what the user should do next.")
 
-Please explain this error in simple terms and suggest what the user should do next."""
+        user_prompt = "\n".join(user_prompt_parts)
 
         messages = [
             SystemMessage(content=system_prompt),
