@@ -14,26 +14,30 @@ logger = logging.getLogger(__name__)
 
 def extract_text_from_completion(completion) -> str:
     """Extract text content from LLM completion, handling both string and list formats.
-    
-    For thinking-enabled models (like Claude with extended thinking), completion.content
-    can be a list of content blocks. This function extracts only the text blocks and
-    concatenates them into a single string.
-    
+
+    For thinking-enabled models (like Claude with extended thinking or OpenAI reasoning models),
+    completion.content can be a list of content blocks. This function extracts only the text blocks
+    and concatenates them into a single string.
+
+    Supported formats:
+    - Anthropic: {type: "text", text: "..."} and {type: "thinking", thinking: "..."}
+    - OpenAI reasoning: {type: "text", text: "..."} and {type: "reasoning", reasoning: "..."}
+
     Args:
         completion: LLM completion object with content attribute
-        
+
     Returns:
         str: Extracted text content (never a list)
     """
     if not hasattr(completion, 'content'):
         return ""
-        
+
     content = completion.content
-    
-    # Handle list of content blocks (Anthropic extended thinking format)
+
+    # Handle list of content blocks (Anthropic extended thinking / OpenAI reasoning format)
     if isinstance(content, list):
         text_blocks = []
-        
+
         for block in content:
             if isinstance(block, dict):
                 block_type = block.get('type', '')
@@ -42,18 +46,21 @@ def extract_text_from_completion(completion) -> str:
                 elif block_type == 'thinking':
                     # Skip thinking blocks - we only want the actual text response
                     continue
+                elif block_type == 'reasoning':
+                    # Skip reasoning blocks (OpenAI format) - we only want the actual text response
+                    continue
             elif hasattr(block, 'type'):
                 # Handle object format
                 if block.type == 'text':
                     text_blocks.append(getattr(block, 'text', ''))
-                # Skip thinking blocks
-        
+                # Skip thinking/reasoning blocks
+
         return '\n\n'.join(text_blocks) if text_blocks else ""
-    
+
     # Handle simple string content
     elif isinstance(content, str):
         return content
-    
+
     # Fallback
     return str(content) if content else ""
 

@@ -569,6 +569,24 @@ class LLMNode(BaseTool):
             # verify messages structure
             messages = state.get("messages", []) if isinstance(state, dict) else []
             if messages:
+                # Filter out all system messages except the first one to avoid
+                # "multiple non-consecutive system messages" error from Anthropic API.
+                # In swarm mode, multiple agents may add their system messages to shared state.
+                first_system_msg = None
+                filtered_messages = []
+                for msg in messages:
+                    if isinstance(msg, SystemMessage):
+                        if first_system_msg is None:
+                            first_system_msg = msg
+                        # Skip subsequent system messages
+                    else:
+                        filtered_messages.append(msg)
+                # Prepend the first system message if found
+                if first_system_msg:
+                    messages = [first_system_msg] + filtered_messages
+                else:
+                    messages = filtered_messages
+
                 # the last message has to be HumanMessage
                 if not isinstance(messages[-1], HumanMessage):
                     raise ToolException("LLMNode requires the last message to be a HumanMessage")

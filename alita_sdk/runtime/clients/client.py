@@ -345,15 +345,23 @@ class AlitaClient:
                 "stream_usage": model_config.get("stream_usage", True),
                 "max_tokens": llm_max_tokens,
                 "temperature": model_config.get("temperature"),
-                "reasoning_effort": model_config.get("reasoning_effort"),
                 "max_retries": model_config.get("max_retries", 3),
                 "seed": model_config.get("seed", None),
                 "openai_organization": str(self.project_id),
             }
 
+            # OpenAI reasoning models (gpt-5, o1, o3): use reasoning dict format
+            # This enables extended thinking and returns reasoning in content_blocks
+            reasoning_effort = model_config.get("reasoning_effort")
+            if reasoning_effort:
+                target_kwargs["reasoning"] = {
+                    "effort": reasoning_effort.lower(),
+                    "summary": "auto"  # Return reasoning summary in response
+                }
+
             if use_responses_api:
                 target_kwargs["use_responses_api"] = True
-            
+
             llm = ChatOpenAI(**target_kwargs)
         return llm
         
