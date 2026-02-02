@@ -112,20 +112,112 @@ class SetupContext:
 
 
 def extract_json_path(data: Any, path: str) -> Any:
-    """Extract a value from data using a simple JSON path ($.field.subfield)."""
+    """
+    Extract a value from data using a simple JSON path ($.field.subfield or $.array[0].field).
+    
+    Supports:
+    - $.field.subfield - nested dict access
+    - $.array[0] - array indexing
+    - $.array[0].field - combined array and dict access
+    """
+    import re
+    
     if not path.startswith("$."):
         return path
 
-    parts = path[2:].split(".")
+    # Remove leading $. 
+    path = path[2:]
+    
+    # Parse path handling both dot notation and bracket notation
+    # Split on dots but preserve bracketed indices
+    parts = []
+    current = ""
+    for char in path:
+        if char == '.':
+            if current:
+                parts.append(current)
+                current = ""
+        else:
+            current += char
+    if current:
+        parts.append(current)
+    
     result = data
     for part in parts:
-        if isinstance(result, dict):
+        if result is None:
+            return None
+            
+        # Check for bracket notation (e.g., "issues[0]")
+        bracket_match = re.match(r'^([^\[]+)\[(\d+)\]$', part)
+        if bracket_match:
+            field_name = bracket_match.group(1)
+            index = int(bracket_match.group(2))
+            
+            # First access the field
+            if isinstance(result, dict):
+                result = result.get(field_name)
+            else:
+                return None
+            
+            # Then index into the array
+            if isinstance(result, list) and 0 <= index < len(result):
+                result = result[index]
+            else:
+                return None
+        elif isinstance(result, dict):
             result = result.get(part)
         elif isinstance(result, list) and part.isdigit():
-            result = result[int(part)]
+            index = int(part)
+            if 0 <= index < len(result):
+                result = result[index]
+            else:
+                return None
         else:
             return None
+            
     return result
+
+
+def extract_regex_match(data: str, pattern: str, match_index: int = 0, group_index: int = 1) -> Any:
+    """
+    Extract a value from string data using regex pattern matching.
+    
+    Supports extracting the N-th match and specific capture groups.
+    
+    Args:
+        data: String data to search in
+        pattern: Regex pattern with capture groups
+        match_index: Which match to extract (0 = first match, 1 = second match, etc.)
+        group_index: Which capture group to extract from the match (1 = first group, etc.)
+    
+    Returns:
+        The extracted value or None if not found
+        
+    Examples:
+        # Extract first issue key: 'key': 'EL-455'
+        extract_regex_match(data, r"'key': '([A-Z]+-\\d+)'", match_index=0, group_index=1)
+        
+        # Extract second issue key
+        extract_regex_match(data, r"'key': '([A-Z]+-\\d+)'", match_index=1, group_index=1)
+    """
+    if not isinstance(data, str):
+        return None
+    
+    try:
+        matches = re.findall(pattern, data)
+        if match_index < len(matches):
+            match_result = matches[match_index]
+            # If regex has groups, match_result is a tuple
+            if isinstance(match_result, tuple):
+                if group_index - 1 < len(match_result):
+                    return match_result[group_index - 1]
+            else:
+                # Single group returns string directly
+                if group_index == 1:
+                    return match_result
+        return None
+    except Exception as e:
+        return None
 
 
 # =============================================================================
@@ -610,15 +702,69 @@ def execute_setup(
         # Save environment variables from step result
         if step_result.get("success") and "save_to_env" in step:
             for save_config in step["save_to_env"]:
+                import json
                 key = save_config["key"]
                 value_path = save_config["value"]
+                default_value = save_config.get("default")
+                
+                # Debug: Show what we're working with
+                ctx.log(f"[DEBUG] save_to_env for key '{key}':", "info")
+                ctx.log(f"  Path: {value_path}", "info")
+                ctx.log(f"  Default: {default_value}", "info")
+                ctx.log(f"  step_result keys: {list(step_result.keys())}", "info")
+                ctx.log(f"  step_result type: {type(step_result)}", "info")
+                
+                # Show relevant portion of step_result
+                if "result" in step_result:
+                    result_preview = json.dumps(step_result["result"], indent=2)[:500]
+                    ctx.log(f"  step_result['result']: {result_preview}...", "info")
+                else:
+                    ctx.log(f"  step_result (no 'result' key): {json.dumps(step_result, indent=2)[:500]}...", "info")
+                
+                # Extract value using JSONPath
                 value = extract_json_path(step_result, value_path)
+                ctx.log(f"  Extracted value: {value} (type: {type(value).__name__})", "info")
+                
+                # If JSONPath failed and result is a string, try regex extraction
+                if value is None and "result" in step_result:
+                    result_data = step_result["result"]
+                    # Check if result is nested dict with 'result' field (toolkit response format)
+                    if isinstance(result_data, dict) and "result" in result_data:
+                        result_data = result_data["result"]
+                    
+                    if isinstance(result_data, str):
+                        # Try to extract issue keys from formatted string output
+                        # Pattern matches: 'key': 'EL-455' or "key": "EL-455"
+                        # Determine which match index to use based on JSONPath
+                        match_index = 0
+                        if "[1]" in value_path:
+                            match_index = 1
+                        elif "[2]" in value_path:
+                            match_index = 2
+                        
+                        # Try single-quoted format first
+                        value = extract_regex_match(result_data, r"'key': '([A-Z]+-\d+)'", match_index=match_index)
+                        if value is None:
+                            # Try double-quoted format
+                            value = extract_regex_match(result_data, r'"key": "([A-Z]+-\d+)"', match_index=match_index)
+                        
+                        if value is not None:
+                            ctx.log(f"  Extracted via regex (match #{match_index}): {value}", "info")
+                
+                # Use default if extraction failed
+                if value is None and default_value is not None:
+                    value = default_value
+                    ctx.log(f"  Using default value: {value}", "info")
+                
                 if value is not None:
                     # In dry_run mode, don't overwrite existing env values with dummy data
                     if step_result.get("dry_run") and key in ctx.env_vars:
                         ctx.log(f"Keeping existing {key}={ctx.env_vars[key]}", "info")
                     else:
+                        ctx.log(f"Saved {key}={value}", "info")
                         ctx.save_env(key, value)
+                else:
+                    ctx.log(f"[WARNING] Not saving {key} - value is None and no default provided", "warning")
 
         results["steps"].append({
             "name": step_name,

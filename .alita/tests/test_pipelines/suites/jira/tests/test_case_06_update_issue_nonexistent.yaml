@@ -1,0 +1,86 @@
+name: "JR06 - Update Issue (Non-existent Issue)"
+priority: High
+description: |
+  Verify `update_issue` tool handles non-existent issue gracefully.
+
+  Objective: Ensure tool returns error for invalid issue key.
+
+  Expected Behavior:
+  - Tool executes and handles error appropriately.
+  - Returns error message for non-existent issue.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_json:
+    type: str
+    value: '{"key": "INVALID-99999", "fields": {"summary": "Updated"}}'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_issue
+
+nodes:
+  - id: invoke_update_issue
+    type: toolkit
+    tool: update_issue
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_json
+    input_mapping:
+      issue_json:
+        type: variable
+        value: issue_json
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_issue' tool.
+
+          Tool Result: {tool_result}
+
+          This test validates ERROR HANDLING for non-existent issues.
+
+          PASS Criteria:
+          - Tool returned an error message about issue not existing or permission denied
+          - Error message contains "Issue does not exist" or "permission" or similar
+
+          FAIL Criteria:
+          - Tool succeeded when it should have failed
+          - No error returned
+          - Empty or null result
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (TRUE if error occurred as expected),
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

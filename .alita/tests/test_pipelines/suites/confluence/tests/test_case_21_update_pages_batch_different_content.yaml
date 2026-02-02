@@ -1,0 +1,90 @@
+name: "CF21 - Update Pages (Batch Update with Different Content)"
+priority: Critical
+description: |
+  Verify `update_pages` tool updates multiple pages with different content in batch.
+
+  Objective: Ensure tool can update several pages with individual content per page.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Updates each page with corresponding content from new_contents list.
+  - Returns string representation of list with update statuses for each page.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_ids:
+    type: list
+    value: ['138969168', '104038676']
+  new_contents:
+    type: list
+    value: ['Updated content 1 ${TIMESTAMP}', 'Updated content 2 ${TIMESTAMP}']
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_pages
+
+nodes:
+  - id: invoke_update_pages
+    type: toolkit
+    tool: update_pages
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_ids
+      - new_contents
+    input_mapping:
+      page_ids:
+        type: variable
+        value: page_ids
+      new_contents:
+        type: variable
+        value: new_contents
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - page_ids
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_pages' tool.
+
+          Tool Result: {tool_result}
+          Page IDs: {page_ids}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty, null, or error message).
+          2. Verify the output is a string representation of a list containing update statuses.
+          3. Check that the number of statuses matches the number of input page IDs.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

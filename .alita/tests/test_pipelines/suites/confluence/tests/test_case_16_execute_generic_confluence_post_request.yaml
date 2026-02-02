@@ -1,0 +1,97 @@
+name: "CF16 - Execute Generic Confluence (POST Request)"
+priority: High
+description: |
+  Verify `execute_generic_confluence` tool executes generic Confluence REST API POST request.
+
+  Objective: Ensure tool handles POST requests with data payload by adding a label to a page.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Returns HTTP response string with status code (200 or 201) and response text.
+  - Handles POST method correctly.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  method:
+    type: str
+    value: "POST"
+  relative_url:
+    type: str
+    value: "/rest/api/content/104038676/label"
+  params:
+    type: str
+    value: '[{"prefix":"global","name":"test-automation"}]'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_execute_generic_confluence
+
+nodes:
+  - id: invoke_execute_generic_confluence
+    type: toolkit
+    tool: execute_generic_confluence
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - method
+      - relative_url
+      - params
+    input_mapping:
+      method:
+        type: variable
+        value: method
+      relative_url:
+        type: variable
+        value: relative_url
+      params:
+        type: variable
+        value: params
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - method
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'execute_generic_confluence' tool.
+
+          Tool Result: {tool_result}
+          Method: {method}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or null).
+          2. Verify the output contains "HTTP: POST" indicating POST method was used.
+          3. Check that response includes successful status code (200 or 201) and response data.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

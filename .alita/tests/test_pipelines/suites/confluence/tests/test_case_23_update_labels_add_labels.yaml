@@ -1,0 +1,92 @@
+name: "CF23 - Update Labels (Add Labels to Pages)"
+priority: Critical
+description: |
+  Verify `update_labels` tool adds labels to multiple pages in batch.
+
+  Objective: Ensure tool can update labels for several pages simultaneously.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Adds specified labels to all provided pages.
+  - Returns string representation of list with update statuses.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_ids:
+    type: list
+    value: ['138969168']
+  new_labels:
+    type: list
+    value: ['test-automated', 'qa-verification']
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_labels
+
+nodes:
+  - id: invoke_update_labels
+    type: toolkit
+    tool: update_labels
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_ids
+      - new_labels
+    input_mapping:
+      page_ids:
+        type: variable
+        value: page_ids
+      new_labels:
+        type: variable
+        value: new_labels
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - page_ids
+      - new_labels
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_labels' tool.
+
+          Tool Result: {tool_result}
+          Page IDs: {page_ids}
+          New Labels: {new_labels}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty, null, or error message).
+          2. Verify the output is a string representation of a list containing update statuses.
+          3. Check that labels were added to the specified pages.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

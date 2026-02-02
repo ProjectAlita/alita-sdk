@@ -1,0 +1,92 @@
+name: "JR12 - Add Comments (Invalid Issue)"
+priority: High
+description: |
+  Verify `add_comments` tool handles non-existent issue gracefully.
+
+  Objective: Ensure tool returns error for invalid issue key.
+
+  Expected Behavior:
+  - Tool executes and handles error appropriately.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_key:
+    type: str
+    value: "INVALID-99999"
+  comment_text:
+    type: str
+    value: "Test comment"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_add_comments
+
+nodes:
+  - id: invoke_add_comments
+    type: toolkit
+    tool: add_comments
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_key
+      - comment_text
+    input_mapping:
+      issue_key:
+        type: variable
+        value: issue_key
+      comment:
+        type: variable
+        value: comment_text
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'add_comments' tool.
+
+          Tool Result: {tool_result}
+
+          This test validates ERROR HANDLING for invalid issue keys.
+
+          PASS Criteria:
+          - Tool returned an error about issue not existing or permission denied
+          - Error message contains "Issue does not exist" or "permission" or similar
+
+          FAIL Criteria:
+          - Tool succeeded when it should have failed
+          - No error returned
+          - Empty or null result
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (TRUE if error occurred as expected),
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,85 @@
+name: "JR20 - Get Field with Image Descriptions (Field Not Found)"
+priority: High
+description: |
+  Verify `get_field_with_image_descriptions` tool handles missing field.
+
+  Objective: Ensure tool returns error for non-existent field.
+
+  Expected Behavior:
+  - Tool executes and handles error appropriately.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_key:
+    type: str
+    value: ${JIRA_TEST_ISSUE}
+  field_name:
+    type: str
+    value: "invalid_field_xyz"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_field_with_images
+
+nodes:
+  - id: invoke_get_field_with_images
+    type: toolkit
+    tool: get_field_with_image_descriptions
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_key
+      - field_name
+    input_mapping:
+      jira_issue_key:
+        type: variable
+        value: issue_key
+      field_name:
+        type: variable
+        value: field_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_field_with_image_descriptions' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed (result is not empty or null).
+          2. Result may contain error for missing field.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

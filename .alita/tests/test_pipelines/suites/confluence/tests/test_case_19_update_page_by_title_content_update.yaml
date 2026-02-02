@@ -1,0 +1,90 @@
+name: "CF19 - Update Page by Title (Content Update)"
+priority: Critical
+description: |
+  Verify `update_page_by_title` tool updates page content using page title.
+
+  Objective: Ensure tool can find page by title and update its content.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Locates page by title and updates content.
+  - Returns success message or updated page details.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_title:
+    type: str
+    value: "TC-003 Page with label"
+  new_body:
+    type: str
+    value: "Updated content via update_page_by_title test ${TIMESTAMP}"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_page_by_title
+
+nodes:
+  - id: invoke_update_page_by_title
+    type: toolkit
+    tool: update_page_by_title
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title
+      - new_body
+    input_mapping:
+      page_title:
+        type: variable
+        value: page_title
+      new_body:
+        type: variable
+        value: new_body
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - page_title
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_page_by_title' tool.
+
+          Tool Result: {tool_result}
+          Page Title: {page_title}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty, null, or error starting with "Page with title").
+          2. Verify the output indicates successful update (contains page details or success message).
+          3. Check that no "not found" error message is present.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
