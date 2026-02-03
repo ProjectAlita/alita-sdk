@@ -1,0 +1,17 @@
+{
+  "type": "ado_wiki",
+  "toolkit_name": "ado-wiki",
+  "id": 2,
+  "ado_configuration": {
+    "alita_title": "ado",
+    "private": true
+  },
+  "organization_url": "https://dev.azure.com/${ADO_ORG}",
+  "project": "${ADO_PROJECT}",
+  "token": "${ADO_TOKEN}",
+  "selected_tools": [
+    "get_wiki_page",
+    "get_wiki_page_by_path",
+    "get_wiki_page_by_id"
+  ]
+}

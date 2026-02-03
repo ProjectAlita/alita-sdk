@@ -151,15 +151,22 @@ def load_config(suite_folder: Path, pipeline_file: str | None = None, raise_on_m
         return yaml.safe_load(f)
 
 
-def load_toolkit_config(config_file: str, base_path: Path) -> dict:
-    """Load a toolkit configuration file (JSON).
+def load_toolkit_config(
+    config_file: str,
+    base_path: Path,
+    env_substitutions: dict = None,
+    env_loader: Optional[Callable[[str], Optional[str]]] = None
+) -> dict:
+    """Load a toolkit configuration file (JSON) with environment variable substitution.
 
     Args:
         config_file: Path to config file (absolute or relative to base_path)
         base_path: Base path for resolving relative paths
+        env_substitutions: Dict of variable name -> value for substitution (optional)
+        env_loader: Optional callable to load env vars (e.g., load_from_env function)
 
     Returns:
-        Parsed JSON config dict.
+        Parsed JSON config dict with environment variables resolved.
 
     Raises:
         FileNotFoundError: If config file not found.
@@ -169,7 +176,13 @@ def load_toolkit_config(config_file: str, base_path: Path) -> dict:
         config_file = str(base_path / config_file)
 
     with open(config_file) as f:
-        return json.load(f)
+        config = json.load(f)
+    
+    # Apply environment variable substitution
+    if env_substitutions is None:
+        env_substitutions = {}
+    
+    return resolve_env_value(config, env_substitutions, env_loader)
 
 
 def parse_suite_spec(suite_spec: str) -> tuple[str, str | None]:

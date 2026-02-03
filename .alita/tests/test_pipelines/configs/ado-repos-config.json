@@ -1,0 +1,28 @@
+{
+  "type": "ado_repos",
+  "toolkit_name": "ado-repos",
+  "id": 1,
+  "ado_configuration": {
+    "alita_title": "ado",
+    "private": true
+  },
+  "organization_url": "https://dev.azure.com/${ADO_ORG}",
+  "project": "${ADO_PROJECT}",
+  "token": "${ADO_TOKEN}",
+  "repository_id": "${ADO_REPOSITORY_ID}",
+  "base_branch": "main",
+  "active_branch": "main",
+  "selected_tools": [
+    "list_files",
+    "list_open_pull_requests",
+    "read_file",
+    "list_branches_in_repo",
+    "create_file",
+    "update_file",
+    "delete_file",
+    "get_work_items",
+    "comment_on_pull_request",
+    "create_pull_request",
+    "get_commits"
+  ]
+}

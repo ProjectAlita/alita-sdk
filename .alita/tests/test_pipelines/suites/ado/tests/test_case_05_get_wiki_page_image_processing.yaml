@@ -1,0 +1,79 @@
+name: "ADO05 - Get Wiki Page with Image Processing"
+description: "Verify 'get_wiki_page' retrieves wiki content and processes images into descriptions"
+
+toolkits:
+  - id: ${ADO_WIKI_TOOLKIT_ID}
+    name: ${ADO_WIKI_TOOLKIT_NAME}
+
+state:
+  wiki_identifier:
+    type: str
+    value: 'TestProject.wiki'
+  page_id:
+    type: str
+    value: '54'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_wiki_page
+nodes:
+  - id: invoke_get_wiki_page
+    type: toolkit
+    input:
+      - wiki_identifier
+      - page_id
+      - include_content
+    input_mapping:
+      wiki_identifier:
+        type: variable
+        value: wiki_identifier
+      page_id:
+        type: variable
+        value: page_id
+      include_content:
+        type: fixed
+        value: true
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_wiki_page
+    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    transition: validate_wiki
+
+  - id: validate_wiki
+    type: llm
+    input:
+      - tool_result
+      - page_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate that the wiki page content contains meaningful image descriptions (no raw attachment URLs) and preserves markdown structure.
+
+          Tool Result: {tool_result}
+          Page ID: {page_id}
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "no_raw_attachments": boolean,
+            "keywords_present": [string]
+          }}
+
+          Return ONLY the JSON object.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

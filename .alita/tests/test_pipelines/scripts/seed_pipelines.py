@@ -373,13 +373,12 @@ def parse_pipeline_yaml(yaml_path: Path, env_substitutions: dict = None) -> dict
         instructions_data = {k: v for k, v in data.items() if k not in ("name", "description")}
         instructions_yaml = yaml.dump(instructions_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-    # Apply environment variable substitutions
-    if env_substitutions:
-        for var_name, value in env_substitutions.items():
-            # Replace ${VAR_NAME} patterns
-            instructions_yaml = instructions_yaml.replace(f"${{{var_name}}}", str(value))
-            # Also replace $VAR_NAME patterns (without braces)
-            instructions_yaml = instructions_yaml.replace(f"${var_name}", str(value))
+    # Apply environment variable substitutions using resolve_env_value
+    # This automatically resolves ${VAR} references from:
+    # 1. env_substitutions dict (from execution.substitutions in pipeline.yaml)
+    # 2. .env files via load_from_env
+    # 3. OS environment variables
+    instructions_yaml = resolve_env_value(instructions_yaml, env_substitutions, env_loader=load_from_env)
 
     return {
         "name": name,

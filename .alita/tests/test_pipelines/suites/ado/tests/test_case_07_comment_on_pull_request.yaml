@@ -1,0 +1,77 @@
+name: "ADO07 - Comment on Pull Request (simple)"
+description: "Verify the ADO 'comment_on_pull_request' tool can add a general comment using comment_query format"
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  repository_id:
+    type: str
+    value: ${ADO_REPOSITORY_ID}
+  comment_query:
+    type: str
+    value: "${ADO_TEST_PR_ID}\n\nAutomated test comment: please ignore."
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_comment_on_pr
+nodes:
+  - id: invoke_comment_on_pr
+    type: toolkit
+    input:
+      - repository_id
+      - comment_query
+    input_mapping:
+      repository_id:
+        type: variable
+        value: repository_id
+      comment_query:
+        type: variable
+        value: comment_query
+    output:
+      - tool_result
+    structured_output: true
+    tool: comment_on_pull_request
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_comment
+
+  - id: validate_comment
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'comment_on_pull_request' for a simple comment_query call.
+
+          Tool Result: {tool_result}
+
+          Validation rules:
+           - tool_executed: True if response indicates success or comment creation
+           - test_passed: True if a success message is present and not an error
+           - message_snippet: short string summarizing response
+           - error: string or null
+
+          Return ONLY JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "message_snippet": string | null,
+            "error": string | null
+          }}
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

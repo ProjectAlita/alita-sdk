@@ -317,11 +317,13 @@ class LocalSetupStrategy(SetupStrategy):
         if "config_file" in config:
             try:
                 file_config = load_toolkit_config(config["config_file"], base_path)
+                # Resolve environment variables in loaded config file
+                file_config = resolve_env_value(file_config, ctx.env_vars, env_loader=load_from_env)
             except FileNotFoundError:
                 ctx.log(f"Config file not found: {config['config_file']}", "warning")
         
-        # Apply overrides
-        overrides = config.get("overrides", {})
+        # Apply overrides - resolve environment variables in overrides first
+        overrides = resolve_env_value(config.get("overrides", {}), ctx.env_vars, env_loader=load_from_env)
         for key, value in overrides.items():
             if isinstance(value, dict) and key in file_config and isinstance(file_config[key], dict):
                 file_config[key].update(value)

@@ -1,0 +1,79 @@
+name: "ADO02 - List Open Pull Requests"
+description: "Verify the ADO 'list_open_pull_requests' tool retrieves open PRs"
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  repository_id:
+    type: str
+    value: ${ADO_REPOSITORY_ID}
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_prs
+nodes:
+  - id: invoke_list_prs
+    type: toolkit
+    input:
+      - repository_id
+    input_mapping:
+      repository_id:
+        type: variable
+        value: repository_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: list_open_pull_requests
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_prs
+
+  - id: validate_prs
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'list_open_pull_requests' tool.
+
+          Tool Result: {tool_result}
+
+          Validation Guidelines:
+          - tool_executed: True if result is a valid list/array (even if empty), False if error message
+          - test_passed: True if tool executed successfully AND returned PR data (count >= 1)
+          - open_pr_count: Number of PRs in the result (0 if empty or error)
+          - sample_pr: First PR object from result, or null if no PRs
+          - title_check: True if 'title': 'PR FOR AI TEST' exists in any PR object
+          - id_check: True if 'pull_request_id': 10 exists in any PR object
+
+          Expected: At least 1 open PR should be present (test PR #10) with the title 'PR FOR AI TEST'.
+
+          Return a JSON object test_results with structure:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "open_pr_count": integer,
+            "sample_pr": object | null,
+            "title_check": boolean,
+            "id_check": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object with no additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

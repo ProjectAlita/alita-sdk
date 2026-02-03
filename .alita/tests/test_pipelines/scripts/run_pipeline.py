@@ -152,8 +152,51 @@ def process_pipeline_result(
     output = result_data
     detected_error = None  # Track user-friendly error messages
 
-    # Check various result structures for test_passed
-    if isinstance(result_data, dict):
+    # CRITICAL: Check for tool execution errors FIRST (before checking test_passed from LLM)
+    # This prevents false positives where LLM says "test passed" but a tool actually failed
+    if isinstance(result_data, dict) and "tool_calls_dict" in result_data:
+        tool_calls = result_data.get("tool_calls_dict", {})
+        if isinstance(tool_calls, dict):
+            for tool_call_id, tool_call in tool_calls.items():
+                if not isinstance(tool_call, dict):
+                    continue
+                
+                # Check if this tool call failed
+                finish_reason = tool_call.get("finish_reason")
+                if finish_reason == "error":
+                    # Tool execution failed - extract error details
+                    tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                    tool_error = tool_call.get("error", "Unknown error")
+                    
+                    # Format a clear error message
+                    if "ValidationError" in tool_error:
+                        # Extract validation error details
+                        lines = tool_error.split('\n')
+                        validation_msg = "Validation error"
+                        for line in lines:
+                            if "validation error" in line.lower():
+                                validation_msg = line.strip()
+                                break
+                            elif "Input should be" in line or "type=" in line:
+                                validation_msg = line.strip()
+                                break
+                        detected_error = f"Tool '{tool_name}' failed: {validation_msg}"
+                    else:
+                        # Generic error message
+                        error_preview = tool_error[:200] + "..." if len(tool_error) > 200 else tool_error
+                        detected_error = f"Tool '{tool_name}' execution failed: {error_preview}"
+                    
+                    test_passed = False
+                    
+                    if logger:
+                        logger.error(f"Tool execution error detected: {detected_error}")
+                        logger.debug(f"Full tool error: {tool_error}")
+                    
+                    # Break on first error (could collect all errors if needed)
+                    break
+
+    # Check various result structures for test_passed (only if not already set by tool error check)
+    if test_passed is None and isinstance(result_data, dict):
         # Direct test_passed field
         if "test_passed" in result_data:
             test_passed = result_data.get("test_passed")
