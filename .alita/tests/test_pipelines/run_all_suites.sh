@@ -250,11 +250,11 @@ run_suite() {
     local results_file="$suite_output_dir/results.json"
 
     # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
-    # Don't pass $VERBOSE with --json to keep stdout clean for JSON output
+    # Now verbose output goes to stderr, so we can use both --json and $VERBOSE together
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
-        # Don't use FORCE_COLOR with --json to keep JSON output clean
-        if python scripts/run_suite.py "$suite_spec" --json > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        # Set FORCE_COLOR=1 to preserve colors through tee pipe
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -264,8 +264,7 @@ run_suite() {
         fi
     else
         # Capture verbose output to log file only
-        # Don't pass $VERBOSE with --json to keep stdout clean for JSON output
-        if python scripts/run_suite.py "$suite_spec" --json > "$results_file" 2> "$suite_output_dir/run.log"; then
+        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -365,66 +364,60 @@ run_suite_local() {
     local suite_output_dir="$OUTPUT_DIR/suites/$suite_output_name"
     mkdir -p "$suite_output_dir"
 
-    # Step 1: Setup (with --local flag)
-    print_step "Step 1/3: Running setup for $suite_spec (local)"
+    # Note: Local mode setup is handled internally by run_suite.py
+    # No separate setup step needed - run_suite.py executes setup and runs tests
+    
+    # Step 1: Run tests (with --local flag, includes internal setup)
+    print_step "Step 1/2: Running tests for $suite_spec (local)"
+    local results_file="$suite_output_dir/results.json"
+
+    # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
+    # run_suite.py --local executes setup internally and then runs tests
+    # Logger routes setup output to stderr so it doesn't pollute JSON on stdout
     if [ "$SHOW_OUTPUT" = true ]; then
-        # Show output in real-time while also capturing to log
+        # Show verbose output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env --local 2>&1 | tee "$suite_output_dir/setup.log"; then
-            print_success "Setup completed"
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+            print_success "Tests completed"
         else
-            print_error "Setup failed - see $suite_output_dir/setup.log"
-            SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
             return 1
         fi
     else
-        # Capture to log only
-        if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env --local > "$suite_output_dir/setup.log" 2>&1; then
-            print_success "Setup completed"
+        # Capture verbose output to log file only
+        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> "$suite_output_dir/run.log"; then
+            print_success "Tests completed"
         else
-            print_error "Setup failed - see $suite_output_dir/setup.log"
-            SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
-            cat "$suite_output_dir/setup.log"
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
             return 1
         fi
     fi
 
-    # Step 3: Run tests (with --local flag)
-    print_step "Step 2/3: Running tests for $suite_spec (local)"
-    local results_file="$suite_output_dir/results.json"
+    # Parse results
+    if [ -f "$results_file" ]; then
+        local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
+        local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+        local errors=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('errors', 0))" 2>/dev/null || echo "0")
+        local skipped=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
+        local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total', 0))" 2>/dev/null || echo "0")
 
-    # Don't pass $VERBOSE with --json to keep stdout clean for JSON output
-    # Verbose logs go to run.log (stderr)
-    if python scripts/run_suite.py "$suite_spec" --json --local > "$results_file" 2> "$suite_output_dir/run.log"; then
-        print_success "Tests completed"
+        SUITE_PASSED["$suite_spec"]=$passed
+        SUITE_FAILED["$suite_spec"]=$failed
+        SUITE_ERRORS["$suite_spec"]=$errors
+        SUITE_SKIPPED["$suite_spec"]=$skipped
 
-        # Parse results
-        if [ -f "$results_file" ]; then
-            local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
-            local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
-            local errors=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('errors', 0))" 2>/dev/null || echo "0")
-            local skipped=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
-            local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total_tests', 0))" 2>/dev/null || echo "0")
+        echo "  Results: $passed passed, $failed failed, $errors errors, $skipped skipped (total: $total)"
 
-            SUITE_PASSED["$suite_spec"]=$passed
-            SUITE_FAILED["$suite_spec"]=$failed
-            SUITE_ERRORS["$suite_spec"]=$errors
-            SUITE_SKIPPED["$suite_spec"]=$skipped
-
-            echo "  Results: $passed passed, $failed failed, $errors errors, $skipped skipped (total: $total)"
-
-            if [ "$failed" -gt 0 ] || [ "$errors" -gt 0 ]; then
-                SUITE_RESULTS["$suite_spec"]="TESTS_FAILED"
-                print_error "Some tests failed"
-            else
-                SUITE_RESULTS["$suite_spec"]="PASSED"
-            fi
+        if [ "$failed" -gt 0 ] || [ "$errors" -gt 0 ]; then
+            SUITE_RESULTS["$suite_spec"]="TESTS_FAILED"
+            print_error "Some tests failed"
+        else
+            SUITE_RESULTS["$suite_spec"]="PASSED"
         fi
-    else
-        print_error "Test execution failed - see $suite_output_dir/run.log"
-        SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
-        cat "$suite_output_dir/run.log"
-        return 1
     fi
 
     # Step 3: Cleanup (with --local flag)
