@@ -98,6 +98,12 @@ ADOUnlinkWorkItemsFromWikiPage = create_model(
     page_name=(str, Field(description="Wiki page path to unlink the work items from", examples=["/TargetPage"]))
 )
 
+ADOGetWorkItemTypeFields = create_model(
+    "ADOGetWorkItemTypeFields",
+    work_item_type=(Optional[str], Field(description="Work item type to get fields for (e.g., 'Task', 'Bug', 'Test Case', 'Epic'). Default is 'Task'.", default="Task")),
+    force_refresh=(Optional[bool], Field(description="If True, reload field definitions from Azure DevOps. Use this if project configuration has changed.", default=False))
+)
+
 class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     # TODO use ado_configuration instead of organization_url, project and token
     organization_url: str
@@ -108,6 +114,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     _wiki_client: Optional[WikiClient] = PrivateAttr() # Add WikiClient instance
     _core_client: Optional[CoreClient] = PrivateAttr() # Add CoreClient instance
     _relation_types: Dict = PrivateAttr(default_factory=dict) # track actual relation types for instance
+    _work_item_type_fields_cache: Dict[str, Dict] = PrivateAttr(default_factory=dict)  # Cache for work item type field definitions
 
     class Config:
         arbitrary_types_allowed = True  # Allow arbitrary types (e.g., WorkItemTrackingClient, WikiClient, CoreClient)
@@ -248,6 +255,129 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             for relation in relations:
                 self._relation_types.update({relation.name: relation.reference_name})
         return self._relation_types
+
+    def _get_work_item_type_fields(self, work_item_type: str) -> Dict:
+        """
+        Get field definitions for a specific work item type using the Azure DevOps client.
+
+        Args:
+            work_item_type: The work item type (e.g., 'Task', 'Bug', 'Test Case')
+
+        Returns:
+            dict: Mapping of field reference names to their metadata (name, type, required, allowed values)
+        """
+        try:
+            # Use the WorkItemTrackingClient to get work item type fields
+            work_item_type_obj = self._client.get_work_item_type(self.project, work_item_type)
+
+            # Get fields for this work item type
+            fields = work_item_type_obj.fields
+
+            field_definitions = {}
+            for field in fields:
+                field_ref_name = field.reference_name
+                field_definitions[field_ref_name] = {
+                    'name': field.name,
+                    'type': field.type if hasattr(field, 'type') else 'Unknown',
+                    'required': field.always_required if hasattr(field, 'always_required') else False,
+                    'allowed_values': field.allowed_values if hasattr(field, 'allowed_values') else [],
+                    'description': field.help_text if hasattr(field, 'help_text') else ''
+                }
+
+            return field_definitions
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch field definitions for work item type '{work_item_type}' using client: {e}")
+            return {}
+
+    def _format_work_item_type_fields_for_display(self, work_item_type: str, field_definitions: Dict) -> str:
+        """
+        Format field definitions in human-readable format for LLM.
+
+        Args:
+            work_item_type: The work item type name
+            field_definitions: Output from _get_work_item_type_fields()
+
+        Returns:
+            Formatted string with field information
+        """
+        if not field_definitions:
+            return f"Unable to retrieve field definitions for work item type '{work_item_type}'. Please check your Azure DevOps connection and permissions."
+
+        output = [f"Available Fields for Work Item Type '{work_item_type}' in Project '{self.project}':\n"]
+        output.append("=" * 80)
+
+        # Separate required and optional fields
+        required_fields = []
+        optional_fields = []
+
+        for ref_name, field_info in sorted(field_definitions.items()):
+            field_entry = {
+                'ref_name': ref_name,
+                'name': field_info.get('name', ref_name),
+                'type': field_info.get('type', 'Unknown'),
+                'required': field_info.get('required', False),
+                'allowed_values': field_info.get('allowed_values', [])
+            }
+
+            if field_entry['required']:
+                required_fields.append(field_entry)
+            else:
+                optional_fields.append(field_entry)
+
+        # Display required fields first
+        if required_fields:
+            output.append("\n📋 REQUIRED FIELDS:")
+            output.append("-" * 80)
+            for field in required_fields:
+                output.append(f"\n✓ {field['name']} (Reference: {field['ref_name']})")
+                output.append(f"  Type: {field['type']}")
+                if field['allowed_values']:
+                    output.append(f"  Allowed Values: {', '.join(str(v) for v in field['allowed_values'])}")
+
+        # Display optional fields (common ones only)
+        if optional_fields:
+            output.append("\n\n📝 OPTIONAL FIELDS (Common):")
+            output.append("-" * 80)
+            # Show only commonly used optional fields
+            common_fields = ['System.AssignedTo', 'System.AreaPath', 'System.IterationPath',
+                           'Microsoft.VSTS.Common.Priority', 'System.Tags', 'System.State']
+            for field in optional_fields:
+                if field['ref_name'] in common_fields:
+                    output.append(f"\n  {field['name']} (Reference: {field['ref_name']})")
+                    output.append(f"    Type: {field['type']}")
+                    if field['allowed_values']:
+                        output.append(f"    Allowed Values: {', '.join(str(v) for v in field['allowed_values'])}")
+
+        output.append("\n\n" + "=" * 80)
+        output.append("\n💡 Usage Instructions:")
+        output.append("  • Use the 'Reference' name (e.g., 'System.Title') as the field key in work_item_json")
+        output.append("  • Provide all required fields when creating work items")
+        output.append("  • For fields with allowed values, use exact value from the list")
+        output.append(f"  • Example for {work_item_type}: " + '{"fields": {"System.Title": "My title", "CustomField": "Value"}}')
+
+        return '\n'.join(output)
+
+    def get_work_item_type_fields(self, work_item_type: str = "Task", force_refresh: bool = False) -> str:
+        """
+        Get formatted information about available fields for a specific work item type.
+        This method helps discover which fields are required for work item creation.
+
+        Args:
+            work_item_type: The work item type to get fields for (e.g., 'Task', 'Bug', 'Test Case', 'Epic').
+                           Default is 'Task'.
+            force_refresh: If True, reload field definitions from Azure DevOps instead of using cache.
+                          Use this if project configuration has changed (new fields added, etc.).
+
+        Returns:
+            Formatted string with field names, types, and requirements
+        """
+        cache_key = work_item_type
+
+        if force_refresh or cache_key not in self._work_item_type_fields_cache:
+            self._work_item_type_fields_cache[cache_key] = self._get_work_item_type_fields(work_item_type)
+
+        return self._format_work_item_type_fields_for_display(work_item_type, self._work_item_type_fields_cache[cache_key])
 
     def link_work_items(self, source_id, target_id, link_type, attributes: dict = None):
         """Add the relation to the source work item with an appropriate attributes if any. User may pass attributes like name, etc."""
@@ -695,5 +825,11 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 "description": self.unlink_work_items_from_wiki_page.__doc__,
                 "args_schema": ADOUnlinkWorkItemsFromWikiPage,
                 "ref": self.unlink_work_items_from_wiki_page,
+            },
+            {
+                "name": "get_work_item_type_fields",
+                "description": self.get_work_item_type_fields.__doc__,
+                "args_schema": ADOGetWorkItemTypeFields,
+                "ref": self.get_work_item_type_fields,
             }
         ]

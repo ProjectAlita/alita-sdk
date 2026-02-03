@@ -213,11 +213,22 @@ def load_mcp_servers_config(config_path: Optional[str] = None) -> Dict[str, Any]
     """Load MCP servers configuration from YAML file.
 
     Config is loaded from (in order of priority):
+    0. Pylon current plugin config
     1. Explicit config_path parameter
     2. ALITA_MCP_SERVERS_CONFIG environment variable
     3. Plugin config: /data/plugins/indexer_worker/config.yml
     4. Template config: /data/configs/indexer_worker.yml
     """
+    try:
+        from tools import this  # pylint: disable=E0401,C0415
+        worker_config = this.for_module("indexer_worker").descriptor.config
+        mcp_servers = worker_config.get('mcp_servers', {})
+        if mcp_servers:
+            logger.info(f"[MCP Config] Loaded {len(mcp_servers)} MCP servers from pylon")
+            return mcp_servers
+    except:  # pylint: disable=W0702
+        pass
+  
     if config_path is None:
         config_path = os.environ.get('ALITA_MCP_SERVERS_CONFIG')
 
@@ -587,7 +598,8 @@ class McpConfigToolkit(BaseToolkit):
         url = _substitute_placeholders(server_config.get('url', ''), user_config)
         headers = _substitute_placeholders(server_config.get('headers', {}), user_config)
         timeout = server_config.get('timeout', 60)
-        ssl_verify = server_config.get('ssl_verify', True)
+        # Check user_config first (user's toolkit settings), then server_config, default True
+        ssl_verify = user_config.get('ssl_verify', server_config.get('ssl_verify', True))
 
         logger.info(f"[MCP Config] Connecting to HTTP server {server_name} at {url} (ssl_verify={ssl_verify})")
 

@@ -1,6 +1,7 @@
 import logging
 import re
-from typing import Optional, Generator, List
+from io import BytesIO
+from typing import Optional, Generator, List, Any
 
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
@@ -10,6 +11,7 @@ from pydantic import Field, PrivateAttr, create_model, model_validator, SecretSt
 
 from .utils import decode_sharepoint_string
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils import get_file_bytes_from_artifact, detect_mime_type
 from ..utils.content_parser import parse_file_content
 from ...runtime.utils.utils import IndexerKeywords
 
@@ -46,12 +48,43 @@ ReadDocument = create_model(
                         default=None))
 )
 
+UploadFile = create_model(
+    "UploadFile",
+    folder_path=(str, Field(description="Server-relative folder path for upload (e.g., '/sites/MySite/Shared Documents/folder')")),
+    filepath=(Optional[str], Field(description="File path in format /{bucket}/{filename} from artifact storage. Either filepath or filedata must be provided.", default=None)),
+    filedata=(Optional[str], Field(description="String content to upload as a file. Either filepath or filedata must be provided.", default=None)),
+    filename=(Optional[str], Field(description="Target filename. Required when using filedata, optional when using filepath (uses original filename if not specified).", default=None)),
+    replace=(Optional[bool], Field(description="If True, overwrite existing file. If False, raise error if file already exists.", default=True))
+)
+
+AddAttachmentToListItem = create_model(
+    "AddAttachmentToListItem",
+    list_title=(str, Field(description="Name of the SharePoint list")),
+    item_id=(int, Field(description="Internal item ID (not the display ID) to attach file to")),
+    filepath=(Optional[str], Field(description="File path in format /{bucket}/{filename} from artifact storage. Either filepath or filedata must be provided.", default=None)),
+    filedata=(Optional[str], Field(description="String content to attach as a file. Either filepath or filedata must be provided.", default=None)),
+    filename=(Optional[str], Field(description="Attachment filename. Required when using filedata, optional when using filepath (uses original filename if not specified).", default=None)),
+    replace=(Optional[bool], Field(description="If True, delete existing attachment with same name before adding. If False, raise error if attachment already exists.", default=True))
+)
+
+GetListColumns = create_model(
+    "GetListColumns",
+    list_title=(str, Field(description="Title of the SharePoint list to get column metadata for"))
+)
+
+CreateListItem = create_model(
+    "CreateListItem",
+    list_title=(str, Field(description="Title of the SharePoint list to create an item in")),
+    fields=(dict, Field(description="Dictionary of field name -> value pairs. Use get_list_columns() first to discover available fields, required fields, and valid choice values. Title field is typically required. For choice fields, value must match one of the allowed choices exactly. For dateTime fields, use ISO 8601 format (e.g., '2026-02-01T00:00:00Z')."))
+)
+
 
 class SharepointApiWrapper(NonCodeIndexerToolkit):
     site_url: str
     client_id: str = None
     client_secret: SecretStr = None
     token: SecretStr = None
+    alita: Any = None
     _client: Optional[ClientContext] = PrivateAttr()  # Private attribute for the office365 client
 
     @model_validator(mode='before')
@@ -99,6 +132,8 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             logging.info("{0} items from sharepoint loaded successfully via SharePoint REST API.".format(len(items)))
             result = []
             for item in items:
+                # TODO: Filter out internal/system fields (@odata.etag, AuthorLookupId, _ComplianceFlags, etc.)
+                # to reduce LLM context pollution. Return only user-defined fields and essential metadata.
                 result.append(item.properties)
             return result
         except Exception as base_e:
@@ -123,6 +158,223 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 logging.error(f"Graph API fallback failed: {graph_e}")
                 return ToolException(f"Cannot read list '{list_title}'. Check list name and permissions: {base_e} | {graph_e}")
 
+    def get_lists(self):
+        """Returns all SharePoint lists available on the site with their titles, IDs, and descriptions."""
+        try:
+            lists = self._client.web.lists.get().execute_query()
+            logging.info(f"{len(lists)} lists loaded successfully via SharePoint REST API.")
+            result = []
+            for lst in lists:
+                # Skip hidden system lists
+                if lst.properties.get('Hidden', False):
+                    continue
+                result.append({
+                    'Title': lst.properties.get('Title', ''),
+                    'Id': lst.properties.get('Id', ''),
+                    'Description': lst.properties.get('Description', ''),
+                    'ItemCount': lst.properties.get('ItemCount', 0),
+                    'BaseTemplate': lst.properties.get('BaseTemplate', 0)
+                })
+            return result
+        except Exception as base_e:
+            logging.warning(f"Primary SharePoint REST lists fetch failed: {base_e}. Attempting Graph API fallback.")
+            # Attempt Graph API fallback
+            try:
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value() if self.client_secret else None,
+                    tenant="",
+                    scope="",
+                    token_json="",
+                )
+                graph_lists = auth_helper.get_lists(self.site_url)
+                if graph_lists:
+                    logging.info(f"{len(graph_lists)} lists loaded successfully via Graph API fallback.")
+                    return graph_lists
+                else:
+                    return ToolException("No lists found or inaccessible via both REST and Graph APIs.")
+            except Exception as graph_e:
+                logging.error(f"Graph API fallback failed: {graph_e}")
+                return ToolException(f"Cannot retrieve lists. Check permissions: {base_e} | {graph_e}")
+
+    def get_list_columns(self, list_title: str):
+        """Get all columns (fields) in a SharePoint list with their metadata.
+        
+        Returns array of column objects with:
+        - name: Internal field name
+        - displayName: User-friendly name
+        - columnType: text, number, boolean, dateTime, choice
+        - required: Whether field is mandatory
+        - choice: For choice fields, includes array of valid values
+        
+        Lookup columns are excluded from results.
+        Use this tool before create_list_item() to discover available fields and validate inputs.
+        """
+        try:
+            # Try REST API first (primary method)
+            logging.info(f"Getting columns for list '{list_title}' via REST API")
+            
+            lists = self._client.web.lists.get().execute_query()
+            target_list = None
+            
+            for lst in lists:
+                if lst.properties.get('Title', '').lower() == list_title.lower():
+                    target_list = lst
+                    break
+            
+            if not target_list:
+                raise RuntimeError(f"List '{list_title}' not found")
+            
+            # Get fields/columns
+            fields = target_list.fields.get().execute_query()
+            
+            result = []
+            for field in fields:
+                props = field.properties
+                
+                # Skip hidden fields
+                if props.get('Hidden', False):
+                    continue
+                
+                # Skip read-only fields
+                if props.get('ReadOnlyField', False):
+                    continue
+                
+                # Skip lookup fields
+                field_type = props.get('TypeAsString', '').lower()
+                if 'lookup' in field_type:
+                    continue
+                
+                column_info = {
+                    'name': props.get('InternalName', props.get('Title', '')),
+                    'displayName': props.get('Title', props.get('InternalName', '')),
+                    'columnType': 'text',  # default
+                    'required': props.get('Required', False)
+                }
+                
+                # Map SharePoint field types to simplified types
+                if field_type == 'text' or field_type == 'note':
+                    column_info['columnType'] = 'text'
+                elif field_type == 'number' or field_type == 'currency':
+                    column_info['columnType'] = 'number'
+                elif field_type == 'boolean':
+                    column_info['columnType'] = 'boolean'
+                elif field_type == 'datetime':
+                    column_info['columnType'] = 'dateTime'
+                elif field_type == 'choice' or field_type == 'multichoice':
+                    column_info['columnType'] = 'choice'
+                    choices = props.get('Choices', [])
+                    if choices:
+                        column_info['choice'] = {'choices': choices}
+                
+                result.append(column_info)
+            
+            logging.info(f"Retrieved {len(result)} columns for list '{list_title}'")
+            return result
+            
+        except Exception as base_e:
+            # Fallback to Graph API
+            logging.warning(f"REST API failed for get_list_columns: {base_e}. Trying Graph API...")
+            
+            try:
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value() if self.client_secret else None,
+                    tenant="",
+                    scope="",
+                    token_json="",
+                )
+                
+                graph_columns = auth_helper.get_list_columns(self.site_url, list_title)
+                logging.info(f"Retrieved {len(graph_columns)} columns via Graph API")
+                return graph_columns
+                
+            except Exception as graph_e:
+                logging.error(f"Both REST and Graph API failed for get_list_columns: {graph_e}")
+                raise ToolException(f"Get list columns failed: {str(graph_e)}")
+
+    def create_list_item(self, list_title: str, fields: dict):
+        """Create a new item in a SharePoint list.
+        
+        Args:
+            list_title: The title of the SharePoint list
+            fields: Dictionary of field name -> value pairs
+            
+        Returns:
+            Dictionary with created item metadata including:
+            - id: Item ID
+            - fields: All field values including system fields
+            - webUrl: URL to view the item (Graph API only)
+            
+        Note: Use get_list_columns() first to discover available fields,
+        required fields, and valid choice values. Title field is typically required.
+        
+        Example:
+            create_list_item(
+                list_title="Tasks",
+                fields={
+                    "Title": "New Task",
+                    "Status": "In Progress",
+                    "Priority": "High"
+                }
+            )
+        """
+        if not list_title:
+            raise ToolException("list_title is required")
+        if not fields or not isinstance(fields, dict):
+            raise ToolException("fields must be a non-empty dictionary")
+        
+        try:
+            # Try REST API first (primary method)
+            logging.info(f"Creating list item in '{list_title}' via REST API")
+            
+            lists = self._client.web.lists.get().execute_query()
+            target_list = None
+            
+            for lst in lists:
+                if lst.properties.get('Title', '').lower() == list_title.lower():
+                    target_list = lst
+                    break
+            
+            if not target_list:
+                raise RuntimeError(f"List '{list_title}' not found")
+            
+            # Create the item
+            new_item = target_list.add_item(fields).execute_query()
+            
+            # TODO: Filter out internal/system fields (@odata.etag, AuthorLookupId, _ComplianceFlags, etc.)
+            # to reduce LLM context pollution. Return only id, user-defined fields, and essential metadata.
+            result = {
+                'id': new_item.properties.get('Id', ''),
+                'fields': new_item.properties
+            }
+            
+            logging.info(f"Created list item with ID {result['id']} in list '{list_title}'")
+            return result
+            
+        except Exception as base_e:
+            # Fallback to Graph API
+            logging.warning(f"REST API failed for create_list_item: {base_e}. Trying Graph API...")
+            
+            try:
+                from .authorization_helper import SharepointAuthorizationHelper
+                auth_helper = SharepointAuthorizationHelper(
+                    client_id=self.client_id,
+                    client_secret=self.client_secret.get_secret_value() if self.client_secret else None,
+                    tenant="",
+                    scope="",
+                    token_json="",
+                )
+                
+                graph_result = auth_helper.create_list_item(self.site_url, list_title, fields)
+                logging.info(f"Created list item via Graph API with ID {graph_result['id']}")
+                return graph_result
+                
+            except Exception as graph_e:
+                logging.error(f"Both REST and Graph API failed for create_list_item: {graph_e}")
+                raise ToolException(f"Create list item failed: {str(graph_e)}")
 
     def get_files_list(self, folder_name: str = None, limit_files: int = 100, form_name: Optional[str] = None):
         """
@@ -333,6 +585,156 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             )
             return auth_helper.get_file_content(self.site_url, path)
 
+    def upload_file(self, folder_path: str, filepath: Optional[str] = None, 
+                   filedata: Optional[str] = None, filename: Optional[str] = None, 
+                   replace: bool = True):
+        """Upload file to SharePoint document library.
+        
+        Supports both artifact-based and direct content uploads. Files ≤4MB use simple PUT,
+        larger files use chunked upload sessions (5MB chunks).
+        
+        Args:
+            folder_path: Server-relative folder path (e.g., '/sites/MySite/Shared Documents/folder')
+            filepath: File path in format /{bucket}/{filename} from artifact storage (mutually exclusive with filedata)
+            filedata: String content to upload as a file (mutually exclusive with filepath)
+            filename: Target filename. Required with filedata, optional with filepath
+            replace: If True, overwrite existing file. If False, raise error on conflict
+            
+        Returns:
+            dict with {id, webUrl, path, size, mime_type} or string with upload confirmation
+        """
+        # Validate inputs
+        if not filepath and not filedata:
+            raise ToolException("Either filepath or filedata must be provided")
+        if filepath and filedata:
+            raise ToolException("Cannot specify both filepath and filedata")
+        if filedata and not filename:
+            raise ToolException("filename is required when using filedata")
+        
+        # Resolve file content
+        if filepath:
+            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
+            actual_filename = filename or artifact_filename
+        else:
+            file_bytes = filedata.encode('utf-8')
+            actual_filename = filename
+        
+        # Detect MIME type
+        mime_type = detect_mime_type(file_bytes, actual_filename)
+        
+        try:
+            # Attempt Graph API upload via helper
+            from .authorization_helper import SharepointAuthorizationHelper
+            auth_helper = SharepointAuthorizationHelper(
+                client_id=self.client_id,
+                client_secret=self.client_secret.get_secret_value() if self.client_secret else None,
+                tenant="",
+                scope="",
+                token_json="",
+            )
+            
+            result = auth_helper.upload_file_to_library(
+                site_url=self.site_url,
+                folder_path=folder_path,
+                filename=actual_filename,
+                file_bytes=file_bytes,
+                replace=replace
+            )
+            
+            logging.info(f"File '{actual_filename}' uploaded successfully to '{folder_path}'")
+            return result
+            
+        except Exception as e:
+            raise ToolException(f"Upload failed: {str(e)}") from None
+
+    def add_attachment_to_list_item(self, list_title: str, item_id: int, 
+                                    filepath: Optional[str] = None,
+                                    filedata: Optional[str] = None, 
+                                    filename: Optional[str] = None,
+                                    replace: bool = True):
+        """Add attachment to SharePoint list item.
+        
+        Supports both artifact-based and direct content uploads.
+        
+        Args:
+            list_title: Name of the SharePoint list
+            item_id: Internal item ID (not the display ID)
+            filepath: File path in format /{bucket}/{filename} from artifact storage (mutually exclusive with filedata)
+            filedata: String content to attach as a file (mutually exclusive with filepath)
+            filename: Attachment filename. Required with filedata, optional with filepath
+            replace: If True, delete existing attachment with same name. If False, raise error on conflict
+            
+        Returns:
+            dict with {id, name, size} or string with attachment confirmation
+        """
+        # Validate inputs
+        if not filepath and not filedata:
+            raise ToolException("Either filepath or filedata must be provided")
+        if filepath and filedata:
+            raise ToolException("Cannot specify both filepath and filedata")
+        if filedata and not filename:
+            raise ToolException("filename is required when using filedata")
+        
+        # Resolve file content
+        if filepath:
+            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
+            actual_filename = filename or artifact_filename
+        else:
+            file_bytes = filedata.encode('utf-8')
+            actual_filename = filename
+        
+        try:
+            # Use SharePoint REST API for list item attachments
+            # Get the list and item (must load list first like in read_list method)
+            target_list = self._client.web.lists.get_by_title(list_title)
+            self._client.load(target_list)
+            self._client.execute_query()
+            
+            list_item = target_list.get_item_by_id(item_id)
+            self._client.load(list_item)
+            self._client.execute_query()
+            
+            # Check for existing attachments with same name
+            attachments = list_item.attachment_files
+            self._client.load(attachments)
+            self._client.execute_query()
+            
+            existing_attachment = None
+            for att in attachments:
+                if att.properties.get('FileName', '').lower() == actual_filename.lower():
+                    existing_attachment = att
+                    break
+            
+            if existing_attachment:
+                if not replace:
+                    raise ToolException(
+                        f"Attachment '{actual_filename}' already exists on list item {item_id}. "
+                        f"Set replace=True to overwrite."
+                    )
+                # Delete existing attachment
+                existing_attachment.delete_object()
+                self._client.execute_query()
+            
+            # Add new attachment using file-like object (office365-rest-python-client API requirement)
+            # The upload() method expects a file object with .read() and .name attributes
+            file_object = BytesIO(file_bytes)
+            file_object.name = actual_filename  # Set filename attribute for API
+            attachment = list_item.attachment_files.upload(file_object).execute_query()
+            
+            # Return attachment metadata
+            result = {
+                'id': attachment.properties.get('ServerRelativeUrl', ''),
+                'name': actual_filename,
+                'size': len(file_bytes)
+            }
+            
+            logging.info(f"Attachment '{actual_filename}' added to list '{list_title}' item {item_id}")
+            return result
+            
+        except Exception as e:
+            logging.error(f"Failed to add attachment: {e}")
+            raise ToolException(f"Attachment failed: {str(e)}")
+
     def get_available_tools(self):
         return super().get_available_tools() + [
             {
@@ -340,6 +742,24 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 "description": self.read_list.__doc__,
                 "args_schema": ReadList,
                 "ref": self.read_list
+            },
+            {
+                "name": "get_lists",
+                "description": self.get_lists.__doc__,
+                "args_schema": NoInput,
+                "ref": self.get_lists
+            },
+            {
+                "name": "get_list_columns",
+                "description": self.get_list_columns.__doc__,
+                "args_schema": GetListColumns,
+                "ref": self.get_list_columns
+            },
+            {
+                "name": "create_list_item",
+                "description": self.create_list_item.__doc__,
+                "args_schema": CreateListItem,
+                "ref": self.create_list_item
             },
             {
                 "name": "get_files_list",
@@ -352,5 +772,17 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 "description": self.read_file.__doc__,
                 "args_schema": ReadDocument,
                 "ref": self.read_file
+            },
+            {
+                "name": "upload_file",
+                "description": self.upload_file.__doc__,
+                "args_schema": UploadFile,
+                "ref": self.upload_file
+            },
+            {
+                "name": "add_attachment_to_list_item",
+                "description": self.add_attachment_to_list_item.__doc__,
+                "args_schema": AddAttachmentToListItem,
+                "ref": self.add_attachment_to_list_item
             }
         ]

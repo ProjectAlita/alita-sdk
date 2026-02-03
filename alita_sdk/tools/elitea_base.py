@@ -929,7 +929,7 @@ class BaseCodeToolApiWrapper(BaseVectorStoreToolApiWrapper):
         try:
             dispatch_custom_event("file_modified", {
                 "message": f"File '{file_path}' edited successfully",
-                "filename": file_path,
+                "filepath": file_path,
                 "tool_name": "edit_file",
                 "toolkit": self.__class__.__name__,
                 "operation_type": "modify",

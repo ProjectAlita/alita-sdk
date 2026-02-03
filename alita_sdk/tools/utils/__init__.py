@@ -119,3 +119,114 @@ def make_json_serializable(obj):
     if str(obj) in ("True", "False"):
         return str(obj) == "True"
     return str(obj)
+
+
+# Artifact and file handling utilities
+def get_file_bytes_from_artifact(alita, filepath: str) -> tuple:
+    """Get file bytes and filename from artifact storage.
+    
+    Retrieves a file from Alita artifact storage using its filepath.
+    This is a shared utility used across multiple toolkits (Jira, Confluence, SharePoint, etc.).
+    
+    Args:
+        alita: Alita client instance (should have artifact() method)
+        filepath: File path in format /{bucket}/{filename}
+        
+    Returns:
+        tuple: (file_bytes: bytes, filename: str)
+        
+    Raises:
+        Exception: If artifact retrieval fails or artifact not found
+    """
+    if not alita:
+        raise ValueError("Alita client is required for artifact operations")
+    
+    # Get artifact client - bucket name doesn't matter for download by filepath
+    artifact_client = alita.artifact('__temp__')
+    
+    # Get raw file bytes from artifact storage
+    try:
+        file_bytes, artifact_filename = artifact_client.get_raw_content_by_filepath(filepath)
+        return file_bytes, artifact_filename
+    except Exception as e:
+        raise Exception(f"Failed to retrieve artifact '{filepath}': {str(e)}")
+
+
+def detect_mime_type(file_bytes: bytes, filename: str) -> str:
+    """Detect MIME type of file from bytes and filename.
+    
+    Uses filetype library for robust detection from file signature,
+    with fallback to extension-based detection if signature detection fails.
+    
+    Args:
+        file_bytes: File content as bytes
+        filename: Filename with extension
+        
+    Returns:
+        str: MIME type (e.g., 'image/png', 'application/pdf', 'application/octet-stream')
+    """
+    try:
+        import filetype
+        kind = filetype.guess(file_bytes)
+        if kind:
+            return kind.mime
+    except Exception:
+        pass  # Fall through to extension-based detection
+    
+    # Fallback to basic detection from extension
+    filename_lower = filename.lower()
+    
+    # Images
+    if filename_lower.endswith(('.png',)):
+        return 'image/png'
+    if filename_lower.endswith(('.jpg', '.jpeg')):
+        return 'image/jpeg'
+    if filename_lower.endswith('.gif'):
+        return 'image/gif'
+    if filename_lower.endswith('.bmp'):
+        return 'image/bmp'
+    if filename_lower.endswith('.webp'):
+        return 'image/webp'
+    if filename_lower.endswith('.svg'):
+        return 'image/svg+xml'
+    
+    # Documents
+    if filename_lower.endswith('.pdf'):
+        return 'application/pdf'
+    if filename_lower.endswith(('.doc', '.docx')):
+        return 'application/msword'
+    if filename_lower.endswith(('.xls', '.xlsx')):
+        return 'application/vnd.ms-excel'
+    if filename_lower.endswith(('.ppt', '.pptx')):
+        return 'application/vnd.ms-powerpoint'
+    
+    # Text
+    if filename_lower.endswith('.txt'):
+        return 'text/plain'
+    if filename_lower.endswith('.csv'):
+        return 'text/csv'
+    if filename_lower.endswith('.html'):
+        return 'text/html'
+    if filename_lower.endswith('.json'):
+        return 'application/json'
+    if filename_lower.endswith('.xml'):
+        return 'application/xml'
+    
+    # Archives
+    if filename_lower.endswith('.zip'):
+        return 'application/zip'
+    if filename_lower.endswith('.tar'):
+        return 'application/x-tar'
+    if filename_lower.endswith('.gz'):
+        return 'application/gzip'
+    
+    # Video
+    if filename_lower.endswith(('.mp4', '.m4v')):
+        return 'video/mp4'
+    if filename_lower.endswith(('.avi',)):
+        return 'video/x-msvideo'
+    if filename_lower.endswith(('.mov',)):
+        return 'video/quicktime'
+    
+    # Default fallback
+    return 'application/octet-stream'

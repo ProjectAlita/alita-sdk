@@ -82,7 +82,7 @@ sandbox_tool_input = create_model(
 class PyodideSandboxTool(BaseTool):
     """
     A tool that provides secure Python code execution using Pyodide (Python compiled to WebAssembly).
-    This tool leverages langchain-sandbox to provide a safe environment for running untrusted Python code.
+    Uses a standalone implementation to provide a safe environment for running untrusted Python code.
     Optimized for performance with caching and stateless execution by default.
     """
 
@@ -147,7 +147,7 @@ class PyodideSandboxTool(BaseTool):
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
 
-            from langchain_sandbox import PyodideSandbox
+            from ..langchain.pyodide_sandbox import PyodideSandbox
 
             # Air-gapped settings
             sandbox_base = os.environ.get("SANDBOX_BASE", os.path.expanduser('~/.cache/pyodide'))
@@ -167,17 +167,6 @@ class PyodideSandboxTool(BaseTool):
                 node_modules_dir="auto"
             )
             logger.info(f"PyodideSandbox initialized successfully (stateful={self.stateful})")
-        except ImportError as e:
-            if "langchain_sandbox" in str(e):
-                error_msg = (
-                    "langchain-sandbox is required for the PyodideSandboxTool. "
-                    "Please install it with: pip install langchain-sandbox"
-                )
-                logger.error(error_msg)
-                raise ImportError(error_msg) from e
-            else:
-                logger.error(f"Failed to import required module: {e}")
-                raise
         except Exception as e:
             logger.error(f"Failed to initialize PyodideSandbox: {e}")
             raise
@@ -207,9 +196,7 @@ class PyodideSandboxTool(BaseTool):
         except (ImportError, RuntimeError) as e:
             # Handle specific dependency errors gracefully
             error_msg = str(e)
-            if "langchain-sandbox" in error_msg:
-                return "❌ PyodideSandboxTool requires langchain-sandbox. Install with: pip install langchain-sandbox"
-            elif "Deno" in error_msg:
+            if "Deno" in error_msg:
                 return "❌ PyodideSandboxTool requires Deno. Install from: https://docs.deno.com/runtime/getting_started/installation/"
             else:
                 return f"❌ PyodideSandboxTool initialization failed: {error_msg}"
@@ -309,7 +296,6 @@ def create_sandbox_tool(stateful: bool = False, allow_net: bool = True, alita_cl
         Configured sandbox tool instance
 
     Raises:
-        ImportError: If langchain-sandbox is not installed
         RuntimeError: If Deno is not found in PATH
 
     Performance Notes:

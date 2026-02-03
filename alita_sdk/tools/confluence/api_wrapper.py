@@ -168,7 +168,7 @@ GetPageAttachmentsInput = create_model(
 AddFileToPage = create_model(
     "AddFileToPage",
     page_id=(str, Field(description="Confluence page ID to add file to")),
-    artifact_id=(str, Field(description="Artifact ID containing the file to upload")),
+    filepath=(str, Field(description="File path in format /{bucket}/{filename} from artifact storage")),
     filename=(Optional[str], Field(description="Filename to use for the upload. If not provided, uses the original filename from artifact.", default=None)),
     alt_text=(Optional[str], Field(description="Alternative text for images (optional)", default=None)),
     position=(Optional[str], Field(description="Position to add file reference: 'append' or 'prepend'", default="append")),
@@ -1764,21 +1764,21 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error retrieving attachments for page {page_id}: {str(e)}")
             return f"Error retrieving attachments: {str(e)}"
 
-    def _upload_file_from_artifact(self, page_id: str, artifact_id: str, filename: str = None) -> Dict[str, Any]:
+    def _upload_file_from_artifact(self, page_id: str, filepath: str, filename: str = None) -> Dict[str, Any]:
         """Download file from artifact storage and upload to Confluence page."""
         try:
-            # Download file from artifact storage using artifact_id
+            # Download file from artifact storage using filepath
             if not self.alita:
                 raise ToolException("Alita client is not initialized. Cannot download artifact.")
 
             artifact_client = self.alita.artifact('__temp__')
-            file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            file_bytes, artifact_filename = artifact_client.get_raw_content_by_filepath(filepath)
             
             # Use provided filename or fallback to artifact filename
             filename = filename or artifact_filename
 
             if not file_bytes:
-                raise ToolException(f"Failed to download artifact {artifact_id}")
+                raise ToolException(f"Failed to download artifact from {filepath}")
 
             # Detect MIME type
             try:
@@ -1848,7 +1848,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
     def add_file_to_page(
         self,
         page_id: str,
-        artifact_id: str,
+        filepath: str,
         filename: str,
         alt_text: Optional[str] = None,
         position: Literal["append", "prepend"] = "append"
@@ -1856,7 +1856,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         """Upload file from artifact and add to Confluence page content. Images display inline, other files as links."""
         try:
             # Upload file to Confluence
-            upload_info = self._upload_file_from_artifact(page_id, artifact_id, filename)
+            upload_info = self._upload_file_from_artifact(page_id, filepath, filename)
             uploaded_filename = upload_info['filename']
             mime_type = upload_info['mime_type']
             

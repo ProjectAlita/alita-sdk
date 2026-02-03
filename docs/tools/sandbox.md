@@ -1,6 +1,6 @@
 # PyodideSandboxTool
 
-The PyodideSandboxTool provides secure Python code execution using Pyodide (Python compiled to WebAssembly) within LangGraph React agents. This tool leverages the `langchain-sandbox` library to create a safe environment for running untrusted Python code.
+The PyodideSandboxTool provides secure Python code execution using Pyodide (Python compiled to WebAssembly) within LangGraph React agents. This tool uses a standalone implementation to create a safe environment for running untrusted Python code.
 
 ## Features
 
@@ -12,13 +12,15 @@ The PyodideSandboxTool provides secure Python code execution using Pyodide (Pyth
 
 ## Installation
 
-The sandbox tool requires `langchain-sandbox` which has been added to the runtime dependencies:
+The sandbox tool requires **Deno** to be installed on the system. See [Deno installation guide](https://docs.deno.com/runtime/getting_started/installation/).
 
 ```bash
-pip install langchain-sandbox
-```
+# Install Deno (macOS/Linux)
+curl -fsSL https://deno.land/install.sh | sh
 
-Note: `langchain-sandbox` requires Deno to be installed on the system. See [Deno installation guide](https://docs.deno.com/runtime/getting_started/installation/).
+# Or on macOS with Homebrew
+brew install deno
+```
 
 ## Tool Variants
 
@@ -55,21 +57,21 @@ tool2 = create_sandbox_tool(stateful=True, allow_net=True)
 
 ## Automatic Integration
 
-The sandbox tool is automatically added to React agents created with `getLangGraphReactAgent()`. The integration is done safely with graceful fallback if `langchain-sandbox` is not installed:
+The sandbox tool is automatically added to React agents created with `getLangGraphReactAgent()`. The integration is done safely with graceful fallback if Deno is not installed:
 
 ```python
 # In assistant.py
 def getLangGraphReactAgent(self):
     # ... existing code ...
-    
+
     # Add sandbox tool by default for react agents
     try:
         from ..tools.sandbox import create_sandbox_tool
         sandbox_tool = create_sandbox_tool(stateful=True, allow_net=True)
         simple_tools.append(sandbox_tool)
         logger.info("Added PyodideSandboxTool to react agent")
-    except ImportError as e:
-        logger.warning(f"Failed to add PyodideSandboxTool: {e}. Install langchain-sandbox to enable this feature.")
+    except RuntimeError as e:
+        logger.warning(f"Failed to add PyodideSandboxTool: {e}. Install Deno to enable this feature.")
     except Exception as e:
         logger.error(f"Error adding PyodideSandboxTool: {e}")
 ```
@@ -145,7 +147,7 @@ In stateful mode, the tool maintains:
 
 The tool includes comprehensive error handling:
 
-1. **Import Errors**: Graceful fallback if `langchain-sandbox` is not installed
+1. **Runtime Errors**: Graceful fallback if Deno is not installed
 2. **Execution Errors**: Captures and returns Python errors from the sandbox
 3. **Timeout Handling**: Built-in execution timeouts
 4. **Network Errors**: Handles network-related issues during package installation
@@ -197,19 +199,14 @@ agent = create_react_agent(
 
 ### Common Issues
 
-1. **"langchain-sandbox not installed"**
-   ```bash
-   pip install langchain-sandbox
-   ```
-
-2. **"Deno not found"**
+1. **"Deno not found"**
    - Install Deno: https://docs.deno.com/runtime/getting_started/installation/
 
-3. **Network access issues**
+2. **Network access issues**
    - Ensure `allow_net=True` for package installation
    - Check firewall settings
 
-4. **Execution timeouts**
+3. **Execution timeouts**
    - Break large computations into smaller chunks
    - Use generators for long-running operations
 

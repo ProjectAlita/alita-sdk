@@ -93,7 +93,7 @@ class AlitaClient:
         if api_extra_headers is not None:
             self.headers.update(api_extra_headers)
         self.predict_url = f"{self.base_url}{self.api_path}/prompt_lib/predict/prompt_lib/{self.project_id}"
-        self.base_app_url = f"{self.base_url}{self.api_v2_path}/applications/application/prompt_lib/"
+        self.base_app_url = f"{self.base_url}{self.api_v2_path}/elitea_core/application/prompt_lib/"
         self.base_public_app_url = f"{self.base_url}{self.api_path}/applications/public_application/prompt_lib/"
         self.app = f"{self.base_app_url}{self.project_id}"
         self.mcp_tools_list = f"{self.base_url}{self.api_path}/mcp_sse/tools_list/{self.project_id}"
@@ -104,7 +104,6 @@ class AlitaClient:
         self.secrets_url = f"{self.base_url}{self.api_path}/secrets/secret/{self.project_id}"
         self.artifacts_url = f"{self.base_url}{self.api_v2_path}/artifacts/artifacts/default/{self.project_id}"
         self.artifact_url = f"{self.base_url}{self.api_v2_path}/artifacts/artifact/default/{self.project_id}"
-        self.artifact_by_id_url = f"{self.base_url}{self.api_v2_path}/artifacts/artifact_id/default/{self.project_id}"
         self.bucket_url = f"{self.base_url}{self.api_v2_path}/artifacts/buckets/{self.project_id}"
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
@@ -346,15 +345,23 @@ class AlitaClient:
                 "stream_usage": model_config.get("stream_usage", True),
                 "max_tokens": llm_max_tokens,
                 "temperature": model_config.get("temperature"),
-                "reasoning_effort": model_config.get("reasoning_effort"),
                 "max_retries": model_config.get("max_retries", 3),
                 "seed": model_config.get("seed", None),
                 "openai_organization": str(self.project_id),
             }
 
+            # OpenAI reasoning models (gpt-5, o1, o3): use reasoning dict format
+            # This enables extended thinking and returns reasoning in content_blocks
+            reasoning_effort = model_config.get("reasoning_effort")
+            if reasoning_effort:
+                target_kwargs["reasoning"] = {
+                    "effort": reasoning_effort.lower(),
+                    "summary": "auto"  # Return reasoning summary in response
+                }
+
             if use_responses_api:
                 target_kwargs["use_responses_api"] = True
-            
+
             llm = ChatOpenAI(**target_kwargs)
         return llm
         
@@ -602,37 +609,33 @@ class AlitaClient:
 
         return ""
 
-    def download_artifact_by_id(self, artifact_id: str) -> tuple:
-        """Download artifact by ID and return (file_bytes, filename) tuple."""
-        url = f"{self.artifact_by_id_url}/{artifact_id}"
-        data = requests.get(url, headers=self.headers, verify=False)
-        if data.status_code == 403:
-            return {"error": "You are not authorized to access this resource"}
-        elif data.status_code == 404:
-            return {"error": "Resource not found"}
-        elif data.status_code != 200:
-            return {
-                "error": "An error occurred while fetching the resource",
-                "content": data.content
-            }
-
-        # Extract filename from Content-Disposition header
-        content_disposition = data.headers.get('Content-Disposition', '')
-        filename = self._parse_content_disposition(content_disposition)
-
-        # Fallback filename if header parsing fails
-        if not filename:
-            # Try to detect extension from file content
-            try:
-                import filetype
-                kind = filetype.guess(data.content)
-                extension = f".{kind.extension}" if kind else ""
-            except Exception:
-                extension = ""
-
-            filename = f"file_{artifact_id[:8]}{extension}"
-
-        return data.content, filename
+    def download_artifact_by_filepath(self, filepath: str) -> tuple:
+        """
+        Download artifact by filepath and return (file_bytes, filename) tuple.
+        
+        Args:
+            filepath: File path in format /{bucket}/{filename}
+            
+        Returns:
+            tuple: (file_bytes, filename) or dict with error
+        """
+        # Parse filepath to get bucket and filename
+        path = filepath.lstrip('/')
+        parts = path.split('/', 1)
+        if len(parts) != 2:
+            return {"error": f"Invalid filepath format: {filepath}. Expected /{{bucket}}/{{filename}}"}
+        
+        bucket_name, filename = parts[0], parts[1]
+        
+        # Use the existing download_artifact method
+        result = self.download_artifact(bucket_name, filename)
+        
+        # If it's an error dict, return it as-is
+        if isinstance(result, dict) and "error" in result:
+            return result
+            
+        # Return (content, filename) tuple
+        return result, filename
 
     @staticmethod
     def _sanitize_artifact_name(filename: str) -> tuple:

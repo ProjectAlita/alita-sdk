@@ -1,7 +1,9 @@
 import json
 import logging
 import hashlib
+import base64
 from typing import Any, Dict, Generator, List, Optional, Literal
+from unicodedata import numeric
 
 import requests
 from langchain_core.documents import Document
@@ -10,6 +12,7 @@ from pydantic import PrivateAttr, SecretStr, create_model, model_validator, Fiel
 from python_graphql_client import GraphqlClient
 
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
+from ..utils import get_file_bytes_from_artifact, detect_mime_type
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ...runtime.utils.utils import IndexerKeywords
 
@@ -76,7 +79,7 @@ _graphql_mutation_description="""Xray GraphQL mutation to create new test:
 # jira: the Jira object that will be used to create the Test.
 # Examples:
 1. Create a new Test with type Manual:
-mutation { createTest( testType: { name: "Manual" }, steps: [ { action: "Create first example step", result: "First step was created" }, { action: "Create second example step with data", data: "Data for the step", result: "Second step was created with data" } ], jira: { fields: { summary:"Exploratory Test", project: {key: "CALC"} } } ) { test { issueId testType { name } steps { action data result } jira(fields: ["key"]) } warnings } }
+mutation { createTest( testType: { name: "Manual" }, steps: [ { action: "Create first example step", result: "First step was created" }, { action: "Create second example step with data", data: "Data for the step", result: "Second step was created with data" } ], jira: { fields: { summary:"Exploratory Test", project: {key: "CALC"} } } ) { test { issueId testType { name } steps { id action data result } jira(fields: ["key"]) } warnings } }
 createTest(testType: UpdateTestTypeInput, steps: [CreateStepInput], unstructured: String, gherkin: String, preconditionIssueIds: [String], folderPath: String, jira: JSON!): CreateTestResult
 }
 2. Create a new Test with type Generic:
@@ -105,6 +108,20 @@ XrayCreateTest = create_model(
 XrayCreateTests = create_model(
     "XrayCreateTests",
     graphql_mutations=(List[str], Field(description="list of GraphQL mutations:\n" + _graphql_mutation_description))
+)
+
+XrayAddAttachmentToTestStep = create_model(
+    "XrayAddAttachmentToTestStep",
+    step_id=(str, Field(description="The ID of the test step to add the attachment to")),
+    filepath=(Optional[str], Field(description="File path in format /{bucket}/{filename} from artifact storage. Either filepath or filedata must be provided.", default=None)),
+    filedata=(Optional[str], Field(description="String content to attach as a file. Either filepath or filedata must be provided.", default=None)),
+    filename=(Optional[str], Field(description="Attachment filename. Required when using filedata, optional when using filepath (uses original filename if not specified).", default=None))
+)
+
+XrayGetTestStepAttachments = create_model(
+    "XrayGetTestStepAttachments",
+    issue_id=(str, Field(description="The test issue ID. Accepts either Jira key (e.g., 'PROJ-123') or numeric issue ID (e.g., '12345')")),
+    step_id=(Optional[str], Field(description="Optional: filter to specific step ID. If not provided, returns attachments for all steps in the test.", default=None))
 )
 
 def _parse_tests(test_results) -> List[Any]:
@@ -220,7 +237,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                 auth_response = requests.post(auth_url, json=auth_data, timeout=30)
                 auth_response.raise_for_status()
                 self._auth_token = auth_response.json()
-                logger.info("Successfully re-authenticated and obtained new token")
+                logger.debug("Successfully re-authenticated and obtained new token")
             except Exception as e:
                 raise ToolException(f"Failed to authenticate: {str(e)}")
         
@@ -231,7 +248,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
 
         start_at = 0
         all_tests = []
-        logger.info(f"jql to get tests: {jql}")
+        logger.debug(f"jql to get tests: {jql}")
         while True:
             # get tests
             try:
@@ -255,7 +272,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
     def create_test(self, graphql_mutation: str) -> str:
         """Create new test in XRAY per defined XRAY graphql mutation"""
 
-        logger.info(f"graphql_mutation to create new test: {graphql_mutation}")
+        logger.debug(f"graphql_mutation to create new test: {graphql_mutation}")
         try:
             create_test_response = self._client.execute(query=graphql_mutation)
         except Exception as e:
@@ -269,7 +286,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
     def execute_graphql(self, graphql: str) -> str:
         """Executes custom graphql query or mutation"""
 
-        logger.info(f"The following graphql will be executed: {graphql}")
+        logger.debug(f"The following graphql will be executed: {graphql}")
         try:
             return f"Result of graphql execution:\n{self._client.execute(query=graphql)}"
         except Exception as e:
@@ -416,7 +433,6 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                 yield Document(page_content='', metadata=metadata)
                 
         except Exception as e:
-            logger.error(f"Error processing test data: {e}")
             raise ToolException(f"Error processing test data: {e}")
 
     def _process_document(self, document: Document) -> Generator[Document, None, None]:
@@ -444,7 +460,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                     ext = ""
 
                 if hasattr(self, '_skipped_attachment_extensions') and ext in self._skipped_attachment_extensions:
-                    logger.info(f"Skipping attachment {filename} due to extension filter: {ext}")
+                    logger.debug(f"Skipping attachment {filename} due to extension filter: {ext}")
                     continue
                 
                 attachment_id = f"attach_{attachment['id']}"
@@ -509,7 +525,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                 # If the token fails (401 Unauthorized), try to re-authenticate and retry
                 if "401" in str(req_e) or "Unauthorized" in str(req_e):
                     try:
-                        logger.info(f"Re-authenticating for attachment download: {filename}")
+                        logger.debug(f"Re-authenticating for attachment download: {filename}")
                         # Re-authenticate to get a fresh token
                         auth_url = f"{self.base_url}/api/v1/authenticate"
                         auth_data = {
@@ -558,6 +574,271 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         attachment_metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = content
         attachment_metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = file_name
         yield Document(page_content='', metadata=attachment_metadata)
+
+    def add_attachment_to_test_step(self, step_id: str, filepath: Optional[str] = None, 
+                                    filedata: Optional[str] = None, filename: Optional[str] = None) -> str:
+        """
+        Add an attachment to an existing test step using GraphQL mutation.
+        
+        The attachment is uploaded to Xray and then associated with the test step.
+        Supports both large files from artifact storage and small text content.
+        
+        Args:
+            step_id: The test step ID to add the attachment to
+            filepath: File path in format /{bucket}/{filename} from artifact storage (mutually exclusive with filedata)
+            filedata: String content to attach (mutually exclusive with filepath)
+            filename: Attachment filename. Required with filedata, optional with filepath
+            
+        Returns:
+            str: Success message with updated step info
+            
+        Example:
+            add_attachment_to_test_step(
+                step_id="12345",
+                filepath="/imagelibrary/screenshot.png",
+                filename="screenshot.png"
+            )
+        """
+        # Validate inputs
+        if not filepath and not filedata:
+            raise ToolException("Either filepath or filedata must be provided")
+        if filepath and filedata:
+            raise ToolException("Cannot specify both filepath and filedata")
+        if filedata and not filename:
+            raise ToolException("filename is required when using filedata")
+        
+        # Validate step_id format
+        if not step_id or len(step_id) < 10:
+            raise ToolException(
+                f"Invalid step_id '{step_id}'. Step ID must be a UUID (e.g., 'a1b2c3d4-...'), not a test issue key. "
+                "Use get_tests tool to retrieve step IDs from test details."
+            )
+        
+        try:
+            # Resolve file content
+            if filepath:
+                file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
+                actual_filename = filename or artifact_filename
+            else:
+                file_bytes = filedata.encode('utf-8')
+                actual_filename = filename
+            
+            # Detect MIME type
+            mime_type = detect_mime_type(file_bytes, actual_filename)
+            
+            # Encode file as base64 for GraphQL
+            base64_data = base64.b64encode(file_bytes).decode('utf-8')
+            
+            # Build GraphQL mutation
+            # Note: UpdateTestStepResult only has 'warnings' field, no 'step' field
+            mutation = """
+            mutation UpdateTestStep($stepId: String!, $step: UpdateStepInput!) {
+                updateTestStep(stepId: $stepId, step: $step) {
+                    warnings
+                }
+            }
+            """
+            
+            variables = {
+                "stepId": step_id,
+                "step": {
+                    "attachments": {
+                        "add": [{
+                            "filename": actual_filename,
+                            "mimeType": mime_type,
+                            "data": base64_data
+                        }]
+                    }
+                }
+            }
+            
+            # Execute mutation
+            try:
+                logger.debug(f"Executing updateTestStep mutation for step_id: {step_id}, filename: {actual_filename}, size: {len(file_bytes)} bytes")
+                response = self._client.execute(query=mutation, variables=variables)
+            except Exception as e:
+                # Try to extract more details from the error
+                error_msg = str(e)
+                error_details_json = None
+                
+                if hasattr(e, 'response'):
+                    if hasattr(e.response, 'text'):
+                        try:
+                            error_details_json = json.loads(e.response.text)
+                            if 'errors' in error_details_json:
+                                error_msg = f"GraphQL errors: {json.dumps(error_details_json['errors'], indent=2)}"
+                            elif 'message' in error_details_json:
+                                error_msg = f"API error: {error_details_json['message']}"
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    if hasattr(e.response, 'status_code'):
+                        error_msg = f"HTTP {e.response.status_code}: {error_msg}"
+                
+                raise ToolException(
+                    f"Failed to add attachment to test step.\n"
+                    f"Error: {error_msg}\n"
+                    f"Step ID: {step_id}\n"
+                    f"Filename: {actual_filename}\n"
+                    f"File size: {len(file_bytes)} bytes\n"
+                    f"Base64 size: {len(base64_data)} chars\n"
+                    f"MIME type: {mime_type}"
+                )
+            
+            if 'errors' in response:
+                raise ToolException(f"GraphQL errors: {response['errors']}")
+            
+            result = response.get('data', {}).get('updateTestStep', {})
+            warnings = result.get('warnings', [])
+            
+            message = f"Successfully added attachment '{actual_filename}' to step {step_id}"
+            message += f"\nFile size: {len(file_bytes)} bytes"
+            message += f"\nMIME type: {mime_type}"
+            if warnings:
+                message += f"\nWarnings: {warnings}"
+            
+            return message
+            
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(f"Unexpected error adding attachment: {str(e)}")
+
+    def _convert_issue_key_to_id(self, issue_id: str) -> str:
+        """
+        Convert Jira issue key to numeric issue ID if needed.
+        
+        Args:
+            issue_id: Either a Jira key (e.g., 'PROJ-123') or numeric ID (e.g., '12345')
+            
+        Returns:
+            str: Numeric issue ID
+            
+        Raises:
+            ToolException: If the issue key cannot be found or converted
+        """
+        # If issue_id looks like a Jira key (contains hyphen), convert to numeric ID
+        if '-' in issue_id:
+            logger.debug(f"Converting Jira key '{issue_id}' to numeric issue ID")
+            # Use JQL to fetch the numeric issue ID
+            jql_query = f'key = "{issue_id}"'
+            get_tests_response = self._client.execute(
+                query=_get_tests_query,
+                variables={"jql": jql_query, "start": 0, "limit": 1}
+            )
+            
+            tests = get_tests_response.get('data', {}).get('getTests', {}).get('results', [])
+            if not tests:
+                raise ToolException(f"Test not found with key: {issue_id}")
+            
+            numeric_issue_id = tests[0].get('issueId')
+            if not numeric_issue_id:
+                raise ToolException(f"Could not retrieve numeric issue ID for key: {issue_id}")
+            
+            logger.debug(f"Converted '{issue_id}' to numeric ID '{numeric_issue_id}'")
+            return numeric_issue_id
+        
+        # Already a numeric ID
+        return issue_id
+
+    def get_test_step_attachments(self, issue_id: str, step_id: Optional[str] = None) -> str:
+        """
+        Get attachments for a test or specific test step.
+        
+        Retrieves attachment metadata including ID, filename, and download link.
+        Can filter to a specific step or get all attachments for all steps.
+        
+        Args:
+            issue_id: The test issue ID (e.g., 'PROJ-123' or numeric ID)
+            step_id: Optional step ID to filter attachments for specific step
+            
+        Returns:
+            str: JSON formatted list of attachments with their metadata
+            
+        Example:
+            # Get all attachments for a test
+            get_test_step_attachments(issue_id="12345")
+            
+            # Get attachments for specific step
+            get_test_step_attachments(issue_id="12345", step_id="67890")
+        """
+        try:
+            # Convert Jira key to numeric ID if needed
+            numeric_issue_id = self._convert_issue_key_to_id(issue_id)
+            
+            # Build GraphQL query
+            query = """
+            query GetTest($issueId: String!) {
+                getTest(issueId: $issueId) {
+                    issueId
+                    jira(fields: ["key"])
+                    steps {
+                        id
+                        action
+                        attachments {
+                            id
+                            filename
+                            downloadLink
+                        }
+                    }
+                }
+            }
+            """
+            
+            variables = {"issueId": numeric_issue_id}
+            
+            # Execute query
+            response = self._client.execute(query=query, variables=variables)
+            
+            if 'errors' in response:
+                raise ToolException(f"GraphQL errors: {response['errors']}")
+            
+            test_data = response.get('data', {}).get('getTest')
+            if not test_data:
+                raise ToolException(f"Test not found with ID: {issue_id}")
+            
+            test_key = test_data.get('jira', {}).get('key', issue_id)
+            steps = test_data.get('steps', [])
+            
+            # Collect attachments
+            all_attachments = []
+            for step in steps:
+                step_attachments = step.get('attachments', [])
+                if step_attachments:
+                    # Add step context to each attachment
+                    for att in step_attachments:
+                        attachment_info = {
+                            'id': att['id'],
+                            'filename': att['filename'],
+                            'downloadLink': att['downloadLink'],
+                            'step_id': step['id'],
+                            'step_action': step.get('action', '')
+                        }
+                        all_attachments.append(attachment_info)
+            
+            # Filter by step_id if provided
+            if step_id:
+                all_attachments = [att for att in all_attachments if att['step_id'] == step_id]
+            
+            if not all_attachments:
+                if step_id:
+                    return f"No attachments found for test {test_key}, step {step_id}"
+                else:
+                    return f"No attachments found for test {test_key}"
+            
+            result = {
+                'test': test_key,
+                'issue_id': numeric_issue_id,
+                'total_attachments': len(all_attachments),
+                'attachments': all_attachments
+            }
+            
+            return json.dumps(result, indent=2)
+            
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(f"Failed to get test step attachments: {str(e)}")
 
     def _index_tool_params(self, **kwargs) -> dict[str, tuple[type, Field]]:
         return {
@@ -658,5 +939,17 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                 "description": self.execute_graphql.__doc__,
                 "args_schema": XrayGrapql,
                 "ref": self.execute_graphql,
+            },
+            {
+                "name": "add_attachment_to_test_step",
+                "description": self.add_attachment_to_test_step.__doc__,
+                "args_schema": XrayAddAttachmentToTestStep,
+                "ref": self.add_attachment_to_test_step,
+            },
+            {
+                "name": "get_test_step_attachments",
+                "description": self.get_test_step_attachments.__doc__,
+                "args_schema": XrayGetTestStepAttachments,
+                "ref": self.get_test_step_attachments,
             }
         ]

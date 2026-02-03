@@ -16,7 +16,7 @@ import requests
 
 from ..llm.img_utils import ImageDescriptionCache
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
-from ..utils import is_cookie_token, parse_cookie_string
+from ..utils import is_cookie_token, parse_cookie_string, get_file_bytes_from_artifact, detect_mime_type
 from ..utils.available_tools_decorator import extend_with_parent_available_tools
 from ..utils.content_parser import file_extension_by_chunker, process_content_by_type
 from ...runtime.utils.utils import IndexerKeywords
@@ -166,7 +166,7 @@ LinkIssues = create_model(
 AddFileToIssueDescription = create_model(
     "AddFileToIssueDescriptionModel",
     issue_key=(str, Field(description="Jira issue key where file will be added, e.g. 'PROJ-123'. The file will be uploaded as attachment and referenced in the description.")),
-    artifact_id=(str, Field(description="UUID of the artifact containing the file to attach. Artifact can be any file type (image, PDF, video, document, etc.). Get this from the file/image generation tool's response.")),
+    filepath=(str, Field(description="File path in format /{bucket}/{filename} containing the file to attach. Artifact can be any file type (image, PDF, video, document, etc.). Get this from the file/image generation tool's response.")),
     filename=(Optional[str], Field(description="Filename for the attachment, e.g. 'diagram.png', 'report.pdf'. If not provided, uses the original filename from artifact. Should include file extension.", default=None)),
     alt_text=(Optional[str], Field(default=None, description="Alternative text for the file (optional). Used for accessibility and as caption.")),
     position=(Optional[Literal["append", "prepend"]], Field(default="append", description="Where to place the file reference in description: 'append' (end) or 'prepend' (beginning)."))
@@ -176,7 +176,7 @@ UpdateCommentWithFile = create_model(
     "UpdateCommentWithFileModel",
     issue_key=(str, Field(description="Jira issue key, e.g. 'PROJ-123'.")),
     comment_id=(str, Field(description="ID of the existing comment to update. Get from list_comments tool.")),
-    artifact_id=(str, Field(description="UUID of the artifact containing the file. Get this from the file/image generation tool's response.")),
+    filepath=(str, Field(description="File path in format /{bucket}/{filename} containing the file. Get this from the file/image generation tool's response.")),
     filename=(Optional[str], Field(description="Filename for the attachment, e.g. 'screenshot.png', 'report.pdf'. If not provided, uses the original filename from artifact.", default=None)),
     position=(Optional[Literal["append", "prepend"]], Field(default="append", description="Where to place file: 'append' (end) or 'prepend' (beginning) of existing comment."))
 )
@@ -850,37 +850,22 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             else:
                 return f"[^{filename}]"
 
-    def _upload_file_from_artifact(self, issue_key: str, artifact_id: str, filename: str = None) -> Dict[str, Any]:
+    def _upload_file_from_artifact(self, issue_key: str, filepath: str, filename: str = None) -> Dict[str, Any]:
         """Upload file from artifact storage to Jira issue."""
-        # Get artifact client on the fly - bucket doesn't matter for download by ID
-        artifact_client = self.alita.artifact('__temp__')
-        
-        # Get raw file bytes from artifact storage
+        # Get raw file bytes from artifact storage using shared utility
         try:
-            file_bytes, artifact_filename = artifact_client.get_raw_content_by_artifact_id(artifact_id)
+            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
         except Exception as e:
-            raise ToolException(f"Failed to retrieve artifact '{artifact_id}': {str(e)}")
+            raise ToolException(f"Failed to retrieve artifact '{filepath}': {str(e)}")
         
         # Use provided filename or fallback to artifact filename
         filename = filename or artifact_filename
         
         if not file_bytes:
-            raise ToolException(f"Artifact '{artifact_id}' not found or empty")
+            raise ToolException(f"Artifact '{filepath}' not found or empty")
         
-        # Detect MIME type
-        try:
-            import filetype
-            kind = filetype.guess(file_bytes)
-            mime_type = kind.mime if kind else 'application/octet-stream'
-        except Exception:
-            # Fallback to basic detection from extension
-            mime_type = 'application/octet-stream'
-            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                mime_type = 'image/jpeg' if filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
-            elif filename.lower().endswith('.gif'):
-                mime_type = 'image/gif'
-            elif filename.lower().endswith('.pdf'):
-                mime_type = 'application/pdf'
+        # Detect MIME type using shared utility
+        mime_type = detect_mime_type(file_bytes, filename)
         
         # Upload to Jira as attachment
         file_io = BytesIO(file_bytes)
@@ -914,7 +899,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
     def add_file_to_issue_description(
         self,
         issue_key: str,
-        artifact_id: str,
+        filepath: str,
         filename: str,
         alt_text: Optional[str] = None,
         position: Literal["append", "prepend"] = "append"
@@ -922,7 +907,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         """Upload file from artifact and add to issue description. Images/videos inline, others as links."""
         try:
             # Upload file to Jira
-            upload_info = self._upload_file_from_artifact(issue_key, artifact_id, filename)
+            upload_info = self._upload_file_from_artifact(issue_key, filepath, filename)
             uploaded_filename = upload_info['filename']
             mime_type = upload_info['mime_type']
             attachment_id = upload_info.get('attachment_id')
@@ -1009,14 +994,14 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         self,
         issue_key: str,
         comment_id: str,
-        artifact_id: str,
+        filepath: str,
         filename: str,
         position: Literal["append", "prepend"] = "append"
     ) -> str:
         """Upload file and add to existing comment. Images/videos inline, others as links."""
         try:
             # Upload file to Jira
-            upload_info = self._upload_file_from_artifact(issue_key, artifact_id, filename)
+            upload_info = self._upload_file_from_artifact(issue_key, filepath, filename)
             uploaded_filename = upload_info['filename']
             mime_type = upload_info['mime_type']
             attachment_id = upload_info.get('attachment_id')

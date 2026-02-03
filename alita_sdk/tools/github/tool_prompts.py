@@ -1,10 +1,10 @@
 CREATE_FILE_PROMPT = """Create a new file in your GitHub repository. Supports two modes:
 1. Create from content: Use 'file_contents' parameter to create new files with text, code, JSON, or structured data
-2. Copy existing file: Use 'artifact_id' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
+2. Copy existing file: Use 'filepath' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
 
-IMPORTANT: Provide EITHER 'file_contents' OR 'artifact_id', never both or neither.
-Use artifact_id when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
-The artifact_id can be found in previous file_modified events in the conversation history."""
+IMPORTANT: Provide EITHER 'file_contents' OR 'filepath', never both or neither.
+Use filepath when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
+The filepath can be found in previous file_modified events in the conversation history."""
 
 
 DELETE_BRANCH_PROMPT = """Delete a branch from the GitHub repository.
