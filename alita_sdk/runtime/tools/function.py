@@ -186,41 +186,41 @@ alita_state = json.loads(state_json)
                 }, config=config
             )
             logger.info(f"ToolNode response: {tool_result}")
-
-            # handler for PyodideSandboxTool
-            if self._is_pyodide_tool():
-                return self._handle_pyodide_output(tool_result)
-
-            if not self.output_variables:
-                return {"messages": [{"role": "assistant", "content": safe_serialize(tool_result)}]}
-            else:
-                if "messages" in self.output_variables:
-                    if isinstance(tool_result, dict) and 'messages' in tool_result:
-                        # case when the sub-graph has been executed
-                        messages_dict = {"messages": tool_result['messages']}
-                    else:
-                        messages_dict = {
-                            "messages": [{
-                                "role": "assistant",
-                                "content": safe_serialize(tool_result)
-                                if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
-                                else str(tool_result)
-                            }]
-                        }
-                    for var in self.output_variables:
-                        if var != "messages":
-                            if isinstance(tool_result, dict) and var in tool_result:
-                                messages_dict[var] = tool_result[var]
-                            else:
-                                messages_dict[var] = tool_result
-                    return messages_dict
-                else:
-                    return { self.output_variables[0]: tool_result }
         except ValidationError:
-            return {"messages": [
-                {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
-        \n\nTool schema is {safe_serialize(params)} \n\nand the input to LLM was 
+            tool_result = {"messages": [
+                {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError.
+        \n\nTool schema is {safe_serialize(params)} \n\nand the input to LLM was
         {func_args}"""}]}
+
+        # handler for PyodideSandboxTool
+        if self._is_pyodide_tool():
+            return self._handle_pyodide_output(tool_result)
+    
+        if not self.output_variables:
+            return {"messages": [{"role": "assistant", "content": safe_serialize(tool_result)}]}
+        else:
+            if "messages" in self.output_variables:
+                if isinstance(tool_result, dict) and 'messages' in tool_result:
+                    # case when the sub-graph has been executed
+                    messages_dict = {"messages": tool_result['messages']}
+                else:
+                    messages_dict = {
+                        "messages": [{
+                            "role": "assistant",
+                            "content": safe_serialize(tool_result)
+                            if not isinstance(tool_result, ToolException) and not isinstance(tool_result, str)
+                            else str(tool_result)
+                        }]
+                    }
+                for var in self.output_variables:
+                    if var != "messages":
+                        if isinstance(tool_result, dict) and var in tool_result:
+                            messages_dict[var] = tool_result[var]
+                        else:
+                            messages_dict[var] = tool_result
+                return messages_dict
+            else:
+                return { self.output_variables[0]: tool_result }
 
     def _run(self, *args, **kwargs):
         return self.invoke(**kwargs)
