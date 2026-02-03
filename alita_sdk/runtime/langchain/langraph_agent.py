@@ -957,60 +957,6 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                *args, **kwargs):
         logger.info(f"Incoming Input: {input}")
 
-        # Dynamic tool selection based on user query
-        if self.tool_registry is not None:
-            # Extract query from input
-            query = None
-            if isinstance(input.get('input'), str):
-                query = input['input']
-            elif input.get('input') and isinstance(input['input'], list):
-                # Get text from last message
-                last_msg = input['input'][-1] if input['input'] else None
-                if hasattr(last_msg, 'content'):
-                    content = last_msg.content
-                    if isinstance(content, str):
-                        query = content
-                    elif isinstance(content, list):
-                        # Extract text parts
-                        query = ' '.join(
-                            item.get('text', '') if isinstance(item, dict) else str(item)
-                            for item in content
-                        )
-            elif input.get('messages'):
-                # Find last human message
-                for msg in reversed(input['messages']):
-                    if isinstance(msg, HumanMessage):
-                        content = msg.content
-                        if isinstance(content, str):
-                            query = content
-                        elif isinstance(content, list):
-                            query = ' '.join(
-                                item.get('text', '') if isinstance(item, dict) else str(item)
-                                for item in content
-                            )
-                        break
-
-            if query:
-                # Select relevant toolkits (returns empty if no matches or too many tools)
-                selected_toolkits = self.tool_registry.select_toolkits_for_query(query)
-
-                # Only store selection if we have a targeted selection
-                # Empty list means "use meta-tools"
-                if selected_toolkits:
-                    selected_tools = self.tool_registry.get_tools_for_toolkits(selected_toolkits)
-                    logger.info(
-                        f"[DynamicToolSelection] Query: '{query[:100]}...' -> Binding {len(selected_toolkits)} toolkits, {len(selected_tools)} tools directly")
-
-                    # Store selection in config for LLMNode to use
-                    if config is None:
-                        config = RunnableConfig()
-                    if 'configurable' not in config:
-                        config['configurable'] = {}
-                    config['configurable']['selected_tools'] = selected_tools
-                    config['configurable']['selected_toolkits'] = selected_toolkits
-                else:
-                    logger.info(
-                        f"[DynamicToolSelection] Query: '{query[:100]}...' -> Using meta-tools (no targeted selection)")
         if config is None:
             config = RunnableConfig()
         if not config.get("configurable", {}).get("thread_id", ""):
