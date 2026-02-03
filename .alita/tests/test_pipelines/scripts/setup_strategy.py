@@ -234,6 +234,7 @@ class LocalSetupStrategy(SetupStrategy):
         settings = config.copy()
         
         # Build the configuration key name (e.g., 'github_configuration', 'jira_configuration')
+        toolkit_type = "ado" if toolkit_type.startswith("ado") else toolkit_type
         config_key = f"{toolkit_type}_configuration"
         
         # Start with existing configuration from config dict if present
@@ -316,9 +317,12 @@ class LocalSetupStrategy(SetupStrategy):
         file_config = {}
         if "config_file" in config:
             try:
-                file_config = load_toolkit_config(config["config_file"], base_path)
-                # Resolve environment variables in loaded config file
-                file_config = resolve_env_value(file_config, ctx.env_vars, env_loader=load_from_env)
+                file_config = load_toolkit_config(
+                    config["config_file"], 
+                    base_path,
+                    env_substitutions=ctx.env_vars,
+                    env_loader=load_from_env
+                )
             except FileNotFoundError:
                 ctx.log(f"Config file not found: {config['config_file']}", "warning")
         
