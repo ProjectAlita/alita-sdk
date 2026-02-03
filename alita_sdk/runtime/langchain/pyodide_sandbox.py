@@ -8,6 +8,7 @@ import asyncio
 import dataclasses
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -41,8 +42,13 @@ class CodeExecutionResult:
     session_bytes: bytes | None = None
 
 
-# Published package name for Deno
-PKG_NAME = "jsr:@langchain/pyodide-sandbox@0.0.4"
+def get_default_pkg_name() -> str | None:
+    """Get the Pyodide sandbox package/script path from environment.
+
+    Set PYODIDE_SANDBOX_PKG environment variable to specify a custom path
+    to the Deno entrypoint script (e.g., local main.js file).
+    """
+    return os.environ.get("PYODIDE_SANDBOX_PKG")
 
 
 def build_permission_flag(
@@ -77,6 +83,7 @@ class BasePyodideSandbox:
         allow_ffi: list[str] | bool = False,
         node_modules_dir: str = "auto",
         skip_deno_check: bool = False,
+        pkg_name: str | None = None,
     ) -> None:
         """Initialize the sandbox with specific Deno permissions.
 
@@ -90,6 +97,8 @@ class BasePyodideSandbox:
             allow_ffi: FFI access (False/True/list of libraries).
             node_modules_dir: Node modules directory setting.
             skip_deno_check: Skip Deno installation check.
+            pkg_name: Path to the Deno entrypoint script. If not provided,
+                reads from PYODIDE_SANDBOX_PKG environment variable.
         """
         self.stateful = stateful
         self.allow_env = allow_env
@@ -99,6 +108,13 @@ class BasePyodideSandbox:
         self.allow_run = allow_run
         self.allow_ffi = allow_ffi
         self.node_modules_dir = node_modules_dir
+        self.pkg_name = pkg_name or get_default_pkg_name()
+
+        if not self.pkg_name:
+            raise RuntimeError(
+                "Pyodide sandbox entrypoint not configured. "
+                "Set PYODIDE_SANDBOX_PKG environment variable or pass pkg_name parameter."
+            )
 
         if not skip_deno_check and not shutil.which("deno"):
             raise RuntimeError(
@@ -141,7 +157,7 @@ class BasePyodideSandbox:
             cmd.append(f"--v8-flags=--max-old-space-size={memory_limit_mb}")
 
         # Add the package and code
-        cmd.extend([PKG_NAME, "-c", code])
+        cmd.extend([self.pkg_name, "-c", code])
 
         # Add stateful flag
         if self.stateful:
@@ -330,6 +346,7 @@ class PyodideSandboxTool(BaseTool):
     allow_ffi: list[str] | bool = False
     timeout_seconds: float | None = 60
     node_modules_dir: str = "auto"
+    pkg_name: str | None = None
 
     _sandbox: PyodideSandbox = None
     _sync_sandbox: SyncPyodideSandbox = None
@@ -340,6 +357,7 @@ class PyodideSandboxTool(BaseTool):
         stateful: bool = False,
         timeout_seconds: float | None = 60,
         allow_net: list[str] | bool = False,
+        pkg_name: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the tool."""
@@ -347,6 +365,7 @@ class PyodideSandboxTool(BaseTool):
             stateful=stateful,
             timeout_seconds=timeout_seconds,
             allow_net=allow_net,
+            pkg_name=pkg_name,
             **kwargs,
         )
 
@@ -379,6 +398,7 @@ class PyodideSandboxTool(BaseTool):
             allow_run=self.allow_run,
             allow_ffi=self.allow_ffi,
             node_modules_dir=self.node_modules_dir,
+            pkg_name=self.pkg_name,
         )
         self._sync_sandbox = SyncPyodideSandbox(
             stateful=self.stateful,
@@ -389,6 +409,7 @@ class PyodideSandboxTool(BaseTool):
             allow_run=self.allow_run,
             allow_ffi=self.allow_ffi,
             node_modules_dir=self.node_modules_dir,
+            pkg_name=self.pkg_name,
             skip_deno_check=True,
         )
 
