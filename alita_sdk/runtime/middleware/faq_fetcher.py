@@ -102,7 +102,7 @@ def _fetch_faq_from_local(toolkit_type: str) -> Optional[str]:
         # FAQ files are in alita_sdk/tools/docs/faq/
         current_file = Path(__file__)
         sdk_root = current_file.parent.parent.parent  # Go up to alita_sdk/
-        faq_dir = sdk_root / 'tools' / 'docs' / 'faq'
+        faq_dir = sdk_root / 'docs' / 'faq'
 
         faq_file = faq_dir / f"{toolkit_type}.md"
 

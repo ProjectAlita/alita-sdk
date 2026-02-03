@@ -708,11 +708,11 @@ class AlitaClient:
             logger.info(f"Auto-created PlanningMiddleware for conversation_id={conversation_id}")
 
         # add ToolExceptionHandlerMiddleware to handle tool errors with LLM messages
+        # TODO: add enable on indexer level via config.yaml
         error_handler = ToolExceptionHandlerMiddleware(
             strategies=[
                 TransformErrorStrategy(
                     llm=self.get_low_tier_llm() or llm,
-                    use_llm=True,
                     return_detailed_errors=True
                 ),
                 # TODO: add required callback is needed

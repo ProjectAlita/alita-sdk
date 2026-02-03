@@ -20,7 +20,7 @@ Example:
     strategies = [
         LoggingStrategy(callbacks={'tool_error': my_callback}),
         CircuitBreakerStrategy(threshold=3),
-        TransformErrorStrategy(llm=my_llm, use_llm=True)
+        TransformErrorStrategy(llm=my_llm)
     ]
 
     middleware = ToolExceptionHandlerMiddleware(strategies=strategies)
@@ -35,6 +35,8 @@ from typing import Any, Callable, Dict, List, Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, ToolException
+
+from ..utils.prompts_loader import TransformErrorPrompts
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +137,6 @@ class TransformErrorStrategy(ExceptionHandlerStrategy):
     def __init__(
         self,
         llm: Optional[BaseChatModel] = None,
-        use_llm: bool = True,
         return_detailed_errors: bool = False
     ):
         """
@@ -143,26 +144,26 @@ class TransformErrorStrategy(ExceptionHandlerStrategy):
 
         Args:
             llm: LLM instance for generating human-readable errors
-            use_llm: Whether to use LLM for error transformation
             return_detailed_errors: Include stack traces in errors (debug mode)
         """
         self.llm = llm
-        self.use_llm = use_llm and llm is not None
         self.return_detailed_errors = return_detailed_errors
 
         logger.info(
-            f"TransformErrorStrategy initialized: use_llm={self.use_llm}, "
+            f"TransformErrorStrategy initialized: "
             f"detailed={self.return_detailed_errors}"
         )
 
     def handle_exception(self, context: ExceptionContext) -> ExceptionContext:
         """Generate user-friendly error message."""
         # Try LLM transformation first if enabled
-        if self.use_llm:
+        if self.llm:
             try:
+                # TODO: move prompts outside the code
                 human_error = self._generate_llm_error(context)
                 if human_error:
-                    context.error_message = f'Possible root cases:\n"""\n{human_error}\n"""\n----------\n\nTool execution error:\n"""\n{context.error_str}"""\n\n*IMPORTANT*: if fixing logic is clear - you can re-try tool execution according to fix.'
+                    context.error_message = (f'{human_error}\n\n*IMPORTANT*: if fixing logic is clear - you can re-try tool execution according to fix.\n'
+                                             f'If you continue experiencing issues, please [contact support](https://elitea.ai/docs/support/contact-support/)')
                     logger.debug(
                         f"Generated LLM error for '{context.tool_name}': "
                         f"{human_error[:100]}..."
@@ -186,47 +187,34 @@ class TransformErrorStrategy(ExceptionHandlerStrategy):
             tool_description = context.tool.description if hasattr(context.tool, 'description') else None
             tool_metadata = context.tool.metadata if hasattr(context.tool, 'metadata') else {}
 
-            system_prompt = """You are a helpful assistant that explains technical errors in simple terms.
-Your job is to translate technical error messages into clear, actionable guidance for users.
-
-You have access to:
-1. The original error and full traceback
-2. Toolkit-specific FAQ documentation
-3. The actual tool implementation source code
-
-IMPORTANT:
-- Usually the errors are related to 3rd party APIs used by the tools (don't suggest code changes to the tool itself)
-- If the error suggests a fix (e.g., missing or invalid parameter), reply with suggested fix
-- Avoid suggesting actions that are not related to API configuration (like browser cache clearing, etc) since it is not sessions related
-- Analyze the tool source code to understand what it's trying to do and what might have gone wrong
-- Check if the FAQ addresses this specific error pattern
-
-Guidelines:
-- Be concise and clear
-- Explain what went wrong in simple terms based on code analysis
-- Suggest concrete next steps or fixes
-- Avoid technical jargon unless necessary
-- Be empathetic and helpful
-- Keep response under 200 words
-- Suggest contacting support if issue persists: https://elitea.ai/docs/support/contact-support/
-"""
+            system_prompt = TransformErrorPrompts.SYSTEM_PROMPT
 
             # Get FAQ for toolkit type from GitHub documentation
             from .faq_fetcher import get_toolkit_faq, get_fallback_faq
 
             toolkit_type = tool_metadata.get('toolkit_type') if tool_metadata else None
+            # TODO: add docs building on python build flow
             faq_content = get_toolkit_faq(toolkit_type)
 
             # Use fallback FAQ if toolkit-specific FAQ unavailable
             if not faq_content:
                 faq_content = get_fallback_faq()
 
+            # TODO: add pre-build docs based on wiki toolkit and keep it here in repo
             # Extract tool source code with dependencies
-            from .tool_code_extractor import extract_tool_code
+            # Try static loader first (pre-generated docs), fallback to runtime extraction
+            from ..utils.tool_code_loader import load_tool_code
+            from ..utils.tool_code_extractor import extract_tool_code
 
             tool_code = None
             try:
-                tool_code = extract_tool_code(context.tool_name, toolkit_type)
+                # Try loading from pre-generated markdown (fast, no AST parsing)
+                tool_code = load_tool_code(context.tool_name, toolkit_type)
+
+                # Fallback to runtime extraction if static docs not available
+                if not tool_code:
+                    logger.debug(f"Static tool code not found for '{context.tool_name}', falling back to runtime extraction")
+                    tool_code = extract_tool_code(context.tool_name, toolkit_type)
             except Exception as e:
                 logger.warning(f"Failed to extract tool code for '{context.tool_name}': {e}")
 
@@ -265,7 +253,7 @@ Guidelines:
                     "",
                 ])
 
-            user_prompt_parts.append("Please analyze the error, tool implementation, and FAQ to explain what went wrong and suggest what the user should do next.")
+            user_prompt_parts.append(TransformErrorPrompts.USER_PROMPT_SUFFIX)
 
             user_prompt = "\n".join(user_prompt_parts)
 
@@ -585,4 +573,3 @@ class CompositeStrategy(ExceptionHandlerStrategy):
                 logger.error(
                     f"Strategy {strategy.__class__.__name__} reset failed: {e}"
                 )
-
