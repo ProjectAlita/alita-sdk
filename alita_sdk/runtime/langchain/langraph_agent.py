@@ -7,7 +7,7 @@ from typing import Dict
 import yaml
 import ast
 from langchain_core.callbacks import dispatch_custom_event
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage, RemoveMessage
 from langchain_core.runnables import Runnable
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
@@ -956,15 +956,70 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                config: Optional[RunnableConfig] = None,
                *args, **kwargs):
         logger.info(f"Incoming Input: {input}")
+
+        # Dynamic tool selection based on user query
+        if self.tool_registry is not None:
+            # Extract query from input
+            query = None
+            if isinstance(input.get('input'), str):
+                query = input['input']
+            elif input.get('input') and isinstance(input['input'], list):
+                # Get text from last message
+                last_msg = input['input'][-1] if input['input'] else None
+                if hasattr(last_msg, 'content'):
+                    content = last_msg.content
+                    if isinstance(content, str):
+                        query = content
+                    elif isinstance(content, list):
+                        # Extract text parts
+                        query = ' '.join(
+                            item.get('text', '') if isinstance(item, dict) else str(item)
+                            for item in content
+                        )
+            elif input.get('messages'):
+                # Find last human message
+                for msg in reversed(input['messages']):
+                    if isinstance(msg, HumanMessage):
+                        content = msg.content
+                        if isinstance(content, str):
+                            query = content
+                        elif isinstance(content, list):
+                            query = ' '.join(
+                                item.get('text', '') if isinstance(item, dict) else str(item)
+                                for item in content
+                            )
+                        break
+
+            if query:
+                # Select relevant toolkits (returns empty if no matches or too many tools)
+                selected_toolkits = self.tool_registry.select_toolkits_for_query(query)
+
+                # Only store selection if we have a targeted selection
+                # Empty list means "use meta-tools"
+                if selected_toolkits:
+                    selected_tools = self.tool_registry.get_tools_for_toolkits(selected_toolkits)
+                    logger.info(
+                        f"[DynamicToolSelection] Query: '{query[:100]}...' -> Binding {len(selected_toolkits)} toolkits, {len(selected_tools)} tools directly")
+
+                    # Store selection in config for LLMNode to use
+                    if config is None:
+                        config = RunnableConfig()
+                    if 'configurable' not in config:
+                        config['configurable'] = {}
+                    config['configurable']['selected_tools'] = selected_tools
+                    config['configurable']['selected_toolkits'] = selected_toolkits
+                else:
+                    logger.info(
+                        f"[DynamicToolSelection] Query: '{query[:100]}...' -> Using meta-tools (no targeted selection)")
         if config is None:
             config = RunnableConfig()
         if not config.get("configurable", {}).get("thread_id", ""):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")
-        
+
         # Check if checkpoint exists early for chat_history handling
         checkpoint_exists = self.checkpointer and self.checkpointer.get_tuple(config)
-        
+
         # Handle chat history and current input properly
         if input.get('chat_history') and not input.get('messages'):
             if checkpoint_exists:
@@ -981,7 +1036,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if not input.get('input'):
             if input.get('messages'):
                 input['input'] = [next((msg for msg in reversed(input['messages']) if isinstance(msg, HumanMessage)),
-                                      None)]
+                                       None)]
                 if input['input'] is not None:
                     input_from_messages = True
 
@@ -1000,7 +1055,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Extract text parts and keep non-text parts (images, etc.)
                     text_contents = []
                     non_text_parts = []
-                    
+
                     for item in current_content:
                         if isinstance(item, dict) and item.get('type') == 'text':
                             text_contents.append(item['text'])
@@ -1009,10 +1064,10 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         else:
                             # Keep image_url and other non-text content
                             non_text_parts.append(item)
-                    
+
                     # Set input to the joined text
                     input['input'] = ". ".join(text_contents) if text_contents else ""
-                    
+
                     # If this message came from input['messages'], update or remove it
                     if input_from_messages:
                         if non_text_parts:
@@ -1031,7 +1086,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                             # Create a new message with only non-text content
                             non_text_message = HumanMessage(content=non_text_parts)
                             input['messages'].append(non_text_message)
-                
+
                 elif isinstance(current_content, str):
                     # on regenerate case
                     input['input'] = current_content
@@ -1053,9 +1108,9 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # Append to existing messages
                 # input['messages'].append(current_message)
             # else:
-                # NOTE: Commented out to prevent duplicates with input['input']
-                # input['messages'] = [current_message]
-        
+            # NOTE: Commented out to prevent duplicates with input['input']
+            # input['messages'] = [current_message]
+
         # Validate that input is not empty after all processing
         if not input.get('input'):
             raise RuntimeError(
@@ -1063,16 +1118,44 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 "This likely means the message contained only non-text content "
                 "with no accompanying text."
             )
-        
+
         logger.info(f"Input: {thread_id} - {input}")
         try:
-            if self.checkpointer and self.checkpointer.get_tuple(config):
-                if config.pop("should_continue", False):
-                    invoke_input = input
+            checkpoint_tuple = self.checkpointer.get_tuple(config) if self.checkpointer else None
+            if checkpoint_tuple:
+                # Check if checkpoint is at END state (previous run completed)
+                checkpoint_state = self.get_state(config)
+                is_at_end = not checkpoint_state.next
+                should_continue = config.pop("should_continue", False)
+
+                if should_continue:
+                    # Explicitly continuing interrupted execution - invoke with input
+                    result = super().invoke(input, config=config, *args, **kwargs)
+                elif is_at_end:
+                    # Previous run completed - start fresh run with new input
+                    # Don't use invoke(None) as that just returns current state without running
+                    logger.info(
+                        f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
+
+                    # FIX: When input contains 'messages' (e.g., regeneration scenario),
+                    # clear old checkpoint messages first to prevent duplication.
+                    # The add_messages reducer would otherwise APPEND new messages to existing ones.
+                    if input.get('messages'):
+                        existing_messages = checkpoint_state.values.get('messages', [])
+                        if existing_messages:
+                            logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
+                            # Create RemoveMessage objects for all existing messages
+                            remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if
+                                           hasattr(msg, 'id') and msg.id]
+                            if remove_msgs:
+                                # Update state to remove old messages before invoking
+                                self.update_state(config, {'messages': remove_msgs})
+
+                    result = super().invoke(input, config=config, *args, **kwargs)
                 else:
+                    # Interrupted mid-execution - update state and continue from where we left off
                     self.update_state(config, input)
-                    invoke_input = None
-                result = super().invoke(invoke_input, config=config, *args, **kwargs)
+                    result = super().invoke(None, config=config, *args, **kwargs)
             else:
                 result = super().invoke(input, config=config, *args, **kwargs)
         except GraphRecursionError as e:
@@ -1091,18 +1174,19 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # Printer completed, extract last AI message
                 messages = result['messages']
                 output = next(
-                    (msg.content for msg in reversed(messages)
+                    (normalize_message_content(msg.content) for msg in reversed(messages)
                      if not isinstance(msg, HumanMessage)),
-                    messages[-1].content
+                    normalize_message_content(messages[-1].content) if messages else None
                 ) if messages else result.get('output')
             elif printer_output is not None:
                 # Printer node has output (interrupted state)
-                output = printer_output
+                output = normalize_message_content(printer_output) if not isinstance(printer_output,
+                                                                                     str) else printer_output
             else:
                 # No printer node, extract last AI message from messages
                 messages = result.get('messages', [])
                 output = next(
-                    (msg.content for msg in reversed(messages)
+                    (normalize_message_content(msg.content) for msg in reversed(messages)
                      if not isinstance(msg, HumanMessage)),
                     None
                 )
@@ -1392,3 +1476,31 @@ def detect_and_flatten_subgraphs(yaml_schema: str) -> tuple[str, list]:
 
     return flattened_yaml, all_tools
 
+def normalize_message_content(content: Any) -> str:
+    """
+    Normalize message content to a string.
+
+    Handles Claude model responses which return content as a list of blocks:
+    [{'type': 'text', 'text': '...'}, {'type': 'thinking', 'thinking': '...'}]
+
+    Extracts only text blocks and joins them into a single string.
+    """
+    if content is None:
+        return ''
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Filter out thinking blocks, keep only text responses
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get('type') == 'text':
+                    text_parts.append(block.get('text', ''))
+                elif 'text' in block and 'type' not in block:
+                    # Handle simple {'text': '...'} format
+                    text_parts.append(block.get('text', ''))
+            elif isinstance(block, str):
+                text_parts.append(block)
+        return ''.join(text_parts)
+    # Fallback for other types
+    return str(content)
