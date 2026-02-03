@@ -250,11 +250,11 @@ run_suite() {
     local results_file="$suite_output_dir/results.json"
 
     # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
-    # Now verbose output goes to stderr, so we can use both --json and $VERBOSE together
+    # Don't pass $VERBOSE with --json to keep stdout clean for JSON output
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
-        # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        # Don't use FORCE_COLOR with --json to keep JSON output clean
+        if python scripts/run_suite.py "$suite_spec" --json > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -264,7 +264,8 @@ run_suite() {
         fi
     else
         # Capture verbose output to log file only
-        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
+        # Don't pass $VERBOSE with --json to keep stdout clean for JSON output
+        if python scripts/run_suite.py "$suite_spec" --json > "$results_file" 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -392,7 +393,9 @@ run_suite_local() {
     print_step "Step 2/3: Running tests for $suite_spec (local)"
     local results_file="$suite_output_dir/results.json"
 
-    if python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> "$suite_output_dir/run.log"; then
+    # Don't pass $VERBOSE with --json to keep stdout clean for JSON output
+    # Verbose logs go to run.log (stderr)
+    if python scripts/run_suite.py "$suite_spec" --json --local > "$results_file" 2> "$suite_output_dir/run.log"; then
         print_success "Tests completed"
 
         # Parse results

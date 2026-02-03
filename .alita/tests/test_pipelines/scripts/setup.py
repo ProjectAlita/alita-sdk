@@ -101,7 +101,7 @@ class SetupContext:
                 self.logger.warning(message)
             else:  # info
                 self.logger.info(message)
-        elif self.verbose or level in ("error", "warning"):
+        elif self.verbose:
             prefix = {"info": "  ", "success": "  ✓", "error": "  ✗", "warning": "  ⚠"}
             print(f"{prefix.get(level, '  ')} {message}")
 
@@ -827,11 +827,9 @@ def run(
     if logger is None:
         logger = TestLogger(verbose=verbose, quiet=quiet)
     
-    # In local mode, we prepare environment but skip backend calls
-    # This essentially acts like dry_run but still writes env file
+    # In local mode, we prepare environment using local toolkits
     if local:
-        dry_run = True  # Skip backend calls
-        logger.info("[LOCAL MODE] Skipping backend calls, preparing local environment")
+        logger.info("[LOCAL MODE] Using local toolkit creation (no backend)")
     
     # Load environment file if provided
     if env_file:

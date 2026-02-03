@@ -488,7 +488,8 @@ def get_pipelines_from_folder(
 
     for name in pipeline_names:
         for p in all_pipelines:
-            if p.get("name") == name:
+            # Use pattern matching for fuzzy matching (case-insensitive, space/underscore agnostic)
+            if matches_any_pattern(p.get("name", ""), [name]):
                 # Get full pipeline details
                 full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
                 if full:
@@ -663,7 +664,7 @@ def run_suite(
             if logger and logger.verbose:
                 status = "PASS" if result.test_passed else "FAIL"
                 logger.debug(f"[{status}] {result.execution_time:.1f}s")
-            elif not logger or not logger.quiet:
+            elif logger and not logger.quiet:
                 # Clear running line
                 sys.stdout.write("\033[2K\r")
                 sys.stdout.flush()
