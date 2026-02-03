@@ -1,0 +1,95 @@
+name: ado_toolkit
+description: |
+  Azure DevOps (ADO) toolkit integration tests
+  
+  Test Structure:
+  - ADO Repos Tests (ADO01-ADO04, ADO06-ADO09): Test repository operations using ado_repos toolkit
+  - ADO Wiki Tests (ADO05): Test wiki operations using ado_wiki toolkit
+
+env_mapping:
+  toolkit_config: ${ADO_CONFIG_PATH:../../configs/ado-config.json}
+  organization_url: ${ADO_ORGANIZATION_URL}
+  project: ${ADO_PROJECT}
+  repository_id: ${ADO_REPOSITORY_ID}
+  token: ${ADO_TOKEN}
+
+setup:
+  - name: Setup ADO Configuration
+    type: configuration
+    config:
+      config_type: ado
+      alita_title: ${ADO_SECRET_NAME:ado}
+      data:
+        token: ${ADO_TOKEN}
+        organization_url: ${ADO_ORGANIZATION_URL}
+        project: ${ADO_PROJECT}
+
+  - name: Create ADO Repos Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/ado-repos-config.json
+      toolkit_type: ado_repos
+      toolkit_name: ${ADO_REPOS_TOOLKIT_NAME:ado-repos-testing}
+    save_to_env:
+      - key: ADO_REPOS_TOOLKIT_ID
+        value: $.id
+      - key: ADO_REPOS_TOOLKIT_NAME
+        value: $.name
+
+  - name: Create ADO Wiki Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/ado-wiki-config.json
+      toolkit_type: ado_wiki
+      toolkit_name: ${ADO_WIKI_TOOLKIT_NAME:ado-wiki-testing}
+    save_to_env:
+      - key: ADO_WIKI_TOOLKIT_ID
+        value: $.id
+      - key: ADO_WIKI_TOOLKIT_NAME
+        value: $.name
+
+composable_pipelines: []
+
+execution:
+  test_directory: tests
+  order:
+    # Repos tests (ADO01-ADO04)
+    - test_case_01_*.yaml
+    - test_case_02_*.yaml
+    - test_case_03_*.yaml
+    - test_case_04_*.yaml
+    # Wiki tests (ADO05)
+    - test_case_05_*.yaml
+    # Additional Repos tests (ADO06-ADO09)
+    - test_case_06_*.yaml
+    - test_case_07_*.yaml
+    - test_case_08_*.yaml
+    - test_case_09_*.yaml
+
+  substitutions:
+    ADO_REPOS_TOOLKIT_ID: ${ADO_REPOS_TOOLKIT_ID}
+    ADO_REPOS_TOOLKIT_NAME: ${ADO_REPOS_TOOLKIT_NAME}
+    ADO_WIKI_TOOLKIT_ID: ${ADO_WIKI_TOOLKIT_ID}
+    ADO_WIKI_TOOLKIT_NAME: ${ADO_WIKI_TOOLKIT_NAME}
+    TIMESTAMP: ${TIMESTAMP}
+
+  settings:
+    timeout: 180
+    parallel: 1
+    stop_on_failure: false
+
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "ADO*"
+    continue_on_error: true
+
+  - name: Delete ADO Repos Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${ADO_REPOS_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true

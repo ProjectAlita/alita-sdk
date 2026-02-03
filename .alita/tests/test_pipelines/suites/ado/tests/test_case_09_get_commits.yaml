@@ -1,0 +1,74 @@
+name: "ADO09 - Get Commits"
+description: "Verify the ADO 'get_commits' tool returns commits for a path or branch"
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  repository_id:
+    type: str
+    value: ${ADO_REPOSITORY_ID}
+  path:
+    type: str
+    value: 'README.md'
+  tool_result:
+    type: list
+  test_results:
+    type: dict
+
+entry_point: invoke_get_commits
+nodes:
+  - id: invoke_get_commits
+    type: toolkit
+    input:
+      - path
+    input_mapping:
+      path:
+        type: variable
+        value: path
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_commits
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_commits
+
+  - id: validate_commits
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'get_commits'.
+
+          Tool Result: {tool_result}
+
+          Validation rules:
+           - tool_executed: True if output is a list (even if empty)
+           - test_passed: True if at least one commit object or sha-like string is present
+           - sample_commit: first commit sha or object (null if none)
+           - error: string or null
+
+          Return ONLY the JSON object:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "commit_count": integer,
+            "sample_commit": string | null,
+            "error": string | null
+          }}
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

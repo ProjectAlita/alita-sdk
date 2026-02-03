@@ -151,7 +151,12 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
     # Load base config from file if specified
     file_config = {}
     if "config_file" in config:
-        file_config = load_toolkit_config(config["config_file"], base_path)
+        file_config = load_toolkit_config(
+            config["config_file"],
+            base_path,
+            env_substitutions=ctx.env_vars,
+            env_loader=load_from_env
+        )
 
     # Apply overrides to file config
     overrides = config.get("overrides", {})

@@ -1,0 +1,79 @@
+name: "ADO01 - List Files"
+description: "Verify the ADO 'list_files' tool retrieves files from repository root"
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  repository_id:
+    type: str
+    value: ${ADO_REPOSITORY_ID}
+  path:
+    type: str
+    value: '.'
+  expected_files:
+    type: list
+    value: ['/ElitePipeline.yml', '/README.md']
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_files
+nodes:
+  - id: invoke_list_files
+    type: toolkit
+    input:
+      - repository_id
+      - path
+    input_mapping:
+      repository_id:
+        type: variable
+        value: repository_id
+      path:
+        type: variable
+        value: path
+    output:
+      - tool_result
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - expected_files
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_files' tool and determine if it contains the expected files.
+
+          Tool Result: {tool_result}
+          Expected: {expected_files}
+
+          Return a JSON object named test_results with structure:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "found_expected": boolean,
+            "missing": [string],
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
