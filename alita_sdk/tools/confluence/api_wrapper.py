@@ -277,7 +277,20 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         # normal user flow: put pages in the Space Home, not in the root of the Space
         user_space = space if space else self.space
         logger.info(f"Page will be created within the space {user_space}")
-        parent_id_filled = parent_id if parent_id else self.client.get_space(user_space)['homepage']['id']
+
+        # Handle parent_id properly - only fetch homepage if parent_id is not provided
+        if parent_id:
+            parent_id_filled = parent_id
+        else:
+            # Try to get space homepage, but handle cases where it doesn't exist
+            try:
+                space_info = self.client.get_space(user_space)
+                parent_id_filled = space_info.get('homepage', {}).get('id')
+                if not parent_id_filled:
+                    logger.info(f"Space {user_space} has no homepage, creating page at space root level")
+            except Exception as e:
+                logger.warning(f"Could not retrieve space homepage: {e}. Creating page at space root level")
+                parent_id_filled = None
 
         created_page = self.temp_create_page(space=user_space, title=title, body=body, status=status,
                                              parent_id=parent_id_filled, representation=representation)
@@ -300,15 +313,29 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
         self._add_default_labels(page_id=created_page['id'])
 
-        return f"The page '{title}' was created under the parent page '{parent_id_filled}': '{page_details['link']}'. \nDetails: {str(page_details)}"
+        parent_display = f"parent page '{parent_id_filled}'" if parent_id_filled else "space root level"
+        return f"The page '{title}' was created under {parent_display}: '{page_details['link']}'. \nDetails: {str(page_details)}"
 
     def create_pages(self, pages_info: str, status: str = 'current', space: str = None, parent_id: str = None):
         """ Creates a batch of pages in the Confluence space."""
         created_pages = []
         user_space = space if space else self.space
         logger.info(f"Pages will be created within the space {user_space}")
+
         # duplicate action to avoid extra api calls in downstream function
-        parent_id_filled = parent_id if parent_id else self.client.get_space(user_space)['homepage']['id']
+        # Handle parent_id properly - only fetch homepage if parent_id is not provided
+        if parent_id:
+            parent_id_filled = parent_id
+        else:
+            # Try to get space homepage, but handle cases where it doesn't exist
+            try:
+                space_info = self.client.get_space(user_space)
+                parent_id_filled = space_info.get('homepage', {}).get('id')
+                if not parent_id_filled:
+                    logger.info(f"Space {user_space} has no homepage, creating pages at space root level")
+            except Exception as e:
+                logger.warning(f"Could not retrieve space homepage: {e}. Creating pages at space root level")
+                parent_id_filled = None
         for page_item in json.loads(pages_info):
             for title, body in page_item.items():
                 created_page = self.create_page(title=title, body=body, status=status, parent_id=parent_id_filled,
