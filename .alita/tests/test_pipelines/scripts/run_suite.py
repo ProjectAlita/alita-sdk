@@ -753,15 +753,18 @@ def run_suite_local(
     
     # Create a minimal SetupContext for local execution
     # No backend auth needed, but we need env_vars for substitution
+    # Pass logger so setup output routes to stderr in JSON mode
     ctx = SetupContext(
         base_url="local://",  # Placeholder, not used in local mode
         project_id=0,         # Placeholder, not used in local mode
         bearer_token="",      # Not needed for local
         verbose=logger.verbose if logger else False,
         dry_run=False,
+        logger=logger,  # Pass logger for proper output routing
     )
     
     # Execute setup steps using local strategy
+    # Logger automatically routes output to stderr in JSON mode (quiet=True)
     if logger:
         logger.section("Executing local setup...")
     
@@ -794,10 +797,11 @@ def run_suite_local(
             logger.warning("No toolkit tools were created during setup")
     
     # Create runner with pre-created tools from strategy
+    # In JSON mode (quiet), disable verbose to prevent LangGraph debug output from polluting stdout
     runner = IsolatedPipelineTestRunner(
         tools=tools,  # Pass pre-created tools from strategy
         env_vars=env_vars,  # Pass setup env_vars for substitution
-        verbose=logger.verbose if logger else False,
+        verbose=logger.verbose if logger and not logger.quiet else False,
     )
     
     # Run all tests
@@ -864,7 +868,7 @@ def main():
                         help="Use exit code to indicate suite result (0=all pass, 1=failures)")
     parser.add_argument("--env-file", help="Load environment variables from file")
     parser.add_argument("--local", action="store_true",
-                        help="Local mode: run pipelines on localsource code without backend")
+                        help="Local mode: run pipelines on local source code without backend")
 
     args = parser.parse_args()
 

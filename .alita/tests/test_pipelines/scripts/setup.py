@@ -669,8 +669,11 @@ def execute_setup(
         step_type = step.get("type")
         action = step.get("action", "")
 
-        if ctx.verbose:
-             print(f"\n[{i}/{len(setup_steps)}] {step_name}")
+        # Log step progress - use logger if available, else fallback to print
+        if ctx.logger:
+            ctx.logger.info(f"[{i}/{len(setup_steps)}] {step_name}")
+        elif ctx.verbose:
+            print(f"\n[{i}/{len(setup_steps)}] {step_name}")
 
         # Check if step is enabled
         if not step.get("enabled", True):
