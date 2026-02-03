@@ -1,44 +1,41 @@
-name: "ADO03 - Read File"
-description: "Verify the ADO 'read_file' tool retrieves file content"
+name: "ADO27 - Get Wiki"
+description: "Verify the ADO 'get_wiki' tool retrieves wiki information"
 
 toolkits:
-  - id: ${ADO_REPOS_TOOLKIT_ID}
-    name: ${ADO_REPOS_TOOLKIT_NAME}
+  - id: ${ADO_WIKI_TOOLKIT_ID}
+    name: ${ADO_WIKI_TOOLKIT_NAME}
 
 state:
-  file_path:
+  wiki_identifier:
     type: str
-    value: 'README.md'
+    value: 'TestProject.wiki'
   tool_result:
     type: str
   test_results:
     type: dict
 
-entry_point: invoke_read_file
+entry_point: invoke_get_wiki
 nodes:
-  - id: invoke_read_file
+  - id: invoke_get_wiki
     type: toolkit
     input:
-      - file_path
+      - wiki_identifier
     input_mapping:
-      file_path:
+      wiki_identified:
         type: variable
-        value: file_path
-      branch:
-        type: fixed
-        value: main
+        value: wiki_identifier
     output:
       - tool_result
     structured_output: true
-    tool: read_file
-    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
-    transition: validate_content
+    tool: get_wiki
+    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    transition: validate_wiki_info
 
-  - id: validate_content
+  - id: validate_wiki_info
     type: llm
     input:
       - tool_result
-      - file_path
+      - wiki_identifier
     input_mapping:
       chat_history:
         type: fixed
@@ -49,16 +46,20 @@ nodes:
       task:
         type: fstring
         value: |
-          Check that the content returned for file '{file_path}' is non-empty and looks like a README.
+          Validate that the wiki information was retrieved successfully.
 
           Tool Result: {tool_result}
+          Expected Wiki: {wiki_identifier}
 
           Return JSON test_results:
           {{
             "test_passed": boolean,
             "tool_executed": boolean,
-            "contains_heading": boolean,
-             "error": string | null
+            "has_id": boolean,
+            "has_name": boolean,
+            "has_type": boolean,
+            "has_url": boolean,
+            "error": string | null
           }}
 
           Return ONLY the JSON object.

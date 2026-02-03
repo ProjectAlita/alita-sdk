@@ -1,0 +1,186 @@
+name: "ADO11 - set_active_branch: Multi-branch switching sequence"
+description: |
+  Verify the ADO 'set_active_branch' tool can switch between multiple branches.
+
+  Objective: Test branch switching sequence across multiple branches
+
+  Expected Behavior:
+  - Switch to ActiveBranchTest and read file successfully
+  - Switch to EliteaTest and attempt to read file (won't exist)
+  - Switch to main branch as cleanup
+  - All branch switches execute successfully
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  active_branch_test:
+    type: str
+    value: "ActiveBranchTest"
+  elitea_test:
+    type: str
+    value: "EliteaTest"
+  main_branch:
+    type: str
+    value: "main"
+  verification_file:
+    type: str
+    value: "test.txt"
+  result_switch_active:
+    type: str
+  result_read_active:
+    type: str
+  result_switch_elitea:
+    type: str
+  result_read_elitea:
+    type: str
+  result_switch_main:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: switch_to_active_branch
+nodes:
+  - id: switch_to_active_branch
+    type: toolkit
+    input:
+      - active_branch_test
+    input_mapping:
+      branch_name:
+        type: variable
+        value: active_branch_test
+    output:
+      - result_switch_active
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: read_file_on_active_branch
+
+  - id: read_file_on_active_branch
+    type: toolkit
+    input:
+      - verification_file
+      - active_branch_test
+    input_mapping:
+      file_path:
+        type: variable
+        value: verification_file
+      branch:
+        type: fixed
+        value: ''
+    output:
+      - result_read_active
+    structured_output: true
+    tool: read_file
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: switch_to_elitea_branch
+
+  - id: switch_to_elitea_branch
+    type: toolkit
+    input:
+      - elitea_test
+    input_mapping:
+      branch_name:
+        type: variable
+        value: elitea_test
+    output:
+      - result_switch_elitea
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: read_file_on_elitea_branch
+
+  - id: read_file_on_elitea_branch
+    type: toolkit
+    input:
+      - verification_file
+      - elitea_test
+    input_mapping:
+      file_path:
+        type: variable
+        value: verification_file
+      branch:
+        type: fixed
+        value: ''
+    output:
+      - result_read_elitea
+    structured_output: true
+    tool: read_file
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: switch_to_main_branch
+
+  - id: switch_to_main_branch
+    type: toolkit
+    input:
+      - main_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: main_branch
+    output:
+      - result_switch_main
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - result_switch_active
+      - result_read_active
+      - result_switch_elitea
+      - result_read_elitea
+      - result_switch_main
+      - active_branch_test
+      - elitea_test
+      - verification_file
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the multi-branch switching sequence.
+
+          Results:
+          1. Switch to ActiveBranchTest: {result_switch_active}
+          2. Read file on ActiveBranchTest: {result_read_active}
+          3. Switch to EliteaTest: {result_switch_elitea}
+          4. Read file on EliteaTest: {result_read_elitea}
+          5. Switch to main: {result_switch_main}
+
+          File: {verification_file}
+
+          Validation Criteria (ALL must pass):
+          1. active_switch_success: Switch to ActiveBranchTest succeeded
+          2. active_read_success: Read file on ActiveBranchTest returned content (file exists)
+          3. elitea_switch_success: Switch to EliteaTest succeeded
+          4. elitea_read_expected_fail: Read file on EliteaTest failed (file doesn't exist - this is expected)
+          5. main_switch_success: Switch to main succeeded
+          6. no_unexpected_errors: No unexpected errors in any operation
+
+          Return a JSON object with structure:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "active_switch_success": boolean,
+            "active_read_success": boolean,
+            "elitea_switch_success": boolean,
+            "elitea_read_expected_fail": boolean,
+            "main_switch_success": boolean,
+            "no_unexpected_errors": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

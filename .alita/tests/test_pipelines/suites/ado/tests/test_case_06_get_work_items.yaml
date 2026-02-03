@@ -10,8 +10,8 @@ state:
     type: str
     value: ${ADO_REPOSITORY_ID}
   pull_request_id:
-    type: int
-    value: 10
+    type: str
+    value: "10"
   tool_result:
     type: list
   test_results:
@@ -57,8 +57,8 @@ nodes:
           Tool Result: {tool_result}
 
           Validation rules:
-           - tool_executed: True if result is a list (even empty), False if error string
-           - test_passed: True if tool_executed is True and each item in list is an integer
+           - tool_executed: True if result is a list containing "69"
+           - test_passed: True if tool_executed is True and each item in list is a string
            - work_item_count: number of work item ids returned
            - sample_item: first item or null
            - error: string or null

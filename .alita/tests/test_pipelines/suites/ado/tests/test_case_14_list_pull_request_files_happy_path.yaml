@@ -1,0 +1,91 @@
+name: "ADO14 - list_pull_request_files: List files changed in PR"
+description: |
+  Verify the ADO 'list_pull_request_files' tool lists files changed in a pull request.
+
+  Objective: Test happy path for listing PR file changes
+
+  Expected Behavior:
+  - Tool executes successfully
+  - Returns list of changed files
+  - Each file has path and change type information
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  pull_request_id:
+    type: str
+    value: "10"
+  expected_file_fields:
+    type: list
+    value: ["path", "diff"]
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_pull_request_files
+nodes:
+  - id: invoke_list_pull_request_files
+    type: toolkit
+    input:
+      - pull_request_id
+    input_mapping:
+      pull_request_id:
+        type: variable
+        value: pull_request_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: list_pull_request_files
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - pull_request_id
+      - expected_file_fields
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_pull_request_files' tool.
+
+          Tool Result: {tool_result}
+          PR ID: {pull_request_id}
+          Expected File Fields: {expected_file_fields}
+
+          Validation Criteria (ALL must pass):
+          1. tool_executed: Result is not empty/null and no exception was thrown
+          2. returns_list: Output contains a list/array structure of files
+          3. has_file_count: At least 1 file is returned (PR 10 should have changes)
+          4. files_have_required_fields: Each file entry has 'path' and 'diff' fields (do NOT check for changeType)
+          5. no_error: Output does NOT contain 'error', 'failed', 'exception'
+
+          Return a JSON object with structure:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "returns_list": boolean,
+            "file_count": number,
+            "files_have_required_fields": boolean,
+            "no_error": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

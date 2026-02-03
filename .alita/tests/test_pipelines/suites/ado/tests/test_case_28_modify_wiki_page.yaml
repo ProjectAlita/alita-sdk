@@ -1,0 +1,142 @@
+name: "ADO28 - Modify Wiki Page"
+description: "Verify the ADO 'modify_wiki_page' tool creates or updates wiki page content"
+
+toolkits:
+  - id: ${ADO_WIKI_TOOLKIT_ID}
+    name: ${ADO_WIKI_TOOLKIT_NAME}
+
+state:
+  wiki_identifier:
+    type: str
+    value: 'TestProject.wiki'
+  page_name:
+    type: str
+  page_content:
+    type: str
+  version_identifier:
+    type: str
+    value: 'wikiMaster'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Wiki page name and content
+        page_name = f"/TestPage-{timestamp}-{random_suffix}"
+        nl = chr(10)
+        page_content = f"# Test Wiki Page{nl}{nl}Created by ADO28 at {timestamp}-{random_suffix}{nl}{nl}## Features{nl}- Automated testing{nl}- Content validation"
+
+        {"page_name": page_name, "page_content": page_content}
+    input:
+      - wiki_identifier
+    output:
+      - page_name
+      - page_content
+    structured_output: true
+    transition: invoke_modify_wiki_page
+
+  - id: invoke_modify_wiki_page
+    type: toolkit
+    input:
+      - wiki_identifier
+      - page_name
+      - page_content
+      - version_identifier
+    input_mapping:
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+      page_name:
+        type: variable
+        value: page_name
+      page_content:
+        type: variable
+        value: page_content
+      version_identifier:
+        type: variable
+        value: version_identifier
+      version_type:
+        type: fixed
+        value: 'branch'
+      expanded:
+        type: fixed
+        value: true
+    output:
+      - tool_result
+    structured_output: true
+    tool: modify_wiki_page
+    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    transition: validate_modification
+
+  - id: validate_modification
+    type: llm
+    input:
+      - tool_result
+      - page_name
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate that the wiki page was created or updated successfully.
+
+          Tool Result: {tool_result}
+          Page Name: {page_name}
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "has_etag": boolean,
+            "has_page_id": boolean,
+            "has_page_path": boolean,
+            "path_matches": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_wiki_page
+
+  - id: cleanup_wiki_page
+    type: toolkit
+    input:
+      - wiki_identifier
+      - page_name
+    input_mapping:
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+      page_name:
+        type: variable
+        value: page_name
+    output:
+      - cleanup_result
+    structured_output: true
+    tool: delete_page_by_path
+    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    transition: END

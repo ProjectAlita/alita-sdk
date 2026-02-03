@@ -1,0 +1,176 @@
+name: "ADO18 - create_file: Create new file in repository"
+description: |
+  Verify the ADO 'create_file' tool creates a new file with content.
+
+  Objective: Test happy path for file creation
+
+  Expected Behavior:
+  - Tool executes successfully
+  - New file is created with specified path and content
+  - Returns commit details or confirmation
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+  file_content:
+    type: str
+  branch_name:
+    type: str
+    value: "EliteaTest"
+  directory_path:
+    type: str
+    value: ""
+  success_indicators:
+    type: list
+    value: ["Created", "created"]
+  tool_result:
+    type: str
+  verification_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # File path and content
+        file_path = f"test-file-{timestamp}-{random_suffix}.txt"
+        file_content = f"This is a test file created by automated tests at {timestamp}-{random_suffix}"
+
+        {"file_path": file_path, "file_content": file_content}
+    input:
+      - directory_path
+    output:
+      - file_path
+      - file_content
+    structured_output: true
+    transition: invoke_create_file
+
+  - id: invoke_create_file
+    type: toolkit
+    input:
+      - file_path
+      - file_content
+      - branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_content
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: verify_file_created
+
+  - id: verify_file_created
+    type: toolkit
+    input:
+      - file_path
+      - branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      branch:
+        type: variable
+        value: branch_name
+    output:
+      - verification_result
+    structured_output: true
+    tool: read_file
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - verification_result
+      - file_path
+      - file_content
+      - success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'create_file' AND the verification call.
+
+          Tool Result (create_file): {tool_result}
+          Verification Result (read_file): {verification_result}
+          Expected File Path: {file_path}
+          Expected Content: {file_content}
+          Success Indicators: {success_indicators}
+
+          Validation Criteria (ALL must pass):
+          1. tool_executed: create_file result is not empty/null
+          2. success_indicated: create_file output contains a success indicator
+          3. file_readable: read_file returned content (not error/empty)
+          4. content_matches: read_file content contains expected text
+          5. no_error: Neither output contains 'error', 'failed', 'not found'
+
+          Return a JSON object with structure:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "success_indicated": boolean,
+            "file_readable": boolean,
+            "content_matches": boolean,
+            "no_error": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_file
+
+  - id: cleanup_file
+    type: toolkit
+    input:
+      - file_path
+      - branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - cleanup_result
+    structured_output: true
+    tool: delete_file
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: END

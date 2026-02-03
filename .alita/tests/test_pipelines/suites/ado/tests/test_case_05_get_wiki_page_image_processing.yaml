@@ -1,12 +1,12 @@
 name: "ADO05 - Get Wiki Page with Image Processing"
-description: "Verify 'get_wiki_page' retrieves wiki content and processes images into descriptions"
+description: "Verify 'get_wiki_page' retrieves wiki content with processed image descriptions using custom prompt"
 
 toolkits:
   - id: ${ADO_WIKI_TOOLKIT_ID}
     name: ${ADO_WIKI_TOOLKIT_NAME}
 
 state:
-  wiki_identifier:
+  wiki_identified:
     type: str
     value: 'TestProject.wiki'
   page_id:
@@ -22,19 +22,27 @@ nodes:
   - id: invoke_get_wiki_page
     type: toolkit
     input:
-      - wiki_identifier
+      - wiki_identified
       - page_id
       - include_content
+      - image_description_prompt
+      - recursion_level
     input_mapping:
-      wiki_identifier:
+      wiki_identified:
         type: variable
-        value: wiki_identifier
+        value: wiki_identified
       page_id:
         type: variable
         value: page_id
       include_content:
         type: fixed
         value: true
+      image_description_prompt:
+        type: fixed
+        value: what is on the immage
+      recursion_level:
+        type: fixed
+        value: oneLevel
     output:
       - tool_result
     structured_output: true
@@ -57,17 +65,40 @@ nodes:
       task:
         type: fstring
         value: |
-          Validate that the wiki page content contains meaningful image descriptions (no raw attachment URLs) and preserves markdown structure.
+          Validate that the wiki page content was retrieved successfully with image descriptions.
 
           Tool Result: {tool_result}
-          Page ID: {page_id}
+          Expected Page ID: {page_id}
+
+          Expected structure:
+          - eTag: string (version tag)
+          - page: object containing:
+            - id: 54
+            - path: string (e.g., "/AI tests")
+            - git_item_path: string (e.g., "/AI-tests.md")
+            - remote_url: string
+            - url: string
+            - order: number
+            - sub_pages: array (can be empty)
+            - content: string containing markdown with image descriptions (not raw attachment URLs)
+
+          Validation requirements:
+          1. Content field must be present
+          2. Image descriptions should be contextual (e.g., describing laptop, workspace, desk)
+          3. Images should NOT be raw attachment URLs - they should be processed descriptions
+          4. Content should match the pattern: ![image.png](descriptive text about the image)
 
           Return JSON test_results:
           {{
             "test_passed": boolean,
             "tool_executed": boolean,
-            "no_raw_attachments": boolean,
-            "keywords_present": [string]
+            "has_etag": boolean,
+            "has_page_object": boolean,
+            "page_id_matches": boolean,
+            "has_content_field": boolean,
+            "has_image_descriptions": boolean,
+            "no_raw_attachment_urls": boolean,
+            "content_contextual": boolean
           }}
 
           Return ONLY the JSON object.

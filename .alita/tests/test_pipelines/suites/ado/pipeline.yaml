@@ -67,6 +67,25 @@ execution:
     - test_case_07_*.yaml
     - test_case_08_*.yaml
     - test_case_09_*.yaml
+    # New Repos tests (ADO10-ADO23) - Missing tool coverage
+    - test_case_10_*.yaml  # set_active_branch (Critical)
+    - test_case_11_*.yaml  # set_active_branch (High)
+    - test_case_12_*.yaml  # get_pull_request (Critical)
+    - test_case_13_*.yaml  # get_pull_request (High)
+    - test_case_14_*.yaml  # list_pull_request_files (Critical)
+    - test_case_15_*.yaml  # list_pull_request_files (High)
+    - test_case_16_*.yaml  # create_branch (Critical)
+    - test_case_17_*.yaml  # create_branch (High)
+    - test_case_18_*.yaml  # create_file (Critical)
+    - test_case_19_*.yaml  # create_file (High)
+    - test_case_20_*.yaml  # update_file (Critical)
+    - test_case_21_*.yaml  # update_file (High)
+    - test_case_22_*.yaml  # delete_file (Critical)
+    - test_case_23_*.yaml  # delete_file (High)
+    # Enhanced coverage tests (ADO24-ADO26)
+    - test_case_24_*.yaml  # list_files with subdirectory (High)
+    - test_case_25_*.yaml  # read_file with line range (High)
+    - test_case_26_*.yaml  # list_branches with details (High)
 
   substitutions:
     ADO_REPOS_TOOLKIT_ID: ${ADO_REPOS_TOOLKIT_ID}

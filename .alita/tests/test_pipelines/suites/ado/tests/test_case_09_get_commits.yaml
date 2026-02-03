@@ -54,16 +54,25 @@ nodes:
 
           Validation rules:
            - tool_executed: True if output is a list (even if empty)
-           - test_passed: True if at least one commit object or sha-like string is present
-           - sample_commit: first commit sha or object (null if none)
-           - error: string or null
+           - test_passed: True if commits have the expected structure:
+             * Each commit must be an object/dict with these fields:
+               - sha: commit hash string
+               - author: author name string
+               - createdAt: timestamp string
+               - message: commit message string
+               - url: commit URL string
+           - has_readme_commit: True if the commit "25151c1cf71eebda3accf323eb9284b8c2908baa" with message "Added README.md" is present
+           - commit_count: number of commits returned
+           - sample_commit: first commit object (null if none)
+           - error: string describing any validation failure or null
 
           Return ONLY the JSON object:
           {{
             "test_passed": boolean,
             "tool_executed": boolean,
             "commit_count": integer,
-            "sample_commit": string | null,
+            "has_readme_commit": boolean,
+            "sample_commit": object | null,
             "error": string | null
           }}
     model: gpt-4o
