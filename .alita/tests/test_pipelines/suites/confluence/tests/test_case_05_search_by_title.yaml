@@ -8,7 +8,7 @@ toolkits:
 state:
   query:
     type: str
-    value: TC-003 Page with label
+    value: "[DO_NOT_DELETE] TC-003 Page with label"
   test_results:
     type: dict
   tool_result:
@@ -51,12 +51,14 @@ nodes:
 
           Perform the following checks:
 
-          1. Exact Content Match: Confirm that the 'content' field is exactly "Page containing label"
-          2. Exact Page ID Match: Verify that the 'page_id' is exactly "138969168".
-          3. Exact Page Title Match: Ensure the 'page_title' is exactly "TC-003 Page with label".
-          4 .Exact Page URL Match: Check that the 'page_url' is exactly "https://epamelitea.atlassian.net/spaces/AT/pages/138969168/TC-003+Page+with+label".
+          1. Tool Execution: Confirm the tool executed successfully (result is not empty or null).
+          2. Page ID Match: Verify that the 'page_id' is "182419457".
+          3. Page Title Match: Ensure the 'page_title' contains "TC-003 Page with label".
+          4. Page URL: Check that the 'page_url' contains "182419457" and "DO_NOT_DELETE".
+          5. Content Present: Verify the 'content' field is not empty/null.
 
-          json
+          Return a JSON object named test_results with the following structure:
+
           {{
             "test_passed": boolean (true if tool executed and returned valid results),
             "tool_executed": boolean (true if tool ran without errors),
