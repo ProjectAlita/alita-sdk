@@ -415,7 +415,7 @@ def create_application_payload(pipeline_data: dict, llm_settings: dict = None) -
         "description": pipeline_data["description"],
         "versions": [
             {
-                "name": get_version_name(),
+                "name": "base",
                 "llm_settings": settings,
                 "instructions": pipeline_data["yaml_content"],
                 "agent_type": "pipeline",
