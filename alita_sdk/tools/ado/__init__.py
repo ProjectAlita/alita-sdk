@@ -19,7 +19,8 @@ def get_tools(tool_type, tool):
         "collection_name": tool['toolkit_name'],
         "doctype": 'doc',
         "embedding_model": tool['settings'].get('embedding_model'),
-        "vectorstore_type": "PGVector"
+        "vectorstore_type": "PGVector",
+        "default_wiki_identifier": tool['settings'].get('default_wiki_identifier', None),
     }
     if tool_type == 'ado_plans':
         return AzureDevOpsPlansToolkit().get_toolkit(**config_dict).get_tools()
