@@ -159,6 +159,81 @@ jobs:
           echo "Generating test report..."
           python .alita/tests/test_pipelines/scripts/generate_report.py ./results.json
 
+      - name: Print execution summary
+        if: always()
+        run: |
+          if [ ! -f ./results.json ]; then
+            echo "❌ No results.json found - tests may not have completed"
+            if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "## ❌ Test Results" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "❌ No results.json found - tests may not have completed" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 1
+          fi
+          
+          # Parse JSON with jq
+          SUITE=$(jq -r '.suite // "unknown"' ./results.json)
+          STATUS=$(jq -r '.status // "unknown"' ./results.json)
+          PASSED=$(jq -r '.passed // 0' ./results.json)
+          FAILED=$(jq -r '.failed // 0' ./results.json)
+          ERRORS=$(jq -r '.errors // 0' ./results.json)
+          SKIPPED=$(jq -r '.skipped // 0' ./results.json)
+          DURATION=$(jq -r '.duration // 0' ./results.json)
+          TOTAL_TIME=$(jq -r '.total_execution_time // .duration // 0' ./results.json)
+          
+          # Format status with emoji
+          case "${STATUS,,}" in
+            "passed") STATUS_DISPLAY="✅ PASSED" ;;
+            "tests_failed") STATUS_DISPLAY="❌ TESTS_FAILED" ;;
+            "setup_failed") STATUS_DISPLAY="🔧 SETUP_FAILED" ;;
+            "error") STATUS_DISPLAY="⚠️  ERROR" ;;
+            "skipped") STATUS_DISPLAY="⏭️  SKIPPED" ;;
+            *) STATUS_DISPLAY="${STATUS^^}" ;;
+          esac
+          
+          # Format durations
+          DURATION="${DURATION}s"
+          TOTAL_TIME="${TOTAL_TIME}s"
+          
+          # Print to console
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "  Execution Summary"
+          echo "═══════════════════════════════════════════════════════════════"
+          echo ""
+          echo "Suite Results:"
+          echo ""
+          printf "%-20s %-23s %-8s %-8s %-8s %-8s %-10s\n" "SUITE" "STATUS" "PASSED" "FAILED" "ERRORS" "SKIPPED" "DURATION"
+          echo "───────────────────────────────────────────────────────────────────────────────────────────"
+          printf "%-20s %-23s %-8s %-8s %-8s %-8s %-10s\n" "suites/$SUITE" "$STATUS_DISPLAY" "$PASSED" "$FAILED" "$ERRORS" "$SKIPPED" "$DURATION"
+          echo ""
+          echo "Total execution time: $TOTAL_TIME"
+          echo ""
+          
+          # Write to GitHub Step Summary
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            {
+              echo ""
+              echo "## 📊 Test Execution Summary"
+              echo ""
+              echo '```'
+              echo "═══════════════════════════════════════════════════════════════"
+              echo "  Execution Summary"
+              echo "═══════════════════════════════════════════════════════════════"
+              echo ""
+              echo "Suite Results:"
+              echo ""
+              printf "%-20s %-23s %-8s %-8s %-8s %-8s %-10s\n" "SUITE" "STATUS" "PASSED" "FAILED" "ERRORS" "SKIPPED" "DURATION"
+              echo "───────────────────────────────────────────────────────────────────────────────────────────"
+              printf "%-20s %-23s %-8s %-8s %-8s %-8s %-10s\n" "suites/$SUITE" "$STATUS_DISPLAY" "$PASSED" "$FAILED" "$ERRORS" "$SKIPPED" "$DURATION"
+              echo ""
+              echo "Total execution time: $TOTAL_TIME"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: LS
         if: always()
         run: |
