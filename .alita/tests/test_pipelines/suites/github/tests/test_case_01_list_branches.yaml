@@ -50,14 +50,15 @@ nodes:
           Confirm the tool executed successfully (the result is not empty or null).
           Determine if any branches were found (branches count > 0).
           Check if a 'main' branch exists in the list.
-          Return a JSON object named test_results with the following structure: 
+          Return a JSON object named test_results with the following structure:
 
-          { 
-          "test_passed": boolean (true if all checks pass), 
-          "tool_executed": boolean, 
-          "branches_count": integer, 
+          {
+          "test_passed": boolean (true if all checks pass),
+          "tool_executed": boolean,
+          "branches_count": integer,
           "has_main_branch": boolean,
-          "branches_sample": list of strings (first 5 branches) 
+          "branches_sample": list of strings (first 5 branches),
+          "error": string | null
           }
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.

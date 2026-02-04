@@ -433,7 +433,8 @@ nodes:
                   "code_block": code_block,
                   "markdown_table": markdown_table,
                   "all_passed": all_comments_ok
-              }
+              },
+              "error": string | null
           }
 
            Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.

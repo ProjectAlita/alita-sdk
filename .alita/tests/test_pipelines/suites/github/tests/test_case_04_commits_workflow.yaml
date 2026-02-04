@@ -188,7 +188,8 @@ nodes:
                 "head_sha": head_sha[:8] if head_sha and len(head_sha) > 8 else head_sha,
                 "diff_files_count": diff_meta.get('files_count', 0),
                 "commits_sample": validation_results.get('commits_sample', [])
-            }
+            },
+            "error": None
         }
         # Clear diff_result to avoid passing large data to sandbox
         {"test_results": test_results, "diff_result": None, "validation_results": None}

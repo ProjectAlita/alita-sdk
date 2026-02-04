@@ -1439,7 +1439,8 @@ nodes:
                 "total_scenarios": total_scenarios,
                 "passed_count": passed_scenarios,
                 "failed_count": failed_scenarios
-            }
+            },
+            "error": None
         }
         {"test_results": test_results}
     input:

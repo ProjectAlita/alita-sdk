@@ -213,8 +213,44 @@ def process_pipeline_result(
                     test_results = nested.get("test_results", {})
                     if isinstance(test_results, dict) and "test_passed" in test_results:
                         test_passed = test_results.get("test_passed")
+        
+        # Check tool_calls_dict for code node outputs (pyodide_sandbox)
+        # This handles cases where test_results is in a code node's output
+        if test_passed is None and "tool_calls_dict" in result_data:
+            tool_calls = result_data.get("tool_calls_dict", {})
+            if isinstance(tool_calls, dict):
+                # Look for code nodes with test_results in output
+                for tool_call_id, tool_call in tool_calls.items():
+                    if not isinstance(tool_call, dict):
+                        continue
+                    
+                    tool_name = tool_call.get("tool_meta", {}).get("name", "")
+                    if tool_name != "pyodide_sandbox":
+                        continue
+                    
+                    # Parse tool_output for test_results
+                    tool_output = tool_call.get("tool_output", "")
+                    if isinstance(tool_output, str) and tool_output.strip().startswith("{"):
+                        try:
+                            parsed = json.loads(tool_output)
+                            if isinstance(parsed, dict):
+                                # Check result.test_results.test_passed
+                                if "result" in parsed:
+                                    result_obj = parsed.get("result", {})
+                                    if isinstance(result_obj, dict) and "test_results" in result_obj:
+                                        tr = result_obj.get("test_results", {})
+                                        if isinstance(tr, dict) and "test_passed" in tr:
+                                            test_passed = tr.get("test_passed")
+                                            if isinstance(output, dict):
+                                                output["result"] = result_obj
+                                            else:
+                                                output = result_obj
+                                            break
+                        except json.JSONDecodeError:
+                            pass
+        
         # Check in chat_history (pipeline response format)
-        elif "chat_history" in result_data:
+        if test_passed is None and "chat_history" in result_data:
             chat_history = result_data.get("chat_history", [])
             for msg in chat_history:
                 if isinstance(msg, dict):

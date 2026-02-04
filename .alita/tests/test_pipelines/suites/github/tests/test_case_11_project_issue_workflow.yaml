@@ -384,7 +384,8 @@ nodes:
               "issue_in_list": boolean (from test_results),
               "search_items_count": integer (from test_results),
               "list_items_count": integer (from test_results)
-            }}
+            }},
+            "error": string | null
           }}
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.

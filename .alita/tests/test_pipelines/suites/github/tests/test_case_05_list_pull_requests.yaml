@@ -57,14 +57,15 @@ nodes:
           Extract a sample of the first 5 pull requests with their number, title (first 50 chars), and state.
           If there is an error, return the error message in the error field.
 
-          Return a JSON object named test_results with the following structure: 
+          Return a JSON object named test_results with the following structure:
 
-          { "test_passed": boolean (true if all checks pass), 
-          "tool_executed": boolean, 
-          "prs_count": integer, 
-          "prs_have_numbers": boolean, 
-          "prs_sample": list of dicts with keys: number, title, state, head 
-          "error": error_message (if any)
+          {
+          "test_passed": boolean (true if all checks pass),
+          "tool_executed": boolean,
+          "prs_count": integer,
+          "prs_have_numbers": boolean,
+          "prs_sample": list of dicts with keys: number, title, state, head,
+          "error": string | null,
           "failed_checks": list of strings (failed checks)
           }
 

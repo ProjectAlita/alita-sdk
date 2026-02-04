@@ -286,7 +286,8 @@ nodes:
               "known_file_length": integer (from validation_results.known_file_length),
               "dir_file_path": string (the directory file path),
               "dir_file_length": integer (length of directory file content)
-            }}
+            }},
+            "error": string | null
           }}
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
