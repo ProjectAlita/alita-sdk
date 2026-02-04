@@ -13,17 +13,23 @@ on:
         required: false
         type: string
         default: 'local'
+       
   workflow_dispatch:
     inputs:
       test_cases_dir:
-        description: 'Test cases directory (e.g., github, ado, confluence)'
+        description: 'Test cases directory (e.g., github, ado, confluence) or anything from .alita/tests/test_pipelines/suites'
         required: true
         type: string
       environment:
-        description: 'Environment to run tests in (local or other)'
-        required: false
-        type: string
+        description: 'Environment to run tests in'
+        required: true
+        type: choice
         default: 'local'
+        options:
+          - local
+          - dev
+          - stage
+          - prod
 
 env:
   REGISTRY: ghcr.io
@@ -79,8 +85,8 @@ jobs:
 
       - name: Run docker-compose
         run: |
-          echo "Starting docker-compose with command: ${{ env.DOCKER_COMMAND_COMPOSED }}"
-          echo "On environment: ${{ env.ENV_UPPER }}"
+          echo "::notice::Starting docker-compose with command: ${{ env.DOCKER_COMMAND_COMPOSED }}"
+          echo "::notice::On environment: ${{ env.ENV_UPPER }}"
           export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
           export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
           export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
@@ -186,20 +192,7 @@ jobs:
           else
             STATUS_DISPLAY="✅ TESTS_PASSED"
           fi
-          
-          # Print to console
-          echo ""
-          echo "═══════════════════════════════════════════════════════════════"
-          echo "  Execution Summary"
-          echo "═══════════════════════════════════════════════════════════════"
-          echo ""
-          echo "Suite Results:"
-          echo ""
-          printf "%-20s %-23s %-8s %-8s %-8s %-8s\n" "SUITE" "STATUS" "PASSED" "FAILED" "ERRORS" "SKIPPED"
-          echo "───────────────────────────────────────────────────────────────────────────────────"
-          printf "%-20s %-23s %-8s %-8s %-8s %-8s\n" "$SUITE" "$STATUS_DISPLAY" "$PASSED" "$FAILED" "$ERRORS" "$SKIPPED"
-          echo ""
-          
+                    
           # Write to GitHub Step Summary
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
             {
@@ -220,11 +213,6 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: LS
-        if: always()
-        run: |
-          ls -la
-      
       - name: Save Docker logs
         if: always()
         run: |

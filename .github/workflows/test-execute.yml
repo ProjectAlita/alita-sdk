@@ -83,4 +83,5 @@ jobs:
     uses: ./.github/workflows/test-runner-reusable.yml
     with:
       test_cases_dir: ${{ matrix.test_cases_dir }}
+      environment: local
     secrets: inherit
