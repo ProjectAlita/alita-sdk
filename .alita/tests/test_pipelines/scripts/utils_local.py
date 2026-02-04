@@ -105,6 +105,7 @@ class IsolatedPipelineTestRunner:
         env_vars: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
         alita_client = None,
+        llm = None,
     ):
         """
         Initialize the test runner.
@@ -114,12 +115,13 @@ class IsolatedPipelineTestRunner:
             env_vars: Environment variables for substitution
             verbose: Enable verbose logging
             alita_client: Optional pre-created AlitaClient
+            llm: Optional pre-created LLM instance
         """
         self._tools = tools or []
         self.env_vars = env_vars or {}
         self.verbose = verbose
         self.alita_client = alita_client
-        self.llm = None
+        self.llm = llm  # Use provided LLM or create on demand
 
 
         if verbose:
@@ -133,8 +135,10 @@ class IsolatedPipelineTestRunner:
 
     def _get_llm(self, model: str = 'gpt-4o-2024-11-20', temperature: float = 0.0, max_tokens: int = 4096):
         """
-        Get LLM from AlitaClient.
+        Get LLM from AlitaClient or return pre-created instance.
 
+        If LLM was passed during initialization, returns that.
+        Otherwise, creates one using AlitaClient.
         Same pattern as streamlit.py and client.application().
         """
         if self.llm is not None:

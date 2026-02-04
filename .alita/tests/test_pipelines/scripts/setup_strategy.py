@@ -132,12 +132,13 @@ class LocalSetupStrategy(SetupStrategy):
     actual toolkit tools for test execution.
     """
     
-    def __init__(self, toolkit_configs: Optional[Dict[str, Any]] = None):
+    def __init__(self, toolkit_configs: Optional[Dict[str, Any]] = None, llm: Optional[Any] = None):
         """
         Initialize local strategy.
         
         Args:
             toolkit_configs: Optional pre-loaded toolkit configurations
+            llm: Optional pre-created LLM instance (for image processing, etc.)
         """
         self.toolkit_configs = toolkit_configs or {}
         self.created_toolkits: Dict[str, Any] = {}
@@ -145,6 +146,7 @@ class LocalSetupStrategy(SetupStrategy):
         self.created_tools: List[Any] = []  # Store instantiated tools
         self._next_toolkit_id = 1
         self._alita_client = None
+        self._llm = llm  # Use provided LLM or create on demand
         self._configuration_data: Dict[str, Dict[str, Any]] = {}  # Store configuration data by alita_title
     
     def get_tools(self) -> List[Any]:
@@ -181,6 +183,10 @@ class LocalSetupStrategy(SetupStrategy):
         if self._alita_client is None:
             self._alita_client = self._create_alita_client()
         
+        # Initialize LLM if needed (for toolkits that process images, etc.)
+        if self._llm is None:
+            self._llm = self._create_llm()
+        
         # Build tool configuration in the format expected by get_tools
         # This matches the structure used by the backend
         tool_config = {
@@ -197,7 +203,7 @@ class LocalSetupStrategy(SetupStrategy):
             tools = get_tools(
                 tools_list=[tool_config],
                 alita_client=self._alita_client,
-                llm=None,
+                llm=self._llm,
                 memory_store=None,
                 debug_mode=False,
             )
@@ -294,6 +300,23 @@ class LocalSetupStrategy(SetupStrategy):
                 auth_token=api_key,
                 project_id=int(project_id) if project_id else 0,
             )
+        except Exception:
+            return None
+    
+    def _create_llm(self) -> Optional[Any]:
+        """Create LLM instance for toolkits that need it (e.g., image processing)."""
+        if self._alita_client is None:
+            return None
+        
+        try:
+            llm = self._alita_client.get_llm(
+                model_name='gpt-4o-2024-11-20',
+                model_config={
+                    'temperature': 0.0,
+                    'max_tokens': 4096,
+                }
+            )
+            return llm
         except Exception:
             return None
     

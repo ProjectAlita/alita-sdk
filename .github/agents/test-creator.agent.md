@@ -188,7 +188,7 @@ Toolkit Node(s) → [Optional Code Node(s)] → Final LLM Validation Node → EN
 ```yaml
 - id: process_results
   type: llm
-  model: ${DEFAULT_LLM_MODEL}
+  model: gpt-4o-2024-11-20
   input:
     - tool_result
   input_mapping:
@@ -347,7 +347,7 @@ nodes:
   # Node 2: LLM validation (MUST be final node)
   - id: process_results
     type: llm
-    model: ${DEFAULT_LLM_MODEL}
+    model: gpt-4o-2024-11-20
     input:
       - tool_result
     input_mapping:
@@ -394,8 +394,10 @@ nodes:
 **LLM Node Configuration**:
 - ❌ **DO NOT** use `structured_output: true` on final LLM node
 - ✅ **DO** use `structured_output_dict: {test_results: "dict"}`
+- ✅ **DO** use model `gpt-4o-2024-11-20` (current default)
 - ✅ **MUST** include in prompt: "Return **ONLY** the JSON object. No markdown formatting, no additional text."
 - ✅ **MUST** transition to END
+- ✅ **DO** use lowercase in JSON field descriptions (e.g., "brief description" not "Brief Description")
 
 **State Variables**:
 - Always include `toolkit_id: ${TOOLKIT_ID}` from setup
@@ -490,7 +492,6 @@ execution:
     TOOLKIT_ID: ${TOOLKIT_ID}
     TOOLKIT_NAME: ${TOOLKIT_NAME}
     TIMESTAMP: ${TIMESTAMP}
-    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
     # Add other substitution variables from setup stage
     # TEST_BRANCH: ${TEST_BRANCH}
     # TEST_ISSUE: ${TEST_ISSUE}
@@ -631,18 +632,21 @@ For each tool to cover:
    - Read `ref` method docstring
    - Extract `args_schema` for parameters
    - Identify core behavior and edge cases
+   - **Analyze implementation for expected errors/warnings**: Review the tool's source code to identify all legitimate error/warning patterns that indicate proper error handling (not system failures). Examples: format identification errors, file loading failures, network/auth issues, resource not found errors.
 
 2. **Design Test Scenarios**:
    - **Critical**: Happy path with canonical inputs
    - **High**: Real-world variation OR error-handling scenario
      * If testing error handling: validate specific error patterns
      * Distinguish expected errors (correct behavior) from system errors (failures)
+     * Include expected warning patterns from implementation analysis in validation logic
 
 3. **Create Test Files**:
    - Generate YAML following standard 2-node pattern
    - Toolkit node: execute tool with parameters
    - LLM node: validate results, determine pass/fail
    - Include clear expectations in LLM prompt
+   - **For tools with error handling**: List expected warning/error keywords for pattern matching (not exact strings)
    - Use descriptive file names and state variables
 
 4. **Document Test Data Needs**:

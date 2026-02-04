@@ -16,7 +16,7 @@ toolkits:
 state:
   issue_key:
     type: str
-    value: EL-200
+    value: ${JIRA_TEST_ISSUE_2}
   tool_result:
     type: str
   test_results:
@@ -58,14 +58,33 @@ nodes:
 
           Perform the following checks:
           1. Confirm the tool executed successfully (result is not empty or null).
-          2. Result should contain comments or image descriptions.
+          2. Result should contain comments with text content.
+          3. For images in comments, verify descriptions are meaningful:
+             - meaningful descriptions contain actual content analysis (not just error messages)
+             - expected warning patterns that indicate acceptable behavior (check if message contains these keywords):
+               * "identify" + "image" + "format" - PIL cannot read the format
+               * "loading image" or "load" + "error" - file corruption or unsupported format
+               * "converting image" or "convert" + "error" - image processing failed
+               * "attachment not found" or "not found" - image reference doesn't exist
+               * "download failed" or "download" + "error" - network or authentication issue
+               * "image processing error" or "processing" + "error" - LLM temporarily unavailable
+               * "no content url" or "content" + "url" - attachment has no downloadable content
+             - unacceptable patterns indicating system failure:
+               * "llm not available" - configuration issue
+               * stack traces or unexpected python exceptions
+          4. If comments exist without images, the tool should still succeed.
+          5. If images have descriptions, they should describe the actual image content.
+
+          Look for keywords and patterns, not exact message matches.
+          Determine if warnings are expected processing limitations (acceptable) or system failures (test fails).
+          Expected warnings indicate proper error handling and are acceptable.
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean,
-            "summary": "Brief description of outcome",
-            "error": "Error details if failed, null if passed"
+            "test_passed": boolean (true if descriptions are meaningful or tool handles missing images correctly),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
           }}
 
           Return **ONLY** the JSON object. No markdown, no additional text.

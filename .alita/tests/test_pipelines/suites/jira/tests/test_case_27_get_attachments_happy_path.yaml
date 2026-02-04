@@ -16,7 +16,7 @@ toolkits:
 state:
   issue_key:
     type: str
-    value: EL-200
+    value: ${JIRA_TEST_ISSUE_2}
   tool_result:
     type: str
   test_results:
@@ -42,7 +42,7 @@ nodes:
 
   - id: process_results
     type: llm
-    model: ${DEFAULT_LLM_MODEL}
+    model: gpt-4o-2024-11-20
     input:
       - tool_result
     input_mapping:
@@ -56,16 +56,23 @@ nodes:
 
           Tool Result: {tool_result}
 
+          This tool retrieves attachment metadata and content (NOT image descriptions).
+          
           Perform the following checks:
           1. Confirm the tool executed successfully (result is not empty or null).
-          2. Result should contain attachment information.
+          2. If attachments exist, result should contain attachment metadata such as:
+             - filename or file information
+             - content or base64 data
+             - size, mime type, or content type information
+          3. Empty list or "no attachments" message is acceptable if issue has no attachments.
+          4. This tool does NOT process images with LLM descriptions (that's a different tool's job).
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean,
-            "summary": "Brief description of outcome",
-            "error": "Error details if failed, null if passed"
+            "test_passed": boolean (true if tool executed and returned valid attachment data or empty list),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
           }}
 
           Return **ONLY** the JSON object. No markdown, no additional text.
