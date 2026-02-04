@@ -131,7 +131,7 @@ class IsolatedPipelineTestRunner:
             self.alita_client = create_alita_client()
         return self.alita_client
 
-    def _get_llm(self, model: str = 'gpt-4o-mini', temperature: float = 0.0, max_tokens: int = 4096):
+    def _get_llm(self, model: str = 'gpt-4o-2024-11-20', temperature: float = 0.0, max_tokens: int = 4096):
         """
         Get LLM from AlitaClient.
 
@@ -352,20 +352,20 @@ class IsolatedPipelineTestRunner:
         logger.info(f"Using {len(self._tools)} toolkit tools")
 
         # Extract model from YAML if specified in nodes
-        model_name = 'gpt-4o-mini'  # default
-        try:
-            yaml_dict = yaml.safe_load(yaml_schema)
-            if isinstance(yaml_dict, dict) and 'nodes' in yaml_dict:
-                nodes = yaml_dict['nodes']
-                if isinstance(nodes, list):
-                    for node in nodes:
-                        if isinstance(node, dict) and node.get('type') == 'llm':
-                            if 'model' in node:
-                                model_name = node['model']
-                                logger.info(f"Found LLM model in YAML: {model_name}")
-                                break
-        except Exception as e:
-            logger.debug(f"Could not extract model from YAML: {e}")
+        model_name = 'gpt-4o-2024-11-20'  # default
+        # try:
+        #     yaml_dict = yaml.safe_load(yaml_schema)
+        #     if isinstance(yaml_dict, dict) and 'nodes' in yaml_dict:
+        #         nodes = yaml_dict['nodes']
+        #         if isinstance(nodes, list):
+        #             for node in nodes:
+        #                 if isinstance(node, dict) and node.get('type') == 'llm':
+        #                     if 'model' in node:
+        #                         model_name = node['model']
+        #                         logger.info(f"Found LLM model in YAML: {model_name}")
+        #                         break
+        # except Exception as e:
+        #     logger.debug(f"Could not extract model from YAML: {e}")
 
         # Get LLM from AlitaClient
         try:
