@@ -55,39 +55,6 @@ setup:
       - key: CONFLUENCE_TOOLKIT_NAME
         value: $.name
 
-  # Step 3: Create Artifact Toolkit for file uploads
-  - name: Create Artifact Toolkit
-    type: toolkit
-    action: create_or_update
-    config:
-      toolkit_type: artifact
-      toolkit_name: confluence-artifact-testing
-      settings:
-        bucket: confluence-test-bucket
-    save_to_env:
-      - key: ARTIFACT_TOOLKIT_ID
-        value: $.id
-
-  # Step 4: Create test file artifact for add_file_to_page tests
-  - name: Create Test File Artifact
-    type: toolkit_invoke
-    config:
-      toolkit_id: ${ARTIFACT_TOOLKIT_ID}
-      tool_name: createFile
-      tool_params:
-        filename: test_upload.txt
-        filedata: |
-          This is a test file for Confluence file upload testing.
-          
-          Created at ${TIMESTAMP}
-          Test Suite: Confluence Toolkit
-          
-          This file is used to test the add_file_to_page tool.
-    save_to_env:
-      - key: TEST_ARTIFACT_ID
-        value: $.result.filepath
-        default: "/confluence-test-bucket/test_upload.txt"
-
 # Composable pipelines - seeded first, used by hooks and other pipelines
 # These are reusable pipeline components that can be invoked conditionally
 composable_pipelines: []
@@ -122,15 +89,12 @@ execution:
     - test_case_22_*.yaml  # CF22 - Update Pages (Batch Same Content)
     - test_case_23_*.yaml  # CF23 - Update Labels (Add Labels)
     - test_case_24_*.yaml  # CF24 - Update Labels (No Page IDs)
-    - test_case_25_*.yaml  # CF25 - Add File to Page (Append)
-    - test_case_26_*.yaml  # CF26 - Add File to Page (Prepend)
 
   # Variables to substitute in test YAML files
   substitutions:
     CONFLUENCE_TOOLKIT_ID: ${CONFLUENCE_TOOLKIT_ID}
     CONFLUENCE_TOOLKIT_NAME: ${CONFLUENCE_TOOLKIT_NAME}
     TIMESTAMP: ${TIMESTAMP}
-    TEST_ARTIFACT_ID: ${TEST_ARTIFACT_ID}
 
   # Execution settings
   settings:
@@ -148,15 +112,7 @@ cleanup:
       pattern: "CF*"  # All Confluence test pipelines
     continue_on_error: true
 
-  # Step 2: Delete the artifact toolkit
-  - name: Delete Artifact Toolkit
-    type: toolkit
-    config:
-      toolkit_id: ${ARTIFACT_TOOLKIT_ID}
-    enabled: true
-    continue_on_error: true
-
-  # Step 3: Delete the test toolkit
+  # Step 2: Delete the test toolkit
   - name: Delete Test Toolkit
     type: toolkit
     config:

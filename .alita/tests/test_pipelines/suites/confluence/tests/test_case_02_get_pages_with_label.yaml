@@ -8,7 +8,7 @@ toolkits:
 state:
   label:
     type: str
-    value: "test-label"
+    value: "test-automated"
   tool_result:
     type: str
   test_results:

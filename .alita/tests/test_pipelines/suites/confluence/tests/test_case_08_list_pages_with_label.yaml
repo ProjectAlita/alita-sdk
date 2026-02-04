@@ -8,7 +8,7 @@ toolkits:
 state:
   label:
     type: str
-    value: test-label
+    value: test-automated
   test_results:
     type: dict
   tool_result:
