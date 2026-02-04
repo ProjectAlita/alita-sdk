@@ -152,6 +152,131 @@ class IsolatedPipelineTestRunner:
         logger.info(f"Created LLM: {model}")
         return self.llm
 
+    def _extract_response_content(self, response: Dict[str, Any], response_format: str = 'output') -> str:
+        """
+        Extract and normalize content from agent response.
+        
+        Mirrors backend's extract_response_content function.
+
+        Args:
+            response: The raw response from agent invocation
+            response_format: Either 'messages' (for predict_agent) or 'output' (for application agent)
+
+        Returns:
+            Normalized string content
+        """
+        if response_format == 'messages':
+            # Predict agent format: {"messages": [...]}
+            messages = response.get("messages", [])
+            if isinstance(messages, list) and len(messages) > 0:
+                last_message = messages[-1]
+                # Handle both dict and message object
+                if hasattr(last_message, 'content'):
+                    content = last_message.content
+                elif isinstance(last_message, dict):
+                    content = last_message.get('content', '')
+                else:
+                    content = str(last_message)
+            else:
+                content = str(response)
+        else:
+            # Application agent format: {"output": ...}
+            content = response.get("output", "")
+
+        return content
+
+    def _build_output_message(self, content: str) -> Dict[str, Any]:
+        """
+        Build a standardized output message dict.
+        
+        Mirrors backend's build_output_message function.
+
+        Args:
+            content: The normalized response content
+
+        Returns:
+            Dict with content and role='assistant'
+        """
+        return {
+            'content': content,
+            'role': 'assistant',
+            'type': 'ai',
+            'additional_kwargs': {},
+            'response_metadata': {},
+            'id': None,
+            'name': None,
+            'tool_calls': [],
+            'invalid_tool_calls': [],
+            'usage_metadata': None
+        }
+
+    def _transform_to_remote_format(self, local_result: Dict[str, Any], user_input: str) -> Dict[str, Any]:
+        """
+        Transform local graph.invoke() result to match remote /predict API format.
+        
+        This enables process_pipeline_result to work consistently across local and remote modes.
+        
+        Args:
+            local_result: Raw result from graph.invoke()
+            user_input: The user input message
+            
+        Returns:
+            Dict in remote API format with chat_history, result, tool_calls_dict
+        """
+        # Build chat_history in remote format
+        chat_history = [
+            {'role': 'user', 'content': user_input}
+        ]
+        
+        # Extract response content using backend logic
+        response_content = self._extract_response_content(local_result, response_format='output')
+        
+        # Add assistant message to chat history
+        output_message = self._build_output_message(response_content)
+        chat_history.append(output_message)
+        
+        # Extract test results from state
+        # Check common locations where test results might be stored
+        result_field = None
+        
+        # Priority 1: test_results field (most specific)
+        if 'test_results' in local_result:
+            test_results = local_result['test_results']
+            # Parse if it's a JSON string
+            if isinstance(test_results, str) and test_results.strip().startswith('{'):
+                try:
+                    result_field = json.loads(test_results)
+                except json.JSONDecodeError:
+                    result_field = {'raw_output': test_results}
+            else:
+                result_field = test_results
+        
+        # Priority 2: output field (fallback)
+        if result_field is None and 'output' in local_result:
+            output = local_result['output']
+            # Parse if it's a JSON string
+            if isinstance(output, str) and output.strip().startswith('{'):
+                try:
+                    result_field = json.loads(output)
+                except json.JSONDecodeError:
+                    result_field = {'raw_output': output}
+            elif isinstance(output, dict):
+                result_field = output
+        
+        # Build remote-like structure
+        remote_format = {
+            'chat_history': chat_history,
+            'error': None,
+            'tool_calls_dict': {},  # Local doesn't have detailed tool call tracking
+            'tool_calls': [],
+            'thinking_steps': [],
+        }
+        
+        # Add result field if available (should be a dict now, not a string)
+        if result_field is not None:
+            remote_format['result'] = result_field
+        
+        return remote_format
 
     def run_test(
         self,
@@ -226,9 +351,25 @@ class IsolatedPipelineTestRunner:
             )
         logger.info(f"Using {len(self._tools)} toolkit tools")
 
+        # Extract model from YAML if specified in nodes
+        model_name = 'gpt-4o-mini'  # default
+        try:
+            yaml_dict = yaml.safe_load(yaml_schema)
+            if isinstance(yaml_dict, dict) and 'nodes' in yaml_dict:
+                nodes = yaml_dict['nodes']
+                if isinstance(nodes, list):
+                    for node in nodes:
+                        if isinstance(node, dict) and node.get('type') == 'llm':
+                            if 'model' in node:
+                                model_name = node['model']
+                                logger.info(f"Found LLM model in YAML: {model_name}")
+                                break
+        except Exception as e:
+            logger.debug(f"Could not extract model from YAML: {e}")
+
         # Get LLM from AlitaClient
         try:
-            llm = self._get_llm()
+            llm = self._get_llm(model=model_name)
         except Exception as e:
             return PipelineResult(
                 success=False,
@@ -283,15 +424,13 @@ class IsolatedPipelineTestRunner:
                 print(json.dumps(result, indent=2, default=str))
                 print("="*60 + "\n")
 
+            # Transform local result to match remote structure (backend format)
+            # This mirrors the backend's extract_response_content + build_output_message
+            result_data = self._transform_to_remote_format(result, input_message or 'execute')
+            
             # Use shared process_pipeline_result for consistent result extraction
-            # Convert Pydantic message models to dicts
-            messages = result.get("messages", [])
-            messages_as_dicts = [
-                msg.dict() if hasattr(msg, 'dict') else (msg.model_dump() if hasattr(msg, 'model_dump') else msg)
-                for msg in messages
-            ]
             pipeline_result = process_pipeline_result(
-                result_data={"chat_history": messages_as_dicts},
+                result_data=result_data,
                 pipeline_id=0,  # Local execution has no backend ID
                 pipeline_name=path.stem,
                 execution_time=execution_time,
@@ -301,8 +440,9 @@ class IsolatedPipelineTestRunner:
             logger.info(f"Execution completed in {execution_time:.2f}s")
             logger.info(f"Test passed: {pipeline_result.test_passed}")
 
-            # Return PipelineResult with output set to full result
-            pipeline_result.output = result
+            # Return PipelineResult with output set to remote-formatted result
+            # This ensures consistency with remote execution format
+            pipeline_result.output = result_data
             return pipeline_result
 
         except Exception as e:

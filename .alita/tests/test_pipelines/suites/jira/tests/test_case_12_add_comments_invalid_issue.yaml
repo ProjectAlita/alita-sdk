@@ -48,7 +48,7 @@ nodes:
 
   - id: process_results
     type: llm
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     input:
       - tool_result
     input_mapping:
@@ -62,16 +62,16 @@ nodes:
 
           Tool Result: {tool_result}
 
-          This test validates ERROR HANDLING for invalid issue keys.
+          This test validates error handling for invalid issue keys.
 
-          PASS Criteria:
-          - Tool returned an error about issue not existing or permission denied
-          - Error message contains "Issue does not exist" or "permission" or similar
-
-          FAIL Criteria:
-          - Tool succeeded when it should have failed
-          - No error returned
-          - Empty or null result
+          Perform the following checks:
+          1. Confirm the tool executed (result is not empty or null).
+          2. Examine any error message for specific meaning. Valid error patterns for invalid issues include:
+             - issue key does not exist or is invalid
+             - issue not found or cannot be accessed
+             - insufficient permissions to view the issue
+             - http error codes 404 (not found) or 403 (forbidden)
+          3. Determine if the error is about the invalid issue itself. Errors like "INVALID-99999 does not exist" are expected and correct. System errors unrelated to the invalid issue key are failures.
 
           Return a JSON object named test_results with the following structure:
 

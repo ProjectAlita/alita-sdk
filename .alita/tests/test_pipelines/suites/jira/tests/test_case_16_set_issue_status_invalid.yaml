@@ -55,7 +55,7 @@ nodes:
 
   - id: process_results
     type: llm
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     input:
       - tool_result
     input_mapping:
@@ -69,16 +69,21 @@ nodes:
 
           Tool Result: {tool_result}
 
-          This test validates ERROR HANDLING for invalid status transitions.
+          This test validates error handling for invalid status transitions.
 
-          PASS Criteria:
-          - Tool returned an error about invalid status or transition
-          - Error message contains "transition" or "status" or "invalid" or similar
+          Perform the following checks:
+          1. Confirm the tool executed (result is not empty or null).
+          2. Examine any error message for specific meaning. Valid error patterns for invalid status transitions include:
+             - invalid status or transition requested
+             - transition not allowed or not available
+             - status does not exist for this issue type
+             - http error codes 400 (bad request) or 404 (not found)
+          3. Determine if the error is about the invalid status/transition itself. Errors like "transition not allowed" are expected and correct. System errors unrelated to the status validation are failures.
 
-          FAIL Criteria:
-          - Tool succeeded when it should have failed
-          - No error returned
-          - Empty or null result
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,          - Empty or null result
 
           Return a JSON object named test_results with the following structure:
 

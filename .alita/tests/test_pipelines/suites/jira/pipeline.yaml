@@ -74,6 +74,7 @@ execution:
     JIRA_TEST_ISSUE: ${JIRA_TEST_ISSUE}
     JIRA_TEST_ISSUE_2: ${JIRA_TEST_ISSUE_2}
     TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
 
 # Cleanup stage - remove created artifacts
 cleanup:

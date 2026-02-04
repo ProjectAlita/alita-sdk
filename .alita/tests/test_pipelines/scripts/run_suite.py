@@ -785,6 +785,20 @@ def run_suite_local(
     # Get env_vars from setup (includes toolkit IDs, names, etc.)
     env_vars = setup_result.get("env_vars", {})
     
+    # Merge and resolve execution.substitutions from pipeline config into env_vars
+    # Substitutions can reference setup variables, .env variables, or have defaults
+    execution_config = config.get("execution", {})
+    substitutions = execution_config.get("substitutions", {})
+    if substitutions:
+        # Resolve each substitution value using setup vars + env_loader (for .env access)
+        for key, value in substitutions.items():
+            if isinstance(value, str):
+                # Resolve ${VAR} references using both setup env_vars and .env
+                resolved = resolve_env_value(value, env_vars, env_loader=load_from_env)
+                env_vars[key] = resolved
+            else:
+                env_vars[key] = value
+    
     # Get tools created by local strategy
     tools = local_strategy.get_tools()
     

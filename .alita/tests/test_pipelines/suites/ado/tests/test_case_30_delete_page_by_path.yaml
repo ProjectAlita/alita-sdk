@@ -133,7 +133,7 @@ nodes:
           }}
 
           Return ONLY the JSON object.
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
     structured_output_dict:

@@ -41,7 +41,7 @@ nodes:
 
   - id: process_results
     type: llm
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     input:
       - tool_result
     input_mapping:
@@ -64,7 +64,8 @@ nodes:
           {{
             "test_passed": boolean,
             "summary": "Brief description of outcome",
-            "error": "Error details if failed, null if passed"
+            "error": "Error details if failed, null if passed",
+            "explanation": "Detailed reasoning behind the test_passed value"
           }}
 
           Return **ONLY** the JSON object. No markdown, no additional text.

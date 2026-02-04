@@ -43,7 +43,7 @@ nodes:
 
   - id: process_results
     type: llm
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     input:
       - tool_result
     input_mapping:

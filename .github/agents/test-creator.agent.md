@@ -171,12 +171,114 @@ Toolkit Node(s) → [Optional Code Node(s)] → Final LLM Validation Node → EN
 
 ---
 
+## Error-Handling Test Validation
+
+**When to Use**: For **High** priority tests that validate error handling (invalid inputs, non-existent resources, permission errors, etc.).
+
+### Key Principles
+
+1. **Errors Can Be Expected Behavior**: A tool returning an error for invalid input is CORRECT behavior, not a test failure
+2. **Check Error Meaning**: Validate that the error message indicates the expected problem
+3. **Distinguish Error Types**:
+   - **Expected Errors** (test PASSES): Invalid input handled correctly
+   - **System Errors** (test FAILS): Unexpected crashes, null responses, wrong error types
+
+### Validation Pattern for Error-Handling Tests
+
+```yaml
+- id: process_results
+  type: llm
+  model: ${DEFAULT_LLM_MODEL}
+  input:
+    - tool_result
+  input_mapping:
+    system:
+      type: fixed
+      value: "You are a quality assurance validator."
+    task:
+      type: fstring
+      value: |
+        Analyze the output from the '<tool_name>' tool.
+
+        Tool Result: {tool_result}
+
+        This test validates error handling for <invalid_condition>.
+
+        Perform the following checks:
+        1. Confirm the tool executed (result is not empty or null).
+        2. Examine any error message for specific meaning. Valid error patterns for <invalid_condition> include:
+           - <specific error pattern 1>
+           - <specific error pattern 2>
+           - <http error codes if applicable>
+        3. Determine if the error is about the <invalid_condition> itself. 
+           Errors like "<example expected error>" are expected and correct.
+           System errors unrelated to <invalid_condition> are failures.
+
+        Return a JSON object named test_results with the following structure:
+
+        {{
+          "test_passed": boolean (TRUE if error occurred as expected),
+          "summary": "brief description of outcome",
+          "error": "error details if failed, null if passed"
+        }}
+
+        Return **ONLY** the JSON object. No markdown, no additional text.
+```
+
+### Examples of Expected Error Patterns
+
+**Invalid Issue/Resource**:
+- "issue does not exist"
+- "issue not found"
+- "cannot be accessed"
+- HTTP 404 (Not Found)
+- HTTP 403 (Forbidden)
+
+**Invalid Project/Workspace**:
+- "project key does not exist"
+- "valid project is required"
+- "project not found"
+- HTTP 400 (Bad Request)
+
+**Invalid Parameters**:
+- "required field missing"
+- "invalid format"
+- "validation failed"
+
+### Formatting Guidelines for Error Tests
+
+- Use lowercase throughout validation prompts (no UPPERCASE headers)
+- No bullet lists with symbols in JSON fields
+- Clear, descriptive error pattern lists
+- Examples of expected vs. system errors
+
+**Example (from JIRA test suite)**:
+```yaml
+# JR06 - Update Issue (Non-existent Issue)
+# Validates that update_issue returns appropriate error for invalid issue key
+
+Perform the following checks:
+1. Confirm the tool executed (result is not empty or null).
+2. Examine any error message for specific meaning. Valid error patterns for invalid issues include:
+   - issue key does not exist or is invalid
+   - issue not found or cannot be accessed
+   - insufficient permissions to view the issue
+   - http error codes 404 (not found) or 403 (forbidden)
+3. Determine if the error is about the invalid issue itself. 
+   Errors like "INVALID-99999 does not exist" are expected and correct.
+   System errors unrelated to the invalid issue key are failures.
+```
+
+---
+
 ## What to generate
 
 Generate **2 testcases per tool**:
 
 1) **Critical**: protect the core contract (canonical input; deterministic expectation).
 2) **High**: common real‑world variation (benign input variant; still succeeds with same core expectation).
+
+**For error-handling tests**: When testing invalid inputs or error conditions, the **High** priority test should validate that the tool returns the expected error. The LLM validation must check error meaning and distinguish expected errors (invalid input handling) from system errors (unexpected failures).
 
 If a tools list is provided for a toolkit, generate precisely two testcases (Critical + High) for each validated tool from that list and do not generate tests for any other tools.
 
@@ -245,7 +347,7 @@ nodes:
   # Node 2: LLM validation (MUST be final node)
   - id: process_results
     type: llm
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     input:
       - tool_result
     input_mapping:
@@ -272,8 +374,8 @@ nodes:
           Return a JSON object with:
           {{
             "test_passed": true/false,
-            "summary": "Brief description of outcome",
-            "error": "Error details if failed, null if passed"
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
           }}
           
           Return **ONLY** the JSON object. No markdown formatting, no additional text.
@@ -388,6 +490,7 @@ execution:
     TOOLKIT_ID: ${TOOLKIT_ID}
     TOOLKIT_NAME: ${TOOLKIT_NAME}
     TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
     # Add other substitution variables from setup stage
     # TEST_BRANCH: ${TEST_BRANCH}
     # TEST_ISSUE: ${TEST_ISSUE}
@@ -531,7 +634,9 @@ For each tool to cover:
 
 2. **Design Test Scenarios**:
    - **Critical**: Happy path with canonical inputs
-   - **High**: Real-world variation with benign input variant
+   - **High**: Real-world variation OR error-handling scenario
+     * If testing error handling: validate specific error patterns
+     * Distinguish expected errors (correct behavior) from system errors (failures)
 
 3. **Create Test Files**:
    - Generate YAML following standard 2-node pattern

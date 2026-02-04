@@ -2,15 +2,21 @@
 name: Test Failure Detector
 description: Diagnose test failures and perform root cause analysis
 model: Claude Haiku 4.5 (copilot)
-tools: ['execute/runInTerminal', 'read', 'search', 'sequentialthinking/*', 'digitarald.agent-memory/memory', 'todo']
+tools: ['execute/runInTerminal', 'read', 'search', 'sequentialthinking/*', 'digitarald.agent-memory/memory', 'todo', 'insert_edit_into_file', 'replace_string_in_file', 'create_file', 'run_in_terminal', 'get_terminal_output', 'get_errors', 'show_content', 'open_file', 'list_dir', 'read_file', 'file_search', 'grep_search', 'validate_cves', 'run_subagent', 'semantic_search']
 handoffs:
   - label: Get Fix Proposals
     agent: Test Fixer
-    prompt: Please generate fix proposals based on the RCA report above. Categorize fixes by target (test case/test runner/codebase) and provide multiple options where applicable.
+    prompt: >-
+      Please generate fix proposals based on the RCA report above. Categorize
+      fixes by target (test case/test runner/codebase) and provide multiple
+      options where applicable.
     send: false
   - label: Create Bug Report Instead
     agent: Bug Reporter
-    prompt: First search for open bugs related to the issue, and if not found based on the RCA report above, create a detailed bug report for tracking purposes instead of proposing fixes. Include all relevant diagnostics and evidence.
+    prompt: >-
+      First search for open bugs related to the issue, and if not found based on
+      the RCA report above, create a detailed bug report for tracking purposes
+      instead of proposing fixes. Include all relevant diagnostics and evidence.
     send: false
 ---
 # Test Failure Detector Agent

@@ -75,7 +75,7 @@ nodes:
             "sample_commit": object | null,
             "error": string | null
           }}
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
     structured_output_dict:

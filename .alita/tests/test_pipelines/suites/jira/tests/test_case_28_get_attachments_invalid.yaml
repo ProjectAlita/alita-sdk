@@ -41,7 +41,7 @@ nodes:
 
   - id: process_results
     type: llm
-    model: gpt-4o
+    model: ${DEFAULT_LLM_MODEL}
     input:
       - tool_result
     input_mapping:
@@ -55,19 +55,24 @@ nodes:
 
           Tool Result: {tool_result}
 
-          This is an EDGE CASE TEST for invalid issue handling.
+          This is an edge case test for invalid issue handling.
 
           Perform the following checks:
-          1. Did the tool execute (result is not empty or null)?
-          2. Does the result contain an error message about the issue not existing or lacking permissions?
-          3. The test PASSES if the tool correctly reports an error for the non-existent issue.
+          1. Confirm the tool executed (result is not empty or null).
+          2. Examine any error message for specific meaning. Valid error patterns for invalid issues include:
+             - issue key does not exist or is invalid
+             - issue not found or cannot be accessed
+             - insufficient permissions to view the issue
+             - http error codes 404 (not found) or 403 (forbidden)
+          3. Determine if the error is about the invalid issue itself. Errors like "INVALID-99999 does not exist" are expected and correct. System errors unrelated to the invalid issue key are failures.
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean (TRUE if tool reported error for non-existent issue, FALSE if tool succeeded incorrectly),
-            "summary": "Brief description of outcome",
-            "error": null (this is an expected error case, so error field should be null when test passes)
+            "test_passed": boolean,
+            "summary": "Brief description of what the tool returned",
+            "error": "Error message if any, null otherwise",
+            "explanation": "Why the test passed or failed based on the error meaning"
           }}
 
           Return **ONLY** the JSON object. No markdown, no additional text.
