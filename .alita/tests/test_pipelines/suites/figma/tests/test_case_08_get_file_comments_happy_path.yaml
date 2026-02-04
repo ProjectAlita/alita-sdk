@@ -1,0 +1,86 @@
+name: "FIG08 - Get File Comments: Happy Path"
+description: "Verify get_file_comments retrieves all comments from a Figma file"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "08gulCjBVizChhF1uwAZUm"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_file_comments
+
+nodes:
+  - id: invoke_get_file_comments
+    type: toolkit
+    input:
+      - file_key
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file_comments
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_comments
+
+  - id: validate_comments
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API comments testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from the 'get_file_comments' tool and validate the comments structure.
+
+          Tool Output: {tool_result}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Response Structure: Verify the response contains proper comments structure:
+             - comments (array of comment objects)
+             - Each comment should have:
+               - id (comment ID)
+               - message (comment text)
+               - user (user who created the comment)
+               - created_at (timestamp)
+               - resolved_at (if resolved)
+               - client_meta (positioning data if any)
+          3. Array Format: Comments should be in an array (can be empty if no comments)
+          4. Data Integrity: All comments should have required fields
+
+          Note: Files may have zero comments, which is valid.
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "comment_count": integer,
+            "has_valid_structure": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of comments retrieved"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

@@ -1,0 +1,15 @@
+{
+  "type": "figma",
+  "toolkit_name": "figma",
+  "selected_tools": [
+    "get_file_nodes",
+    "get_file",
+    "get_file_versions",
+    "get_file_comments",
+    "post_file_comment",
+    "get_file_images",
+    "get_team_projects",
+    "get_project_files",
+    "analyze_file"
+  ]
+}

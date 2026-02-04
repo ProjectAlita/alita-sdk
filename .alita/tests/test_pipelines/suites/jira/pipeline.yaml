@@ -81,6 +81,14 @@ execution:
 
 # Cleanup stage - remove created artifacts
 cleanup:
+  # Step 1: Delete seeded pipelines
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "JR*"  # All JIRA test pipelines
+    continue_on_error: true
+
+  # Step 2: Delete the test toolkit
   - name: Delete Test Toolkit
     type: toolkit
     action: delete

@@ -1,0 +1,86 @@
+name: "FIG05 - Get File Versions"
+description: "Verify get_file_versions retrieves version history of a Figma file"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "qhfjaNs21EVUVlBiBejzPH"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_file_versions
+
+nodes:
+  - id: invoke_get_file_versions
+    type: toolkit
+    input:
+      - file_key
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file_versions
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_version_history
+
+  - id: validate_version_history
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API version history testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from the 'get_file_versions' tool and validate the version history.
+
+          Tool Output: {tool_result}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Response Structure: Verify the response contains version history structure:
+             - versions (array of version objects)
+             - pagination (optional pagination info)
+          3. Version Objects: Each version should contain:
+             - id (version ID)
+             - created_at (timestamp)
+             - label (version label/name, may be empty)
+             - description (version description, may be empty)
+             - user (user who created the version)
+          4. Chronological Order: Versions should be ordered (typically newest first)
+
+          Note: New files may have only one version (the current version).
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "version_count": integer,
+            "has_valid_structure": boolean,
+            "versions_have_timestamps": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of version history"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

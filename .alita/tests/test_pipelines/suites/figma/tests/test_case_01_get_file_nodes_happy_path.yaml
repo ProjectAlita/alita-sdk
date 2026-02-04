@@ -1,0 +1,89 @@
+name: "FIG01 - Get File Nodes: Happy Path"
+description: "Verify get_file_nodes retrieves specific nodes from a Figma file"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "08gulCjBVizChhF1uwAZUm"
+  node_ids:
+    type: str
+    value: "1-15,0-1"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_file_nodes
+
+nodes:
+  - id: invoke_get_file_nodes
+    type: toolkit
+    input:
+      - file_key
+      - node_ids
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+      ids:
+        type: variable
+        value: node_ids
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file_nodes
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - node_ids
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from the 'get_file_nodes' tool and validate it according to the criteria below.
+
+          Tool Output: {tool_result}
+          Requested Node IDs: {node_ids}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully (result is not empty or null)
+          2. Response Structure: Verify the response contains expected Figma node structure
+          3. Required Fields: Check for presence of key fields:
+             - name (file name)
+             - nodes (object containing requested nodes)
+             - version (file version)
+             - err (should be null for success)
+          4. Node Retrieval: Verify that nodes object contains entries for the requested node IDs
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "nodes_retrieved": integer,
+            "has_required_fields": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of the result"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
