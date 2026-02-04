@@ -6,23 +6,28 @@ toolkits:
     name: ${ADO_WIKI_TOOLKIT_NAME}
 
 state:
-  wiki_identifier:
+  cleanup_result:
     type: str
-    value: 'TestProject.wiki'
-  old_page_name:
+    value: ''
+  create_result:
     type: str
+    value: ''
   new_page_name:
+    type: str
+  old_page_name:
     type: str
   page_content:
     type: str
-  version_identifier:
-    type: str
-    value: 'wikiMaster'
-  tool_result:
-    type: str
   test_results:
     type: dict
-
+  tool_result:
+    type: str
+  version_identifier:
+    type: str
+    value: TestProject.wiki
+  wiki_identifier:
+    type: str
+    value: TestProject.wiki
 entry_point: prepare_test_data
 nodes:
   - id: prepare_test_data
@@ -53,7 +58,6 @@ nodes:
       - page_content
     structured_output: true
     transition: create_page_to_rename
-
   - id: create_page_to_rename
     type: toolkit
     input:
@@ -62,31 +66,52 @@ nodes:
       - page_content
       - version_identifier
     input_mapping:
-      wiki_identifier:
-        type: variable
-        value: wiki_identifier
-      page_name:
-        type: variable
-        value: old_page_name
+      expanded:
+        type: fixed
+        value: true
       page_content:
         type: variable
         value: page_content
+      page_name:
+        type: variable
+        value: old_page_name
       version_identifier:
         type: variable
         value: version_identifier
       version_type:
         type: fixed
-        value: 'branch'
-      expanded:
-        type: fixed
-        value: true
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
     output:
       - create_result
     structured_output: true
     tool: modify_wiki_page
-    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
-    transition: invoke_rename_wiki_page
+    toolkit_name: ado-wiki-testing
+    transition: verify_page_created
+  - id: verify_page_created
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify page was created before attempting rename
+        import json
+        result_str = alita_state.get('create_result', '{}')
+        if isinstance(result_str, str):
+            result = json.loads(result_str) if result_str.startswith('{') else {}
+        else:
+            result = result_str
 
+        has_id = 'id' in result or ('page' in result and 'id' in result.get('page', {}))
+        if not has_id:
+            raise Exception(f"Failed to create test page. Result: {result}")
+        {}
+    input:
+      - create_result
+    output: []
+    structured_output: false
+    transition: invoke_rename_wiki_page
   - id: invoke_rename_wiki_page
     type: toolkit
     input:
@@ -95,28 +120,27 @@ nodes:
       - new_page_name
       - version_identifier
     input_mapping:
-      wiki_identified:
-        type: variable
-        value: wiki_identifier
-      old_page_name:
-        type: variable
-        value: old_page_name
       new_page_name:
         type: variable
         value: new_page_name
+      old_page_name:
+        type: variable
+        value: old_page_name
       version_identifier:
         type: variable
         value: version_identifier
       version_type:
         type: fixed
-        value: 'branch'
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
     output:
       - tool_result
     structured_output: true
     tool: rename_wiki_page
-    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    toolkit_name: ado-wiki-testing
     transition: validate_rename
-
   - id: validate_rename
     type: llm
     input:
@@ -155,22 +179,24 @@ nodes:
     structured_output_dict:
       test_results: dict
     transition: cleanup_wiki_page
-
   - id: cleanup_wiki_page
     type: toolkit
     input:
       - wiki_identifier
       - new_page_name
     input_mapping:
-      wiki_identifier:
-        type: variable
-        value: wiki_identifier
       page_name:
         type: variable
         value: new_page_name
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+      wiki_identifier:
+        type: variable
+        value: wiki_identifier
     output:
       - cleanup_result
     structured_output: true
     tool: delete_page_by_path
-    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    toolkit_name: ado-wiki-testing
     transition: END

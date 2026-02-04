@@ -10,7 +10,7 @@ state:
     type: str
     value: 'TestProject.wiki'
   tool_result:
-    type: str
+    type: dict
   test_results:
     type: dict
 

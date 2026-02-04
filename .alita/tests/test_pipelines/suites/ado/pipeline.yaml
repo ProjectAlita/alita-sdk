@@ -112,3 +112,10 @@ cleanup:
       toolkit_id: ${ADO_REPOS_TOOLKIT_ID}
     enabled: true
     continue_on_error: true
+
+  - name: Delete ADO Wiki Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${ADO_WIKI_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true

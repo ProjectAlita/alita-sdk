@@ -6,21 +6,23 @@ toolkits:
     name: ${ADO_WIKI_TOOLKIT_NAME}
 
 state:
-  wiki_identifier:
+  create_result:
     type: str
-    value: 'TestProject.wiki'
-  page_name:
-    type: str
+    value: ''
   page_content:
     type: str
-  version_identifier:
-    type: str
-    value: 'wikiMaster'
-  tool_result:
+  page_name:
     type: str
   test_results:
     type: dict
-
+  tool_result:
+    type: str
+  version_identifier:
+    type: str
+    value: TestProject.wiki
+  wiki_identifier:
+    type: str
+    value: TestProject.wiki
 entry_point: prepare_test_data
 nodes:
   - id: prepare_test_data
@@ -49,7 +51,6 @@ nodes:
       - page_content
     structured_output: true
     transition: create_page_to_delete
-
   - id: create_page_to_delete
     type: toolkit
     input:
@@ -58,50 +59,48 @@ nodes:
       - page_content
       - version_identifier
     input_mapping:
-      wiki_identified:
-        type: variable
-        value: wiki_identifier
-      page_name:
-        type: variable
-        value: page_name
+      expanded:
+        type: fixed
+        value: true
       page_content:
         type: variable
         value: page_content
+      page_name:
+        type: variable
+        value: page_name
       version_identifier:
         type: variable
         value: version_identifier
       version_type:
         type: fixed
-        value: 'branch'
-      expanded:
-        type: fixed
-        value: true
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
     output:
       - create_result
     structured_output: true
     tool: modify_wiki_page
-    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    toolkit_name: ado-wiki-testing
     transition: invoke_delete_page_by_path
-
   - id: invoke_delete_page_by_path
     type: toolkit
     input:
       - wiki_identifier
       - page_name
     input_mapping:
-      wiki_identified:
-        type: variable
-        value: wiki_identifier
       page_name:
         type: variable
         value: page_name
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
     output:
       - tool_result
     structured_output: true
     tool: delete_page_by_path
-    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    toolkit_name: ado-wiki-testing
     transition: validate_deletion
-
   - id: validate_deletion
     type: llm
     input:

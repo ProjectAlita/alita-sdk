@@ -6,23 +6,25 @@ toolkits:
     name: ${ADO_WIKI_TOOLKIT_NAME}
 
 state:
-  wiki_identifier:
+  create_result:
     type: str
-    value: 'TestProject.wiki'
-  page_name:
-    type: str
+    value: ''
   page_content:
     type: str
-  version_identifier:
-    type: str
-    value: 'wikiMaster'
   page_id:
     type: int
-  tool_result:
+  page_name:
     type: str
   test_results:
     type: dict
-
+  tool_result:
+    type: str
+  version_identifier:
+    type: str
+    value: wikiMaster
+  wiki_identifier:
+    type: str
+    value: TestProject.wiki
 entry_point: prepare_test_data
 nodes:
   - id: prepare_test_data
@@ -51,7 +53,6 @@ nodes:
       - page_content
     structured_output: true
     transition: create_page_to_delete
-
   - id: create_page_to_delete
     type: toolkit
     input:
@@ -60,31 +61,30 @@ nodes:
       - page_content
       - version_identifier
     input_mapping:
-      wiki_identified:
-        type: variable
-        value: wiki_identifier
-      page_name:
-        type: variable
-        value: page_name
+      expanded:
+        type: fixed
+        value: true
       page_content:
         type: variable
         value: page_content
+      page_name:
+        type: variable
+        value: page_name
       version_identifier:
         type: variable
         value: version_identifier
       version_type:
         type: fixed
-        value: 'branch'
-      expanded:
-        type: fixed
-        value: true
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
     output:
       - create_result
     structured_output: true
     tool: modify_wiki_page
-    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    toolkit_name: ado-wiki-testing
     transition: extract_page_id
-
   - id: extract_page_id
     type: code
     code:
@@ -94,38 +94,42 @@ nodes:
         import json
         result_str = alita_state.get('create_result', '{}')
         if isinstance(result_str, str):
-            result = json.loads(result_str) if result_str.startswith('{') else {'id': 0}
+            result = json.loads(result_str) if result_str.startswith('{') else {}
         else:
             result = result_str
-        
-        page_id = result.get('id', result.get('page', {}).get('id', 0))
-        {"page_id": page_id}
+
+        # Try multiple paths to find page ID
+        page_id = result.get('id') or result.get('page', {}).get('id')
+
+        # Validate page_id is a positive integer
+        if not page_id or not isinstance(page_id, int) or page_id <= 0:
+            raise Exception(f"Failed to extract valid page ID from create result. Got: {page_id}, Result: {result}")
+
+        {"page_id": int(page_id)}
     input:
       - create_result
     output:
       - page_id
     structured_output: true
     transition: invoke_delete_page_by_id
-
   - id: invoke_delete_page_by_id
     type: toolkit
     input:
       - wiki_identifier
       - page_id
     input_mapping:
-      wiki_identified:
-        type: variable
-        value: wiki_identifier
       page_id:
         type: variable
         value: page_id
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
     output:
       - tool_result
     structured_output: true
     tool: delete_page_by_id
-    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    toolkit_name: ado-wiki-testing
     transition: validate_deletion
-
   - id: validate_deletion
     type: llm
     input:

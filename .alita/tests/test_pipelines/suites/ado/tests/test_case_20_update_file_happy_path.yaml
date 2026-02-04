@@ -52,7 +52,10 @@ nodes:
         file_path = f"update-test-{timestamp}-{random_suffix}.txt"
         nl = chr(10)
         file_content = f"# Original File{nl}Created by ADO20 at {timestamp}-{random_suffix}{nl}{nl}This file will be updated."
-        updated_content = f"# Updated File{nl}Updated by ADO20 test at {timestamp}-{random_suffix}{nl}{nl}This file was successfully updated."
+        new_content = f"# Updated File{nl}Updated by ADO20 test at {timestamp}-{random_suffix}{nl}{nl}This file was successfully updated."
+        
+        # Format update_query with OLD/NEW markers (required by update_file tool)
+        updated_content = f"OLD <<<<{nl}{file_content}{nl}>>>> OLD{nl}NEW <<<<{nl}{new_content}{nl}>>>> NEW"
 
         {"file_path": file_path, "file_content": file_content, "updated_content": updated_content}
     input:
@@ -159,7 +162,7 @@ nodes:
           1. tool_executed: update_file result is not empty/null
           2. success_indicated: update_file output contains a success indicator
           3. file_readable: read_file returned content (not error/empty)
-          4. content_updated: read_file content contains 'Updated by ADO20'
+          4. content_updated: read_file content contains '# Updated File' and 'Updated by ADO20'
           5. no_error: Neither output contains 'error', 'failed', 'not found'
 
           Return a JSON object with structure:
