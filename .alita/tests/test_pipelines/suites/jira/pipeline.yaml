@@ -10,9 +10,9 @@ setup:
       config_type: jira
       alita_title: ${JIRA_SECRET_NAME:jira}
       data:
-        base_url: ${JIRA_BASE_URL}
-        username: ${JIRA_USERNAME}
-        api_key: ${JIRA_API_KEY}
+        base_url: ${CONFLUENCE_BASE_URL}
+        username: ${CONFLUENCE_USERNAME}
+        api_key: ${CONFLUENCE_API_KEY}
 
   # Step 2: Create JIRA Toolkit Instance
   - name: Create JIRA Toolkit
