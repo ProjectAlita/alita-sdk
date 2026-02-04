@@ -756,7 +756,8 @@ def execute_setup(
                 
                 # Use default if extraction failed
                 if value is None and default_value is not None:
-                    value = default_value
+                    # Resolve any environment variable references in the default value
+                    value = resolve_env_value(default_value, ctx.env_vars, env_loader=load_from_env)
                     ctx.log(f"  Using default value: {value}", "info")
                 
                 if value is not None:

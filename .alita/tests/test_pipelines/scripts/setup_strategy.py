@@ -370,11 +370,10 @@ class LocalSetupStrategy(SetupStrategy):
         ctx: "SetupContext"
     ) -> Dict[str, Any]:
         """
-        Handle toolkit invocation locally.
+        Handle toolkit invocation locally by executing the tool directly.
         
-        For local execution, we skip actual tool invocation and return
-        a placeholder success result. Real tool execution happens during
-        test execution, not setup.
+        Finds the matching tool from self.created_tools and invokes it
+        with the specified parameters.
         """
         from utils_common import resolve_env_value, load_from_env
         
@@ -382,6 +381,7 @@ class LocalSetupStrategy(SetupStrategy):
         
         toolkit_id = config.get("toolkit_id") or config.get("toolkit_ref")
         tool_name = config.get("tool_name")
+        tool_params = resolve_env_value(config.get("tool_params", {}), ctx.env_vars, env_loader=load_from_env)
         
         if not toolkit_id:
             ctx.log("[LOCAL] No toolkit_id provided, skipping", "warning")
@@ -391,15 +391,44 @@ class LocalSetupStrategy(SetupStrategy):
             ctx.log("[LOCAL] No tool_name provided, skipping", "warning")
             return {"success": True, "skipped": True, "reason": "no tool_name", "local": True}
         
-        ctx.log(f"[LOCAL] Skipping toolkit invoke: {tool_name} (local mode)", "info")
+        ctx.log(f"[LOCAL] Invoking toolkit tool: {tool_name} with params: {tool_params}")
         
-        return {
-            "success": True,
-            "skipped": True,
-            "reason": "local_mode",
-            "local": True,
-            "result": {},
-        }
+        # Find the matching tool from created tools
+        matching_tool = None
+        for tool in self.created_tools:
+            if hasattr(tool, 'name') and tool.name == tool_name:
+                matching_tool = tool
+                break
+        
+        if not matching_tool:
+            ctx.log(f"[LOCAL] Tool '{tool_name}' not found in created tools", "error")
+            available_tools = [t.name for t in self.created_tools if hasattr(t, 'name')]
+            ctx.log(f"[LOCAL] Available tools: {available_tools}", "info")
+            return {
+                "success": False,
+                "error": f"Tool '{tool_name}' not found",
+                "available_tools": available_tools,
+                "local": True
+            }
+        
+        # Execute the tool
+        try:
+            ctx.log(f"[LOCAL] Executing tool: {tool_name}", "info")
+            result = matching_tool.invoke(tool_params)
+            ctx.log(f"[LOCAL] Tool {tool_name} executed successfully", "success")
+            
+            return {
+                "success": True,
+                "result": result,
+                "local": True
+            }
+        except Exception as e:
+            ctx.log(f"[LOCAL] Tool {tool_name} execution failed: {e}", "error")
+            return {
+                "success": False,
+                "error": str(e),
+                "local": True
+            }
     
     def handle_configuration(
         self,
