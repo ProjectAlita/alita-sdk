@@ -62,7 +62,7 @@ setup:
       toolkit_id: ${GITHUB_TOOLKIT_ID}
       tool_name: create_branch
       tool_params:
-        branch_name: tc-test-${TIMESTAMP}
+        proposed_branch_name: tc-test-${TIMESTAMP}
         from_branch: ${GITHUB_BASE_BRANCH:main}
     continue_on_error: true  # Branch may already exist
     save_to_env:
@@ -81,7 +81,7 @@ setup:
         body: |
           This issue is used for automated testing of the GitHub toolkit.
           Do not close or delete this issue.
-        labels: "test,automated"
+        labels: ["test", "automated"]
     continue_on_error: true  # Issue may already exist
     save_to_env:
       - key: GITHUB_TEST_ISSUE_NUMBER

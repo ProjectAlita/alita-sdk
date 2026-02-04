@@ -249,6 +249,10 @@ run_suite() {
     print_step "Step 3/4: Running tests for $suite_spec"
     local results_file="$suite_output_dir/results.json"
 
+    # Extract timeout from config (will be overridden by run_suite.py if not found)
+    # Note: run_suite.py will use config value automatically, no need to pass --timeout
+    # unless we want to override it
+
     # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
     # Now verbose output goes to stderr, so we can use both --json and $VERBOSE together
     if [ "$SHOW_OUTPUT" = true ]; then

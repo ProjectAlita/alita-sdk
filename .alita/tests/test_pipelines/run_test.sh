@@ -25,7 +25,8 @@ DO_SEED=false
 DO_CLEANUP=false
 LOCAL_MODE=false
 ENV_FILE=".env"
-TIMEOUT=120
+TIMEOUT=""
+TIMEOUT_SET=false
 
 print_usage() {
     echo "Usage: $0 [OPTIONS] <suite> <pattern>"
@@ -107,6 +108,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --timeout)
             TIMEOUT="$2"
+            TIMEOUT_SET=true
             shift 2
             ;;
         -v|--verbose)
@@ -211,10 +213,17 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Build timeout argument - only pass if user explicitly provided it
+# Otherwise, run_suite.py will read from config or use its default (120)
+TIMEOUT_ARG=""
+if [ "$TIMEOUT_SET" = true ]; then
+    TIMEOUT_ARG="--timeout $TIMEOUT"
+fi
+
 # Run with pattern filter
 if python scripts/run_suite.py "$SUITE" \
     --pattern "$PATTERN" \
-    --timeout "$TIMEOUT" \
+    $TIMEOUT_ARG \
     --env-file "$ENV_FILE" \
     --output-json "test_results/$SUITE/results.json" \
     $VERBOSE \

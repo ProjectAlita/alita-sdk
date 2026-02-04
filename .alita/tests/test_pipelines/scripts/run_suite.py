@@ -872,7 +872,7 @@ def main():
     parser.add_argument("--base-url", default=None, help="Base URL (default: from env)")
     parser.add_argument("--project-id", type=int, default=None, help="Project ID (default: from env)")
     parser.add_argument("--input", "-i", type=str, default="", help="Input message for pipelines")
-    parser.add_argument("--timeout", "-t", type=int, default=120, help="Execution timeout per pipeline")
+    parser.add_argument("--timeout", "-t", type=int, default=None, help="Execution timeout per pipeline (default: from config or 120)")
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel executions")
     parser.add_argument("--json", "-j", action="store_true", help="Output JSON format")
     parser.add_argument("--output-json", help="Save JSON results to file (can be used with or without --json)")
@@ -1056,11 +1056,24 @@ def main():
             print(f"Error: {error_msg}")
         sys.exit(1)
 
+    # Determine effective timeout: CLI arg > config value > default 120
+    # Extract timeout from config with validation
+    config_timeout = 120  # Default
+    if config:
+        raw_timeout = config.get("execution", {}).get("settings", {}).get("timeout")
+        # Validate: must be a positive integer (not None, not blank, not zero/negative)
+        if raw_timeout is not None and isinstance(raw_timeout, int) and raw_timeout > 0:
+            config_timeout = raw_timeout
+    
+    effective_timeout = args.timeout if args.timeout is not None else config_timeout
+    
     # Create logger instance
     logger = TestLogger(verbose=args.verbose, quiet=args.json) if args.verbose or not args.json else None
 
     if logger:
         logger.info(f"Found {len(pipelines)} pipeline(s) to execute")
+        if args.timeout is None and config:
+            logger.debug(f"Using timeout from config: {effective_timeout}s")
 
     # ========================================
     # EXECUTION: Local vs Remote
@@ -1072,7 +1085,7 @@ def main():
             test_files=pipelines,  # pipelines contains test file paths in local mode
             suite_name=suite_name,
             input_message=args.input,
-            timeout=args.timeout,
+            timeout=effective_timeout,
             logger=logger,
         )
     else:
@@ -1082,7 +1095,7 @@ def main():
             pipelines=pipelines,
             suite_name=suite_name,
             input_message=args.input,
-            timeout=args.timeout,
+            timeout=effective_timeout,
             parallel=args.parallel,
             logger=logger,
             config=config,
