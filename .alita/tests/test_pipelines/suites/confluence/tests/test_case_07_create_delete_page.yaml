@@ -137,6 +137,9 @@ nodes:
     input:
       - page_title
     input_mapping:
+      title:
+        type: variable
+        value: page_title
       skip_images:
         type: fixed
         value: false

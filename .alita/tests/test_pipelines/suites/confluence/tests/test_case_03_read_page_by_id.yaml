@@ -8,7 +8,10 @@ toolkits:
 state:
   page_id:
     type: str
-    value: '104038676'
+    value: '182452225'
+  expected_title:
+    type: str
+    value: 'Template - Project plan'
   test_results:
     type: dict
   tool_result:
@@ -35,6 +38,7 @@ nodes:
     type: llm
     input:
       - tool_result
+      - expected_title
     input_mapping:
       chat_history:
         type: fixed
@@ -44,33 +48,31 @@ nodes:
         value: You are a quality assurance validator.
       task:
         type: fstring
-        value: |-
-          Analyze the output {tool_result} from the 'read_page_by_id' tool and validate the page content according to the specified criteria.
+        value: |
+          Analyze the output from the 'read_page_by_id' tool for page ID 182452225 (Template - Project plan).
 
-          Validation Criteria
-          Tool Execution: Confirm the tool executed successfully (result is not empty or null).
-          Content Format: Verify the output contains structured content in markdown format.
-          Content Presence: Ensure the following elements are present anywhere in the content (you may skip markdown), all fields should be empty:
-          "Driver"
-          "Approver"
-          "Contributors"
-          "Due date"
-          Expected JSON Output
+          Tool Result: {tool_result}
+          Expected Title: {expected_title}
 
-            
+          Perform the following checks:
+
+          1. Tool Execution: Confirm the tool executed successfully (result is not empty or null).
+          2. Content Retrieved: Verify the output contains page content (non-empty string).
+          3. Content Length: Check that content length is greater than 10 characters.
+          4. Content Pattern: Verify content matches the pattern "Same content for all pages YYYYMMDD-HHMMSS" (timestamp may vary).
+
           Return a JSON object named test_results with the following structure:
-          json
 
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "content_length": integer,
+            "has_valid_content": boolean,
+            "content_matches_pattern": boolean,
+            "failed_checks": [string]
+          }}
 
-          {
-            "test_passed": boolean, // true if all checks are satisfied
-            "tool_executed": boolean, // true if tool ran without errors
-            "content_length": integer, // total length of content in characters
-            "actual_response": {tool_result},
-            "failed_checks": [string] // list of failed assertions
-          }
-
-          Important: Return EXACTLY and ONLY the test_results JSON object. Do not include any explanations, summaries, or additional text.
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
     model: gpt-4o
     output:
       - test_results
