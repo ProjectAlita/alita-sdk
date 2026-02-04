@@ -234,7 +234,7 @@ Answer only with step name, no need to add descrip in case none of the steps are
             result = clean_string(str(completion).strip())
 
         logger.info(f"Plan to transition to: {result}")
-        if result not in self.steps or result == 'END':
+        if result not in self.steps:
             result = self.default_output
         dispatch_custom_event(
             "on_decision_edge", {"decisional_inputs": self.decisional_inputs, "state": state}, config=config
