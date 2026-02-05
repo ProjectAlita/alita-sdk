@@ -236,7 +236,7 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: Toolkit 2
+    transition: delete_page
   - id: process_results
     type: llm
     input:

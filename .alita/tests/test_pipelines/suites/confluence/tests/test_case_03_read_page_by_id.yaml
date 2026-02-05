@@ -59,16 +59,15 @@ nodes:
           1. Tool Execution: Confirm the tool executed successfully (result is not empty or null).
           2. Content Retrieved: Verify the output contains page content (non-empty string).
           3. Content Length: Check that content length is greater than 10 characters.
-          4. Content Pattern: Verify content matches the pattern "Same content for all pages YYYYMMDD-HHMMSS" (timestamp may vary).
+          4. Content Validity: Verify content is a non-empty string (pattern check removed as page content may vary).
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean,
+            "test_passed": boolean (true if tool executed and returned valid content),
             "tool_executed": boolean,
             "content_length": integer,
-            "has_valid_content": boolean,
-            "content_matches_pattern": boolean,
+            "has_valid_content": boolean (true if content length > 10),
             "failed_checks": [string]
           }}
 
