@@ -726,20 +726,59 @@ class Assistant:
 
         # Helper function to create agent node
         def make_agent_node(model, tools, prompt, agent_name):
-            """Create an agent node function."""
+            """Create an agent node function with swarm event emission."""
+            from langchain_core.callbacks.manager import dispatch_custom_event
+            from langchain_core.runnables import RunnableConfig
+
             if tools:
                 model_with_tools = model.bind_tools(tools)
             else:
                 model_with_tools = model
 
-            def agent_node(state: SwarmState):
+            def agent_node(state: SwarmState, config: RunnableConfig = None):
                 messages = state["messages"]
                 # Filter out existing system messages to avoid "multiple non-consecutive system messages" error
                 filtered_messages = [m for m in messages if not isinstance(m, SystemMessage)]
                 # Filter orphaned tool_use blocks to avoid Anthropic API errors
                 filtered_messages = filter_orphaned_tool_calls(filtered_messages)
+
+                # Emit swarm agent start event
+                if config:
+                    try:
+                        dispatch_custom_event(
+                            "swarm_agent_start",
+                            {
+                                "agent_name": agent_name,
+                                "is_parent": agent_name == "parent",
+                                "message_count": len(filtered_messages),
+                            },
+                            config=config
+                        )
+                    except Exception as e:
+                        logger.debug(f"[SWARM] Failed to emit swarm_agent_start event: {e}")
+
                 system_msg = SystemMessage(content=prompt)
-                response = model_with_tools.invoke([system_msg] + filtered_messages)
+                response = model_with_tools.invoke([system_msg] + filtered_messages, config)
+
+                # Emit swarm agent response event
+                if config:
+                    try:
+                        content = response.content if hasattr(response, 'content') else str(response)
+                        has_tool_calls = bool(getattr(response, 'tool_calls', None))
+                        dispatch_custom_event(
+                            "swarm_agent_response",
+                            {
+                                "agent_name": agent_name,
+                                "is_parent": agent_name == "parent",
+                                "content": content,
+                                "has_tool_calls": has_tool_calls,
+                                "tool_calls": [tc.get('name') for tc in (response.tool_calls or [])] if has_tool_calls else [],
+                            },
+                            config=config
+                        )
+                    except Exception as e:
+                        logger.debug(f"[SWARM] Failed to emit swarm_agent_response event: {e}")
+
                 return {"messages": [response]}
 
             return agent_node
@@ -757,12 +796,15 @@ class Assistant:
 
         # Custom tool node that updates active_agent on handoff
         def make_tool_node_with_handoff(tools, agent_names_list):
-            """Create a tool node that handles handoff state updates."""
+            """Create a tool node that handles handoff state updates with event emission."""
+            from langchain_core.callbacks.manager import dispatch_custom_event
+            from langchain_core.runnables import RunnableConfig
+
             base_tool_node = ToolNode(tools)
 
-            def tool_node_with_handoff(state: SwarmState):
+            def tool_node_with_handoff(state: SwarmState, config: RunnableConfig = None):
                 # Execute tools normally
-                result = base_tool_node.invoke(state)
+                result = base_tool_node.invoke(state, config)
 
                 # Check if there was a handoff in the last AI message
                 messages = state.get("messages", [])
@@ -770,12 +812,29 @@ class Assistant:
                     if isinstance(msg, AIMessage):
                         handoff_dest = get_handoff_destination(msg)
                         if handoff_dest and handoff_dest in agent_names_list:
+                            from_agent = state.get("active_agent", "parent") or "parent"
+
                             # Update active_agent in the result
                             if isinstance(result, dict):
                                 result["active_agent"] = handoff_dest
                             else:
                                 result = {"messages": result.get("messages", []), "active_agent": handoff_dest}
-                            logger.info(f"[SWARM] Handoff detected: transferring to {handoff_dest}")
+
+                            # Emit handoff event
+                            if config:
+                                try:
+                                    dispatch_custom_event(
+                                        "swarm_handoff",
+                                        {
+                                            "from_agent": from_agent,
+                                            "to_agent": handoff_dest,
+                                        },
+                                        config=config
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"[SWARM] Failed to emit swarm_handoff event: {e}")
+
+                            logger.info(f"[SWARM] Handoff detected: transferring from {from_agent} to {handoff_dest}")
                         break
                 return result
 

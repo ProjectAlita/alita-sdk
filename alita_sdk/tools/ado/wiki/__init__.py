@@ -15,6 +15,7 @@ from ....runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLK
 name = "azure_devops_wiki"
 name_alias = 'ado_wiki'
 
+# deprecated (see common get_toolkit in ado/__init__.py)
 def get_toolkit(tool):
     return AzureDevOpsWikiToolkit().get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),

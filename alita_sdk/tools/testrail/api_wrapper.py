@@ -886,7 +886,7 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             )
 
         if output_format == "json":
-            return f"Extracted test cases:\n{data}"
+            return f"Extracted data:\n{data}"
 
         df = pd.DataFrame(data)
 

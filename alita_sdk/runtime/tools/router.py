@@ -24,6 +24,8 @@ class RouterNode(BaseTool):
         result = template.evaluate()
         logger.info(f"RouterNode evaluated condition '{self.condition}' with input {input_data} => {result}")
         result = clean_string(str(result))
+        if result == '__end__' and "END" in self.routes:
+            return {"router_output": "END"}
         if result in [clean_string(formatted_result) for formatted_result in self.routes]:
             # If the result is one of the routes, return it
             return {"router_output": result}
