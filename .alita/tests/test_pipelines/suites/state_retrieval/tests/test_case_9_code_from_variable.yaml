@@ -39,7 +39,7 @@ nodes:
       type: variable
       value: code_to_execute
     input:
-      - code_to_execute
+      - messages
     output:
       - test_results
     structured_output: false
@@ -74,6 +74,7 @@ nodes:
         test_results = final_result
         test_results
     input:
+      - test_results
       - html_content
     output:
       - messages
