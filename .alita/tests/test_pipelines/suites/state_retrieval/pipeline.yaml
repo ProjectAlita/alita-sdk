@@ -46,17 +46,7 @@ execution:
 
   # Order of test execution (by file pattern or explicit list)
   order:
-    - test_case_1_*.yaml
-    - test_case_2_*.yaml
-    - test_case_3_*.yaml
-    - test_case_4_*.yaml
-    - test_case_5_*.yaml
-    - test_case_6_*.yaml
-    - test_case_7_*.yaml
-    - test_case_8_*.yaml
-    - test_case_9_*.yaml
-    - test_case_10_*.yaml
-    - test_case_11_*.yaml
+    - test_case_*.yaml
 
   # Execution settings
   settings:

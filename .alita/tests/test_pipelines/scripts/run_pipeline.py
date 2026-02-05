@@ -196,8 +196,150 @@ def process_pipeline_result(
                     
                     # Break on first error (could collect all errors if needed)
                     break
+                
+                # Also check tool output content for error patterns (e.g., pyodide_sandbox errors)
+                # Some tools complete successfully but return error information in their output
+                tool_output = tool_call.get("tool_output") or tool_call.get("content")
+                if isinstance(tool_output, str) and tool_output.strip():
+                    # Try to parse as JSON to detect structured error responses
+                    try:
+                        parsed_output = json.loads(tool_output)
+                        if isinstance(parsed_output, dict):
+                            # Check for error field or execution failure status
+                            if "error" in parsed_output and parsed_output["error"]:
+                                tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                                error_msg = parsed_output["error"]
+                                
+                                # Extract meaningful error from tracebacks
+                                if "Traceback" in error_msg:
+                                    # Get last line of traceback (usually the actual error)
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Tool '{tool_name}' returned error: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Tool output error detected: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                            
+                            # Check for execution failure status
+                            elif parsed_output.get("status") == "Execution failed":
+                                tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                                error_msg = parsed_output.get("error", "Execution failed")
+                                
+                                if "Traceback" in error_msg:
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Tool '{tool_name}' execution failed: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Tool execution failure detected: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                    except json.JSONDecodeError:
+                        pass
 
-    # Check various result structures for test_passed (only if not already set by tool error check)
+    # Check for errors in direct result field (e.g., from local execution or chat_history parsing)
+    if test_passed is None and isinstance(result_data, dict):
+        if "result" in result_data:
+            result_obj = result_data.get("result", {})
+            if isinstance(result_obj, dict):
+                # Check for error indicators in result object
+                if "error" in result_obj and result_obj["error"]:
+                    error_msg = result_obj["error"]
+                    
+                    if "Traceback" in error_msg:
+                        lines = error_msg.strip().split('\n')
+                        error_summary = lines[-1] if lines else error_msg
+                    else:
+                        error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                    
+                    detected_error = f"Execution error: {error_summary}"
+                    test_passed = False
+                    
+                    if logger:
+                        logger.error(f"Result error detected: {detected_error}")
+                        logger.debug(f"Full error: {error_msg}")
+                
+                # Check for execution failure status in result
+                elif result_obj.get("status") == "Execution failed":
+                    error_msg = result_obj.get("error", "Execution failed")
+                    
+                    if "Traceback" in error_msg:
+                        lines = error_msg.strip().split('\n')
+                        error_summary = lines[-1] if lines else error_msg
+                    else:
+                        error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                    
+                    detected_error = f"Execution failed: {error_summary}"
+                    test_passed = False
+                    
+                    if logger:
+                        logger.error(f"Execution failure in result: {detected_error}")
+                        logger.debug(f"Full error: {error_msg}")
+    
+    # Check for errors in chat_history messages (before checking test_passed)
+    if test_passed is None and isinstance(result_data, dict) and "chat_history" in result_data:
+        chat_history = result_data.get("chat_history", [])
+        for msg in chat_history:
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+                # Try to parse JSON content for error patterns
+                if isinstance(content, str) and content.strip().startswith("{"):
+                    try:
+                        parsed_content = json.loads(content)
+                        if isinstance(parsed_content, dict):
+                            # Check for error field
+                            if "error" in parsed_content and parsed_content["error"]:
+                                error_msg = parsed_content["error"]
+                                
+                                if "Traceback" in error_msg:
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Chat history error: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Error in chat_history: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                            
+                            # Check for execution failure status
+                            elif parsed_content.get("status") == "Execution failed":
+                                error_msg = parsed_content.get("error", "Execution failed")
+                                
+                                if "Traceback" in error_msg:
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Execution failed in chat: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Execution failure in chat_history: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                    except json.JSONDecodeError:
+                        pass
+
+    # Check various result structures for test_passed (only if not already set by error checks)
     if test_passed is None and isinstance(result_data, dict):
         # Direct test_passed field
         if "test_passed" in result_data:

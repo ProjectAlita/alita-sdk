@@ -6,104 +6,25 @@ state:
     type: str
   messages:
     type: list
-  formatted_message:
-    type: str
-  test_results:
-    type: dict
-
-entry_point: "generate_datetime_message"
-
+  test_data:
+    type: number
+    value: '1'
+entry_point: code_to_catch_bug_with_new_lines
 nodes:
-  - id: "generate_datetime_message"
-    type: "code"
+  - id: code_to_catch_bug_with_new_lines
+    type: code
     code:
       type: fixed
-      value: |
+      value: |-
         from datetime import datetime
-        
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        current_time = datetime.now().strftime("%H:%M:%S")
-        
+        current_date = datetime.now()
+        current_time = datetime.now()
+
         output_string = f"11\n\n Test comment {current_date}{current_time}"
         print(output_string)
-        
+
         {"formatted_message": output_string}
-    output:
-      - formatted_message
+    input: []
+    output: []
     structured_output: true
-    transition: verify_output_format
-
-  - id: "verify_output_format"
-    type: "code"
-    code:
-      type: fixed
-      value: |
-        # Verify the formatted message has the expected structure
-        formatted_msg = alita_state.get('formatted_message', '')
-        
-        # Check that message exists
-        msg_exists = bool(formatted_msg)
-        
-        # Check for required components
-        has_number = '11' in formatted_msg
-        has_test_comment = 'Test comment' in formatted_msg
-        has_double_newline = '\n\n' in formatted_msg
-        
-        # Check format: should start with "11\n\n Test comment" followed by date and time
-        lines = formatted_msg.split('\n')
-        starts_correctly = len(lines) >= 2 and lines[0] == '11'
-        has_content_line = len(lines) >= 3 and 'Test comment' in lines[2]
-        
-        # Verify date format (YYYY-MM-DD) and time format (HH:MM:SS)
-        import re
-        date_pattern = r'\d{4}-\d{2}-\d{2}'
-        time_pattern = r'\d{2}:\d{2}:\d{2}'
-        
-        has_date_format = bool(re.search(date_pattern, formatted_msg))
-        has_time_format = bool(re.search(time_pattern, formatted_msg))
-        
-        # Overall test result
-        all_checks_passed = (
-            msg_exists and 
-            has_number and 
-            has_test_comment and 
-            has_double_newline and
-            starts_correctly and
-            has_content_line and
-            has_date_format and
-            has_time_format
-        )
-        
-        result = {
-            "test_passed": all_checks_passed,
-            "message_exists": msg_exists,
-            "has_number_11": has_number,
-            "has_test_comment": has_test_comment,
-            "has_double_newline": has_double_newline,
-            "starts_with_11": starts_correctly,
-            "has_content_line": has_content_line,
-            "has_date_format": has_date_format,
-            "has_time_format": has_time_format,
-            "formatted_message": formatted_msg,
-            "message_length": len(formatted_msg)
-        }
-        
-        test_results = result
-        test_results
-    input:
-      - formatted_message
-    output:
-      - test_results
-    structured_output: false
-
-expected_output:
-  test_results:
-    test_passed: true
-    message_exists: true
-    has_number_11: true
-    has_test_comment: true
-    has_double_newline: true
-    starts_with_11: true
-    has_content_line: true
-    has_date_format: true
-    has_time_format: true
+    transition: END
