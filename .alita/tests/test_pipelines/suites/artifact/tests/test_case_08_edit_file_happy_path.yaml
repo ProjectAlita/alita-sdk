@@ -1,0 +1,189 @@
+name: "ART08 - Edit File: OLD/NEW Markers for Precise Replacement"
+priority: High
+description: |
+  Verify that edit_file correctly replaces content using OLD/NEW markers.
+  
+  Objective: Test file editing with precise text replacement
+  
+  Expected Behavior:
+  - OLD block is found and replaced
+  - NEW block replaces the OLD block
+  - Content outside markers is unchanged
+  - Edited file can be read back with correct content
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "edit-test-${TIMESTAMP}.txt"
+  original_content:
+    type: str
+    value: |
+      Line 1: Header
+      Line 2: This is the old content that needs editing
+      Line 3: This stays the same
+  edit_query:
+    type: str
+    value: |
+      OLD <<<<
+      This is the old content that needs editing
+      >>>> OLD
+      NEW <<<<
+      This is the new content after editing
+      >>>> NEW
+  create_result:
+    type: str
+    value: ''
+  edit_result:
+    type: str
+    value: ''
+  read_result:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  file_path:
+    type: str
+    value: ''
+  file_query:
+    type: str
+    value: ''
+  test_results:
+    type: str
+    value: ''
+
+entry_point: create_file
+
+nodes:
+  - id: create_file
+    name: create_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: edit_file
+
+  - id: edit_file
+    name: edit_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: edit_file
+    input:
+      - file_path
+      - bucket_name
+      - file_query
+    input_mapping:
+      file_path:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      file_query:
+        type: variable
+        value: edit_query
+    output:
+      - edit_result
+    structured_output: true
+    transition: read_edited
+
+  - id: read_edited
+    name: read_edited
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: readFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - edit_result
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact edit operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the file edit and read results to verify content replacement.
+          
+          Tool executed: edit_file → readFile
+          Original file contained: "This is the old content that needs editing"
+          Edit query replaced it with: "This is the new content after editing"
+          
+          Edit result: {edit_result}
+          Read result: {read_result}
+          
+          Expected behavior:
+          - Edit succeeds and indicates applied edits
+          - OLD block is found and replaced
+          - NEW block replaces the old content
+          - Line 1 (header) and Line 3 (unchanged) remain intact
+          - Read result shows the new content
+          - No errors
+          
+          Evaluate:
+          1. Did the edit operation succeed?
+          2. Does the read result contain "new content after editing"?
+          3. Does the read result NOT contain "old content"?
+          4. Are the unchanged lines (header, line 3) still present?
+          5. Is there any error in either operation?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of edit operation",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,146 @@
+name: "ART05 - Read File: Retrieve Content Integrity"
+priority: Critical
+description: |
+  Verify that readFile correctly retrieves file content with proper encoding and formatting.
+  
+  Objective: Test complete file retrieval with multi-line content and special characters
+  
+  Expected Behavior:
+  - File content is retrieved completely
+  - Line breaks are preserved
+  - Special characters are intact
+  - Content matches exactly what was written
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "read-test-${TIMESTAMP}.txt"
+  content:
+    type: str
+    value: |
+      First line of content
+      Second line with special chars: @#$%
+      Third line
+      Final line with unicode: café
+  create_result:
+    type: str
+    value: ''
+  read_result:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  test_results:
+    type: str
+    value: ''
+
+entry_point: create_file
+
+nodes:
+  - id: create_file
+    name: create_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: content
+    output:
+      - create_result
+    structured_output: true
+    transition: read_file
+
+  - id: read_file
+    name: read_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: readFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact read operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the file read result to verify content integrity.
+          
+          Tool executed: readFile
+          Filename: read-test-${TIMESTAMP}.txt
+          Expected content: 4 lines with special characters and unicode
+          Read result: {read_result}
+          
+          Expected behavior:
+          - File content is retrieved completely
+          - All 4 lines are present
+          - Line breaks are preserved
+          - Special characters (@#$%) are intact
+          - Unicode characters (é in café) are preserved
+          - No truncation or corruption
+          
+          Evaluate:
+          1. Is the file content present in the result?
+          2. Do all 4 lines appear in the result?
+          3. Are special characters preserved correctly?
+          4. Are line breaks preserved?
+          5. Is unicode content intact?
+          6. Is there any error or empty content?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of read operation",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

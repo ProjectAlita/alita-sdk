@@ -1,0 +1,173 @@
+name: "ART10 - Overwrite Data: Replace Complete File Content"
+priority: High
+description: |
+  Verify that overwriteData correctly replaces entire file content.
+  
+  Objective: Test file overwriting with complete content replacement
+  
+  Expected Behavior:
+  - Original content is completely replaced
+  - New content is the only content in file
+  - File size reflects new content
+  - Old content is not accessible
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "overwrite-test-${TIMESTAMP}.txt"
+  original_content:
+    type: str
+    value: "This is the original content that will be replaced"
+  new_content:
+    type: str
+    value: "This is the completely new content"
+  create_result:
+    type: str
+    value: ''
+  overwrite_result:
+    type: str
+    value: ''
+  read_result:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  test_results:
+    type: str
+    value: ''
+
+entry_point: create_file
+
+nodes:
+  - id: create_file
+    name: create_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: overwrite_data
+
+  - id: overwrite_data
+    name: overwrite_data
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: overwriteData
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: new_content
+    output:
+      - overwrite_result
+    structured_output: true
+    transition: read_file
+
+  - id: read_file
+    name: read_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: readFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - overwrite_result
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact overwrite operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the overwrite and read results to verify complete content replacement.
+          
+          Tool executed: overwriteData → readFile
+          Original content: "This is the original content that will be replaced"
+          New content: "This is the completely new content"
+          
+          Overwrite result: {overwrite_result}
+          Read result: {read_result}
+          
+          Expected behavior:
+          - Overwrite operation succeeds
+          - Read result contains ONLY the new content
+          - Original content is completely gone
+          - No partial or mixed content
+          - File size matches new content
+          
+          Evaluate:
+          1. Did the overwrite operation succeed?
+          2. Does the read result contain the new content exactly?
+          3. Does the read result NOT contain the original content?
+          4. Is there any partial match or mixed content?
+          5. Is there any error?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of overwrite operation",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

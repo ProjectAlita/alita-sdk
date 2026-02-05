@@ -1,0 +1,151 @@
+name: "ART13 - Get File Type: Detect File Type from Content"
+priority: High
+description: |
+  Verify that get_file_type correctly detects file types from content (magic bytes).
+  
+  Objective: Test file type detection using content analysis rather than extension
+  
+  Expected Behavior:
+  - File type is correctly identified
+  - MIME type is accurate
+  - File extension is properly recognized
+  - Detection works for various file types
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  txt_file:
+    type: str
+    value: "type-test-${TIMESTAMP}.txt"
+  txt_content:
+    type: str
+    value: "This is plain text content for type detection"
+  create_result:
+    type: str
+    value: ''
+  type_result:
+    type: str
+    value: ''
+  filename:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  filepath:
+    type: str
+    value: ''
+  test_results:
+    type: str
+    value: ''
+
+entry_point: create_text_file
+
+nodes:
+  - id: create_text_file
+    name: create_text_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: txt_file
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: txt_content
+    output:
+      - create_result
+    structured_output: true
+    transition: get_type
+
+  - id: get_type
+    name: get_type
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: get_file_type
+    input:
+      - filepath
+      - bucket_name
+      - txt_file
+    input_mapping:
+      bucket_name:
+        type: variable
+        value: bucket_name
+      txt_file:
+        type: variable
+        value: txt_file
+      filepath:
+        type: fstring
+        value: "/{bucket_name}/{txt_file}"
+    output:
+      - type_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - type_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact file type detection."
+      task:
+        type: fstring
+        value: |
+          Analyze the file type detection result to verify correct identification.
+          
+          Tool executed: get_file_type
+          File: type-test-${TIMESTAMP}.txt (plain text)
+          Filepath format: /{bucket}/{filename}
+          
+          Type result: {type_result}
+          
+          Expected behavior:
+          - Operation succeeds (status: success)
+          - File type is detected as text (txt)
+          - MIME type is text/plain or similar text type
+          - Filename is returned correctly
+          - No error in detection
+          
+          Evaluate:
+          1. Is the status "success"?
+          2. Does the result contain extension field (should be "txt")?
+          3. Does the result contain mime field with text type?
+          4. Is the filename correctly identified?
+          5. Is there any error message?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of file type detection",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
