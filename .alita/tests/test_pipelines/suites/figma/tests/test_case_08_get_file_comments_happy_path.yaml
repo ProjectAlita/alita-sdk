@@ -64,8 +64,6 @@ nodes:
           3. Array Format: Comments should be in an array (can be empty if no comments)
           4. Data Integrity: All comments should have required fields
 
-          Note: Files may have zero comments, which is valid.
-
           Return a JSON object named test_results with this EXACT structure:
           {
             "test_passed": boolean,
