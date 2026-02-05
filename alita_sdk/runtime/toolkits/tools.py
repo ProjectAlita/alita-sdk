@@ -21,6 +21,7 @@ from ...tools.memory import MemoryToolkit
 from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
 from ...tools.utils import clean_string
 from alita_sdk.tools import _inject_toolkit_id
+from .security import is_toolkit_blocked, is_tool_blocked, get_blocked_tools_for_toolkit
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,13 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
             if participant_id == current_participant_id:
                 logger.info(f"Filtering out self-reference: participant_id={participant_id}")
                 continue
+
+        # Security filtering - block configured toolkits at runtime
+        tool_type = tool.get('type', '')
+        if is_toolkit_blocked(tool_type):
+            logger.warning(f"[SECURITY] Skipping blocked toolkit type '{tool_type}' "
+                          f"(toolkit_id={toolkit_id}, name={tool.get('name', 'unknown')})")
+            continue
 
         deduplicated_tools.append(tool)
 
