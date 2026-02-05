@@ -126,7 +126,7 @@ class PyodideSandboxTool(BaseTool):
 
                 with open(sandbox_client_path, 'r') as f:
                     sandbox_client_code = f.read()
-                pyodide_predata += sandbox_client_code + "\n"
+                pyodide_predata += f"{sandbox_client_code.replace('\\n', '\\\n')}\n"
                 pyodide_predata += (f"alita_client = SandboxClient(base_url='{self.alita_client.base_url}',"
                                     f"project_id={self.alita_client.project_id},"
                                     f"auth_token='{self.alita_client.auth_token}')\n")
