@@ -8,6 +8,9 @@ from ...tools.utils.content_parser import parse_file_content
 
 logger = logging.getLogger(__name__)
 
+# Use only the first 10 KB for chardet so it doesn't scan the whole file (slow for large files).
+_CHARDET_SAMPLE_SIZE = 10 * 1024
+
 class Artifact:
     def __init__(self, client: Any, bucket_name: str):
         self.client = client
@@ -42,7 +45,7 @@ class Artifact:
             return ""
         if isinstance(data, dict) and data.get('error'):
             return f"{data['error']}. {data.get('content', '')}"
-        detected = chardet.detect(data)
+        detected = chardet.detect(data[:_CHARDET_SAMPLE_SIZE])
         if detected['encoding'] is not None:
             try:
                 return data.decode(detected['encoding'])
