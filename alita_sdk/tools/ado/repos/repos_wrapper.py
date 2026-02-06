@@ -196,7 +196,7 @@ class ArgsSchema(Enum):
         "GetWorkItems",
         pull_request_id=(
             int,
-            Field(description="The PR number as a string, e.g. `12`"),
+            Field(description="The PR number as an integer, e.g. `12`"),
         ),
     )
     CreatePullRequest = create_model(
