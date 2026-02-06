@@ -172,9 +172,7 @@ alita_state = json.loads(state_json)
 
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
-            # replace new lines in strings in code block
-            code = func_args['code'].replace('\\n', '\\\\n')
-            func_args['code'] = f"{self._prepare_pyodide_input(state, self.input_variables)}\n{code}"
+            func_args['code'] = f"{self._prepare_pyodide_input(state, self.input_variables)}\n{func_args['code']}"
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
             dispatch_custom_event(
