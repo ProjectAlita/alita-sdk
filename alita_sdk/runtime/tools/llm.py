@@ -363,10 +363,11 @@ class LLMNode(BaseTool):
             selected_tools = configurable.get('selected_tools')
             if selected_tools:
                 logger.info(f"[DynamicToolSelection] Using {len(selected_tools)} pre-selected tools")
-                # Include always_bind_tools with dynamically selected tools
-                if self.always_bind_tools:
-                    return list(selected_tools) + list(self.always_bind_tools)
-                return selected_tools
+                # Fix for #3290: Always include always_bind_tools (e.g., Planner tools) with
+                # dynamically selected tools. Use `or []` to handle None/falsy gracefully.
+                # This ensures Planner tools are available even on first message when
+                # Smart Tools Selection finds matching toolkits.
+                return list(selected_tools) + list(self.always_bind_tools or [])
 
         # Check if lazy tools mode is enabled and we have a registry
         if self.lazy_tools_mode and self.tool_registry is not None:
