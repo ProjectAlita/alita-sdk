@@ -1,0 +1,219 @@
+name: "ART12 - Read Multiple Files: Batch File Retrieval"
+priority: High
+description: |
+  Verify that read_multiple_files correctly reads multiple files in single operation.
+  
+  Objective: Test batch file reading with correct content mapping
+  
+  Expected Behavior:
+  - Multiple files are read in single operation
+  - Each file content is correctly mapped
+  - No files are skipped
+  - Content integrity is maintained across batch
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  file1:
+    type: str
+    value: "batch-file1-${TIMESTAMP}.txt"
+  file2:
+    type: str
+    value: "batch-file2-${TIMESTAMP}.txt"
+  file3:
+    type: str
+    value: "batch-file3-${TIMESTAMP}.txt"
+  content1:
+    type: str
+    value: "Content of file 1"
+  content2:
+    type: str
+    value: "Content of file 2"
+  content3:
+    type: str
+    value: "Content of file 3"
+  create1_result:
+    type: str
+    value: ''
+  create2_result:
+    type: str
+    value: ''
+  create3_result:
+    type: str
+    value: ''
+  read_result:
+    type: str
+    value: ''
+  filename:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  file_paths:
+    type: list
+    value:
+      - "batch-file1-${TIMESTAMP}.txt"
+      - "batch-file2-${TIMESTAMP}.txt"
+      - "batch-file3-${TIMESTAMP}.txt"
+  test_results:
+    type: str
+    value: ''
+
+entry_point: create_file1
+
+nodes:
+  - id: create_file1
+    name: create_file1
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: file1
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: content1
+    output:
+      - create1_result
+    structured_output: true
+    transition: create_file2
+
+  - id: create_file2
+    name: create_file2
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: file2
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: content2
+    output:
+      - create2_result
+    structured_output: true
+    transition: create_file3
+
+  - id: create_file3
+    name: create_file3
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: file3
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: content3
+    output:
+      - create3_result
+    structured_output: true
+    transition: read_multiple
+
+  - id: read_multiple
+    name: read_multiple
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: read_multiple_files
+    input:
+      - file_paths
+      - bucket_name
+    input_mapping:
+      bucket_name:
+        type: variable
+        value: bucket_name
+      file_paths:
+        type: variable
+        value: file_paths
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact batch read operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the batch read result to verify all files are retrieved correctly.
+          
+          Tool executed: read_multiple_files
+          Files to read: 3 files
+          Expected content for each file is present
+          
+          Read result: {read_result}
+          
+          Expected behavior:
+          - All 3 files are read in single operation
+          - Each file is mapped correctly with its content
+          - "Content of file 1" is returned for file 1
+          - "Content of file 2" is returned for file 2
+          - "Content of file 3" is returned for file 3
+          - No files are missing or mismatched
+          - No errors in the operation
+          
+          Evaluate:
+          1. Does result contain all 3 files?
+          2. Is each file's content correct and not mixed?
+          3. Does file1 map to "Content of file 1"?
+          4. Does file2 map to "Content of file 2"?
+          5. Does file3 map to "Content of file 3"?
+          6. Is there any error or missing content?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of batch read result",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,80 @@
+name: "CF24 - Update Labels (No Page IDs Provided)"
+priority: High
+description: |
+  Verify `update_labels` tool handles missing page IDs gracefully.
+
+  Objective: Ensure tool returns appropriate error when page_ids is empty or None.
+
+  Expected Behavior:
+  - Tool executes without crashing.
+  - Returns error message stating "Either list of page_ids should be provided".
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  new_labels:
+    type: list
+    value: ['test-label']
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_labels
+
+nodes:
+  - id: invoke_update_labels
+    type: toolkit
+    tool: update_labels
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - new_labels
+    input_mapping:
+      new_labels:
+        type: variable
+        value: new_labels
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_labels' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed without throwing exceptions.
+          2. Verify the result contains error message "Either list of page_ids should be provided".
+          3. Tool should handle missing page_ids parameter gracefully.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

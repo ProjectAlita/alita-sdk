@@ -1,0 +1,129 @@
+name: "BB07 - list_files: List files in root directory"
+description: |
+  Verify the Bitbucket 'list_files' tool lists files in repository root directory.
+
+  Objective: Test file listing with recursive option
+
+  Expected Behavior:
+  - Recursive listing returns all files in repository
+  - Non-recursive listing returns only root-level items
+  - Common root files are present (README, .gitignore, etc.)
+  - Output is properly structured
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  root_path:
+    type: str
+    value: "."
+  expected_root_files:
+    type: list
+    value: ["README", ".gitignore", "setup.py", "requirements.txt", "Dockerfile", "package.json"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "permission denied", "not found", "exception"]
+  root_files:
+    type: str
+  root_files_non_recursive:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: list_root_recursive
+nodes:
+  - id: list_root_recursive
+    type: toolkit
+    input:
+      - root_path
+    input_mapping:
+      path:
+        type: variable
+        value: root_path
+      recursive:
+        type: fixed
+        value: true
+    output:
+      - root_files
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: list_root_non_recursive
+
+  - id: list_root_non_recursive
+    type: toolkit
+    input:
+      - root_path
+    input_mapping:
+      path:
+        type: variable
+        value: root_path
+      recursive:
+        type: fixed
+        value: false
+    output:
+      - root_files_non_recursive
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - root_files
+      - root_files_non_recursive
+      - expected_root_files
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'list_files' tool execution.
+
+          Recursive Listing: {root_files}
+          Non-Recursive Listing: {root_files_non_recursive}
+          Expected Root Files (any of these): {expected_root_files}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful file listing.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tools_executed: Both tools executed and returned results
+          2. no_errors: No error indicators in outputs
+          3. has_files: Both listings contain at least one file
+          4. recursive_has_more: Recursive listing contains more files than non-recursive
+          5. non_recursive_root_only: Non-recursive listing shows only root-level items (no path separators)
+          6. has_common_files: At least one expected root file is present
+          7. proper_structure: Results are in list/array format or clearly structured
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tools_executed": boolean,
+            "no_errors": boolean,
+            "has_files": boolean,
+            "recursive_has_more": boolean,
+            "non_recursive_root_only": boolean,
+            "has_common_files": boolean,
+            "proper_structure": boolean,
+            "recursive_file_count": number,
+            "non_recursive_file_count": number,
+            "common_files_found": [list of common files found],
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

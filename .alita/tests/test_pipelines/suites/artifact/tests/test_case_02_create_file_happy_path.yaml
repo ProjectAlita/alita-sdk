@@ -1,0 +1,128 @@
+name: "ART02 - Create File: Happy Path"
+priority: Critical
+description: |
+  Verify that the createFile tool correctly creates files with various content types.
+  
+  Objective: Test file creation with text and JSON content types
+  
+  Expected Behavior:
+  - Text file is created successfully
+  - File can be read back with correct content
+  - File path is returned in response
+  - Filename is sanitized for safe storage
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "test-document-${TIMESTAMP}.txt"
+  content:
+    type: str
+    value: "This is a test document for artifact toolkit testing.\nLine 2: Testing file creation.\nLine 3: Verifying content integrity."
+  create_result:
+    type: str
+  read_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_file
+
+nodes:
+  - id: create_file
+    type: toolkit
+    tool: createFile
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    input:
+      - filename
+      - bucket_name
+      - content
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: content
+    output:
+      - create_result
+    structured_output: true
+    transition: read_file
+
+  - id: read_file
+    type: toolkit
+    tool: readFile
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o
+    input:
+      - create_result
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact file operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the file creation and read results to determine if the test passed.
+          
+          Tool executed: createFile → readFile
+          Expected content: This is a test document for artifact toolkit testing.\nLine 2: Testing file creation.\nLine 3: Verifying content integrity.
+          
+          Creation result: {create_result}
+          Read result: {read_result}
+          
+          Expected behavior:
+          - File is created successfully
+          - File path is returned in creation response
+          - File can be read back with identical content
+          - No errors or exceptions
+          
+          Evaluate:
+          1. Did file creation succeed (check for filepath in response)?
+          2. Does read result contain the exact content that was written?
+          3. Are the content lines intact and unmodified?
+          4. Are there any errors in either operation?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

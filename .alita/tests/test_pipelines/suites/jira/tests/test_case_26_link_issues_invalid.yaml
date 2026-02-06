@@ -1,0 +1,99 @@
+name: "JR26 - Link Issues (Invalid Issue)"
+priority: High
+description: |
+  Verify `link_issues` tool handles non-existent issue gracefully.
+
+  Objective: Ensure tool returns error for invalid issue key.
+
+  Expected Behavior:
+  - Tool executes and handles error appropriately.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  inward_issue_key:
+    type: str
+    value: "INVALID-99999"
+  outward_issue_key:
+    type: str
+    value: ${JIRA_TEST_ISSUE}
+  link_type:
+    type: str
+    value: "Relates"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_link_issues
+
+nodes:
+  - id: invoke_link_issues
+    type: toolkit
+    tool: link_issues
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - inward_issue_key
+      - outward_issue_key
+      - link_type
+    input_mapping:
+      inward_issue_key:
+        type: variable
+        value: inward_issue_key
+      outward_issue_key:
+        type: variable
+        value: outward_issue_key
+      linktype:
+        type: variable
+        value: link_type
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'link_issues' tool when given an invalid issue key.
+
+          Tool Result: {tool_result}
+
+          This is an edge case test for invalid issue handling.
+
+          Perform the following checks:
+          1. Confirm the tool executed (result is not empty or null).
+          2. Examine any error message for specific meaning. Valid error patterns for invalid issues include:
+             - issue key does not exist or is invalid
+             - issue not found or cannot be accessed
+             - insufficient permissions to view the issue
+             - http error codes 404 (not found) or 403 (forbidden)
+          3. Determine if the error is about the invalid issue itself. Errors like "INVALID-99999 does not exist" are expected and correct. System errors unrelated to the invalid issue key are failures.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": null (this is an expected error case, so error field should be null when test passes)
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

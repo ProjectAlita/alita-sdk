@@ -1,0 +1,98 @@
+name: "FIG10 - Post File Comment: With Position"
+description: "Test posting a comment with positioning metadata (Vector positioning)"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "08gulCjBVizChhF1uwAZUm"
+  comment_message:
+    type: str
+    value: "Positioned comment at coordinates - ${TIMESTAMP}"
+  client_meta:
+    type: dict
+    value:
+      x: 100
+      y: 200
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_post_positioned_comment
+
+nodes:
+  - id: invoke_post_positioned_comment
+    type: toolkit
+    input:
+      - file_key
+      - comment_message
+      - client_meta
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+      message:
+        type: variable
+        value: comment_message
+      client_meta:
+        type: variable
+        value: client_meta
+    output:
+      - tool_result
+    structured_output: true
+    tool: post_file_comment
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_positioned_comment
+
+  - id: validate_positioned_comment
+    type: llm
+    input:
+      - tool_result
+      - client_meta
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API positioned comment testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'post_file_comment' with positioning metadata.
+
+          Tool Output: {tool_result}
+          Position Data Used: {client_meta}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Comment Created: Verify comment was created with standard fields
+          3. Position Data: Check if client_meta was accepted:
+             - The response may or may not include the client_meta back
+             - The comment should still be created regardless
+          4. No Errors: Tool should handle positioning data gracefully
+
+          Note: Figma API may process positioning differently based on context.
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "comment_created": boolean,
+            "handled_position_data": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of positioned comment creation"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

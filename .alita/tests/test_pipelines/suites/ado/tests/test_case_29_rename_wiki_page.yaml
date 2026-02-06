@@ -1,0 +1,202 @@
+name: "ADO29 - Rename Wiki Page"
+description: "Verify the ADO 'rename_wiki_page' tool renames a wiki page"
+
+toolkits:
+  - id: ${ADO_WIKI_TOOLKIT_ID}
+    name: ${ADO_WIKI_TOOLKIT_NAME}
+
+state:
+  cleanup_result:
+    type: str
+    value: ''
+  create_result:
+    type: str
+    value: ''
+  new_page_name:
+    type: str
+  old_page_name:
+    type: str
+  page_content:
+    type: str
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+  version_identifier:
+    type: str
+    value: TestProject.wiki
+  wiki_identifier:
+    type: str
+    value: TestProject.wiki
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Wiki page names
+        old_page_name = f"/TestPageToRename-{timestamp}-{random_suffix}"
+        new_page_name = f"/RenamedTestPage-{timestamp}-{random_suffix}"
+        nl = chr(10)
+        page_content = f"# Page for Rename Test{nl}{nl}Created by ADO29 at {timestamp}-{random_suffix}"
+
+        {"old_page_name": old_page_name, "new_page_name": new_page_name, "page_content": page_content}
+    input:
+      - wiki_identifier
+    output:
+      - old_page_name
+      - new_page_name
+      - page_content
+    structured_output: true
+    transition: create_page_to_rename
+  - id: create_page_to_rename
+    type: toolkit
+    input:
+      - wiki_identifier
+      - old_page_name
+      - page_content
+      - version_identifier
+    input_mapping:
+      expanded:
+        type: fixed
+        value: true
+      page_content:
+        type: variable
+        value: page_content
+      page_name:
+        type: variable
+        value: old_page_name
+      version_identifier:
+        type: variable
+        value: version_identifier
+      version_type:
+        type: fixed
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+    output:
+      - create_result
+    structured_output: true
+    tool: modify_wiki_page
+    toolkit_name: ado-wiki-testing
+    transition: verify_page_created
+  - id: verify_page_created
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Verify page was created before attempting rename
+        import json
+        result_str = alita_state.get('create_result', '{}')
+        if isinstance(result_str, str):
+            result = json.loads(result_str) if result_str.startswith('{') else {}
+        else:
+            result = result_str
+
+        has_id = 'id' in result or ('page' in result and 'id' in result.get('page', {}))
+        if not has_id:
+            raise Exception(f"Failed to create test page. Result: {result}")
+        {}
+    input:
+      - create_result
+    output: []
+    structured_output: false
+    transition: invoke_rename_wiki_page
+  - id: invoke_rename_wiki_page
+    type: toolkit
+    input:
+      - wiki_identifier
+      - old_page_name
+      - new_page_name
+      - version_identifier
+    input_mapping:
+      new_page_name:
+        type: variable
+        value: new_page_name
+      old_page_name:
+        type: variable
+        value: old_page_name
+      version_identifier:
+        type: variable
+        value: version_identifier
+      version_type:
+        type: fixed
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+    output:
+      - tool_result
+    structured_output: true
+    tool: rename_wiki_page
+    toolkit_name: ado-wiki-testing
+    transition: validate_rename
+  - id: validate_rename
+    type: llm
+    input:
+      - tool_result
+      - old_page_name
+      - new_page_name
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate that the wiki page was renamed successfully.
+
+          Tool Result: {tool_result}
+          Old Page Name: {old_page_name}
+          New Page Name: {new_page_name}
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_successful": boolean,
+            "has_page_move_info": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_wiki_page
+  - id: cleanup_wiki_page
+    type: toolkit
+    input:
+      - wiki_identifier
+      - new_page_name
+    input_mapping:
+      page_name:
+        type: variable
+        value: new_page_name
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+      wiki_identifier:
+        type: variable
+        value: wiki_identifier
+    output:
+      - cleanup_result
+    structured_output: true
+    tool: delete_page_by_path
+    toolkit_name: ado-wiki-testing
+    transition: END

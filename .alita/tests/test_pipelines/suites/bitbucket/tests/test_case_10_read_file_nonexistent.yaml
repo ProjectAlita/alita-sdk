@@ -1,0 +1,125 @@
+name: "BB10 - read_file: Error handling for non-existent file"
+description: |
+  Verify the Bitbucket 'read_file' tool handles non-existent file gracefully.
+
+  Objective: Test error handling for invalid file path
+
+  Expected Behavior:
+  - Tool handles invalid file path gracefully
+  - Returns appropriate error message
+  - Error indicates file not found
+  - No unhandled exceptions
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  non_existent_file:
+    type: str
+    value: this/file/does/not/exist/bb10.txt
+  expected_error_indicators:
+    type: list
+    value: ["not found", "does not exist", "404", "no such file", "error", "failed"]
+  files_in_repo:
+    type: str
+  read_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: list_existing_files
+nodes:
+  - id: list_existing_files
+    type: toolkit
+    input: []
+    input_mapping:
+      path:
+        type: fixed
+        value: "."
+      recursive:
+        type: fixed
+        value: false
+    output:
+      - files_in_repo
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: attempt_read_non_existent
+
+  - id: attempt_read_non_existent
+    type: toolkit
+    input:
+      - non_existent_file
+    input_mapping:
+      file_path:
+        type: variable
+        value: non_existent_file
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - read_result
+    structured_output: true
+    tool: read_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - files_in_repo
+      - read_result
+      - non_existent_file
+      - expected_error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'read_file' with NON-EXISTENT file path.
+
+          Files in Repository: {files_in_repo}
+          Read Attempt Result: {read_result}
+          Non-Existent File Path: {non_existent_file}
+          Expected Error Indicators: {expected_error_indicators}
+
+          This is a NEGATIVE test - we expect the tool to handle invalid input gracefully.
+
+          Validation Criteria for test_passed=true:
+          REQUIRED (ALL must pass):
+          1. list_files_worked: File listing executed successfully
+          2. read_failed: Read operation failed (contains error indicator)
+          3. error_indicates_not_found: Error message indicates file not found
+          4. file_not_in_list: The file '{non_existent_file}' does NOT appear in file list
+          5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          
+          OPTIONAL (nice to have, but not required for test to pass):
+          6. error_message_helpful: Error message provides useful information
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (SET TO TRUE if: list_files_worked AND read_failed AND error_indicates_not_found AND file_not_in_list AND no_unhandled_exception),
+            "list_files_worked": boolean,
+            "read_failed": boolean,
+            "error_indicates_not_found": boolean,
+            "file_not_in_list": boolean,
+            "no_unhandled_exception": boolean,
+            "error_message_helpful": boolean (optional, does not affect test_passed),
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "files_count_in_repo": number,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

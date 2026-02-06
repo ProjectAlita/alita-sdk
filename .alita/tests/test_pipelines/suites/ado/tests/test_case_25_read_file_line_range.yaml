@@ -1,0 +1,110 @@
+name: "ADO25 - read_file: Read file with line range"
+description: |
+  Verify the ADO 'read_file' tool can read a specific line range from a file.
+
+  Objective: Test partial file reading with offset/limit parameters
+
+  Expected Behavior:
+  - Tool executes successfully
+  - Returns only requested line range
+  - Handles offset and limit parameters correctly
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: "README.md"
+  branch:
+    type: str
+    value: "main"
+  offset:
+    type: int
+    value: 1
+  limit:
+    type: int
+    value: 10
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_read_file
+nodes:
+  - id: invoke_read_file
+    type: toolkit
+    input:
+      - file_path
+      - branch
+      - offset
+      - limit
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      branch:
+        type: variable
+        value: branch
+      offset:
+        type: variable
+        value: offset
+      limit:
+        type: variable
+        value: limit
+    output:
+      - tool_result
+    structured_output: true
+    tool: read_file
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - file_path
+      - offset
+      - limit
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'read_file' tool with line range parameters.
+
+          Tool Result: {tool_result}
+          File: {file_path}
+          Offset: {offset}
+          Limit: {limit}
+
+          Validation Criteria (ALL must pass):
+          1. tool_executed: Result is not empty/null and no exception was thrown
+          2. has_content: Output contains actual file content (not just metadata)
+          3. content_reasonable_length: Content length suggests line limiting was applied (not entire large file)
+          4. no_error: Output does NOT contain 'error', 'failed', 'not found'
+
+          Return a JSON object with structure:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "has_content": boolean,
+            "content_reasonable_length": boolean,
+            "approximate_line_count": number,
+            "no_error": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

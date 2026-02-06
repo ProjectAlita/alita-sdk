@@ -76,7 +76,7 @@ class SandboxArtifact:
                 return 'Data appended successfully'
             else:
                 # Return error as before
-                return f"Error: Cannot append to file '{artifact_name}'. {raw_data["error"]}"
+                return f"Error: Cannot append to file '{artifact_name}'. {raw_data['error']}"
 
         # Get the parsed content
         data = self.get(artifact_name, bucket_name)

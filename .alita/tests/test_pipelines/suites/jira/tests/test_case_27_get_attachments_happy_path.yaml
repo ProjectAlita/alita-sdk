@@ -1,0 +1,86 @@
+name: "JR27 - Get Attachments Content (Happy Path)"
+priority: Critical
+description: |
+  Verify `get_attachments_content` tool retrieves attachments from issue.
+
+  Objective: Ensure tool can get attachments from existing issue.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Returns attachment information or empty list.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_key:
+    type: str
+    value: ${JIRA_TEST_ISSUE_2}
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_attachments
+
+nodes:
+  - id: invoke_get_attachments
+    type: toolkit
+    tool: get_attachments_content
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_key
+    input_mapping:
+      jira_issue_key:
+        type: variable
+        value: issue_key
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_attachments_content' tool.
+
+          Tool Result: {tool_result}
+
+          This tool retrieves attachment metadata and content (NOT image descriptions).
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or null).
+          2. If attachments exist, result should contain attachment metadata such as:
+             - filename or file information
+             - content or base64 data
+             - size, mime type, or content type information
+          3. Empty list or "no attachments" message is acceptable if issue has no attachments.
+          4. This tool does NOT process images with LLM descriptions (that's a different tool's job).
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and returned valid attachment data or empty list),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

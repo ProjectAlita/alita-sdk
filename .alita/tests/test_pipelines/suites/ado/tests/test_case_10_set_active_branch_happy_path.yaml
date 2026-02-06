@@ -1,0 +1,107 @@
+name: "ADO10 - set_active_branch: Switch to existing branch"
+description: "Verify the ADO 'set_active_branch' tool successfully switches to an existing branch."
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  branch_name:
+    type: str
+    value: ActiveBranchTest
+  expected_confirmation:
+    type: str
+    value: ActiveBranchTest
+  test_results:
+    type: str
+    value: test.txt
+  tool_result:
+    type: str
+  verification_file:
+    type: str
+    value: test.txt
+  verification_result:
+    type: str
+entry_point: invoke_set_active_branch
+nodes:
+  - id: invoke_set_active_branch
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ado-repos-testing
+    transition: verify_by_reading_file
+  - id: verify_by_reading_file
+    type: toolkit
+    input:
+      - verification_file
+      - branch_name
+    input_mapping:
+      branch:
+        type: fixed
+        value: ''
+      file_path:
+        type: variable
+        value: verification_file
+    output:
+      - verification_result
+    structured_output: true
+    tool: read_file
+    toolkit_name: ado-repos-testing
+    transition: validate_results
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - verification_result
+      - branch_name
+      - verification_file
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'set_active_branch' AND the verification read_file call.
+
+          Tool Result (set_active_branch): {tool_result}
+          Verification Result (read_file on active branch): {verification_result}
+          Expected Active Branch: {branch_name}
+          File Read: {verification_file}
+
+          Validation Criteria (ALL must pass):
+          1. tool_executed: set_active_branch result is "Switched to branch ActiveBranchTest"
+          2. branch_confirmed: set_active_branch output mentions '{branch_name}'
+          3. file_read_success: read_file returned content
+          4. active_branch_working: read_file used the active branch (no 'branch not found' error)
+          5. no_error: Neither output contains 'error', 'failed', 'exception', 'not found'
+
+          Return a JSON object with structure:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "branch_confirmed": boolean,
+            "file_read_success": boolean,
+            "active_branch_working": boolean,
+            "no_error": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

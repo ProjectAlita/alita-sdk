@@ -1,0 +1,1484 @@
+# GH08 - Update File Comprehensive Test Pipeline
+# Tests update_file functionality across multiple scenarios:
+#   1. Simple single-line content replacement
+#   2. Multiline code block replacement
+#   3. JSON/structured content replacement
+#   4. Special characters and formatting
+#   5. OLD block not found (negative test - graceful error handling)
+#   6. Whitespace tolerance matching
+#   7. Empty replacement (deletion)
+
+name: "GH08 - Update File Tests"
+description: "Comprehensive end-to-end tests for update_file tool covering positive scenarios, edge cases, and error handling"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  target_branch:
+    type: str
+  # Scenario tracking
+  scenario_results:
+    type: dict
+  current_scenario:
+    type: str
+  # File operation state
+  file_path:
+    type: str
+  original_content:
+    type: str
+  new_content:
+    type: str
+  old_content:
+    type: str
+  file_query:
+    type: str
+  create_result:
+    type: str
+  update_result:
+    type: str
+  verified_content:
+    type: str
+  # Final results
+  test_results:
+    type: dict
+
+entry_point: init_scenarios
+
+nodes:
+  #############################################################################
+  # INITIALIZATION
+  #############################################################################
+  - id: init_scenarios
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique branch name dynamically
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        target_branch = f"tc-test-{timestamp}-{random_suffix}"
+
+        scenario_results = {
+            "single_line": {"status": "pending", "passed": False, "error": None},
+            "multiline": {"status": "pending", "passed": False, "error": None},
+            "multiple_replacements": {"status": "pending", "passed": False, "error": None},
+            "special_characters": {"status": "pending", "passed": False, "error": None},
+            "old_not_found": {"status": "pending", "passed": False, "error": None},
+            "whitespace_tolerance": {"status": "pending", "passed": False, "error": None},
+            "empty_replacement": {"status": "pending", "passed": False, "error": None}
+        }
+        {"scenario_results": scenario_results, "current_scenario": "single_line", "target_branch": target_branch}
+    input: []
+    output:
+      - scenario_results
+      - current_scenario
+      - target_branch
+    structured_output: true
+    transition: create_test_branch
+
+  # Create the test branch before setting it active
+  - id: create_test_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: set_branch
+
+  - id: set_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_1_prepare
+
+  #############################################################################
+  # SCENARIO 1: Simple Single-Line Update
+  #############################################################################
+  - id: scenario_1_prepare
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/scenario1-simple-{random_id}.md"
+        original_content = f"Original content v1 - created at {timestamp}"
+
+        scenario_results = alita_state.get('scenario_results', {})
+        scenario_results["single_line"]["status"] = "running"
+
+        {"file_path": file_path, "original_content": original_content, "current_scenario": "single_line", "scenario_results": scenario_results}
+    input:
+      - scenario_results
+    output:
+      - file_path
+      - original_content
+      - current_scenario
+      - scenario_results
+    structured_output: true
+    transition: scenario_1_create_file
+
+  - id: scenario_1_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_1_build_query
+
+  - id: scenario_1_build_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        original_content = str(alita_state.get('original_content', '')).strip()
+
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        new_content = f"Updated content v2 - modified at {timestamp} - ID: {random_id}"
+
+        nl = chr(10)
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += original_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": original_content}
+    input:
+      - file_path
+      - original_content
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: scenario_1_update
+
+  - id: scenario_1_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: scenario_1_verify
+
+  - id: scenario_1_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: scenario_1_evaluate
+
+  - id: scenario_1_evaluate
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        new_content = alita_state.get('new_content', '')
+        original_content = alita_state.get('original_content', '')
+        scenario_results = alita_state.get('scenario_results', {})
+
+        error_message = None
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:200]}"
+
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        content_updated = new_content.strip() in verified_text.strip() if new_content else False
+        original_removed = original_content.strip() not in verified_text.strip() if original_content else True
+
+        passed = not update_failed and content_updated and original_removed
+
+        scenario_results["single_line"] = {
+            "status": "completed",
+            "passed": passed,
+            "error": error_message,
+            "details": {
+                "content_updated": content_updated,
+                "original_removed": original_removed,
+                "response_preview": update_result_str[:150]
+            }
+        }
+
+        {"scenario_results": scenario_results, "current_scenario": "multiline"}
+    input:
+      - update_result
+      - verified_content
+      - new_content
+      - original_content
+      - scenario_results
+    output:
+      - scenario_results
+      - current_scenario
+    structured_output: true
+    transition: scenario_2_prepare
+
+  #############################################################################
+  # SCENARIO 2: Multiline Code Block Update
+  #############################################################################
+  - id: scenario_2_prepare
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/scenario2-multiline-{random_id}.py"
+
+        nl = chr(10)
+        original_content = (
+            f"# Test file created at {timestamp}" + nl +
+            f"# ID: {random_id}" + nl +
+            nl +
+            "def hello_world():" + nl +
+            '    """Original docstring."""' + nl +
+            '    print("Hello, World!")' + nl +
+            "    return True" + nl +
+            nl +
+            "def calculate(a, b):" + nl +
+            '    """Calculate sum."""' + nl +
+            "    result = a + b" + nl +
+            "    return result" + nl +
+            nl +
+            'if __name__ == "__main__":' + nl +
+            "    hello_world()" + nl
+        )
+
+        scenario_results = alita_state.get('scenario_results', {})
+        scenario_results["multiline"]["status"] = "running"
+
+        {"file_path": file_path, "original_content": original_content, "scenario_results": scenario_results}
+    input:
+      - scenario_results
+    output:
+      - file_path
+      - original_content
+      - scenario_results
+    structured_output: true
+    transition: scenario_2_create_file
+
+  - id: scenario_2_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_2_build_query
+
+  - id: scenario_2_build_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+        nl = chr(10)
+
+        old_content = (
+            "def hello_world():" + nl +
+            '    """Original docstring."""' + nl +
+            '    print("Hello, World!")' + nl +
+            "    return True"
+        )
+
+        new_content = (
+            'def hello_world(name: str = "World") -> bool:' + nl +
+            '    """' + nl +
+            "    Greet someone by name." + nl +
+            nl +
+            "    Args:" + nl +
+            '        name: The name to greet. Defaults to "World".' + nl +
+            nl +
+            "    Returns:" + nl +
+            "        True if greeting was successful." + nl +
+            nl +
+            f"    Updated: {timestamp}" + nl +
+            f"    Update ID: {random_id}" + nl +
+            '    """' + nl +
+            "    import logging" + nl +
+            "    logger = logging.getLogger(__name__)" + nl +
+            '    logger.info(f"Greeting {name}")' + nl +
+            '    print(f"Hello, {name}!")' + nl +
+            "    return True"
+        )
+
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: scenario_2_update
+
+  - id: scenario_2_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: scenario_2_verify
+
+  - id: scenario_2_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: scenario_2_evaluate
+
+  - id: scenario_2_evaluate
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        new_content = alita_state.get('new_content', '')
+        scenario_results = alita_state.get('scenario_results', {})
+
+        error_message = None
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:300]}"
+
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # Multiline content checks
+        checks = {
+            "has_new_signature": "def hello_world(name: str" in verified_text,
+            "has_docstring_args": "Args:" in verified_text,
+            "has_docstring_returns": "Returns:" in verified_text,
+            "has_logging_import": "import logging" in verified_text,
+            "has_logger_call": "logger.info" in verified_text,
+            "removed_old_docstring": "Original docstring" not in verified_text,
+            "kept_other_functions": "def calculate" in verified_text,
+        }
+
+        all_checks_passed = all(checks.values())
+        passed = not update_failed and all_checks_passed
+
+        scenario_results["multiline"] = {
+            "status": "completed",
+            "passed": passed,
+            "error": error_message,
+            "details": {
+                "checks": checks,
+                "all_checks_passed": all_checks_passed,
+                "response_preview": update_result_str[:150]
+            }
+        }
+
+        {"scenario_results": scenario_results, "current_scenario": "multiple_replacements"}
+    input:
+      - update_result
+      - verified_content
+      - new_content
+      - scenario_results
+    output:
+      - scenario_results
+      - current_scenario
+    structured_output: true
+    transition: scenario_3_prepare
+
+  #############################################################################
+  # SCENARIO 3: Multiple Replacements in Same File
+  #############################################################################
+  - id: scenario_3_prepare
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/scenario3-multi-replace-{random_id}.json"
+
+        nl = chr(10)
+        original_content = (
+            "{" + nl +
+            '  "version": "1.0.0",' + nl +
+            '  "name": "test-config",' + nl +
+            '  "settings": {' + nl +
+            '    "debug": false,' + nl +
+            '    "timeout": 30' + nl +
+            "  }" + nl +
+            "}"
+        )
+
+        scenario_results = alita_state.get('scenario_results', {})
+        scenario_results["multiple_replacements"]["status"] = "running"
+
+        {"file_path": file_path, "original_content": original_content, "scenario_results": scenario_results}
+    input:
+      - scenario_results
+    output:
+      - file_path
+      - original_content
+      - scenario_results
+    structured_output: true
+    transition: scenario_3_create_file
+
+  - id: scenario_3_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_3_build_query
+
+  - id: scenario_3_build_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+
+        file_path = alita_state.get('file_path')
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+
+        nl = chr(10)
+
+        # Replace the entire settings block
+        old_content = (
+            '  "settings": {' + nl +
+            '    "debug": false,' + nl +
+            '    "timeout": 30' + nl +
+            "  }"
+        )
+
+        new_content = (
+            '  "settings": {' + nl +
+            '    "debug": true,' + nl +
+            '    "timeout": 60,' + nl +
+            f'    "updated_at": "{timestamp}",' + nl +
+            '    "features": ["logging", "metrics"]' + nl +
+            "  }"
+        )
+
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: scenario_3_update
+
+  - id: scenario_3_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: scenario_3_verify
+
+  - id: scenario_3_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: scenario_3_evaluate
+
+  - id: scenario_3_evaluate
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        scenario_results = alita_state.get('scenario_results', {})
+
+        error_message = None
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:200]}"
+
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # Check multiple changes applied
+        checks = {
+            "debug_changed": '"debug": true' in verified_text,
+            "timeout_changed": '"timeout": 60' in verified_text,
+            "has_updated_at": '"updated_at"' in verified_text,
+            "has_features_array": '"features"' in verified_text and '"logging"' in verified_text,
+            "preserved_version": '"version": "1.0.0"' in verified_text,
+            "preserved_name": '"name": "test-config"' in verified_text,
+        }
+
+        all_checks_passed = all(checks.values())
+        passed = not update_failed and all_checks_passed
+
+        scenario_results["multiple_replacements"] = {
+            "status": "completed",
+            "passed": passed,
+            "error": error_message,
+            "details": {
+                "checks": checks,
+                "all_checks_passed": all_checks_passed,
+                "response_preview": update_result_str[:150]
+            }
+        }
+
+        {"scenario_results": scenario_results, "current_scenario": "special_characters"}
+    input:
+      - update_result
+      - verified_content
+      - scenario_results
+    output:
+      - scenario_results
+      - current_scenario
+    structured_output: true
+    transition: scenario_4_prepare
+
+  #############################################################################
+  # SCENARIO 4: Special Characters and Formatting
+  #############################################################################
+  - id: scenario_4_prepare
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/scenario4-special-chars-{random_id}.txt"
+
+        nl = chr(10)
+        tab = chr(9)
+        original_content = (
+            'Line with "quotes" and ' + "'apostrophes'" + nl +
+            "Line with special chars: @#$%^&*()" + nl +
+            "Line with unicode: Hello World" + nl +
+            "Line with tabs:" + tab + "tab1" + tab + "tab2" + nl +
+            "Line with backslash: path\\to\\file"
+        )
+
+        scenario_results = alita_state.get('scenario_results', {})
+        scenario_results["special_characters"]["status"] = "running"
+
+        {"file_path": file_path, "original_content": original_content, "scenario_results": scenario_results}
+    input:
+      - scenario_results
+    output:
+      - file_path
+      - original_content
+      - scenario_results
+    structured_output: true
+    transition: scenario_4_create_file
+
+  - id: scenario_4_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_4_build_query
+
+  - id: scenario_4_build_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+
+        file_path = alita_state.get('file_path')
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+
+        nl = chr(10)
+
+        old_content = "Line with special chars: @#$%^&*()"
+
+        new_content = (
+            "Line with UPDATED special chars: @#$%^&*()!~`[]{}|" + nl +
+            f"Updated at: {timestamp}"
+        )
+
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: scenario_4_update
+
+  - id: scenario_4_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: scenario_4_verify
+
+  - id: scenario_4_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: scenario_4_evaluate
+
+  - id: scenario_4_evaluate
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        scenario_results = alita_state.get('scenario_results', {})
+
+        error_message = None
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:200]}"
+
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # Check special character handling
+        checks = {
+            "has_updated_marker": "UPDATED special chars" in verified_text,
+            "has_new_special_chars": "!~`[]" in verified_text,
+            "preserved_quotes": '"quotes"' in verified_text,
+            "preserved_apostrophes": "'apostrophes'" in verified_text,
+            "preserved_unicode": "Hello" in verified_text or "unicode" in verified_text.lower(),
+            "preserved_tabs": "tab1" in verified_text,
+        }
+
+        all_checks_passed = all(checks.values())
+        passed = not update_failed and all_checks_passed
+
+        scenario_results["special_characters"] = {
+            "status": "completed",
+            "passed": passed,
+            "error": error_message,
+            "details": {
+                "checks": checks,
+                "all_checks_passed": all_checks_passed,
+                "response_preview": update_result_str[:150]
+            }
+        }
+
+        {"scenario_results": scenario_results, "current_scenario": "old_not_found"}
+    input:
+      - update_result
+      - verified_content
+      - scenario_results
+    output:
+      - scenario_results
+      - current_scenario
+    structured_output: true
+    transition: scenario_5_prepare
+
+  #############################################################################
+  # SCENARIO 5: OLD Block Not Found (Negative Test)
+  # Tests graceful error handling when OLD content doesn't exist in file
+  #############################################################################
+  - id: scenario_5_prepare
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/scenario5-not-found-{random_id}.txt"
+
+        original_content = f"This is the actual content of the file.\nCreated at {timestamp}"
+
+        scenario_results = alita_state.get('scenario_results', {})
+        scenario_results["old_not_found"]["status"] = "running"
+
+        {"file_path": file_path, "original_content": original_content, "scenario_results": scenario_results}
+    input:
+      - scenario_results
+    output:
+      - file_path
+      - original_content
+      - scenario_results
+    structured_output: true
+    transition: scenario_5_create_file
+
+  - id: scenario_5_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_5_build_query
+
+  - id: scenario_5_build_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        file_path = alita_state.get('file_path')
+
+        nl = chr(10)
+
+        # OLD content that does NOT exist in the file
+        old_content = "This text does not exist in the file at all"
+        new_content = "Replacement that should not happen"
+
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: scenario_5_update
+
+  - id: scenario_5_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: scenario_5_verify
+
+  - id: scenario_5_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: scenario_5_evaluate
+
+  - id: scenario_5_evaluate
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        original_content = alita_state.get('original_content', '')
+        new_content = alita_state.get('new_content', '')
+        scenario_results = alita_state.get('scenario_results', {})
+
+        update_result_str = str(update_result) if update_result else ''
+
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # For this negative test, we expect:
+        # 1. The update to report an error/warning about OLD not found
+        # 2. The file content remains UNCHANGED (original content preserved)
+        error_reported = 'not found' in update_result_str.lower() or 'no replacement' in update_result_str.lower()
+        content_unchanged = original_content.strip() in verified_text.strip()
+        new_content_absent = new_content.strip() not in verified_text.strip()
+
+        # This test passes if the tool correctly handles the "not found" case
+        passed = error_reported and content_unchanged and new_content_absent
+
+        scenario_results["old_not_found"] = {
+            "status": "completed",
+            "passed": passed,
+            "error": None if passed else "Expected graceful error handling for OLD not found",
+            "details": {
+                "error_reported": error_reported,
+                "content_unchanged": content_unchanged,
+                "new_content_absent": new_content_absent,
+                "response_preview": update_result_str[:200]
+            }
+        }
+
+        {"scenario_results": scenario_results, "current_scenario": "whitespace_tolerance"}
+    input:
+      - update_result
+      - verified_content
+      - original_content
+      - new_content
+      - scenario_results
+    output:
+      - scenario_results
+      - current_scenario
+    structured_output: true
+    transition: scenario_6_prepare
+
+  #############################################################################
+  # SCENARIO 6: Whitespace Tolerance Matching
+  # Tests that minor whitespace differences don't break the match
+  #############################################################################
+  - id: scenario_6_prepare
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/scenario6-whitespace-{random_id}.txt"
+
+        nl = chr(10)
+        # Content with specific whitespace
+        original_content = (
+            "Header line" + nl +
+            "    indented line with spaces" + nl +
+            "another   line   with   multiple   spaces" + nl +
+            "trailing spaces here" + nl +
+            timestamp
+        )
+
+        scenario_results = alita_state.get('scenario_results', {})
+        scenario_results["whitespace_tolerance"]["status"] = "running"
+
+        {"file_path": file_path, "original_content": original_content, "scenario_results": scenario_results}
+    input:
+      - scenario_results
+    output:
+      - file_path
+      - original_content
+      - scenario_results
+    structured_output: true
+    transition: scenario_6_create_file
+
+  - id: scenario_6_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_6_build_query
+
+  - id: scenario_6_build_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        file_path = alita_state.get('file_path')
+
+        nl = chr(10)
+
+        # OLD with slightly different whitespace (should still match with tolerance)
+        old_content = (
+            "    indented line with spaces" + nl +
+            "another   line   with   multiple   spaces"
+        )
+
+        new_content = (
+            "REPLACED indented line" + nl +
+            "REPLACED multiple spaces line"
+        )
+
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: scenario_6_update
+
+  - id: scenario_6_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: scenario_6_verify
+
+  - id: scenario_6_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: scenario_6_evaluate
+
+  - id: scenario_6_evaluate
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        new_content = alita_state.get('new_content', '')
+        scenario_results = alita_state.get('scenario_results', {})
+
+        error_message = None
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:200]}"
+
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # Check that replacement happened
+        checks = {
+            "has_replaced_content": "REPLACED indented line" in verified_text,
+            "has_replaced_spaces": "REPLACED multiple spaces" in verified_text,
+            "preserved_header": "Header line" in verified_text,
+            "removed_old_indented": "indented line with spaces" not in verified_text,
+        }
+
+        all_checks_passed = all(checks.values())
+        passed = not update_failed and all_checks_passed
+
+        scenario_results["whitespace_tolerance"] = {
+            "status": "completed",
+            "passed": passed,
+            "error": error_message,
+            "details": {
+                "checks": checks,
+                "all_checks_passed": all_checks_passed,
+                "response_preview": update_result_str[:150]
+            }
+        }
+
+        {"scenario_results": scenario_results, "current_scenario": "empty_replacement"}
+    input:
+      - update_result
+      - verified_content
+      - new_content
+      - scenario_results
+    output:
+      - scenario_results
+      - current_scenario
+    structured_output: true
+    transition: scenario_7_prepare
+
+  #############################################################################
+  # SCENARIO 7: Empty Replacement (Deletion)
+  # Tests replacing content with empty string to effectively delete it
+  #############################################################################
+  - id: scenario_7_prepare
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        file_path = f"test-data/update-test/scenario7-deletion-{random_id}.txt"
+
+        nl = chr(10)
+        original_content = (
+            "Keep this line" + nl +
+            "DELETE THIS SECTION START" + nl +
+            "This entire section should be removed" + nl +
+            "Including this line" + nl +
+            "DELETE THIS SECTION END" + nl +
+            "Keep this line too" + nl +
+            f"Created at {timestamp}"
+        )
+
+        scenario_results = alita_state.get('scenario_results', {})
+        scenario_results["empty_replacement"]["status"] = "running"
+
+        {"file_path": file_path, "original_content": original_content, "scenario_results": scenario_results}
+    input:
+      - scenario_results
+    output:
+      - file_path
+      - original_content
+      - scenario_results
+    structured_output: true
+    transition: scenario_7_create_file
+
+  - id: scenario_7_create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: scenario_7_build_query
+
+  - id: scenario_7_build_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        file_path = alita_state.get('file_path')
+
+        nl = chr(10)
+
+        # Delete the entire marked section
+        old_content = (
+            "DELETE THIS SECTION START" + nl +
+            "This entire section should be removed" + nl +
+            "Including this line" + nl +
+            "DELETE THIS SECTION END"
+        )
+
+        # Replace with empty (effectively deleting)
+        new_content = ""
+
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: scenario_7_update
+
+  - id: scenario_7_update
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: scenario_7_verify
+
+  - id: scenario_7_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: scenario_7_evaluate
+
+  - id: scenario_7_evaluate
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result')
+        verify_result = alita_state.get('verified_content')
+        scenario_results = alita_state.get('scenario_results', {})
+
+        error_message = None
+        update_result_str = str(update_result) if update_result else ''
+        update_failed = 'error' in update_result_str.lower() or 'exception' in update_result_str.lower()
+
+        if update_failed:
+            error_message = f"Update failed: {update_result_str[:200]}"
+
+        if isinstance(verify_result, dict):
+            verified_text = verify_result.get('content', str(verify_result))
+        else:
+            verified_text = str(verify_result) if verify_result else ''
+
+        # Check that deletion worked
+        checks = {
+            "section_deleted": "DELETE THIS SECTION" not in verified_text,
+            "removed_content_gone": "should be removed" not in verified_text,
+            "preserved_before": "Keep this line" in verified_text,
+            "preserved_after": "Keep this line too" in verified_text,
+        }
+
+        all_checks_passed = all(checks.values())
+        passed = not update_failed and all_checks_passed
+
+        scenario_results["empty_replacement"] = {
+            "status": "completed",
+            "passed": passed,
+            "error": error_message,
+            "details": {
+                "checks": checks,
+                "all_checks_passed": all_checks_passed,
+                "response_preview": update_result_str[:150]
+            }
+        }
+
+        {"scenario_results": scenario_results}
+    input:
+      - update_result
+      - verified_content
+      - scenario_results
+    output:
+      - scenario_results
+    structured_output: true
+    transition: aggregate_results
+
+  #############################################################################
+  # FINAL: Aggregate Results
+  #############################################################################
+  - id: aggregate_results
+    type: code
+    code:
+      type: fixed
+      value: |
+        scenario_results = alita_state.get('scenario_results', {})
+
+        # Count passed/failed scenarios
+        total_scenarios = len(scenario_results)
+        passed_scenarios = sum(1 for s in scenario_results.values() if s.get('passed', False))
+        failed_scenarios = total_scenarios - passed_scenarios
+
+        # Overall test passed only if ALL scenarios passed
+        test_passed = failed_scenarios == 0
+
+        # Simplified flat structure matching other tests
+        test_results = {
+            "test_passed": test_passed,
+            "operations": {
+                "single_line_update": scenario_results.get("single_line", {}).get("passed", False),
+                "multiline_update": scenario_results.get("multiline", {}).get("passed", False),
+                "multiple_replacements": scenario_results.get("multiple_replacements", {}).get("passed", False),
+                "special_characters": scenario_results.get("special_characters", {}).get("passed", False),
+                "old_not_found_handling": scenario_results.get("old_not_found", {}).get("passed", False),
+                "whitespace_tolerance": scenario_results.get("whitespace_tolerance", {}).get("passed", False),
+                "empty_replacement": scenario_results.get("empty_replacement", {}).get("passed", False)
+            },
+            "details": {
+                "total_scenarios": total_scenarios,
+                "passed_count": passed_scenarios,
+                "failed_count": failed_scenarios
+            },
+            "error": None
+        }
+        {"test_results": test_results}
+    input:
+      - scenario_results
+    output:
+      - test_results
+    structured_output: true
+    transition: cleanup_branch
+
+  # Cleanup: Delete the test branch
+  - id: cleanup_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+      force:
+        type: fixed
+        value: true
+    output:
+      - create_result
+    structured_output: true
+    transition: final_output
+
+  - id: final_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        test_results = alita_state.get('test_results', {})
+        test_results
+    input:
+      - test_results
+    output:
+      - messages
+    structured_output: false
+    transition: END

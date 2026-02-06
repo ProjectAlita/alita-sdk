@@ -1,0 +1,107 @@
+name: "FIG12 - Get File Images: Custom Format and Scale"
+description: "Test get_file_images with different formats (PNG, SVG) and scaling"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "qhfjaNs21EVUVlBiBejzPH"
+  node_ids:
+    type: str
+    value: ${TEST_NODE_IDS:"0:1,1:2"}
+  image_format:
+    type: str
+    value: "svg"
+  scale_factor:
+    type: str
+    value: "2"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_images_custom
+
+nodes:
+  - id: invoke_get_images_custom
+    type: toolkit
+    input:
+      - file_key
+      - node_ids
+      - image_format
+      - scale_factor
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+      ids:
+        type: variable
+        value: node_ids
+      format:
+        type: variable
+        value: image_format
+      scale:
+        type: variable
+        value: scale_factor
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file_images
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_custom_images
+
+  - id: validate_custom_images
+    type: llm
+    input:
+      - tool_result
+      - image_format
+      - scale_factor
+      - node_ids
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API custom image export testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'get_file_images' with custom format and scaling.
+
+          Tool Output: {tool_result}
+          Format Used: {image_format}
+          Scale Factor: {scale_factor}
+          Node IDs: {node_ids}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Image URLs: Verify URLs were generated for the requested nodes
+          3. Format Indication: URLs should indicate the correct format:
+             - SVG URLs may have .svg extension or format parameter
+             - Check URL parameters for format specification
+          4. Multiple Nodes: If multiple node IDs provided, verify multiple URLs returned
+
+          Note: Scale factor may not be visible in URL but should be accepted by API.
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "correct_format_applied": boolean,
+            "multiple_urls_returned": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of custom format image export"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

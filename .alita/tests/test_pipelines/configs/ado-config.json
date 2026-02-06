@@ -1,0 +1,18 @@
+{
+  "type": "ado_boards",
+  "toolkit_name": "ado",
+  "id": 1,
+  "organization_url": "https://dev.azure.com/${ADO_ORG}",
+  "project": "${ADO_PROJECT}",
+  "token": "${ADO_TOKEN}",
+  "selected_tools": [
+    "list_files_in_main_branch",
+    "list_open_pull_requests",
+    "read_file",
+    "list_branches_in_repo",
+    "get_wiki_page",
+    "create_file",
+    "update_file",
+    "delete_file"
+  ]
+}

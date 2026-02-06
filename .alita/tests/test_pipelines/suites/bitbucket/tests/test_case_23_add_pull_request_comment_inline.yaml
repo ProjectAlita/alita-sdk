@@ -1,0 +1,136 @@
+name: "BB23 - add_pull_request_comment: Add inline comment to PR"
+description: |
+  Verify the Bitbucket 'add_pull_request_comment' tool adds an inline comment.
+
+  Objective: Test adding inline comment to specific file/line in PR
+
+  Expected Behavior:
+  - Tool executes without crashing
+  - Inline comment is added when PR and file exist
+  - Returns appropriate error when PR/file doesn't exist
+  - Inline comment format is correctly processed
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  pr_id:
+    type: str
+    value: "1"
+  inline_comment_text:
+    type: str
+    value: "This is an inline comment on a specific line of code. Test case BB23."
+  inline_file_path:
+    type: str
+    value: "README.md"
+  inline_line_number:
+    type: str
+    value: "1"
+  expected_success_indicators:
+    type: list
+    value: ["created", "added", "id", "comment", "success", "inline"]
+  acceptable_error_indicators:
+    type: list
+    value: ["not found", "does not exist", "404", "no pull request", "file not in diff", "line not in diff"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "unauthorized", "forbidden"]
+  comment_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: add_inline_comment
+nodes:
+  - id: add_inline_comment
+    type: toolkit
+    input:
+      - pr_id
+      - inline_comment_text
+      - inline_file_path
+      - inline_line_number
+    input_mapping:
+      pr_id:
+        type: variable
+        value: pr_id
+      content:
+        type: fstring
+        value: |
+          {{"text": "{inline_comment_text}", "path": "{inline_file_path}", "line": {inline_line_number}}}
+      inline:
+        type: fixed
+        value: true
+    output:
+      - comment_result
+    structured_output: true
+    tool: add_pull_request_comment
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - comment_result
+      - pr_id
+      - inline_comment_text
+      - inline_file_path
+      - inline_line_number
+      - expected_success_indicators
+      - acceptable_error_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'add_pull_request_comment' tool with inline comment.
+
+          PR ID: {pr_id}
+          Inline Comment Text: {inline_comment_text}
+          File Path: {inline_file_path}
+          Line Number: {inline_line_number}
+          Comment Result: {comment_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Acceptable Error Indicators: {acceptable_error_indicators}
+          Error Indicators: {error_indicators}
+
+          This is an EDGE CASE test - we expect inline comment OR acceptable failure (file not in diff).
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool executed without crashing or unhandled exception
+          2. inline_accepted_or_acceptable_error: Inline format was accepted OR error is acceptable
+          3. inline_parameter_set: Inline parameter was correctly set to true
+          4. no_unexpected_errors: No unexpected error indicators in output
+          5. format_processed: The inline comment JSON format was processed
+          6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          7. inline_supported: Tool demonstrates inline commenting capability (even if file not in diff)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "inline_accepted_or_acceptable_error": boolean,
+            "inline_parameter_set": boolean,
+            "no_unexpected_errors": boolean,
+            "format_processed": boolean,
+            "no_unhandled_exception": boolean,
+            "inline_supported": boolean,
+            "inline_comment_added": boolean,
+            "comment_id": "extracted comment ID or 'not found'",
+            "acceptable_error_found": "which acceptable error was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

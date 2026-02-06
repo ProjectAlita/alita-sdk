@@ -1,0 +1,66 @@
+name: "ADO04 - List Branches in Repository"
+description: "Verify the ADO 'list_branches_in_repo' tool retrieves branch list"
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  repository_id:
+    type: str
+    value: ${ADO_REPOSITORY_ID}
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_branches
+nodes:
+  - id: invoke_list_branches
+    type: toolkit
+    input:
+      - repository_id
+    input_mapping:
+      repository_id:
+        type: variable
+        value: repository_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_branches
+
+  - id: validate_branches
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze branch list in tool_result and confirm that 'EliteaTest' branch exists.
+
+          Tool Result: {tool_result}
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "has_main": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

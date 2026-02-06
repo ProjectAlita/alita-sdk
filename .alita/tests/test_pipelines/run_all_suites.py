@@ -354,19 +354,24 @@ def run_initial_cleanup(suites: List[str], output_dir: Path, verbose: bool):
         
         if suite_path.is_dir() and (suite_path / "pipeline.yaml").exists():
             print(f"  Cleaning up {suite_spec}...")
+            
+            # Create suite-specific output directory
+            suite_output_dir = output_dir / "suites" / log_name
+            suite_output_dir.mkdir(parents=True, exist_ok=True)
+            
             cmd = [
                 sys.executable, str(SCRIPTS_DIR / "cleanup.py"),
                 suite_spec,
                 "--yes",
             ] + verbose_args
             
-            with open(output_dir / f"{log_name}_initial_cleanup.log", "w") as log:
+            with open(suite_output_dir / "initial_cleanup.log", "w") as log:
                 proc = subprocess.run(cmd, cwd=SCRIPT_DIR, stdout=log, stderr=subprocess.STDOUT)
             
             if proc.returncode == 0:
                 print("    ✓ Cleaned")
             else:
-                print(f"    ⚠ Cleanup had issues (see {output_dir}/{log_name}_initial_cleanup.log)")
+                print(f"    ⚠ Cleanup had issues (see {suite_output_dir}/initial_cleanup.log)")
                 cleanup_failed = True
     
     if not cleanup_failed:

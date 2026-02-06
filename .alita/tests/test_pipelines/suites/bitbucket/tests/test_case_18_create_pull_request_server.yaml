@@ -1,0 +1,199 @@
+name: "BB18 - create_pull_request: Create PR with server format"
+description: |
+  Verify the Bitbucket 'create_pull_request' tool creates a PR using Server format.
+
+  Objective: Test PR creation with Bitbucket Server JSON structure
+
+  Expected Behavior:
+  - Source branch is created
+  - Test file is added to source branch
+  - PR is created successfully using server format (refs/heads/ prefix)
+  - PR ID or URL is returned
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  source_branch:
+    type: str
+    value: feature/bb18-server-pr
+  test_file_path:
+    type: str
+    value: test-files/bb18-server-pr-changes.txt
+  test_file_content:
+    type: str
+    value: |
+      Test file for BB18 - Server PR Format
+      =====================================
+
+      This file demonstrates changes for the pull request.
+      Created using Bitbucket Server format specifications.
+
+      The server format uses refs/heads/ prefix in branch references.
+  pr_title:
+    type: str
+    value: "BB18: Test PR with Server Format"
+  pr_description:
+    type: str
+    value: |
+      This PR is created by the Bitbucket test suite to verify server PR creation.
+
+      ## Changes
+      - Added test file with sample content
+      - Testing Bitbucket Server PR format with refs/heads/ prefix
+  expected_success_indicators:
+    type: list
+    value: ["created", "id", "url", "pull", "request", "success"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "unauthorized", "forbidden"]
+  branch_result:
+    type: str
+  switch_result:
+    type: str
+  file_result:
+    type: str
+  pr_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_source_branch
+nodes:
+  - id: create_source_branch
+    type: toolkit
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - branch_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: switch_to_source_branch
+
+  - id: switch_to_source_branch
+    type: toolkit
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - switch_result
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    input:
+      - test_file_path
+      - test_file_content
+      - source_branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: variable
+        value: test_file_content
+      branch:
+        type: variable
+        value: source_branch
+    output:
+      - file_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_pull_request
+
+  - id: create_pull_request
+    type: toolkit
+    input:
+      - pr_title
+      - pr_description
+      - source_branch
+    input_mapping:
+      pr_json_data:
+        type: fstring
+        value: |
+          {{"title": "{pr_title}", "description": "{pr_description}", "fromRef": {{"id": "refs/heads/{source_branch}"}}, "toRef": {{"id": "refs/heads/main"}}}}
+    output:
+      - pr_result
+    structured_output: true
+    tool: create_pull_request
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - branch_result
+      - switch_result
+      - file_result
+      - pr_result
+      - pr_title
+      - source_branch
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'create_pull_request' tool execution with Server format.
+
+          Branch Creation Result: {branch_result}
+          Branch Switch Result: {switch_result}
+          File Creation Result: {file_result}
+          PR Creation Result: {pr_result}
+          PR Title: {pr_title}
+          Source Branch: {source_branch}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful PR creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branch_created: Source branch was created successfully
+          2. branch_switched: Successfully switched to source branch
+          3. file_created: Test file was created in the branch
+          4. no_errors: No error indicators in any output
+          5. pr_created: PR creation returned success indicator
+          6. pr_id_returned: PR result contains an ID or URL
+          7. server_format_accepted: The server JSON format with refs/heads/ was accepted
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branch_created": boolean,
+            "branch_switched": boolean,
+            "file_created": boolean,
+            "no_errors": boolean,
+            "pr_created": boolean,
+            "pr_id_returned": boolean,
+            "server_format_accepted": boolean,
+            "pr_id_or_url": "extracted PR ID or URL or 'not found'",
+            "success_indicator_found": "which success indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

@@ -21,7 +21,7 @@ jobs:
         id: set-matrix
         run: |
           # Generate test directories from testcases folder
-          TEST_DIRS=$(find .alita/tests/testcases -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          TEST_DIRS=$(find .alita/tests/test_pipelines/suites -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "Available test directories: $TEST_DIRS"
           
           # Calculate diffs from PR if available
@@ -83,4 +83,5 @@ jobs:
     uses: ./.github/workflows/test-runner-reusable.yml
     with:
       test_cases_dir: ${{ matrix.test_cases_dir }}
+      environment: local
     secrets: inherit

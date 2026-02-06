@@ -1,0 +1,83 @@
+name: "ADO26 - list_branches_in_repo: Verify branch details"
+description: |
+  Verify the ADO 'list_branches_in_repo' tool returns branch details including commit info.
+
+  Objective: Test branch listing with commit information
+
+  Expected Behavior:
+  - Tool executes successfully
+  - Returns list of branches with metadata
+  - Includes commit information for each branch
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  expected_branches:
+    type: list
+    value: ["main", "EliteaTest"]
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_branches
+nodes:
+  - id: invoke_list_branches
+    type: toolkit
+    input: []
+    input_mapping: {}
+    output:
+      - tool_result
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - expected_branches
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_branches_in_repo' tool.
+
+          Tool Result: {tool_result}
+          Expected Branches: {expected_branches}
+
+          Validation Criteria (ALL must pass):
+          1. tool_executed: Result is not empty/null and no exception was thrown
+          2. is_branch_report: Output is a formatted string report (not JSON)
+          3. has_main_branch: Output contains branch name 'main'
+          4. has_eliteatest_branch: Output contains branch name 'EliteaTest'
+          5. no_error: Output does NOT contain 'error', 'failed', 'exception'
+
+          Return a JSON object with structure:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "is_branch_report": boolean,
+            "has_main_branch": boolean,
+            "has_eliteatest_branch": boolean,
+            "branch_count": number,
+            "no_error": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

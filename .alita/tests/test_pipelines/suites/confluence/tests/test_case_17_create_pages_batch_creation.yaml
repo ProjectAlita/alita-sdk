@@ -1,0 +1,83 @@
+name: "CF17 - Create Pages (Batch Creation)"
+priority: Critical
+description: |
+  Verify `create_pages` tool creates multiple pages in batch operation.
+
+  Objective: Ensure tool can create several pages from JSON structure and return creation details.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Creates pages specified in pages_info JSON.
+  - Returns string representation of list containing creation details for each page.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  pages_info:
+    type: str
+    value: '[{"Test Page Batch 1 ${TIMESTAMP}": "Content for test page 1"}, {"Test Page Batch 2 ${TIMESTAMP}": "Content for test page 2"}]'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_pages
+
+nodes:
+  - id: invoke_create_pages
+    type: toolkit
+    tool: create_pages
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - pages_info
+    input_mapping:
+      pages_info:
+        type: variable
+        value: pages_info
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - pages_info
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_pages' tool.
+
+          Tool Result: {tool_result}
+          Pages Info: {pages_info}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty, null, or error message).
+          2. Verify the output is a string representation of a list containing page creation details.
+          3. Check that result contains multiple page entries (count should match input).
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

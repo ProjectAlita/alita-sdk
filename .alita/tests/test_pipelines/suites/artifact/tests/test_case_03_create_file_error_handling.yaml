@@ -1,0 +1,104 @@
+name: "ART03 - Create File: Missing Required Parameter (Error Handling)"
+priority: High
+description: |
+  Verify that createFile returns appropriate error when required parameters are missing.
+  
+  Objective: Validate error handling for missing content (both filedata and filepath are None)
+  
+  Expected Behavior:
+  - Tool returns error message indicating missing required parameter
+  - Error message is descriptive and actionable
+  - Error does not crash the system
+  - Error type indicates input validation failure
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "test_file.txt"
+  error_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_file_no_content
+
+nodes:
+  - id: create_file_no_content
+    type: toolkit
+    tool: createFile
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - error_result
+    structured_output: true
+    transition: validate_error
+
+  - id: validate_error
+    name: validate_error
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - error_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact error handling."
+      task:
+        type: fstring
+        value: |
+          Analyze the error result from createFile when required parameters are missing.
+          
+          Tool executed: createFile
+          Filename: test_file.txt
+          Note: Neither filedata nor filepath was provided
+          Result: {error_result}
+          
+          This test validates error handling for invalid input.
+          
+          Expected behavior:
+          - Tool returns an error (not success)
+          - Error message indicates missing required parameter
+          - Valid error patterns for missing content include:
+            - must provide either 'filedata' or 'filepath'
+            - both parameters cannot be empty
+            - required parameter missing
+            - validation failed
+          
+          Evaluate:
+          1. Does the result indicate an error occurred?
+          2. Is the error message about missing required parameters?
+          3. Is the error message descriptive and actionable?
+          4. Does the response contain expected error keywords?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of error handling outcome",
+            "error": "error details if validation failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,86 @@
+name: "FIG06 - Get File: Invalid Key"
+description: "Test get_file error handling with invalid file key"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  invalid_file_key:
+    type: str
+    value: "INVALID_FILE_KEY_12345"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_file_invalid
+
+nodes:
+  - id: invoke_get_file_invalid
+    type: toolkit
+    input:
+      - invalid_file_key
+    input_mapping:
+      file_key:
+        type: variable
+        value: invalid_file_key
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_error_handling
+
+  - id: validate_error_handling
+    type: llm
+    input:
+      - tool_result
+      - invalid_file_key
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API error handling testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'get_file' when called with an invalid file key.
+
+          Tool Output: {tool_result}
+          Invalid File Key Used: {invalid_file_key}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool completed execution without crashing
+          2. Error Response: Check for appropriate error handling:
+             - Should return an error response (not empty/null)
+             - Error message should indicate file not found or invalid key
+             - HTTP status should be 404 or similar error code
+          3. Error Structure: Verify error response has proper structure:
+             - err field with error message
+             - status code (if provided)
+             - No sensitive information exposed
+          4. Graceful Failure: Tool should handle invalid input gracefully
+
+          Expected: The API should return a clear error message indicating the file was not found.
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": false,
+            "error_handled_gracefully": boolean,
+            "error_message_clear": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of error handling"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

@@ -1,0 +1,122 @@
+name: ado_toolkit
+description: |
+  Azure DevOps (ADO) toolkit integration tests
+  
+  Test Structure:
+  - ADO Repos Tests (ADO01-ADO04, ADO06-ADO09): Test repository operations using ado_repos toolkit
+  - ADO Wiki Tests (ADO05): Test wiki operations using ado_wiki toolkit
+
+env_mapping:
+  toolkit_config: ${ADO_CONFIG_PATH:../../configs/ado-config.json}
+  organization_url: ${ADO_ORGANIZATION_URL}
+  project: ${ADO_PROJECT}
+  repository_id: ${ADO_REPOSITORY_ID}
+  token: ${ADO_TOKEN}
+
+setup:
+  - name: Setup ADO Configuration
+    type: configuration
+    config:
+      config_type: ado
+      alita_title: ${ADO_SECRET_NAME:ado}
+      data:
+        token: ${ADO_TOKEN}
+        organization_url: ${ADO_ORGANIZATION_URL}
+        project: ${ADO_PROJECT}
+
+  - name: Create ADO Repos Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/ado-repos-config.json
+      toolkit_type: ado_repos
+      toolkit_name: ${ADO_REPOS_TOOLKIT_NAME:ado-repos-testing}
+    save_to_env:
+      - key: ADO_REPOS_TOOLKIT_ID
+        value: $.id
+      - key: ADO_REPOS_TOOLKIT_NAME
+        value: $.name
+
+  - name: Create ADO Wiki Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/ado-wiki-config.json
+      toolkit_type: ado_wiki
+      toolkit_name: ${ADO_WIKI_TOOLKIT_NAME:ado-wiki-testing}
+    save_to_env:
+      - key: ADO_WIKI_TOOLKIT_ID
+        value: $.id
+      - key: ADO_WIKI_TOOLKIT_NAME
+        value: $.name
+
+composable_pipelines: []
+
+execution:
+  test_directory: tests
+  order:
+    # Repos tests (ADO01-ADO04)
+    - test_case_01_*.yaml
+    - test_case_02_*.yaml
+    - test_case_03_*.yaml
+    - test_case_04_*.yaml
+    # Wiki tests (ADO05)
+    - test_case_05_*.yaml
+    # Additional Repos tests (ADO06-ADO09)
+    - test_case_06_*.yaml
+    - test_case_07_*.yaml
+    - test_case_08_*.yaml
+    - test_case_09_*.yaml
+    # New Repos tests (ADO10-ADO23) - Missing tool coverage
+    - test_case_10_*.yaml  # set_active_branch (Critical)
+    - test_case_11_*.yaml  # set_active_branch (High)
+    - test_case_12_*.yaml  # get_pull_request (Critical)
+    - test_case_13_*.yaml  # get_pull_request (High)
+    - test_case_14_*.yaml  # list_pull_request_files (Critical)
+    - test_case_15_*.yaml  # list_pull_request_files (High)
+    - test_case_16_*.yaml  # create_branch (Critical)
+    - test_case_17_*.yaml  # create_branch (High)
+    - test_case_18_*.yaml  # create_file (Critical)
+    - test_case_19_*.yaml  # create_file (High)
+    - test_case_20_*.yaml  # update_file (Critical)
+    - test_case_21_*.yaml  # update_file (High)
+    - test_case_22_*.yaml  # delete_file (Critical)
+    - test_case_23_*.yaml  # delete_file (High)
+    # Enhanced coverage tests (ADO24-ADO26)
+    - test_case_24_*.yaml  # list_files with subdirectory (High)
+    - test_case_25_*.yaml  # read_file with line range (High)
+    - test_case_26_*.yaml  # list_branches with details (High)
+
+  substitutions:
+    ADO_REPOS_TOOLKIT_ID: ${ADO_REPOS_TOOLKIT_ID}
+    ADO_REPOS_TOOLKIT_NAME: ${ADO_REPOS_TOOLKIT_NAME}
+    ADO_WIKI_TOOLKIT_ID: ${ADO_WIKI_TOOLKIT_ID}
+    ADO_WIKI_TOOLKIT_NAME: ${ADO_WIKI_TOOLKIT_NAME}
+    TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
+
+  settings:
+    timeout: 180
+    parallel: 1
+    stop_on_failure: false
+
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "ADO*"
+    continue_on_error: true
+
+  - name: Delete ADO Repos Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${ADO_REPOS_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  - name: Delete ADO Wiki Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${ADO_WIKI_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true

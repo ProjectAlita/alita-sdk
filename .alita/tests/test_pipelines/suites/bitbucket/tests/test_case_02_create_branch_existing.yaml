@@ -1,0 +1,145 @@
+name: "BB02 - create_branch: Handle existing branch error"
+description: |
+  Verify the Bitbucket 'create_branch' tool handles duplicate branch creation gracefully.
+
+  Objective: Test error handling for existing branch
+
+  Expected Behavior:
+  - First creation succeeds
+  - Second creation handles "already exists" gracefully
+  - Branch is set as active or appropriate error is returned
+  - No unhandled exceptions
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  branch_name:
+    type: str
+    value: test-branch-bb02-duplicate
+  expected_duplicate_indicators:
+    type: list
+    value: ["already exists", "AlreadyExistsException", "duplicate", "cannot create", "branch exists", "set as active"]
+  success_indicators:
+    type: list
+    value: ["created", "success", "branch"]
+  first_create_result:
+    type: str
+  second_create_result:
+    type: str
+  branch_list_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_branch_first_time
+nodes:
+  - id: create_branch_first_time
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - first_create_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_branch_second_time
+
+  - id: create_branch_second_time
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - second_create_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_branch_exists
+
+  - id: verify_branch_exists
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_name
+      limit:
+        type: fixed
+        value: 5
+    output:
+      - branch_list_result
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - first_create_result
+      - second_create_result
+      - branch_list_result
+      - branch_name
+      - expected_duplicate_indicators
+      - success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from duplicate branch creation test.
+
+          Branch Name: {branch_name}
+          First Create Result: {first_create_result}
+          Second Create Result (Duplicate): {second_create_result}
+          Branch List: {branch_list_result}
+          Expected Duplicate Indicators: {expected_duplicate_indicators}
+          Success Indicators: {success_indicators}
+
+          This is an EDGE CASE test - we expect graceful handling of duplicate branch creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tools_executed: All three tools ran and returned results
+          2. first_creation_success: First creation contains success indicator
+          3. duplicate_handled: Second creation contains duplicate indicator OR sets branch as active
+          4. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
+          5. branch_exists: Branch appears in the branch list after both operations
+          6. consistent_behavior: Tool behavior is predictable and documented
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tools_executed": boolean,
+            "first_creation_success": boolean,
+            "duplicate_handled": boolean,
+            "no_unhandled_exception": boolean,
+            "branch_exists": boolean,
+            "consistent_behavior": boolean,
+            "first_success_indicator": "which indicator was found or 'none'",
+            "duplicate_indicator_found": "which indicator was found or 'none'",
+            "branch_count_in_list": number,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

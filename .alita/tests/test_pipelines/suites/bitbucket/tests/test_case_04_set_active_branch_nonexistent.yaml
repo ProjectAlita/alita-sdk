@@ -1,0 +1,120 @@
+name: "BB04 - set_active_branch: Error handling for non-existent branch"
+description: |
+  Verify the Bitbucket 'set_active_branch' tool handles non-existent branch gracefully.
+
+  Objective: Test error handling for invalid branch
+
+  Expected Behavior:
+  - Tool handles invalid branch name gracefully
+  - Returns appropriate error message
+  - Error includes list of available branches
+  - No unhandled exceptions
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  non_existent_branch:
+    type: str
+    value: this-branch-does-not-exist-bb04
+  expected_error_indicators:
+    type: list
+    value: ["not found", "does not exist", "error", "invalid", "no such branch", "404"]
+  expected_branch_list_indicators:
+    type: list
+    value: ["available branches", "existing branches", "valid branches", "main", "master"]
+  available_branches:
+    type: str
+  switch_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: get_available_branches
+nodes:
+  - id: get_available_branches
+    type: toolkit
+    input: []
+    input_mapping:
+      limit:
+        type: fixed
+        value: 10
+    output:
+      - available_branches
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: attempt_switch
+
+  - id: attempt_switch
+    type: toolkit
+    input:
+      - non_existent_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: non_existent_branch
+    output:
+      - switch_result
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - available_branches
+      - switch_result
+      - non_existent_branch
+      - expected_error_indicators
+      - expected_branch_list_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'set_active_branch' with INVALID branch name.
+
+          Available Branches: {available_branches}
+          Switch Attempt Result: {switch_result}
+          Invalid Branch Name Used: {non_existent_branch}
+          Expected Error Indicators: {expected_error_indicators}
+          Expected Branch List Indicators: {expected_branch_list_indicators}
+
+          This is a NEGATIVE test - we expect the tool to handle invalid input gracefully.
+
+          Validation Criteria for test_passed=true:
+          REQUIRED (ALL must pass):
+          1. branch_list_retrieved: List of branches was retrieved successfully
+          2. switch_failed: Switch operation failed (contains error indicator)
+          3. error_indicates_not_found: Error message indicates branch not found
+          4. branch_not_in_list: The branch '{non_existent_branch}' does NOT appear in available branches
+          5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (SET TO TRUE if: branch_list_retrieved AND switch_failed AND error_indicates_not_found AND branch_not_in_list AND no_unhandled_exception),
+            "branch_list_retrieved": boolean,
+            "switch_failed": boolean,
+            "error_indicates_not_found": boolean,
+            "branch_not_in_list": boolean,
+            "no_unhandled_exception": boolean,
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "branches_count": number (count of available branches),
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object no markup.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

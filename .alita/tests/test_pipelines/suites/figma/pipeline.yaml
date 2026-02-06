@@ -1,0 +1,150 @@
+# Figma Toolkit Test Suite Configuration
+# This file defines setup, execution, and cleanup for the test suite
+#
+# This configuration is toolkit-agnostic - all specificity comes from
+# the config values, not hardcoded handlers in setup.py/cleanup.py
+
+name: figma_toolkit
+description: Figma toolkit integration tests
+
+# Environment variable mappings
+# These map .env variables to config values used in setup
+env_mapping:
+  toolkit_config: ${FIGMA_CONFIG_PATH:../../configs/figma-config.json}
+  api_token: ${FIGMA_API_TOKEN}
+  test_file_key: ${TEST_FILE_KEY:5vWxC85QBhqbzPU30RP7LH}
+  test_team_id: ${TEST_TEAM_ID:1600893205947708770}
+  test_project_id: ${TEST_PROJECT_ID:547513795}
+  test_node_ids: ${TEST_NODE_IDS}
+
+# Setup steps executed before running tests
+# Steps are executed in order; if a step fails, setup stops
+setup:
+  # Step 1: Ensure Figma credentials configuration exists
+  - name: Setup Figma Configuration
+    type: configuration
+    config:
+      config_type: figma
+      alita_title: ${FIGMA_SECRET_NAME:figma}
+      data:
+        token: ${FIGMA_API_TOKEN}
+
+  # Step 2: Create or update the Figma toolkit on the platform
+  - name: Create Figma Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      # Load base config from tool_configs
+      config_file: ../../configs/figma-config.json
+      toolkit_type: figma
+      # Override/substitute values from environment
+      overrides:
+        # Credentials must use secret reference format (platform requirement)
+        figma_configuration:
+          private: true
+          alita_title: ${FIGMA_SECRET_NAME:figma}
+      # Name for the toolkit on platform
+      toolkit_name: ${FIGMA_TOOLKIT_NAME:figma-testing}
+    # Save created toolkit ID to environment for pipeline substitution
+    save_to_env:
+      - key: FIGMA_TOOLKIT_ID
+        value: $.id
+      - key: FIGMA_TOOLKIT_NAME
+        value: $.name
+
+# Composable pipelines - seeded first, used by hooks and other pipelines
+# These are reusable pipeline components that can be invoked conditionally
+composable_pipelines: []
+
+# Test execution configuration
+execution:
+  # Order of test execution (by file pattern or explicit list)
+  # Tests are located in tests/ subdirectory
+  test_directory: tests
+  order:
+    # Tool: get_file_nodes
+    - test_case_01_*.yaml  # FIG01 - Get File Nodes (Happy Path)
+    - test_case_02_*.yaml  # FIG02 - Get File Nodes (Edge Case - Invalid IDs)
+
+    # Tool: get_file
+    - test_case_03_*.yaml  # FIG03 - Get File (Happy Path)
+    - test_case_04_*.yaml  # FIG04 - Get File with Geometry
+    - test_case_06_*.yaml  # FIG06 - Get File (Invalid Key)
+    - test_case_07_*.yaml  # FIG07 - Get File with Extra Params
+
+    # Tool: get_file_versions
+    - test_case_05_*.yaml  # FIG05 - Get File Versions
+
+    # Tool: get_file_comments
+    - test_case_08_*.yaml  # FIG08 - Get File Comments (Happy Path)
+
+    # Tool: post_file_comment
+    - test_case_09_*.yaml  # FIG09 - Post File Comment (Simple)
+    - test_case_10_*.yaml  # FIG10 - Post File Comment (With Position)
+
+    # Tool: get_file_images
+    - test_case_11_*.yaml  # FIG11 - Get File Images (Default)
+    - test_case_12_*.yaml  # FIG12 - Get File Images (Custom Format and Scale)
+
+    # Tool: get_team_projects
+    - test_case_13_*.yaml  # FIG13 - Get Team Projects (Happy Path)
+    - test_case_14_*.yaml  # FIG14 - Get Team Projects (Invalid ID)
+
+    # Tool: get_project_files
+    - test_case_15_*.yaml  # FIG15 - Get Project Files (Happy Path)
+
+    # Tool: analyze_file
+    - test_case_16_*.yaml  # FIG16 - Analyze File (Basic)
+    - test_case_17_*.yaml  # FIG17 - Analyze File (With Filters and Options)
+    - test_case_18_*.yaml  # FIG18 - Analyze File (By URL)
+
+  # Variables to substitute in test YAML files
+  substitutions:
+    FIGMA_TOOLKIT_ID: ${FIGMA_TOOLKIT_ID}
+    FIGMA_TOOLKIT_NAME: ${FIGMA_TOOLKIT_NAME}
+    TIMESTAMP: ${TIMESTAMP}
+    TEST_FILE_KEY: ${TEST_FILE_KEY:5vWxC85QBhqbzPU30RP7LH}
+    TEST_TEAM_ID: ${TEST_TEAM_ID:1600893205947708770}
+    TEST_PROJECT_ID: ${TEST_PROJECT_ID:547513795}
+    TEST_NODE_IDS: ${TEST_NODE_IDS}
+
+  # Execution settings
+  settings:
+    timeout: 120
+    parallel: 1  # Sequential for dependent tests
+    stop_on_failure: false
+
+# Cleanup steps executed after tests complete
+# Steps are executed in order; failures are logged but don't stop cleanup
+cleanup:
+  # Step 1: Delete seeded pipelines
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "FIG*"  # All Figma test pipelines
+    continue_on_error: true
+
+  # Step 2: Delete the test toolkit
+  - name: Delete Test Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${FIGMA_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+# Hooks for custom actions
+hooks:
+  # Run before any setup steps
+  pre_setup: []
+
+  # Run after all setup steps complete
+  post_setup: []
+
+  # Run after each test
+  post_test: []
+
+  # Run before cleanup starts
+  pre_cleanup: []
+
+  # Run after cleanup completes
+  post_cleanup: []

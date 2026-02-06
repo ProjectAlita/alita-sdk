@@ -1,0 +1,121 @@
+name: "BB03 - set_active_branch: Switch to existing branch"
+description: |
+  Verify the Bitbucket 'set_active_branch' tool successfully switches to an existing branch.
+
+  Objective: Test branch switching functionality
+
+  Expected Behavior:
+  - Branch is created successfully for testing
+  - Switching between branches works correctly
+  - Active branch is properly updated
+  - No errors during switch operations
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+    value: test-branch-bb03-switch
+  expected_switch_indicators:
+    type: list
+    value: ["Switched to branch", "Active branch", "set as active", "checkout"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "not found", "does not exist", "permission denied"]
+  switch_result:
+    type: str
+  files_in_active_branch:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: switch_to_test_branch
+
+nodes:
+  - id: switch_to_test_branch
+    type: toolkit
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - switch_result
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_active_branch
+
+  - id: verify_active_branch
+    type: toolkit
+    input: []
+    input_mapping:
+      path:
+        type: fixed
+        value: "test.txt"
+      recursive:
+        type: fixed
+        value: false
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - files_in_active_branch
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - switch_result
+      - files_in_active_branch
+      - test_branch_name
+      - expected_switch_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'set_active_branch' tool execution.
+
+          Switch to Test Branch ({test_branch_name}): {switch_result}
+          Files Listed (verify branch context): {files_in_active_branch}
+          Expected Switch Indicators: {expected_switch_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful branch switching.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. switch_success: Switch to test branch contains success indicator
+          2. no_errors: No error indicators in output
+          3. files_listed: File listing succeeded (confirms active branch is valid)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "switch_success": boolean,
+            "no_errors": boolean,
+            "files_listed": boolean,
+            "switch_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

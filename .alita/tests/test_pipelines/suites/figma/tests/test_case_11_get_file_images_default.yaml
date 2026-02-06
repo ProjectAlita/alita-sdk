@@ -1,0 +1,81 @@
+name: "FIG11 - Get File Images: Default"
+description: "Test get_file_images with default parameters"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "qhfjaNs21EVUVlBiBejzPH"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_file_images
+
+nodes:
+  - id: invoke_get_file_images
+    type: toolkit
+    input:
+      - file_key
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file_images
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_image_urls
+
+  - id: validate_image_urls
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API image export testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'get_file_images' with default parameters.
+
+          Tool Output: {tool_result}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Response Structure: Verify the response contains:
+             - err (should be null for success)
+             - images (object mapping node IDs to image URLs)
+          3. Image URLs: Check that returned URLs:
+             - Are valid URL format (start with http/https)
+             - Point to Figma's image service
+             - Default should return image for node "0:0" (entire canvas)
+          4. No Errors: Response should not contain error messages
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "has_image_urls": boolean,
+            "urls_valid_format": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of image URL generation"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

@@ -1,0 +1,80 @@
+name: "FIG18 - Analyze File: By URL"
+description: "Test analyze_file using a Figma URL instead of file key"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  figma_url:
+    type: str
+    value: "https://www.figma.com/design/1RCds4LPiarpwoy8g1JTVW/Untitled"
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+
+entry_point: invoke_analyze_by_url
+
+nodes:
+  - id: invoke_analyze_by_url
+    type: toolkit
+    input:
+      - figma_url
+    input_mapping:
+      url:
+        type: variable
+        value: figma_url
+    output:
+      - tool_result
+    structured_output: true
+    tool: analyze_file
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_url_analysis
+
+  - id: validate_url_analysis
+    type: llm
+    input:
+      - tool_result
+      - figma_url
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API URL-based analysis testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'analyze_file' when using a Figma URL.
+
+          Tool Output: {tool_result}
+          Figma URL Used: {figma_url}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. URL Parsing: Verify the tool correctly extracted the file key from URL
+          3. Same Results: Output should be similar to using file_key directly:
+             - Should contain TOON format output
+             - File structure should be present
+          4. No URL Errors: Tool should handle URL format properly
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "url_parsed_correctly": boolean,
+            "toon_output_generated": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of URL-based analysis"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

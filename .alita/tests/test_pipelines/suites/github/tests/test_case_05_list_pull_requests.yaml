@@ -1,0 +1,80 @@
+name: "GH05 - List Pull Requests"
+description: "Verify list_pull_requests tool retrieves PR list from repository"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  pr_state:
+    type: str
+    value: "open"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_prs
+
+nodes:
+  - id: invoke_list_prs
+    type: toolkit
+    tool: list_open_pull_requests
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_open_pull_requests' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+
+          Confirm the tool executed successfully (the result is not empty or null).
+          Confirm pr numeber 163 is in the list.
+          Determine if any pull requests were found (PRs count >= 0).
+          Check if pull requests have proper structure with 'number' and 'title' fields.
+          Extract a sample of the first 5 pull requests with their number, title (first 50 chars), and state.
+          If there is an error, return the error message in the error field.
+
+          Return a JSON object named test_results with the following structure:
+
+          {
+          "test_passed": boolean (true if all checks pass),
+          "tool_executed": boolean,
+          "prs_count": integer,
+          "prs_have_numbers": boolean,
+          "prs_sample": list of dicts with keys: number, title, state, head,
+          "error": string | null,
+          "failed_checks": list of strings (failed checks)
+          }
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+        test_results: "dict"
+    transition: END

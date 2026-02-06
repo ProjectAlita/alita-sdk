@@ -1,0 +1,87 @@
+name: "FIG15 - Get Project Files: Happy Path"
+description: "Verify get_project_files retrieves all files in a project"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: str
+    value: "547513795"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_project_files
+
+nodes:
+  - id: invoke_get_project_files
+    type: toolkit
+    input:
+      - project_id
+    input_mapping:
+      project_id:
+        type: variable
+        value: project_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_project_files
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_files
+
+  - id: validate_files
+    type: llm
+    input:
+      - tool_result
+      - project_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API project files testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'get_project_files' and validate the files list.
+
+          Tool Output: {tool_result}
+          Project ID Used: {project_id}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Response Structure: Verify the response contains:
+             - files (array of file objects)
+             - Each file should have:
+               - key (file key/ID)
+               - name (Vlad Variushkin's team library)
+               - thumbnail_url (optional)
+               - last_modified (shoukd have such format 2026-02-04T14:58:05Z)
+          3. Array Format: Files should be in an array (can be empty for new projects)
+          4. No Errors: Response should not contain error fields
+
+          Note: Projects may have zero files, which is valid.
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "file_count": integer,
+            "has_valid_structure": boolean,
+            "files_have_keys": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of project files retrieved"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

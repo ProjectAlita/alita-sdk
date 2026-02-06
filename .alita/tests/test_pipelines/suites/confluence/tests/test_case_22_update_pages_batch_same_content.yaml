@@ -1,0 +1,90 @@
+name: "CF22 - Update Pages (Batch Update with Same Content)"
+priority: High
+description: |
+  Verify `update_pages` tool updates multiple pages with same content in batch.
+
+  Objective: Ensure tool handles bulk update scenario where all pages get identical content.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Updates all pages with the single content provided.
+  - Returns list of update statuses for all pages.
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_ids:
+    type: list
+    value: ['138969168', '104038676']
+  new_contents:
+    type: list
+    value: ['Same content for all pages ${TIMESTAMP}']
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_pages
+
+nodes:
+  - id: invoke_update_pages
+    type: toolkit
+    tool: update_pages
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_ids
+      - new_contents
+    input_mapping:
+      page_ids:
+        type: variable
+        value: page_ids
+      new_contents:
+        type: variable
+        value: new_contents
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o
+    input:
+      - tool_result
+      - page_ids
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_pages' tool.
+
+          Tool Result: {tool_result}
+          Page IDs: {page_ids}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty, null, or error message).
+          2. Verify the output contains update statuses for all pages.
+          3. Check that single content value was applied to all pages.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

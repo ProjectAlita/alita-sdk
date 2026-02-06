@@ -1,0 +1,78 @@
+name: "CF05 - Search by Title"
+description: "Verify search_by_title tool searches for pages by query text in page title only"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  query:
+    type: str
+    value: "[DO_NOT_DELETE] TC-003 Page with label"
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+entry_point: invoke_search_by_title
+nodes:
+  - id: invoke_search_by_title
+    type: toolkit
+    input:
+      - query
+    input_mapping:
+      query:
+        type: variable
+        value: query
+    output:
+      - tool_result
+    structured_output: true
+    tool: search_by_title
+    toolkit_name: confluence-testing
+    transition: process_results
+  - id: process_results
+    type: llm
+    input:
+      - tool_result
+      - query
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'search_by_title' tool.
+
+          Tool Result: {tool_result}
+          Query: {query}
+
+          Perform the following checks:
+
+          1. Tool Execution: Confirm the tool executed successfully (result is not empty or null).
+          2. Page ID Match: Verify that the 'page_id' is "182419457".
+          3. Page Title Match: Ensure the 'page_title' contains "TC-003 Page with label".
+          4. Page URL: Check that the 'page_url' contains "182419457" and "DO_NOT_DELETE".
+          5. Content Present: Verify the 'content' field is not empty/null.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and returned valid results),
+            "tool_executed": boolean (true if tool ran without errors),
+            "results_found": boolean (true if at least one page was returned),
+            "result_count": integer (number of pages in results),
+            "has_valid_structure": boolean (true if results have required fields),
+            "sample_page_title": string (title of first page found, or null if none),
+            "failed_checks": [string] // list of failed assertions
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

@@ -1,0 +1,90 @@
+name: "ADO17 - create_branch: Handle duplicate branch name"
+description: |
+  Verify the ADO 'create_branch' tool handles duplicate branch names appropriately.
+
+  Objective: Test error handling for existing branch name
+
+  Expected Behavior:
+  - Tool detects branch already exists
+  - Returns appropriate error message
+  - Does not crash or overwrite existing branch
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  branch_name:
+    type: str
+    value: "main"
+  expected_error_indicators:
+    type: list
+    value: ["already exists", "exists", "duplicate", "error", "failed"]
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_branch
+nodes:
+  - id: invoke_create_branch
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - branch_name
+      - expected_error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_branch' tool with EXISTING branch name.
+
+          Tool Result: {tool_result}
+          Existing Branch Name: {branch_name}
+          Expected Error Indicators: {expected_error_indicators}
+
+          This is a NEGATIVE test - we expect the tool to reject duplicate branch creation.
+
+          Validation Criteria (ALL must pass):
+          1. tool_executed: Tool ran without crashing (got some result)
+          2. duplicate_detected: Output contains at least one error indicator about existing branch
+          3. no_unhandled_exception: Output does NOT contain 'unhandled', 'traceback', 'stack trace'
+
+          Return a JSON object with structure:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "duplicate_detected": boolean,
+            "no_unhandled_exception": boolean,
+            "error_indicator_found": "which indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object (no markdown or explanation).
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
