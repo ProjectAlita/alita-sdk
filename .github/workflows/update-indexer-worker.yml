@@ -8,10 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       create-pr:
-        description: "Create a pull request? (false = push to main)"
+        description: "Create a pull request? (false = push directly)"
         required: true
         type: boolean
         default: false
+      target-branch:
+        description: "Target branch in indexer_worker (leave empty to use current branch)"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   update-dependencies:
@@ -23,8 +28,26 @@ jobs:
       id-token: write
 
     steps:
+      - name: Determine target branch
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_run" ]; then
+            # Use the branch that triggered the PyPI publish workflow
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+          elif [ -n "${{ inputs.target-branch }}" ]; then
+            # Use manually specified branch
+            BRANCH="${{ inputs.target-branch }}"
+          else
+            # Default to current branch
+            BRANCH="${{ github.ref_name }}"
+          fi
+          echo "target_branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "::notice title=Target Branch::Will update indexer_worker on branch: $BRANCH"
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.branch.outputs.target_branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -53,6 +76,7 @@ jobs:
           repository: ProjectAlita/indexer_worker
           ssh-key: ${{ secrets.INDEXER_WORKER_DEPLOYMENT_KEY }}
           path: indexer_worker
+          ref: ${{ steps.branch.outputs.target_branch }}
 
       - name: Update requirements.txt
         run: |
@@ -80,10 +104,11 @@ jobs:
           body: |
             This PR updates the following dependencies to version ${{ steps.get_version.outputs.version }}:
             - alita-sdk
-            
+
             This update was automatically triggered by the release of a new version.
-          branch: update-dependencies
-          base: main
+            Target branch: ${{ steps.branch.outputs.target_branch }}
+          branch: update-dependencies-${{ steps.branch.outputs.target_branch }}
+          base: ${{ steps.branch.outputs.target_branch }}
           delete-branch: true
           
       - name: Show version bump annotation
