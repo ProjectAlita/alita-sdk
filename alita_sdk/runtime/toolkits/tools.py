@@ -21,7 +21,7 @@ from ...tools.memory import MemoryToolkit
 from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
 from ...tools.utils import clean_string
 from alita_sdk.tools import _inject_toolkit_id
-from .security import is_toolkit_blocked, is_tool_blocked, get_blocked_tools_for_toolkit
+from .security import is_toolkit_blocked
 
 logger = logging.getLogger(__name__)
 
