@@ -863,8 +863,10 @@ def create_graph(
                     # Lazy tools mode parameters
                     lazy_tools_mode=use_lazy_for_node,
                     tool_registry=tool_registry if use_lazy_for_node else None,
-                    # Always-bind tools (e.g., middleware/planning tools)
-                    always_bind_tools=always_bind_tools if use_lazy_for_node else None,
+                    # Always-bind tools (e.g., agent/pipeline tools, planning tools)
+                    # These should ALWAYS be passed regardless of lazy mode - they need direct LLM access
+                    # Fix for #3382: When lazy mode auto-disabled (tool_count < 20), agent tools were lost
+                    always_bind_tools=always_bind_tools if always_bind_tools else None,
                 ))
             elif node_type in ['router', 'decision']:
                 if node_type == 'router':
