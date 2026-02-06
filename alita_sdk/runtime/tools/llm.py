@@ -603,10 +603,12 @@ class LLMNode(BaseTool):
 
         # Bind tools when:
         # 1. Traditional mode: specific tool_names are provided, OR
-        # 2. Lazy mode: tool_registry exists (meta-tools will be bound)
+        # 2. Lazy mode: tool_registry exists (meta-tools will be bound), OR
+        # 3. available_tools exist (covers lazy mode auto-disabled case)
         should_bind_tools = (
             len(self.tool_names or []) > 0 or
-            (self.lazy_tools_mode and self.tool_registry is not None)
+            (self.lazy_tools_mode and self.tool_registry is not None) or
+            bool(self.available_tools)  # Bind available tools even when lazy mode auto-disabled
         )
 
         if should_bind_tools:

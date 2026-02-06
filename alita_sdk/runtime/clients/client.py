@@ -811,13 +811,10 @@ class AlitaClient:
             'internal_tools': internal_tools  # Mode flags like 'swarm' for multi-agent collaboration
         }
 
-        # Auto-create middleware based on internal_tools in the tools list
-        # Check if any tool config is an internal_tool with name='planner'
+        # Auto-create middleware based on internal_tools parameter
+        # This matches the behavior in application() method
         middleware_list = []
-        has_planner = any(
-            t.get('type') == 'internal_tool' and t.get('name') == 'planner'
-            for t in tools
-        )
+        has_planner = 'planner' in internal_tools
         if has_planner:
             from ..middleware.planning import PlanningMiddleware
             planning_middleware = PlanningMiddleware(
