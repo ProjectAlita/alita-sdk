@@ -16,9 +16,14 @@ from ...tools.utils.available_tools_decorator import extend_with_parent_availabl
 from ...tools.elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
 from ...runtime.utils.utils import IndexerKeywords
 
+# Error message returned when file content exceeds single read size limit
+CONTENT_TOO_LARGE_ERROR = "[File content exceeds size limit. Use chunked read operations to access specific portions of this file.]"
+DEFAULT_MAX_SINGLE_READ_SIZE = 200000
+
 
 class ArtifactWrapper(NonCodeIndexerToolkit):
     bucket: str
+    max_single_read_size: int = DEFAULT_MAX_SINGLE_READ_SIZE
     artifact: Optional[Any] = None
 
     # Override file operation methods to support bucket_name parameter
@@ -77,10 +82,17 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         from ...tools.utils.text_operations import apply_line_slice
 
         results = {}
+        
         for path in file_paths:
             try:
                 content = self._read_file(path, branch=None, bucket_name=bucket_name, offset=offset, limit=limit)
-                results[path] = apply_line_slice(content, offset=offset, limit=limit)
+                sliced_content = apply_line_slice(content, offset=offset, limit=limit)
+                
+                # Check content size limit per file
+                if isinstance(sliced_content, str) and len(sliced_content) > self.max_single_read_size:
+                    results[path] = CONTENT_TOO_LARGE_ERROR
+                else:
+                    results[path] = sliced_content
             except Exception as e:
                 results[path] = f"Error reading file: {str(e)}"
         return results
@@ -453,13 +465,18 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                   page_number: int = None,
                   sheet_name: str = None,
                   excel_by_sheets: bool = False):
-        return self.artifact.get(artifact_name=filename,
+        content = self.artifact.get(artifact_name=filename,
                                  bucket_name=bucket_name,
                                   is_capture_image=is_capture_image,
                                   page_number=page_number,
                                   sheet_name=sheet_name,
                                   excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
+
+        if isinstance(content, str) and len(content) > self.max_single_read_size:
+            return CONTENT_TOO_LARGE_ERROR
+
+        return content
     
     def _read_file(
         self,
