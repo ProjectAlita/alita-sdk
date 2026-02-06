@@ -404,9 +404,22 @@ def process_pipeline_result(
                          output = {"error": detected_error, "raw_content": content}
                          break
 
-                    if isinstance(content, str) and content.startswith("{"):
+                    # Strip markdown code fences if present
+                    json_content = content
+                    if isinstance(content, str):
+                        # Remove markdown code fences (```json ... ``` or ``` ... ```)
+                        stripped = content.strip()
+                        if stripped.startswith("```"):
+                            lines = stripped.split("\n")
+                            if lines[0].startswith("```"):
+                                lines = lines[1:]  # Remove first line
+                            if lines and lines[-1].strip() == "```":
+                                lines = lines[:-1]  # Remove last line
+                            json_content = "\n".join(lines).strip()
+
+                    if isinstance(json_content, str) and json_content.startswith("{"):
                         try:
-                            parsed = json.loads(content)
+                            parsed = json.loads(json_content)
                             if isinstance(parsed, dict):
                                 if "test_passed" in parsed:
                                     test_passed = parsed.get("test_passed")
@@ -444,7 +457,7 @@ def process_pipeline_result(
                 # Get all tool calls sorted by timestamp_finish (latest first)
                 sorted_calls = sorted(
                     tool_calls.values(),
-                    key=lambda x: x.get("timestamp_finish", "") if isinstance(x, dict) else "",
+                    key=lambda x: x.get("timestamp_finish") or "" if isinstance(x, dict) else "",
                     reverse=True
                 )
                 for tool_call in sorted_calls:

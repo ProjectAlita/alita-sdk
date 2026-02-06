@@ -1,0 +1,208 @@
+name: "BB13 - update_file: Update file with valid OLD/NEW markers"
+description: |
+  Verify the Bitbucket 'update_file' tool correctly updates file content.
+
+  Objective: Test file update with OLD/NEW marker syntax
+
+  Expected Behavior:
+  - File is created with initial content
+  - Update with OLD/NEW markers succeeds
+  - Only targeted section is modified
+  - Other content remains unchanged
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  test_file_path:
+    type: str
+    value: test-files/bb13-update-test.py
+  initial_content:
+    type: str
+    value: |
+      # Test file for BB13
+      def greet(name):
+          return f"Hello, {name}!"
+
+      def calculate(a, b):
+          return a + b
+
+      # Main execution
+      if __name__ == "__main__":
+          print(greet("World"))
+          print(calculate(5, 3))
+  update_query:
+    type: str
+    value: |
+      OLD
+      def greet(name):
+          return f"Hello, {name}!"
+      NEW
+      def greet(name):
+          return f"Welcome, {name}! How are you today?"
+  expected_new_content:
+    type: str
+    value: "Welcome"
+  expected_unchanged:
+    type: str
+    value: "calculate"
+  error_indicators:
+    type: list
+    value: ["error", "failed", "not found", "exception"]
+  create_result:
+    type: str
+  update_result:
+    type: str
+  updated_content:
+    type: str
+  cleanup_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_test_file
+nodes:
+  - id: create_test_file
+    type: toolkit
+    input:
+      - test_file_path
+      - initial_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: variable
+        value: initial_content
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - create_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: update_file_content
+
+  - id: update_file_content
+    type: toolkit
+    input:
+      - test_file_path
+      - update_query
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      update_query:
+        type: variable
+        value: update_query
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - update_result
+    structured_output: true
+    tool: update_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_update
+
+  - id: verify_update
+    type: toolkit
+    input:
+      - test_file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - updated_content
+    structured_output: true
+    tool: read_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: cleanup_file
+
+  - id: cleanup_file
+    type: toolkit
+    input:
+      - test_file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - cleanup_result
+    structured_output: true
+    tool: delete_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - update_result
+      - updated_content
+      - initial_content
+      - expected_new_content
+      - expected_unchanged
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'update_file' tool execution.
+
+          Create Result: {create_result}
+          Update Result: {update_result}
+          Updated Content: {updated_content}
+          Initial Content: {initial_content}
+          Expected New Content Indicator: {expected_new_content}
+          Expected Unchanged Indicator: {expected_unchanged}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful file update.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. file_created: Initial file was created successfully
+          2. no_errors: No error indicators in any output
+          3. update_succeeded: Update operation completed without errors
+          4. greet_function_updated: Updated content contains "Welcome" instead of "Hello"
+          5. calculate_function_unchanged: Calculate function remains in updated content
+          6. markers_processed: OLD/NEW markers were correctly processed
+          7. main_block_preserved: Main execution block remains intact
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "file_created": boolean,
+            "no_errors": boolean,
+            "update_succeeded": boolean,
+            "greet_function_updated": boolean,
+            "calculate_function_unchanged": boolean,
+            "markers_processed": boolean,
+            "main_block_preserved": boolean,
+            "contains_welcome": boolean,
+            "contains_calculate": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

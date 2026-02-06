@@ -613,15 +613,9 @@ def run(
     if config and "execution" in config and "substitutions" in config["execution"]:
         config_subs = config["execution"]["substitutions"]
         for key, value in config_subs.items():
-            # Resolve ${VAR} references from environment
-            if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-                var_name = value[2:-1]  # Extract VAR from ${VAR}
-                env_value = load_from_env(var_name)
-                if env_value:
-                    env_substitutions[key] = env_value
-            else:
-                # Direct value
-                env_substitutions[key] = value
+            # Resolve using resolve_env_value to handle ${VAR} and ${VAR:default}
+            resolved_value = resolve_env_value(value, env_substitutions, env_loader=load_from_env)
+            env_substitutions[key] = resolved_value
 
     if not folder_path.exists():
         raise FileNotFoundError(f"Folder '{folder_path}' does not exist")

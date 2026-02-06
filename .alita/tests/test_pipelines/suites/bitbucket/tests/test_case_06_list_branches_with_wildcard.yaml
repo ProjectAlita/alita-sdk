@@ -1,0 +1,193 @@
+name: "BB06 - list_branches_in_repo: Filter branches with wildcard"
+description: |
+  Verify the Bitbucket 'list_branches_in_repo' tool correctly filters branches using wildcards.
+
+  Objective: Test wildcard filtering functionality
+
+  Expected Behavior:
+  - Wildcard patterns filter branches correctly
+  - Matching branches are included
+  - Non-matching branches are excluded
+  - Multiple wildcard patterns work as expected
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  branch_prefix:
+    type: str
+    value: feature-bb06
+  branch_1:
+    type: str
+    value: feature-bb06-alpha
+  branch_2:
+    type: str
+    value: feature-bb06-beta
+  branch_3:
+    type: str
+    value: hotfix-bb06-gamma
+  feature_wildcard:
+    type: str
+    value: "feature-bb06-*"
+  all_wildcard:
+    type: str
+    value: "*-bb06-*"
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "invalid pattern"]
+  create_result_1:
+    type: str
+  create_result_2:
+    type: str
+  create_result_3:
+    type: str
+  filtered_results:
+    type: str
+  all_test_branches:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_test_branch_1
+nodes:
+  - id: create_test_branch_1
+    type: toolkit
+    input:
+      - branch_1
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_1
+    output:
+      - create_result_1
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_test_branch_2
+
+  - id: create_test_branch_2
+    type: toolkit
+    input:
+      - branch_2
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_2
+    output:
+      - create_result_2
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_test_branch_3
+
+  - id: create_test_branch_3
+    type: toolkit
+    input:
+      - branch_3
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_3
+    output:
+      - create_result_3
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: filter_branches_with_wildcard
+
+  - id: filter_branches_with_wildcard
+    type: toolkit
+    input:
+      - feature_wildcard
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: feature_wildcard
+    output:
+      - filtered_results
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: filter_all_test_branches
+
+  - id: filter_all_test_branches
+    type: toolkit
+    input:
+      - all_wildcard
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: all_wildcard
+    output:
+      - all_test_branches
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - branch_1
+      - branch_2
+      - branch_3
+      - filtered_results
+      - all_test_branches
+      - feature_wildcard
+      - all_wildcard
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from wildcard branch filtering test.
+
+          Created Branches: {branch_1}, {branch_2}, {branch_3}
+          Feature Filter Pattern: {feature_wildcard}
+          Feature Filter Results: {filtered_results}
+          All Filter Pattern: {all_wildcard}
+          All Filter Results: {all_test_branches}
+          Error Indicators: {error_indicators}
+
+          This is an EDGE CASE test - we expect wildcard filtering to work correctly.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branches_created: All three test branches were created successfully
+          2. no_errors: No error indicators in any output
+          3. feature_filter_accurate: Feature filter contains ONLY branches matching "feature-bb06-*"
+          4. includes_both_features: Both {branch_1} and {branch_2} appear in feature filter results
+          5. excludes_hotfix: {branch_3} does NOT appear in feature filter results
+          6. all_filter_complete: All filter contains all three test branches
+          7. pattern_matching_works: Wildcard patterns correctly include/exclude branches
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branches_created": boolean,
+            "no_errors": boolean,
+            "feature_filter_accurate": boolean,
+            "includes_both_features": boolean,
+            "excludes_hotfix": boolean,
+            "all_filter_complete": boolean,
+            "pattern_matching_works": boolean,
+            "feature_filter_count": number,
+            "all_filter_count": number,
+            "branches_in_feature_filter": [list of branch names],
+            "branches_in_all_filter": [list of branch names],
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
