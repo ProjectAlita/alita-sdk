@@ -15,9 +15,40 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
-  test_file_path:
+  branch:
     type: str
-    value: test-files/bb09-read-test.txt
+    value: main
+  cleanup_result:
+    type: str
+  create_result:
+    type: str
+  error_indicators:
+    type: list
+    value:
+      - error
+      - not found
+      - '404'
+      - permission denied
+      - failed to read
+  expected_line_count:
+    type: int
+    value: 4
+  expected_special_chars:
+    type: list
+    value:
+      - '@'
+      - '#'
+      - $
+      - '%'
+      - ^
+      - '&'
+      - '*'
+      - (
+      - )
+  file_content:
+    type: str
+  main_branch_content:
+    type: str
   test_content:
     type: str
     value: |
@@ -25,26 +56,11 @@ state:
       It contains multiple lines of text.
       Including special characters: @#$%^&*()
       And numbers: 123456789
-  expected_line_count:
-    type: int
-    value: 4
-  expected_special_chars:
-    type: list
-    value: ["@", "#", "$", "%", "^", "&", "*", "(", ")"]
-  error_indicators:
-    type: list
-    value: ["error", "not found", "404", "permission denied", "failed to read"]
-  create_result:
+  test_file_path:
     type: str
-  file_content:
-    type: str
-  main_branch_content:
-    type: str
-  cleanup_result:
-    type: str
+    value: test-files/bb09-read-test.txt
   test_results:
     type: dict
-
 entry_point: create_test_file
 nodes:
   - id: create_test_file
@@ -53,76 +69,38 @@ nodes:
       - test_file_path
       - test_content
     input_mapping:
-      file_path:
+      branch:
         type: variable
-        value: test_file_path
+        value: branch
       file_contents:
         type: variable
         value: test_content
-      branch:
+      file_path:
         type: variable
-        value: ACTIVE_BRANCH
+        value: test_file_path
     output:
       - create_result
     structured_output: true
     tool: create_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    toolkit_name: bitbucket-testing
     transition: read_file_content
-
   - id: read_file_content
     type: toolkit
     input:
       - test_file_path
     input_mapping:
+      branch:
+        type: variable
+        value: branch
       file_path:
         type: variable
         value: test_file_path
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
     output:
       - file_content
     structured_output: true
     tool: read_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: read_from_different_branch
-
-  - id: read_from_different_branch
-    type: toolkit
-    input:
-      - test_file_path
-    input_mapping:
-      file_path:
-        type: variable
-        value: test_file_path
-      branch:
-        type: fixed
-        value: main
-    output:
-      - main_branch_content
-    structured_output: true
-    tool: read_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: cleanup_test_file
-
-  - id: cleanup_test_file
-    type: toolkit
-    input:
-      - test_file_path
-    input_mapping:
-      file_path:
-        type: variable
-        value: test_file_path
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - cleanup_result
-    structured_output: true
-    tool: delete_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    toolkit_name: bitbucket-testing
     transition: validate_results
-
   - id: validate_results
     type: llm
     input:
@@ -182,7 +160,7 @@ nodes:
           }}
 
           Return ONLY the JSON object.
-    model: ${DEFAULT_LLM_MODEL}
+    model: gpt-4o-2024-11-20
     output:
       - test_results
     structured_output_dict:

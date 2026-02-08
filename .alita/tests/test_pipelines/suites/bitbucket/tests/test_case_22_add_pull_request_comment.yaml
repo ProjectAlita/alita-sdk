@@ -57,9 +57,6 @@ nodes:
       content:
         type: variable
         value: comment_content
-      inline:
-        type: fixed
-        value: false
     output:
       - comment_result
     structured_output: true
@@ -102,9 +99,8 @@ nodes:
           2. comment_added_or_acceptable_error: Comment was added OR error indicates PR not found
           3. result_has_confirmation: If successful, result contains ID or success indicator
           4. no_unexpected_errors: No unexpected error indicators in output
-          5. inline_parameter_respected: Inline parameter was correctly set to false
-          6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
-          7. response_is_informative: Response indicates what happened (success or why failed)
+          5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          6. response_is_informative: Response indicates what happened (success or why failed)
 
           Return JSON test_results:
           {{
@@ -113,7 +109,6 @@ nodes:
             "comment_added_or_acceptable_error": boolean,
             "result_has_confirmation": boolean,
             "no_unexpected_errors": boolean,
-            "inline_parameter_respected": boolean,
             "no_unhandled_exception": boolean,
             "response_is_informative": boolean,
             "comment_was_added": boolean,

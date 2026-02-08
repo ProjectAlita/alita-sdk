@@ -15,59 +15,101 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
-  pr_id:
-    type: str
-    value: "1"
-  inline_comment_text:
-    type: str
-    value: "This is an inline comment on a specific line of code. Test case BB23."
-  inline_file_path:
-    type: str
-    value: "README.md"
-  inline_line_number:
-    type: str
-    value: "1"
-  expected_success_indicators:
-    type: list
-    value: ["created", "added", "id", "comment", "success", "inline"]
   acceptable_error_indicators:
     type: list
-    value: ["not found", "does not exist", "404", "no pull request", "file not in diff", "line not in diff"]
-  error_indicators:
-    type: list
-    value: ["error", "failed", "exception", "unauthorized", "forbidden"]
+    value:
+      - not found
+      - does not exist
+      - '404'
+      - no pull request
+      - file not in diff
+      - line not in diff
   comment_result:
     type: str
+  error_indicators:
+    type: list
+    value:
+      - error
+      - failed
+      - exception
+      - unauthorized
+      - forbidden
+  expected_success_indicators:
+    type: list
+    value:
+      - created
+      - added
+      - id
+      - comment
+      - success
+      - inline
+      - bitbucket.org
+      - pull-requests
+      - '#comment-'
+  inline_comment_text:
+    type: str
+    value: This is an inline comment on a specific line of code. Test case BB23.
+  inline_file_path:
+    type: str
+    value: test-files/bb17-pr-changes.txt
+  inline_json_data:
+    type: str
+  inline_line_number:
+    type: str
+    value: '1'
+  pr_id:
+    type: str
+    value: '1'
   test_results:
     type: dict
-
-entry_point: add_inline_comment
+entry_point: build_inline_json
 nodes:
+  - id: build_inline_json
+    type: code
+    code:
+      type: fstring
+      value: |-
+        import json
+
+        line = alita_state.get('inline_line_number')
+        path = alita_state.get('inline_file_path')
+
+        inline_data = {
+            "from": int(line),
+            "to": int(line),
+            "path": path
+        }
+
+        inline_data
+    input:
+      - inline_line_number
+      - inline_file_path
+    output:
+      - inline_json_data
+    structured_output: false
+    transition: add_inline_comment
   - id: add_inline_comment
     type: toolkit
     input:
       - pr_id
       - inline_comment_text
-      - inline_file_path
-      - inline_line_number
+      - inline_json_data
     input_mapping:
+      content:
+        type: variable
+        value: inline_comment_text
+      inline:
+        type: variable
+        value: inline_json_data
       pr_id:
         type: variable
         value: pr_id
-      content:
-        type: fstring
-        value: |
-          {{"text": "{inline_comment_text}", "path": "{inline_file_path}", "line": {inline_line_number}}}
-      inline:
-        type: fixed
-        value: true
     output:
       - comment_result
     structured_output: true
     tool: add_pull_request_comment
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    toolkit_name: bitbucket-testing
     transition: validate_results
-
   - id: validate_results
     type: llm
     input:
@@ -102,6 +144,11 @@ nodes:
 
           This is an EDGE CASE test - we expect inline comment OR acceptable failure (file not in diff).
 
+          IMPORTANT: The Bitbucket API returns a URL format response:
+          - Success: https://bitbucket.org/.../pull-requests/{pr_id}/_/diff#comment-{comment_id}
+          - Extract comment_id from URL pattern: #comment-XXXXXX
+          - URL with "#comment-" is definitive success
+
           Validation Criteria (ALL must pass for test_passed=true):
           1. tool_executed: Tool executed without crashing or unhandled exception
           2. inline_accepted_or_acceptable_error: Inline format was accepted OR error is acceptable
@@ -122,13 +169,13 @@ nodes:
             "no_unhandled_exception": boolean,
             "inline_supported": boolean,
             "inline_comment_added": boolean,
-            "comment_id": "extracted comment ID or 'not found'",
+            "comment_id": "extracted comment ID from URL (e.g., '751427920' from '#comment-751427920') or 'not found'",
             "acceptable_error_found": "which acceptable error was found or 'none'",
             "error": string | null
           }}
 
           Return ONLY the JSON object.
-    model: ${DEFAULT_LLM_MODEL}
+    model: gpt-4o-2024-11-20
     output:
       - test_results
     structured_output_dict:

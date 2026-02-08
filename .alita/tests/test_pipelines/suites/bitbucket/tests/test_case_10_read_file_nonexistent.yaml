@@ -15,6 +15,9 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
+  branch:
+    type: str
+    value: main
   non_existent_file:
     type: str
     value: this/file/does/not/exist/bb10.txt
@@ -34,6 +37,9 @@ nodes:
     type: toolkit
     input: []
     input_mapping:
+      branch:
+        type: variable
+        value: branch
       path:
         type: fixed
         value: "."
@@ -57,12 +63,13 @@ nodes:
         value: non_existent_file
       branch:
         type: variable
-        value: ACTIVE_BRANCH
+        value: branch
     output:
       - read_result
     structured_output: true
     tool: read_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    continue_on_error: true  # Expected to fail - this is a negative test
     transition: validate_results
 
   - id: validate_results
@@ -70,8 +77,6 @@ nodes:
     input:
       - files_in_repo
       - read_result
-      - non_existent_file
-      - expected_error_indicators
     input_mapping:
       chat_history:
         type: fixed

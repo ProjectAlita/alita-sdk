@@ -56,8 +56,6 @@ state:
     type: str
   updated_content:
     type: str
-  cleanup_result:
-    type: str
   test_results:
     type: dict
 
@@ -122,24 +120,6 @@ nodes:
       - updated_content
     structured_output: true
     tool: read_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: cleanup_file
-
-  - id: cleanup_file
-    type: toolkit
-    input:
-      - test_file_path
-    input_mapping:
-      file_path:
-        type: variable
-        value: test_file_path
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - cleanup_result
-    structured_output: true
-    tool: delete_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 

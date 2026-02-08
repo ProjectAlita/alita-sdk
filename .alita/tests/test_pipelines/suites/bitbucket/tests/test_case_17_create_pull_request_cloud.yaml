@@ -52,6 +52,8 @@ state:
     type: str
   file_result:
     type: str
+  pr_json_data:
+    type: str
   pr_result:
     type: str
   test_results:
@@ -110,19 +112,49 @@ nodes:
     structured_output: true
     tool: create_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: build_pr_json
+
+  - id: build_pr_json
+    type: code
+    code:
+      type: fstring
+      value: |-
+        import json
+
+        title = alita_state.get('pr_title')
+        branch = alita_state.get('source_branch')
+
+        pr_data = {
+            "title": title,
+            "source": {
+                "branch": {
+                    "name": branch
+                }
+            },
+            "destination": {
+                "branch": {
+                    "name": "main"
+                }
+            }
+        }
+
+        json.dumps(pr_data)
+    input:
+      - pr_title
+      - source_branch
+    output:
+      - pr_json_data
+    structured_output: true
     transition: create_pull_request
 
   - id: create_pull_request
     type: toolkit
     input:
-      - pr_title
-      - pr_description
-      - source_branch
+      - pr_json_data
     input_mapping:
       pr_json_data:
-        type: fstring
-        value: |
-          {{"title": "{pr_title}", "description": "{pr_description}", "source": {{"branch": {{"name": "{source_branch}"}}}}, "destination": {{"branch": {{"name": "main"}}}}, "close_source_branch": false}}
+        type: variable
+        value: pr_json_data
     output:
       - pr_result
     structured_output: true

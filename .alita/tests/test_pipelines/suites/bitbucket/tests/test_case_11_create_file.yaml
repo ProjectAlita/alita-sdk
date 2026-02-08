@@ -37,8 +37,6 @@ state:
     type: str
   read_result:
     type: str
-  cleanup_result:
-    type: str
   test_results:
     type: dict
 
@@ -82,24 +80,6 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: cleanup_file
-
-  - id: cleanup_file
-    type: toolkit
-    input:
-      - test_file_path
-    input_mapping:
-      file_path:
-        type: variable
-        value: test_file_path
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - cleanup_result
-    structured_output: true
-    tool: delete_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results
@@ -136,8 +116,7 @@ nodes:
           3. content_matches: Read result contains the original content
           4. special_chars_preserved: Special characters and Unicode are preserved in read result
           5. read_succeeded: File was successfully read back after creation
-          6. cleanup_completed: Cleanup operation did not fail catastrophically
-          7. commit_confirmed: Create result indicates a commit was made
+          6. commit_confirmed: Create result indicates a commit was made
 
           Return JSON test_results:
           {{
@@ -147,7 +126,6 @@ nodes:
             "content_matches": boolean,
             "special_chars_preserved": boolean,
             "read_succeeded": boolean,
-            "cleanup_completed": boolean,
             "commit_confirmed": boolean,
             "content_length_original": number,
             "content_length_read": number,

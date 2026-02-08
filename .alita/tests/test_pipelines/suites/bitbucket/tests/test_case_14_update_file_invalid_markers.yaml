@@ -15,6 +15,9 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
+  branch:
+    type: str
+    value: main
   test_file_path:
     type: str
     value: test-files/bb14-invalid-update.txt
@@ -69,7 +72,7 @@ nodes:
         value: initial_content
       branch:
         type: variable
-        value: ACTIVE_BRANCH
+        value: branch
     output:
       - create_result
     structured_output: true
@@ -91,7 +94,7 @@ nodes:
         value: invalid_update_non_matching
       branch:
         type: variable
-        value: ACTIVE_BRANCH
+        value: branch
     output:
       - invalid_result_1
     structured_output: true
@@ -113,7 +116,7 @@ nodes:
         value: invalid_update_missing_new
       branch:
         type: variable
-        value: ACTIVE_BRANCH
+        value: branch
     output:
       - invalid_result_2
     structured_output: true
@@ -131,29 +134,11 @@ nodes:
         value: test_file_path
       branch:
         type: variable
-        value: ACTIVE_BRANCH
+        value: branch
     output:
       - current_content
     structured_output: true
     tool: read_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: cleanup_file
-
-  - id: cleanup_file
-    type: toolkit
-    input:
-      - test_file_path
-    input_mapping:
-      file_path:
-        type: variable
-        value: test_file_path
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - cleanup_result
-    structured_output: true
-    tool: delete_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 

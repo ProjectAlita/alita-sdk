@@ -29,6 +29,7 @@ import json
 import os
 import sys
 import time
+import yaml
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Any
@@ -71,6 +72,115 @@ def get_auth_headers(include_content_type: bool = False) -> dict:
     if include_content_type:
         headers["Content-Type"] = "application/json"
     return headers
+
+
+def load_nodes_with_continue_on_error(pipeline_name: str, logger: Optional[TestLogger] = None) -> set:
+    """
+    Load the test YAML definition and extract node IDs that have continue_on_error: true.
+    
+    Args:
+        pipeline_name: Name of the pipeline to find the YAML file for
+        logger: Optional logger for debugging
+        
+    Returns:
+        Set of node IDs that have continue_on_error enabled
+    """
+    import yaml
+    
+    nodes_with_flag = set()
+    
+    try:
+        # Search for test YAML files in common locations
+        test_dirs = [
+            Path("suites"),
+            Path("."),
+            Path(".."),
+            Path("../../suites"),
+        ]
+        
+        for base_dir in test_dirs:
+            if not base_dir.exists():
+                continue
+                
+            # Search recursively for test YAML files
+            for yaml_file in base_dir.rglob("*.yaml"):
+                try:
+                    with open(yaml_file, 'r', encoding='utf-8') as f:
+                        data = yaml.safe_load(f)
+                        
+                    if not data or not isinstance(data, dict):
+                        continue
+                    
+                    # Check if this is the right test file
+                    if data.get("name") != pipeline_name:
+                        continue
+                    
+                    # Found the right file - extract nodes with continue_on_error
+                    nodes = data.get("nodes", [])
+                    for node in nodes:
+                        if isinstance(node, dict) and node.get("continue_on_error") is True:
+                            node_id = node.get("id")
+                            if node_id:
+                                nodes_with_flag.add(node_id)
+                                if logger:
+                                    logger.debug(f"Found node '{node_id}' with continue_on_error: true")
+                    
+                    # Found and processed the file
+                    break
+                except Exception:
+                    continue
+            
+            if nodes_with_flag:
+                break
+                
+    except Exception as e:
+        if logger:
+            logger.debug(f"Could not load node configuration: {e}")
+    
+    return nodes_with_flag
+
+
+def is_error_from_continue_on_error_node(error_text: str, tool_calls_dict: dict, 
+                                         nodes_with_continue_on_error: set,
+                                         logger: Optional[TestLogger] = None) -> bool:
+    """
+    Check if an error message came from a node with continue_on_error: true.
+    
+    This checks if the error text appears in the tool_output of a tool call
+    from a node that has the continue_on_error flag enabled.
+    
+    Args:
+        error_text: The error message text
+        tool_calls_dict: Dictionary of tool calls from execution
+        nodes_with_continue_on_error: Set of node IDs that have continue_on_error: true
+        logger: Optional logger for debugging
+        
+    Returns:
+        True if error came from a continue_on_error node, False otherwise
+    """
+    if not tool_calls_dict or not error_text or not nodes_with_continue_on_error:
+        return False
+    
+    # Extract key parts of error message for matching
+    error_key = error_text.strip()[:100]  # First 100 chars for matching
+    
+    for tool_call_id, tool_call in tool_calls_dict.items():
+        tool_output = tool_call.get("tool_output") or tool_call.get("content", "")
+        
+        if isinstance(tool_output, str) and error_key in tool_output:
+            # Error matches this tool's output - check if node has continue_on_error
+            node_name = tool_call.get("metadata", {}).get("langgraph_node", "unknown")
+            
+            if node_name in nodes_with_continue_on_error:
+                if logger:
+                    logger.debug(f"Error from node '{node_name}' with continue_on_error: true - treating as expected")
+                return True
+            else:
+                if logger:
+                    logger.debug(f"Error from node '{node_name}' without continue_on_error - treating as failure")
+                return False
+    
+    return False
 
 
 def get_pipeline_by_id(base_url: str, project_id: int, pipeline_id: int, headers: dict) -> Optional[dict]:
@@ -153,6 +263,11 @@ def process_pipeline_result(
     test_passed = None
     output = result_data
     detected_error = None  # Track user-friendly error messages
+    
+    # Load node configuration to identify nodes with continue_on_error: true
+    nodes_with_continue_on_error = load_nodes_with_continue_on_error(pipeline_name, logger)
+    if nodes_with_continue_on_error and logger:
+        logger.debug(f"Loaded {len(nodes_with_continue_on_error)} nodes with continue_on_error: {nodes_with_continue_on_error}")
 
     # CRITICAL: Check for tool execution errors FIRST (before checking test_passed from LLM)
     # This prevents false positives where LLM says "test passed" but a tool actually failed
@@ -291,6 +406,8 @@ def process_pipeline_result(
     # Check for errors in chat_history messages (before checking test_passed)
     if test_passed is None and isinstance(result_data, dict) and "chat_history" in result_data:
         chat_history = result_data.get("chat_history", [])
+        tool_calls_dict = result_data.get("tool_calls_dict", {})
+        
         for msg in chat_history:
             if isinstance(msg, dict):
                 content = msg.get("content", "")
@@ -302,6 +419,12 @@ def process_pipeline_result(
                             # Check for error field
                             if "error" in parsed_content and parsed_content["error"]:
                                 error_msg = parsed_content["error"]
+                                
+                                # Check if this error came from a continue_on_error node
+                                if is_error_from_continue_on_error_node(error_msg, tool_calls_dict, nodes_with_continue_on_error, logger):
+                                    if logger:
+                                        logger.debug(f"Error from continue_on_error node - not treating as failure")
+                                    continue
                                 
                                 if "Traceback" in error_msg:
                                     lines = error_msg.strip().split('\n')
@@ -321,6 +444,12 @@ def process_pipeline_result(
                             # Check for execution failure status
                             elif parsed_content.get("status") == "Execution failed":
                                 error_msg = parsed_content.get("error", "Execution failed")
+                                
+                                # Check if this error came from a continue_on_error node
+                                if is_error_from_continue_on_error_node(error_msg, tool_calls_dict, nodes_with_continue_on_error, logger):
+                                    if logger:
+                                        logger.debug(f"Execution failed from continue_on_error node - not treating as failure")
+                                    continue
                                 
                                 if "Traceback" in error_msg:
                                     lines = error_msg.strip().split('\n')
