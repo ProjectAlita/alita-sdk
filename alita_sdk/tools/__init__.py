@@ -130,6 +130,32 @@ except ImportError as e:
     logger.debug(f"Community module not available: {e}")
 
 
+def _filter_blocked_tools(toolkit_tools: list, toolkit_type: str) -> list:
+    """Filter out blocked tools from a list of instantiated tools.
+
+    This is a security feature that filters tools at runtime based on
+    deployment configuration.
+    """
+    try:
+        from ..runtime.toolkits.security import get_blocked_tools_for_toolkit
+        blocked_tools = get_blocked_tools_for_toolkit(toolkit_type)
+        if not blocked_tools:
+            return toolkit_tools
+
+        blocked_lower = set(t.lower() for t in blocked_tools)
+        filtered = []
+        for tool in toolkit_tools:
+            tool_name = getattr(tool, 'name', '')
+            if tool_name.lower() in blocked_lower:
+                logger.warning(f"[SECURITY] Filtering blocked tool '{tool_name}' from toolkit '{toolkit_type}'")
+            else:
+                filtered.append(tool)
+        return filtered
+    except ImportError:
+        # Security module not available, return unfiltered
+        return toolkit_tools
+
+
 def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, **kwargs):
     tools = []
 
@@ -204,7 +230,10 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
             else:
                 logger.warning(f"Unknown tool type: {tool_type}")
         #
-        # Always inject toolkit_id to each tool 
+        # Filter out blocked tools within this toolkit
+        toolkit_tools = _filter_blocked_tools(toolkit_tools, tool_type)
+
+        # Always inject toolkit_id to each tool
         _inject_toolkit_id(tool, toolkit_tools)
         tools.extend(toolkit_tools)
 

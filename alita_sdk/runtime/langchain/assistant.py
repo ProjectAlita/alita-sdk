@@ -136,13 +136,19 @@ class Assistant:
                         bucket_name = tool['settings']['bucket']
                         break
 
+            # Build internal tool configs
+            internal_tool_configs = []
             for internal_tool_name in actual_internal_tools:
                 tool_config = {"type": "internal_tool", "name": internal_tool_name, "settings": {}}
                 if bucket_name:
                     tool_config["settings"]["bucket_name"] = bucket_name
-                version_tools.append(tool_config)
+                internal_tool_configs.append(tool_config)
 
-            logger.info(f"Added {len(actual_internal_tools)} internal tools: {actual_internal_tools}")
+            # Insert internal tools at the FRONT of version_tools
+            # This ensures they are "first class citizens" - bound to LLM before other toolkits
+            version_tools = internal_tool_configs + version_tools
+
+            logger.info(f"Added {len(actual_internal_tools)} internal tools as first-class: {actual_internal_tools}")
 
         self.tools = get_tools(
             version_tools,
