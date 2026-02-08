@@ -101,6 +101,8 @@ jobs:
           export JIRA_API_KEY="${{ secrets.JIRA_API_KEY }}"
           export JIRA_USERNAME="${{ secrets.JIRA_USERNAME }}"
           export JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}"
+          export FIGMA_API_TOKEN="${{ secrets.FIGMA_API_TOKEN }}"
+          export BITBUCKET_TOKEN="${{ secrets.BITBUCKET_TOKEN }}"
           export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"
