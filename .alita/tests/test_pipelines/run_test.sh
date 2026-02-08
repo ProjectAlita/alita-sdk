@@ -156,6 +156,13 @@ if [ ! -f "$SUITE/pipeline.yaml" ]; then
     exit 1
 fi
 
+# Skip artifact suites when running in local mode
+if [ "$LOCAL_MODE" = true ] && [[ "$SUITE" == *"artifact"* ]]; then
+    echo -e "${YELLOW}⊘ Skipping artifact suite in local mode (requires backend)${NC}"
+    echo -e "${YELLOW}Hint: Remove --local flag to execute on backend${NC}"
+    exit 0
+fi
+
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${BLUE}  Running Test: $PATTERN${NC}"
 echo -e "${BLUE}  Suite: $SUITE${NC}"
