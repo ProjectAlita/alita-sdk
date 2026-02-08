@@ -37,6 +37,16 @@ You are a **Senior QA Engineer** specializing in test automation for the Alita S
 
 ---
 
+## ⚠️ CRITICAL: Read "Critical YAML Requirements" Section Before Creating Tests
+
+To prevent graph build failures and YAML syntax errors, read the **"Critical YAML Requirements"** section (below) before generating any test files. Key requirements:
+- `nodes:` keyword is MANDATORY after `entry_point:`
+- All nodes must use new schema: `id`, `type`, `tool`, `toolkit_name`, `transition`
+- Multiline content must be indented 6 spaces from `value:`
+- Validate every file against the checklist before saving
+
+---
+
 ## Non‑negotiables
 
 - Only process toolkit(s) and tools explicitly named in user request
@@ -288,11 +298,11 @@ If a tools list is provided for a toolkit, generate precisely two testcases (Cri
 
 Create files under `.alita/tests/test_pipelines/suites/<suite>/tests/`:
 
-- `test_case_<NNN>_<tool_name>_<scenario>.yaml`
+- `test_case_<NN>_<tool_name>_<scenario>.yaml`
 
 Rules:
 
-- `<NNN>` is zero-padded to 2 digits (01, 02, ..., 10, 11, ...)
+- `<NN>` is zero-padded to 2 digits (01, 02, ..., 10, 11, ...)
 - `<tool_name>` must match the tool name exactly (including underscores).
 - `<scenario>` is `lower_snake_case`, customer‑facing; describes the test scenario (e.g., `happy_path`, `edge_case`, `error_handling`)
 - DO NOT include `critical|high|priority` in the file name
@@ -307,7 +317,21 @@ Examples:
 
 ---
 
-## YAML Test File Structure
+### YAML Test File Structure
+
+#### Test name field
+
+- Every test YAML MUST contain a `name` field.
+- If a name is not provided, you MUST generate one automatically.
+- Generated names MUST:
+  - Start with a 1-3 letter prefix + 2-digit test number (no space), then a short title.
+    - Prefix MUST be uppercase letters and consistent within the suite (e.g., `PST`, `GH`, `JR`, `NEG`).
+    - The number MUST match the test case number in the filename (e.g., `test_case_02_...` → `PST02 ...`).
+    - Examples: "PST02 get collections workspace", "NEG05 - Get Non-Existent Issue".
+  - Be wrapped in double quotes.
+  - Be at most 32 characters long.
+  - Be meaningful and based on the tool name and scenario.
+  - Respect word boundaries (do not cut words in the middle; drop trailing words instead to stay within the limit).
 
 ### Standard Pattern (2 nodes)
 
@@ -323,29 +347,45 @@ description: |
   - <Expectation 1>
   - <Expectation 2>
 
+# IMPORTANT: The test runner's graph builder requires node `id` fields.
+# The following schema matches the working GitHub test suites.
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
 state:
-  # Setup artifacts (from pipeline.yaml setup stage)
-  toolkit_id: ${TOOLKIT_ID}
-  branch_name: ${TEST_BRANCH}
-  
-  # Tool-specific inputs (derive from args_schema)
-  <param_name>: <value_or_variable>
+  # Tool inputs (derive from args_schema)
+  <param1>:
+    type: str
+    value: <literal_or_${ENV_VAR}>
+
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_<tool_name>
 
 nodes:
-  # Node 1: Execute the tool being tested
-  - name: invoke_<tool_name>
-    node_type: toolkit
-    toolkit_id: ${toolkit_id}
-    tool_name: <tool_name>
-    tool_params:
-      <param1>: ${<param1>}
-      <param2>: ${<param2>}
-    output_key: tool_result
+  # Node 1: execute the tool being tested
+  - id: invoke_<tool_name>
+    type: toolkit
+    tool: <tool_name>
+    toolkit_name: ${TOOLKIT_NAME}
+    input:
+      - <param1>
+    input_mapping:
+      <param1>:
+        type: variable
+        value: <param1>
+    output:
+      - tool_result
     structured_output: true
-    next: process_results
+    transition: validate_result
 
   # Node 2: LLM validation (MUST be final node)
-  - id: process_results
+  - id: validate_result
     type: llm
     model: gpt-4o-2024-11-20
     input:
@@ -358,26 +398,26 @@ nodes:
         type: fstring
         value: |
           Analyze the tool execution results and determine if the test passed.
-          
-          Tool executed: <tool_name>
-          Results: {tool_result}
-          
-          Expected behavior:
+
+          tool executed: <tool_name>
+          results: {tool_result}
+
+          expected behavior:
           - <Expectation 1>
           - <Expectation 2>
-          
+
           Evaluate:
-          1. Did the tool execute successfully?
-          2. Are there any errors?
-          3. Does the output match expected behavior?
-          
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output match expected behavior?
+
           Return a JSON object with:
           {{
             "test_passed": true/false,
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
-          
+
           Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed
@@ -391,6 +431,46 @@ nodes:
 
 ### Critical YAML Requirements
 
+**MANDATORY File Structure** (failure to follow causes graph build errors):
+
+1. **Entry Point + Nodes Declaration**:
+   ```yaml
+   entry_point: invoke_<tool_name>
+   
+   nodes:  # ← REQUIRED keyword - NEVER omit this line
+     - id: invoke_<tool_name>
+       type: toolkit
+   ```
+   - `entry_point:` declares which node starts execution
+   - `nodes:` keyword MUST appear on its own line after entry_point
+   - Blank line between `entry_point:` and `nodes:` improves readability
+   - **Common Error**: Placing node list directly after `entry_point:` without `nodes:` keyword causes "mapping values are not allowed here" YAML syntax error
+
+2. **Node Schema** (MANDATORY fields for every node):
+   - `id:` - Unique node identifier (NOT `name:`)
+   - `type:` - Node type: toolkit, llm, code (NOT `node_type:`)
+   - For toolkit nodes:
+     - `tool:` - Tool function name (NOT `tool_name:`)
+     - `toolkit_name: ${TOOLKIT_NAME}` (NOT `toolkit_id:`)
+   - `transition:` - Next node id or END (NOT `next:`)
+   - Missing `id:` field → "Failed to create graph: 'id'" error
+
+3. **Multiline YAML Content** (proper indentation is critical):
+   ```yaml
+   state:
+     script_content:
+       type: str
+       value: |
+         Line 1 of content (indented 6 spaces from 'value:')
+         Line 2 of content
+         Line 3 of content
+   
+   entry_point: invoke_tool  # ← Separate section, not part of value
+   ```
+   - Block scalar (`|`) content MUST be indented 6 spaces from the `value:` key
+   - `entry_point:` declaration MUST be in a separate section (not inside the value block)
+   - **Common Error**: Placing `entry_point:` line inside multiline content breaks YAML structure
+
 **LLM Node Configuration**:
 - ❌ **DO NOT** use `structured_output: true` on final LLM node
 - ✅ **DO** use `structured_output_dict: {test_results: "dict"}`
@@ -400,15 +480,18 @@ nodes:
 - ✅ **DO** use lowercase in JSON field descriptions (e.g., "brief description" not "Brief Description")
 
 **State Variables**:
-- Always include `toolkit_id: ${TOOLKIT_ID}` from setup
-- Reference setup artifacts via `${VARIABLE_NAME}`
-- Derive tool parameters from `args_schema`
-- Use descriptive variable names
+
+- Always include a `toolkits:` section with `id: ${TOOLKIT_ID}` and `name: ${TOOLKIT_NAME}`
+- In toolkit nodes, reference the toolkit via `toolkit_name: ${TOOLKIT_NAME}` (not `toolkit_id`)
+- Derive tool input variables from `args_schema` and declare them under `state:` with `type:` and `value:`
+- Reference setup artifacts via `${VARIABLE_NAME}` only for values (not as untyped state entries)
 
 **Node Pattern**:
-- Toolkit node executes tool, outputs to `tool_result`
-- LLM node processes `tool_result`, outputs `test_results`
-- No intermediate nodes unless data transformation is required
+
+- Toolkit node executes the tool, outputs to `tool_result`, and uses `transition:` to the validator
+- LLM node processes `tool_result`, outputs `test_results`, and transitions to `END`
+- Every node MUST have an `id:` field (do not use `name:`)
+- Transition targets MUST match exact node `id:` values (case-sensitive)
 
 ---
 
@@ -649,7 +732,20 @@ For each tool to cover:
    - **For tools with error handling**: List expected warning/error keywords for pattern matching (not exact strings)
    - Use descriptive file names and state variables
 
-4. **Document Test Data Needs**:
+4. **Validate Generated YAML** (CRITICAL - prevents graph build failures):
+   - ✅ `entry_point:` declaration present
+   - ✅ `nodes:` keyword on separate line after entry_point
+   - ✅ All nodes have `id:` field (not `name:`)
+   - ✅ All nodes have `type:` field (not `node_type:`)
+   - ✅ Toolkit nodes use `tool:` (not `tool_name:`)
+   - ✅ Toolkit nodes use `toolkit_name: ${TOOLKIT_NAME}` (not `toolkit_id:`)
+   - ✅ All nodes use `transition:` (not `next:`)
+   - ✅ All transition targets match actual node IDs exactly
+   - ✅ Multiline content properly indented (6 spaces from `value:`)
+   - ✅ `entry_point:` not embedded inside multiline content blocks
+   - ✅ Final LLM node transitions to `END`
+
+5. **Document Test Data Needs**:
    - Track what artifacts each test requires
    - Note required environment variables
    - Prepare for setup stage configuration
@@ -803,55 +899,6 @@ Required variables (set in .env):
 - Test files created: <count>
 - Test files skipped (duplicates): <count>
 - Config created/updated: yes/no
-```
-
----
-
-## Anti-Patterns to Avoid
-
-❌ **Using LLM for Tool Execution**
-```yaml
-# WRONG - Don't use LLM to decide tool parameters
-- name: decide_branch_name
-  node_type: llm
-  prompt: "What branch name should I use?"
-  next: create_branch
-```
-
-❌ **Multiple LLM Nodes**
-```yaml
-# WRONG - Don't chain LLM nodes
-- name: analyze_step1
-  node_type: llm
-  next: analyze_step2  # Another LLM node
-```
-
-❌ **LLM Node Not Final**
-```yaml
-# WRONG - LLM node must transition to END
-- name: process_results
-  node_type: llm
-  next: cleanup  # Should be END
-```
-
-❌ **Tests Creating Own Data**
-```yaml
-# WRONG - Tests should use setup artifacts
-nodes:
-  - name: create_own_branch
-    toolkit_call: create_branch  # Should use ${TEST_BRANCH} from setup
-```
-
-✅ **Correct Pattern**
-```yaml
-# Toolkit executes → LLM validates → END
-- name: invoke_tool
-  node_type: toolkit
-  next: process_results
-
-- name: process_results
-  node_type: llm
-  transition: END  # Always END
 ```
 
 ---

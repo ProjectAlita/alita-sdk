@@ -19,10 +19,11 @@ Comprehensive test suite for the artifact toolkit (`alita_sdk/runtime/tools/arti
 | AT11 | `deleteFile` | test_case_11_delete_file_happy_path.yaml | High | File deletion and removal verification |
 | AT12 | `read_multiple_files` | test_case_12_read_multiple_files_happy_path.yaml | High | Batch file retrieval |
 | AT13 | `get_file_type` | test_case_13_get_file_type_happy_path.yaml | High | File type detection from content |
+| AT16 | `edit_file` | test_case_16_edit_empty_file_edge_case.yaml | High | Empty file edit behavior validation |
 
-**Total Test Cases: 13**
+**Total Test Cases: 14**
 - Critical: 4 tests (core functionality)
-- High: 9 tests (variations and edge cases)
+- High: 10 tests (variations and edge cases)
 
 ## Artifact Toolkit Features
 

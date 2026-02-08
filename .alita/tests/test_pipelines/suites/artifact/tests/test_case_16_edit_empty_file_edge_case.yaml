@@ -1,0 +1,177 @@
+name: "ART16 - Edit Empty File: Edge Case Behavior"
+priority: High
+description: |
+  Verify that edit_file handles editing an empty file appropriately.
+  
+  Objective: Test edit behavior when attempting to add content to an empty file using OLD/NEW markers
+  
+  Expected Behavior:
+  - Empty file creation succeeds
+  - Edit operation executes without crash
+  - Replacing empty string ("") with any value will NOT be applied (edit_file limitation)
+  - File MUST remain empty (0B) after edit attempt
+  - Read result MUST be empty string
+  - No system errors occur
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "empty-edit-test-${TIMESTAMP}.txt"
+  empty_content:
+    type: str
+    value: ""
+  edit_query:
+    type: str
+    value: |
+      OLD <<<<
+
+      >>>> OLD
+      NEW <<<<
+      Initial content added via edit
+      >>>> NEW
+  create_result:
+    type: str
+    value: ''
+  edit_result:
+    type: str
+    value: ''
+  read_result:
+    type: str
+    value: ''
+  test_results:
+    type: dict
+
+entry_point: create_empty_file
+
+nodes:
+  - id: create_empty_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - empty_content
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: empty_content
+    output:
+      - create_result
+    structured_output: true
+    transition: edit_empty_file
+
+  - id: edit_empty_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: edit_file
+    input:
+      - filename
+      - bucket_name
+      - edit_query
+    input_mapping:
+      file_path:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      file_query:
+        type: variable
+        value: edit_query
+    output:
+      - edit_result
+    structured_output: true
+    transition: read_edited
+
+  - id: read_edited
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: readFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - create_result
+      - edit_result
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the empty file edit operation results.
+          
+          tool executed: createFile (empty) → edit_file → readFile
+          
+          create result: {create_result}
+          edit result: {edit_result}
+          read result: "{read_result}"
+          
+          this test validates that editing empty files does NOT apply changes.
+          
+          CRITICAL VALIDATION RULES:
+          1. confirm the empty file was created successfully
+          2. examine the edit result - it may show "Successfully applied" but this is misleading
+          3. **VERIFY read_result is EXACTLY empty string ""** - this is the KEY requirement
+          4. if read_result contains ANY content, the test MUST FAIL
+          5. file must remain empty (0 bytes) after edit attempt
+          
+          EXPECTED BEHAVIOR:
+          - Replacing "" (empty string) with any value will NOT be applied
+          - This is a known limitation of edit_file tool with empty files
+          - File MUST remain completely empty after edit
+          
+          return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (TRUE ONLY if read_result is empty string ""),
+            "summary": "brief description of outcome",
+            "error": "error details if file is not empty after edit, null if passed",
+            "file_size_bytes": 0,
+            "content_after_edit": "{read_result}",
+            "validation": "PASS if empty, FAIL if any content present"
+          }}
+          
+          return **ONLY** the JSON object. no markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
