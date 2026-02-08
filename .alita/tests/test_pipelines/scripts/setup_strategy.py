@@ -132,12 +132,13 @@ class LocalSetupStrategy(SetupStrategy):
     actual toolkit tools for test execution.
     """
     
-    def __init__(self, toolkit_configs: Optional[Dict[str, Any]] = None):
+    def __init__(self, toolkit_configs: Optional[Dict[str, Any]] = None, llm: Optional[Any] = None):
         """
         Initialize local strategy.
         
         Args:
             toolkit_configs: Optional pre-loaded toolkit configurations
+            llm: Optional pre-created LLM instance (for image processing, etc.)
         """
         self.toolkit_configs = toolkit_configs or {}
         self.created_toolkits: Dict[str, Any] = {}
@@ -145,6 +146,8 @@ class LocalSetupStrategy(SetupStrategy):
         self.created_tools: List[Any] = []  # Store instantiated tools
         self._next_toolkit_id = 1
         self._alita_client = None
+        self._llm = llm  # Use provided LLM or create on demand
+        self._configuration_data: Dict[str, Dict[str, Any]] = {}  # Store configuration data by alita_title
     
     def get_tools(self) -> List[Any]:
         """
@@ -180,6 +183,10 @@ class LocalSetupStrategy(SetupStrategy):
         if self._alita_client is None:
             self._alita_client = self._create_alita_client()
         
+        # Initialize LLM if needed (for toolkits that process images, etc.)
+        if self._llm is None:
+            self._llm = self._create_llm()
+        
         # Build tool configuration in the format expected by get_tools
         # This matches the structure used by the backend
         tool_config = {
@@ -196,7 +203,7 @@ class LocalSetupStrategy(SetupStrategy):
             tools = get_tools(
                 tools_list=[tool_config],
                 alita_client=self._alita_client,
-                llm=None,
+                llm=self._llm,
                 memory_store=None,
                 debug_mode=False,
             )
@@ -212,21 +219,20 @@ class LocalSetupStrategy(SetupStrategy):
         """
         Build settings dict for a toolkit in the format expected by get_tools.
         
-        Uses configuration schemas from alita_sdk.configurations to dynamically
-        determine required fields and load values from environment variables.
+        This method mirrors the remote mode behavior - it takes already-resolved
+        configuration (with all ${VAR} placeholders substituted via resolve_env_value)
+        and structures it for toolkit creation.
         
         Logic:
-        1. Get configuration class for toolkit_type from alita_sdk.configurations
-        2. Extract all field names from the Pydantic model
-        3. For each field, try to load value from:
-           a. Provided config dict
-           b. Environment variable: {TOOLKIT_TYPE}_{FIELD_NAME} (uppercase)
-        4. Build {toolkit_type}_configuration dict with all values
+        1. Start with existing {toolkit_type}_configuration from config if present
+        2. If alita_title is present, merge in stored configuration data from configuration step
+        3. All placeholders should already be resolved by resolve_env_value before this method
+        4. Fill in any defaults from the Pydantic model if needed
         
         Args:
             toolkit_type: Type of toolkit (e.g., 'github', 'jira')
-            config: Base configuration dict (may contain some values)
-            load_from_env: Function to load values from .env file
+            config: Configuration dict with all ${VAR} placeholders already resolved
+            load_from_env: Function to load values from .env file (for defaults only)
             
         Returns:
             Settings dict with {toolkit_type}_configuration populated
@@ -234,42 +240,40 @@ class LocalSetupStrategy(SetupStrategy):
         settings = config.copy()
         
         # Build the configuration key name (e.g., 'github_configuration', 'jira_configuration')
+        toolkit_type = "ado" if toolkit_type.startswith("ado") else toolkit_type
         config_key = f"{toolkit_type}_configuration"
         
-        # Always start with fresh configuration (override any existing)
-        toolkit_config = {}
+        # Start with existing configuration from config dict if present
+        existing_config = config.get(config_key, {})
+        toolkit_config = existing_config.copy() if isinstance(existing_config, dict) else {}
         
+        # If toolkit_config has an alita_title, try to load stored configuration data
+        if 'alita_title' in toolkit_config and toolkit_config['alita_title'] in self._configuration_data:
+            stored_data = self._configuration_data[toolkit_config['alita_title']]
+            # Merge stored configuration data (credentials) into toolkit_config
+            # Stored data takes precedence for credential fields
+            for key, value in stored_data.items():
+                if key not in toolkit_config or not toolkit_config[key]:
+                    toolkit_config[key] = value
+        
+        # Fill in defaults from Pydantic model if available
         try:
-            # Import configuration classes dynamically
             from alita_sdk.configurations import get_class_configurations
             
             config_classes = get_class_configurations()
             
             if toolkit_type in config_classes:
                 config_class = config_classes[toolkit_type]
-                
-                # Extract field information from Pydantic model
                 model_fields = config_class.model_fields
                 
                 for field_name, field_info in model_fields.items():
-                    # Try to get value from config dict first
-                    value = config.get(field_name)
-                    
-                    # If not in config, try environment variable
-                    # Pattern: {TOOLKIT_TYPE}_{FIELD_NAME} (uppercase)
-                    if not value:
-                        env_var_name = f"{toolkit_type.upper()}_{field_name.upper()}"
-                        value = load_from_env(env_var_name)
-                    # Set the value if found
-                    if value:
-                        toolkit_config[field_name] = value
-                    elif field_info.default is not None:
-                        # Use default value from model if available
-                        toolkit_config[field_name] = field_info.default
+                    # Only set default if field is completely missing
+                    if field_name not in toolkit_config or toolkit_config[field_name] is None:
+                        if field_info.default is not None:
+                            toolkit_config[field_name] = field_info.default
         
         except Exception as e:
-            # If configuration class not available, fall back to basic approach
-            # Just use values from config dict
+            # If configuration class not available, just use what we have
             pass
         
         # Store the configuration in settings
@@ -299,6 +303,23 @@ class LocalSetupStrategy(SetupStrategy):
         except Exception:
             return None
     
+    def _create_llm(self) -> Optional[Any]:
+        """Create LLM instance for toolkits that need it (e.g., image processing)."""
+        if self._alita_client is None:
+            return None
+        
+        try:
+            llm = self._alita_client.get_llm(
+                model_name='gpt-4o-2024-11-20',
+                model_config={
+                    'temperature': 0.0,
+                    'max_tokens': 4096,
+                }
+            )
+            return llm
+        except Exception:
+            return None
+    
     def handle_toolkit_create(
         self,
         step: Dict[str, Any],
@@ -319,12 +340,17 @@ class LocalSetupStrategy(SetupStrategy):
         file_config = {}
         if "config_file" in config:
             try:
-                file_config = load_toolkit_config(config["config_file"], base_path)
+                file_config = load_toolkit_config(
+                    config["config_file"], 
+                    base_path,
+                    env_substitutions=ctx.env_vars,
+                    env_loader=load_from_env
+                )
             except FileNotFoundError:
                 ctx.log(f"Config file not found: {config['config_file']}", "warning")
         
-        # Apply overrides
-        overrides = config.get("overrides", {})
+        # Apply overrides - resolve environment variables in overrides first
+        overrides = resolve_env_value(config.get("overrides", {}), ctx.env_vars, env_loader=load_from_env)
         for key, value in overrides.items():
             if isinstance(value, dict) and key in file_config and isinstance(file_config[key], dict):
                 file_config[key].update(value)
@@ -367,11 +393,10 @@ class LocalSetupStrategy(SetupStrategy):
         ctx: "SetupContext"
     ) -> Dict[str, Any]:
         """
-        Handle toolkit invocation locally.
+        Handle toolkit invocation locally by executing the tool directly.
         
-        For local execution, we skip actual tool invocation and return
-        a placeholder success result. Real tool execution happens during
-        test execution, not setup.
+        Finds the matching tool from self.created_tools and invokes it
+        with the specified parameters.
         """
         from utils_common import resolve_env_value, load_from_env
         
@@ -379,6 +404,7 @@ class LocalSetupStrategy(SetupStrategy):
         
         toolkit_id = config.get("toolkit_id") or config.get("toolkit_ref")
         tool_name = config.get("tool_name")
+        tool_params = resolve_env_value(config.get("tool_params", {}), ctx.env_vars, env_loader=load_from_env)
         
         if not toolkit_id:
             ctx.log("[LOCAL] No toolkit_id provided, skipping", "warning")
@@ -388,15 +414,44 @@ class LocalSetupStrategy(SetupStrategy):
             ctx.log("[LOCAL] No tool_name provided, skipping", "warning")
             return {"success": True, "skipped": True, "reason": "no tool_name", "local": True}
         
-        ctx.log(f"[LOCAL] Skipping toolkit invoke: {tool_name} (local mode)", "info")
+        ctx.log(f"[LOCAL] Invoking toolkit tool: {tool_name} with params: {tool_params}")
         
-        return {
-            "success": True,
-            "skipped": True,
-            "reason": "local_mode",
-            "local": True,
-            "result": {},
-        }
+        # Find the matching tool from created tools
+        matching_tool = None
+        for tool in self.created_tools:
+            if hasattr(tool, 'name') and tool.name == tool_name:
+                matching_tool = tool
+                break
+        
+        if not matching_tool:
+            ctx.log(f"[LOCAL] Tool '{tool_name}' not found in created tools", "error")
+            available_tools = [t.name for t in self.created_tools if hasattr(t, 'name')]
+            ctx.log(f"[LOCAL] Available tools: {available_tools}", "info")
+            return {
+                "success": False,
+                "error": f"Tool '{tool_name}' not found",
+                "available_tools": available_tools,
+                "local": True
+            }
+        
+        # Execute the tool
+        try:
+            ctx.log(f"[LOCAL] Executing tool: {tool_name}", "info")
+            result = matching_tool.invoke(tool_params)
+            ctx.log(f"[LOCAL] Tool {tool_name} executed successfully", "success")
+            
+            return {
+                "success": True,
+                "result": result,
+                "local": True
+            }
+        except Exception as e:
+            ctx.log(f"[LOCAL] Tool {tool_name} execution failed: {e}", "error")
+            return {
+                "success": False,
+                "error": str(e),
+                "local": True
+            }
     
     def handle_configuration(
         self,
@@ -431,6 +486,9 @@ class LocalSetupStrategy(SetupStrategy):
             "title": alita_title,
             "data": data,
         }
+        
+        # Also store the data for lookup by alita_title
+        self._configuration_data[alita_title] = data
         
         ctx.log(f"[LOCAL] Registered configuration '{alita_title}' of type '{config_type}'", "success")
         

@@ -29,6 +29,7 @@ import json
 import os
 import sys
 import time
+import yaml
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Any
@@ -40,6 +41,7 @@ from pattern_matcher import matches_pattern
 
 # Import shared utilities
 from utils_common import load_from_env, load_token_from_env, load_base_url_from_env, load_project_id_from_env
+from logger import TestLogger
 
 
 @dataclass
@@ -70,6 +72,115 @@ def get_auth_headers(include_content_type: bool = False) -> dict:
     if include_content_type:
         headers["Content-Type"] = "application/json"
     return headers
+
+
+def load_nodes_with_continue_on_error(pipeline_name: str, logger: Optional[TestLogger] = None) -> set:
+    """
+    Load the test YAML definition and extract node IDs that have continue_on_error: true.
+    
+    Args:
+        pipeline_name: Name of the pipeline to find the YAML file for
+        logger: Optional logger for debugging
+        
+    Returns:
+        Set of node IDs that have continue_on_error enabled
+    """
+    import yaml
+    
+    nodes_with_flag = set()
+    
+    try:
+        # Search for test YAML files in common locations
+        test_dirs = [
+            Path("suites"),
+            Path("."),
+            Path(".."),
+            Path("../../suites"),
+        ]
+        
+        for base_dir in test_dirs:
+            if not base_dir.exists():
+                continue
+                
+            # Search recursively for test YAML files
+            for yaml_file in base_dir.rglob("*.yaml"):
+                try:
+                    with open(yaml_file, 'r', encoding='utf-8') as f:
+                        data = yaml.safe_load(f)
+                        
+                    if not data or not isinstance(data, dict):
+                        continue
+                    
+                    # Check if this is the right test file
+                    if data.get("name") != pipeline_name:
+                        continue
+                    
+                    # Found the right file - extract nodes with continue_on_error
+                    nodes = data.get("nodes", [])
+                    for node in nodes:
+                        if isinstance(node, dict) and node.get("continue_on_error") is True:
+                            node_id = node.get("id")
+                            if node_id:
+                                nodes_with_flag.add(node_id)
+                                if logger:
+                                    logger.debug(f"Found node '{node_id}' with continue_on_error: true")
+                    
+                    # Found and processed the file
+                    break
+                except Exception:
+                    continue
+            
+            if nodes_with_flag:
+                break
+                
+    except Exception as e:
+        if logger:
+            logger.debug(f"Could not load node configuration: {e}")
+    
+    return nodes_with_flag
+
+
+def is_error_from_continue_on_error_node(error_text: str, tool_calls_dict: dict, 
+                                         nodes_with_continue_on_error: set,
+                                         logger: Optional[TestLogger] = None) -> bool:
+    """
+    Check if an error message came from a node with continue_on_error: true.
+    
+    This checks if the error text appears in the tool_output of a tool call
+    from a node that has the continue_on_error flag enabled.
+    
+    Args:
+        error_text: The error message text
+        tool_calls_dict: Dictionary of tool calls from execution
+        nodes_with_continue_on_error: Set of node IDs that have continue_on_error: true
+        logger: Optional logger for debugging
+        
+    Returns:
+        True if error came from a continue_on_error node, False otherwise
+    """
+    if not tool_calls_dict or not error_text or not nodes_with_continue_on_error:
+        return False
+    
+    # Extract key parts of error message for matching
+    error_key = error_text.strip()[:100]  # First 100 chars for matching
+    
+    for tool_call_id, tool_call in tool_calls_dict.items():
+        tool_output = tool_call.get("tool_output") or tool_call.get("content", "")
+        
+        if isinstance(tool_output, str) and error_key in tool_output:
+            # Error matches this tool's output - check if node has continue_on_error
+            node_name = tool_call.get("metadata", {}).get("langgraph_node", "unknown")
+            
+            if node_name in nodes_with_continue_on_error:
+                if logger:
+                    logger.debug(f"Error from node '{node_name}' with continue_on_error: true - treating as expected")
+                return True
+            else:
+                if logger:
+                    logger.debug(f"Error from node '{node_name}' without continue_on_error - treating as failure")
+                return False
+    
+    return False
 
 
 def get_pipeline_by_id(base_url: str, project_id: int, pipeline_id: int, headers: dict) -> Optional[dict]:
@@ -114,6 +225,7 @@ def process_pipeline_result(
     pipeline_name: str = "Unknown",
     version_id: Optional[int] = None,
     execution_time: float = 0.0,
+    logger: Optional[TestLogger] = None,
     verbose: bool = False,
 ) -> PipelineResult:
     """
@@ -129,7 +241,8 @@ def process_pipeline_result(
         pipeline_name: Name of the pipeline
         version_id: Optional version ID
         execution_time: Time taken for execution
-        verbose: Enable verbose logging
+        logger: Optional TestLogger instance for verbose logging
+        verbose: Whether to enable verbose output (ignored, for compatibility)
         
     Returns:
         PipelineResult with extracted test results and metadata
@@ -150,9 +263,213 @@ def process_pipeline_result(
     test_passed = None
     output = result_data
     detected_error = None  # Track user-friendly error messages
+    
+    # Load node configuration to identify nodes with continue_on_error: true
+    nodes_with_continue_on_error = load_nodes_with_continue_on_error(pipeline_name, logger)
+    if nodes_with_continue_on_error and logger:
+        logger.debug(f"Loaded {len(nodes_with_continue_on_error)} nodes with continue_on_error: {nodes_with_continue_on_error}")
 
-    # Check various result structures for test_passed
-    if isinstance(result_data, dict):
+    # CRITICAL: Check for tool execution errors FIRST (before checking test_passed from LLM)
+    # This prevents false positives where LLM says "test passed" but a tool actually failed
+    if isinstance(result_data, dict) and "tool_calls_dict" in result_data:
+        tool_calls = result_data.get("tool_calls_dict", {})
+        if isinstance(tool_calls, dict):
+            for tool_call_id, tool_call in tool_calls.items():
+                if not isinstance(tool_call, dict):
+                    continue
+                
+                # Check if this tool call failed
+                finish_reason = tool_call.get("finish_reason")
+                if finish_reason == "error":
+                    # Tool execution failed - extract error details
+                    tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                    tool_error = tool_call.get("error", "Unknown error")
+                    
+                    # Format a clear error message
+                    if "ValidationError" in tool_error:
+                        # Extract validation error details
+                        lines = tool_error.split('\n')
+                        validation_msg = "Validation error"
+                        for line in lines:
+                            if "validation error" in line.lower():
+                                validation_msg = line.strip()
+                                break
+                            elif "Input should be" in line or "type=" in line:
+                                validation_msg = line.strip()
+                                break
+                        detected_error = f"Tool '{tool_name}' failed: {validation_msg}"
+                    else:
+                        # Generic error message
+                        error_preview = tool_error[:200] + "..." if len(tool_error) > 200 else tool_error
+                        detected_error = f"Tool '{tool_name}' execution failed: {error_preview}"
+                    
+                    test_passed = False
+                    
+                    if logger:
+                        logger.error(f"Tool execution error detected: {detected_error}")
+                        logger.debug(f"Full tool error: {tool_error}")
+                    
+                    # Break on first error (could collect all errors if needed)
+                    break
+                
+                # Also check tool output content for error patterns (e.g., pyodide_sandbox errors)
+                # Some tools complete successfully but return error information in their output
+                tool_output = tool_call.get("tool_output") or tool_call.get("content")
+                if isinstance(tool_output, str) and tool_output.strip():
+                    # Try to parse as JSON to detect structured error responses
+                    try:
+                        parsed_output = json.loads(tool_output)
+                        if isinstance(parsed_output, dict):
+                            # Check for error field or execution failure status
+                            if "error" in parsed_output and parsed_output["error"]:
+                                tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                                error_msg = parsed_output["error"]
+                                
+                                # Extract meaningful error from tracebacks
+                                if "Traceback" in error_msg:
+                                    # Get last line of traceback (usually the actual error)
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Tool '{tool_name}' returned error: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Tool output error detected: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                            
+                            # Check for execution failure status
+                            elif parsed_output.get("status") == "Execution failed":
+                                tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                                error_msg = parsed_output.get("error", "Execution failed")
+                                
+                                if "Traceback" in error_msg:
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Tool '{tool_name}' execution failed: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Tool execution failure detected: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                    except json.JSONDecodeError:
+                        pass
+
+    # Check for errors in direct result field (e.g., from local execution or chat_history parsing)
+    if test_passed is None and isinstance(result_data, dict):
+        if "result" in result_data:
+            result_obj = result_data.get("result", {})
+            if isinstance(result_obj, dict):
+                # Check for error indicators in result object
+                if "error" in result_obj and result_obj["error"]:
+                    error_msg = result_obj["error"]
+                    
+                    if "Traceback" in error_msg:
+                        lines = error_msg.strip().split('\n')
+                        error_summary = lines[-1] if lines else error_msg
+                    else:
+                        error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                    
+                    detected_error = f"Execution error: {error_summary}"
+                    test_passed = False
+                    
+                    if logger:
+                        logger.error(f"Result error detected: {detected_error}")
+                        logger.debug(f"Full error: {error_msg}")
+                
+                # Check for execution failure status in result
+                elif result_obj.get("status") == "Execution failed":
+                    error_msg = result_obj.get("error", "Execution failed")
+                    
+                    if "Traceback" in error_msg:
+                        lines = error_msg.strip().split('\n')
+                        error_summary = lines[-1] if lines else error_msg
+                    else:
+                        error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                    
+                    detected_error = f"Execution failed: {error_summary}"
+                    test_passed = False
+                    
+                    if logger:
+                        logger.error(f"Execution failure in result: {detected_error}")
+                        logger.debug(f"Full error: {error_msg}")
+    
+    # Check for errors in chat_history messages (before checking test_passed)
+    if test_passed is None and isinstance(result_data, dict) and "chat_history" in result_data:
+        chat_history = result_data.get("chat_history", [])
+        tool_calls_dict = result_data.get("tool_calls_dict", {})
+        
+        for msg in chat_history:
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+                # Try to parse JSON content for error patterns
+                if isinstance(content, str) and content.strip().startswith("{"):
+                    try:
+                        parsed_content = json.loads(content)
+                        if isinstance(parsed_content, dict):
+                            # Check for error field
+                            if "error" in parsed_content and parsed_content["error"]:
+                                error_msg = parsed_content["error"]
+                                
+                                # Check if this error came from a continue_on_error node
+                                if is_error_from_continue_on_error_node(error_msg, tool_calls_dict, nodes_with_continue_on_error, logger):
+                                    if logger:
+                                        logger.debug(f"Error from continue_on_error node - not treating as failure")
+                                    continue
+                                
+                                if "Traceback" in error_msg:
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Chat history error: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Error in chat_history: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                            
+                            # Check for execution failure status
+                            elif parsed_content.get("status") == "Execution failed":
+                                error_msg = parsed_content.get("error", "Execution failed")
+                                
+                                # Check if this error came from a continue_on_error node
+                                if is_error_from_continue_on_error_node(error_msg, tool_calls_dict, nodes_with_continue_on_error, logger):
+                                    if logger:
+                                        logger.debug(f"Execution failed from continue_on_error node - not treating as failure")
+                                    continue
+                                
+                                if "Traceback" in error_msg:
+                                    lines = error_msg.strip().split('\n')
+                                    error_summary = lines[-1] if lines else error_msg
+                                else:
+                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                
+                                detected_error = f"Execution failed in chat: {error_summary}"
+                                test_passed = False
+                                
+                                if logger:
+                                    logger.error(f"Execution failure in chat_history: {detected_error}")
+                                    logger.debug(f"Full error: {error_msg}")
+                                
+                                break
+                    except json.JSONDecodeError:
+                        pass
+
+    # Check various result structures for test_passed (only if not already set by error checks)
+    if test_passed is None and isinstance(result_data, dict):
         # Direct test_passed field
         if "test_passed" in result_data:
             test_passed = result_data.get("test_passed")
@@ -167,8 +484,44 @@ def process_pipeline_result(
                     test_results = nested.get("test_results", {})
                     if isinstance(test_results, dict) and "test_passed" in test_results:
                         test_passed = test_results.get("test_passed")
+        
+        # Check tool_calls_dict for code node outputs (pyodide_sandbox)
+        # This handles cases where test_results is in a code node's output
+        if test_passed is None and "tool_calls_dict" in result_data:
+            tool_calls = result_data.get("tool_calls_dict", {})
+            if isinstance(tool_calls, dict):
+                # Look for code nodes with test_results in output
+                for tool_call_id, tool_call in tool_calls.items():
+                    if not isinstance(tool_call, dict):
+                        continue
+                    
+                    tool_name = tool_call.get("tool_meta", {}).get("name", "")
+                    if tool_name != "pyodide_sandbox":
+                        continue
+                    
+                    # Parse tool_output for test_results
+                    tool_output = tool_call.get("tool_output", "")
+                    if isinstance(tool_output, str) and tool_output.strip().startswith("{"):
+                        try:
+                            parsed = json.loads(tool_output)
+                            if isinstance(parsed, dict):
+                                # Check result.test_results.test_passed
+                                if "result" in parsed:
+                                    result_obj = parsed.get("result", {})
+                                    if isinstance(result_obj, dict) and "test_results" in result_obj:
+                                        tr = result_obj.get("test_results", {})
+                                        if isinstance(tr, dict) and "test_passed" in tr:
+                                            test_passed = tr.get("test_passed")
+                                            if isinstance(output, dict):
+                                                output["result"] = result_obj
+                                            else:
+                                                output = result_obj
+                                            break
+                        except json.JSONDecodeError:
+                            pass
+        
         # Check in chat_history (pipeline response format)
-        elif "chat_history" in result_data:
+        if test_passed is None and "chat_history" in result_data:
             chat_history = result_data.get("chat_history", [])
             for msg in chat_history:
                 if isinstance(msg, dict):
@@ -177,12 +530,25 @@ def process_pipeline_result(
                     if isinstance(content, str) and ("Error executing code: [Errno 7]" in content or "[Errno 7] Argument list too long" in content):
                          test_passed = False
                          detected_error = "Content too large: The data payload exceeded system limits. Consider reducing the amount of data being processed."
-                         output = {"error": detected_error, "raw_content": content[:500]}
+                         output = {"error": detected_error, "raw_content": content}
                          break
 
-                    if isinstance(content, str) and content.startswith("{"):
+                    # Strip markdown code fences if present
+                    json_content = content
+                    if isinstance(content, str):
+                        # Remove markdown code fences (```json ... ``` or ``` ... ```)
+                        stripped = content.strip()
+                        if stripped.startswith("```"):
+                            lines = stripped.split("\n")
+                            if lines[0].startswith("```"):
+                                lines = lines[1:]  # Remove first line
+                            if lines and lines[-1].strip() == "```":
+                                lines = lines[:-1]  # Remove last line
+                            json_content = "\n".join(lines).strip()
+
+                    if isinstance(json_content, str) and json_content.startswith("{"):
                         try:
-                            parsed = json.loads(content)
+                            parsed = json.loads(json_content)
                             if isinstance(parsed, dict):
                                 if "test_passed" in parsed:
                                     test_passed = parsed.get("test_passed")
@@ -220,7 +586,7 @@ def process_pipeline_result(
                 # Get all tool calls sorted by timestamp_finish (latest first)
                 sorted_calls = sorted(
                     tool_calls.values(),
-                    key=lambda x: x.get("timestamp_finish", "") if isinstance(x, dict) else "",
+                    key=lambda x: x.get("timestamp_finish") or "" if isinstance(x, dict) else "",
                     reverse=True
                 )
                 for tool_call in sorted_calls:
@@ -273,8 +639,31 @@ def process_pipeline_result(
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-    if verbose:
-        print(f"  Processed result - test_passed: {test_passed}")
+    if logger:
+        logger.debug(f"Processed result - test_passed: {test_passed}")
+        if test_passed is False:
+            # Log error details when test fails
+            if detected_error:
+                logger.error(f"Test failed: {detected_error}")
+            elif isinstance(output, dict):
+                # Try to extract error from output
+                error_msg = output.get("error") or output.get("error_message")
+                if error_msg:
+                    logger.error(f"Test failed: {error_msg}")
+                elif "result" in output:
+                    result = output.get("result")
+                    if isinstance(result, dict):
+                        error_msg = result.get("error") or result.get("error_message") or result.get("message")
+                        if error_msg:
+                            logger.error(f"Test failed: {error_msg}")
+                        else:
+                            logger.error(f"Test failed: {result}")
+                    else:
+                        logger.error(f"Test failed with result: {result}")
+                else:
+                    logger.error(f"Test failed with output: {output}")
+            else:
+                logger.error(f"Test failed with output: {output}")
 
     return PipelineResult(
         success=True,
@@ -294,13 +683,12 @@ def execute_pipeline(
     pipeline: dict,
     input_message: str = "",
     timeout: int = 120,
-    verbose: bool = False,
-    verbose_to_stderr: bool = False
+    logger: Optional[TestLogger] = None,
 ) -> PipelineResult:
     """Execute a pipeline using the v2 predict API (synchronous).
     
     Args:
-        verbose_to_stderr: If True and verbose is True, write verbose output to stderr
+        logger: Optional TestLogger instance for logging
     """
     start_time = time.time()
     headers = get_auth_headers(include_content_type=True)
@@ -321,9 +709,8 @@ def execute_pipeline(
     version = versions[0]  # Latest version
     version_id = version.get("id")
 
-    if verbose:
-        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
-        print(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})", file=output_stream)
+    if logger:
+        logger.debug(f"Executing: {pipeline_name} (ID: {pipeline_id}, Version: {version_id})")
 
     # Use v2 predict API for synchronous execution
     predict_url = f"{base_url}/api/v2/elitea_core/predict/prompt_lib/{project_id}/{version_id}"
@@ -332,10 +719,9 @@ def execute_pipeline(
         "user_input": input_message or "execute"
     }
 
-    if verbose:
-        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
-        print(f"  POST {predict_url}", file=output_stream)
-        print(f"  Payload: {json.dumps(payload)}", file=output_stream)
+    if logger:
+        logger.debug(f"POST {predict_url}")
+        logger.debug(f"Payload: {json.dumps(payload)}")
 
     try:
         response = requests.post(
@@ -367,13 +753,21 @@ def execute_pipeline(
 
     execution_time = time.time() - start_time
 
-    if verbose:
-        output_stream = sys.stderr if verbose_to_stderr else sys.stdout
-        print(f"  Response: {response.status_code}", file=output_stream)
+    if logger:
+        logger.debug(f"Response: {response.status_code}")
 
     # Handle HTTP errors
     if response.status_code not in (200, 201):
-        error_text = response.text[:500] if response.text else "No response body"
+        error_text = response.text if response.text else "No response body"
+        
+        # Log the HTTP error with details
+        if logger:
+            logger.http_error(
+                response.status_code,
+                error_text,
+                context=f"POST {base_url}/api/v2/elitea_core/predict/prompt_lib/{pipeline_id}/{version_id}"
+            )
+        
         return PipelineResult(
             success=False,
             pipeline_id=pipeline_id,
@@ -404,7 +798,7 @@ def execute_pipeline(
         pipeline_name=pipeline_name,
         version_id=version_id,
         execution_time=execution_time,
-        verbose=verbose,
+        logger=logger,
     )
 
 
@@ -457,6 +851,9 @@ def main():
             print(f"Error: {error_msg}")
         sys.exit(1)
 
+    # Create logger instance
+    logger = TestLogger(verbose=args.verbose, quiet=args.json) if args.verbose else None
+
     # Execute pipeline
     result = execute_pipeline(
         base_url=base_url,
@@ -464,7 +861,7 @@ def main():
         pipeline=pipeline,
         input_message=args.input,
         timeout=args.timeout,
-        verbose=args.verbose
+        logger=logger
     )
 
     # Output results

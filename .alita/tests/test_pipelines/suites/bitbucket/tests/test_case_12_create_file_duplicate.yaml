@@ -1,0 +1,165 @@
+name: "BB12 - create_file: Handle duplicate file error"
+description: |
+  Verify the Bitbucket 'create_file' tool handles duplicate file gracefully.
+
+  Objective: Test error handling when creating a file that already exists
+
+  Expected Behavior:
+  - First creation succeeds
+  - Second creation fails with appropriate error
+  - Original content is preserved (not overwritten)
+  - Error message indicates file already exists
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  test_file_path:
+    type: str
+    value: test-files/bb12-duplicate-test.txt
+  initial_content:
+    type: str
+    value: "Initial content for BB12 test - this should be preserved"
+  duplicate_content:
+    type: str
+    value: "This content should NOT overwrite the original"
+  expected_error_indicators:
+    type: list
+    value: ["exists", "already", "duplicate", "conflict", "error", "failed"]
+  first_create_result:
+    type: str
+  duplicate_create_result:
+    type: str
+  current_content:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_file_first_time
+nodes:
+  - id: create_file_first_time
+    type: toolkit
+    input:
+      - test_file_path
+      - initial_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: variable
+        value: initial_content
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - first_create_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: attempt_duplicate_create
+
+  - id: attempt_duplicate_create
+    type: toolkit
+    input:
+      - test_file_path
+      - duplicate_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: variable
+        value: duplicate_content
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - duplicate_create_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_original_content
+
+  - id: verify_original_content
+    type: toolkit
+    input:
+      - test_file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      branch:
+        type: variable
+        value: ACTIVE_BRANCH
+    output:
+      - current_content
+    structured_output: true
+    tool: read_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - first_create_result
+      - duplicate_create_result
+      - current_content
+      - initial_content
+      - duplicate_content
+      - expected_error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from duplicate file creation attempt.
+
+          First Creation Result: {first_create_result}
+          Duplicate Creation Result: {duplicate_create_result}
+          Current File Content: {current_content}
+          Initial Content: {initial_content}
+          Duplicate Content Attempted: {duplicate_content}
+          Expected Error Indicators: {expected_error_indicators}
+
+          This is a NEGATIVE test - we expect the duplicate creation to fail.
+
+          Validation Criteria for test_passed=true:
+          REQUIRED (ALL must pass):
+          1. first_creation_succeeded: First file creation was successful
+          2. duplicate_creation_failed: Second creation attempt failed or returned error
+          3. error_indicates_exists: Duplicate result contains indicator that file exists
+          4. original_content_preserved: Current content matches initial content (not duplicate)
+          5. content_not_overwritten: Duplicate content does NOT appear in current file
+          6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
+          
+          OPTIONAL (nice to have, but not required for test to pass):
+          7. error_message_helpful: Error message provides useful information
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (SET TO TRUE if: first_creation_succeeded AND duplicate_creation_failed AND error_indicates_exists AND original_content_preserved AND content_not_overwritten AND no_unhandled_exception),
+            "first_creation_succeeded": boolean,
+            "duplicate_creation_failed": boolean,
+            "error_indicates_exists": boolean,
+            "original_content_preserved": boolean,
+            "content_not_overwritten": boolean,
+            "no_unhandled_exception": boolean,
+            "error_message_helpful": boolean (optional, does not affect test_passed),
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

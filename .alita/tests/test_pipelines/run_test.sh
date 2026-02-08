@@ -25,7 +25,8 @@ DO_SEED=false
 DO_CLEANUP=false
 LOCAL_MODE=false
 ENV_FILE=".env"
-TIMEOUT=120
+TIMEOUT=""
+TIMEOUT_SET=false
 
 print_usage() {
     echo "Usage: $0 [OPTIONS] <suite> <pattern>"
@@ -107,6 +108,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --timeout)
             TIMEOUT="$2"
+            TIMEOUT_SET=true
             shift 2
             ;;
         -v|--verbose)
@@ -152,6 +154,13 @@ fi
 if [ ! -f "$SUITE/pipeline.yaml" ]; then
     echo -e "${RED}Error: pipeline.yaml not found in $SUITE/${NC}"
     exit 1
+fi
+
+# Skip artifact suites when running in local mode
+if [ "$LOCAL_MODE" = true ] && [[ "$SUITE" == *"artifact"* ]]; then
+    echo -e "${YELLOW}⊘ Skipping artifact suite in local mode (requires backend)${NC}"
+    echo -e "${YELLOW}Hint: Remove --local flag to execute on backend${NC}"
+    exit 0
 fi
 
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
@@ -211,10 +220,17 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Build timeout argument - only pass if user explicitly provided it
+# Otherwise, run_suite.py will read from config or use its default (120)
+TIMEOUT_ARG=""
+if [ "$TIMEOUT_SET" = true ]; then
+    TIMEOUT_ARG="--timeout $TIMEOUT"
+fi
+
 # Run with pattern filter
 if python scripts/run_suite.py "$SUITE" \
     --pattern "$PATTERN" \
-    --timeout "$TIMEOUT" \
+    $TIMEOUT_ARG \
     --env-file "$ENV_FILE" \
     --output-json "test_results/$SUITE/results.json" \
     $VERBOSE \

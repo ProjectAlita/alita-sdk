@@ -1,0 +1,103 @@
+name: "ART01 - Create New Bucket: Happy Path"
+priority: Critical
+description: |
+  Verify that the createNewBucket tool correctly creates a new artifact bucket with expiration settings.
+  
+  Objective: Test bucket creation with proper sanitization (underscores to hyphens) and expiration configuration
+  
+  Expected Behavior:
+  - Bucket is created successfully
+  - Bucket name is sanitized (underscores → hyphens)
+  - Expiration settings are applied
+  - Bucket can be used for file operations
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  bucket_name:
+    type: str
+    value: "test-bucket-${TIMESTAMP}"
+  expiration_measure:
+    type: str
+    value: "weeks"
+  expiration_value:
+    type: int
+    value: 2
+  create_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: create_bucket
+
+nodes:
+  - id: create_bucket
+    type: toolkit
+    tool: createNewBucket
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    input:
+      - bucket_name
+      - expiration_measure
+      - expiration_value
+    input_mapping:
+      bucket_name:
+        type: variable
+        value: bucket_name
+      expiration_measure:
+        type: variable
+        value: expiration_measure
+      expiration_value:
+        type: variable
+        value: expiration_value
+    output:
+      - create_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o
+    input:
+      - create_result
+      - bucket_name
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact storage operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the bucket creation result and determine if the test passed.
+          
+          Tool executed: createNewBucket
+          Original bucket name: {bucket_name}
+          Expiration: 2 weeks
+          Result: {create_result}
+          
+          Expected behavior:
+          - Bucket is created successfully
+          - Response indicates success
+          
+          Evaluate:
+          1. Does the result indicate successful bucket creation?
+          2. Is the bucket name sanitized (underscores converted to hyphens)?
+          3. Are there any errors or exceptions?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -18,6 +18,12 @@
     "execute_generic_rq",
     "modify_labels",
     "get_specific_field_info",
-    "link_issues"
+    "link_issues",
+    "get_field_with_image_descriptions",
+    "get_comments_with_image_descriptions",
+    "get_remote_links",
+    "get_attachments_content",
+    "add_file_to_issue_description",
+    "update_comment_with_file"
   ]
 }

@@ -1,0 +1,96 @@
+name: "FIG07 - Get File with Extra Params"
+description: "Test get_file with extra_params for output filtering and limiting"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "qhfjaNs21EVUVlBiBejzPH"
+  extra_params:
+    type: dict
+    value:
+      limit: "5000"
+      fields_retain: "name,version,document"
+      depth_start: "0"
+      depth_end: "2"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_file_filtered
+
+nodes:
+  - id: invoke_get_file_filtered
+    type: toolkit
+    input:
+      - file_key
+      - extra_params
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+      extra_params:
+        type: variable
+        value: extra_params
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_filtered_output
+
+  - id: validate_filtered_output
+    type: llm
+    input:
+      - tool_result
+      - extra_params
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API output filtering testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'get_file' when called with extra_params for filtering.
+
+          Tool Output: {tool_result}
+          Extra Params Used: {extra_params}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Field Filtering: Verify only retained fields are present:
+             - Should have: name, version, document (as specified in fields_retain)
+             - Should NOT have: components, styles, or other fields not in retain list
+          3. Depth Limiting: Check that nested objects respect depth limits:
+             - depth_start: 0, depth_end: 2 means maximum 2 levels of nesting
+             - Deeper nested objects should be truncated or excluded
+          4. Character Limit: Output should respect the 5000 character limit if exceeded
+
+          Note: The exact filtering behavior depends on the implementation. The test passes if filtering is applied in any reasonable way.
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "filtering_applied": boolean,
+            "has_retained_fields": boolean,
+            "respects_depth_limit": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of filtering results"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

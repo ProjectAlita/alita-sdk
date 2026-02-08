@@ -1,0 +1,30 @@
+name: "SR12 - DateTime Formatting"
+description: "Verify datetime formatting in code node with output string format"
+
+state:
+  input:
+    type: str
+  messages:
+    type: list
+  test_data:
+    type: number
+    value: '1'
+entry_point: code_to_catch_bug_with_new_lines
+nodes:
+  - id: code_to_catch_bug_with_new_lines
+    type: code
+    code:
+      type: fixed
+      value: |-
+        from datetime import datetime
+        current_date = datetime.now()
+        current_time = datetime.now()
+
+        output_string = f"11\n\n Test comment {current_date}{current_time}"
+        print(output_string)
+
+        {"formatted_message": output_string}
+    input: []
+    output: []
+    structured_output: true
+    transition: END

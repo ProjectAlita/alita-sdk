@@ -1,0 +1,108 @@
+name: "FIG16 - Analyze File: Basic"
+description: "Test analyze_file with default parameters for comprehensive file analysis"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "08gulCjBVizChhF1uwAZUm"
+  node_id:
+    type: str
+    value: ""
+  max_frames:
+    type: int
+    value: 50
+  include_design_insights:
+    type: bool
+    value: true
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+
+entry_point: invoke_analyze_file
+
+nodes:
+  - id: invoke_analyze_file
+    type: toolkit
+    input:
+      - file_key
+      - node_id
+      - max_frames
+      - include_design_insights
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+      node_id:
+        type: variable
+        value: node_id
+      max_frames:
+        type: variable
+        value: max_frames
+      include_design_insights:
+        type: variable
+        value: include_design_insights
+    output:
+      - tool_result
+    structured_output: true
+    tool: analyze_file
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_analysis
+
+  - id: validate_analysis
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API file analysis testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'analyze_file' tool which uses TOON format.
+
+          Tool Output: {tool_result}
+
+          The analyze_file tool returns Token-Optimized Output Notation (TOON) format.
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. TOON Structure: Verify the output contains expected TOON sections:
+             - FILE SUMMARY section with basic file info
+             - PAGES section listing all pages
+             - PAGE sections with frame details
+             - DESIGN INSIGHTS section (by default)
+          3. Content Quality: Check that:
+             - Text content is extracted and categorized
+             - Frame hierarchy is preserved
+             - Screen types are identified
+          4. Format Validity: TOON format should be readable and structured
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "has_file_summary": boolean,
+            "has_pages_section": boolean,
+            "has_design_insights": boolean,
+            "toon_format_valid": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of analysis results"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

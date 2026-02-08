@@ -1,0 +1,90 @@
+name: "FIG02 - Get File Nodes: Edge Case"
+description: "Test get_file_nodes behavior with invalid node IDs"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "08gulCjBVizChhF1uwAZUm"
+  invalid_node_ids:
+    type: str
+    value: "999999:999999,INVALID:NODE"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_file_nodes_invalid
+
+nodes:
+  - id: invoke_get_file_nodes_invalid
+    type: toolkit
+    input:
+      - file_key
+      - invalid_node_ids
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+      ids:
+        type: variable
+        value: invalid_node_ids
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_file_nodes
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_edge_case
+
+  - id: validate_edge_case
+    type: llm
+    input:
+      - tool_result
+      - invalid_node_ids
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API edge case testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'get_file_nodes' when called with invalid node IDs.
+
+          Tool Output: {tool_result}
+          Invalid Node IDs Used: {invalid_node_ids}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool completed execution (didn't crash)
+          2. Error Handling: Check how the API handles invalid node IDs:
+             - Does it return an error message?
+             - Does it return empty nodes?
+             - Does it return partial results?
+          3. Response Structure: Even with invalid IDs, response should maintain valid structure
+          4. Graceful Failure: The tool should handle invalid input gracefully
+
+          Expected behavior: The API might return empty nodes object or specific error messages for invalid IDs.
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "error_handling": "graceful" or "error" or "crash",
+            "nodes_returned": integer,
+            "error": string or null,
+            "message_snippet": "Brief summary of how invalid IDs were handled"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

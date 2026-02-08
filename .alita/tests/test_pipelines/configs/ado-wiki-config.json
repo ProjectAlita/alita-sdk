@@ -1,0 +1,23 @@
+{
+  "type": "ado_wiki",
+  "toolkit_name": "ado-wiki",
+  "id": 2,
+  "ado_configuration": {
+    "alita_title": "ado",
+    "private": true
+  },
+  "organization_url": "https://dev.azure.com/epameliteatest",
+  "project": "TestProject",
+  "token": "${ADO_TOKEN}",
+  "default_wiki_identifier": "TestProject.wiki",
+  "selected_tools": [
+    "get_wiki",
+    "get_wiki_page",
+    "get_wiki_page_by_path",
+    "get_wiki_page_by_id",
+    "delete_page_by_path",
+    "delete_page_by_id",
+    "modify_wiki_page",
+    "rename_wiki_page"
+  ]
+}

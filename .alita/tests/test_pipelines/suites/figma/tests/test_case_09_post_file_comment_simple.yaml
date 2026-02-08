@@ -1,0 +1,90 @@
+name: "FIG09 - Post File Comment: Simple"
+description: "Test posting a basic comment to a Figma file"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  file_key:
+    type: str
+    value: "08gulCjBVizChhF1uwAZUm"
+  comment_message:
+    type: str
+    value: "Test comment from ALITA SDK - ${TIMESTAMP}"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_post_comment
+
+nodes:
+  - id: invoke_post_comment
+    type: toolkit
+    input:
+      - file_key
+      - comment_message
+    input_mapping:
+      file_key:
+        type: variable
+        value: file_key
+      message:
+        type: variable
+        value: comment_message
+    output:
+      - tool_result
+    structured_output: true
+    tool: post_file_comment
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_comment_creation
+
+  - id: validate_comment_creation
+    type: llm
+    input:
+      - tool_result
+      - comment_message
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API comment creation testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'post_file_comment' tool and validate the comment was created.
+
+          Tool Output: {tool_result}
+          Expected Message: {comment_message}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool executed successfully
+          2. Comment Created: Verify a comment object was returned with:
+             - id (newly created comment ID)
+             - message (should match the input message)
+             - user (user who created the comment)
+             - created_at (timestamp)
+          3. Message Match: The returned message should match the input message
+          4. No Errors: Response should not contain error fields
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": boolean,
+            "comment_created": boolean,
+            "message_matches": boolean,
+            "has_comment_id": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of comment creation"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

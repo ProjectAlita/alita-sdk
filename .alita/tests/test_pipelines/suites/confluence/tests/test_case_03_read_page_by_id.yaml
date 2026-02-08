@@ -1,0 +1,80 @@
+name: "CF03 - Read Page by ID"
+description: "Verify read_page_by_id tool retrieves page content using page ID"
+
+toolkits:
+  - id: ${CONFLUENCE_TOOLKIT_ID}
+    name: ${CONFLUENCE_TOOLKIT_NAME}
+
+state:
+  page_id:
+    type: str
+    value: '182452225'
+  expected_title:
+    type: str
+    value: 'Template - Project plan'
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+entry_point: invoke_read_page_by_id
+
+nodes:
+  - id: invoke_read_page_by_id
+    type: toolkit
+    input:
+      - page_id
+    input_mapping:
+      page_id:
+        type: variable
+        value: page_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: read_page_by_id
+    toolkit_name: confluence-testing
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    input:
+      - tool_result
+      - expected_title
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'read_page_by_id' tool for page ID 182452225 (Template - Project plan).
+
+          Tool Result: {tool_result}
+          Expected Title: {expected_title}
+
+          Perform the following checks:
+
+          1. Tool Execution: Confirm the tool executed successfully (result is not empty or null).
+          2. Content Retrieved: Verify the output contains page content (non-empty string).
+          3. Content Length: Check that content length is greater than 10 characters.
+          4. Content Validity: Verify content is a non-empty string (pattern check removed as page content may vary).
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if tool executed and returned valid content),
+            "tool_executed": boolean,
+            "content_length": integer,
+            "has_valid_content": boolean (true if content length > 10),
+            "failed_checks": [string]
+          }}
+
+          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+    model: gpt-4o
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

@@ -1,0 +1,80 @@
+name: "JR03 - Create Issue (Happy Path)"
+priority: Critical
+description: |
+  Verify `create_issue` tool creates a new JIRA issue successfully.
+
+  Objective: Ensure tool can create issues with proper fields and returns created issue info.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Returns message containing created issue key and details.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_json:
+    type: str
+    value: '{"fields": {"project": {"key": "${JIRA_PROJECT}"}, "summary": "Test Issue ${TIMESTAMP}", "description": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Automated test issue created by JIRA toolkit test"}]}]}, "issuetype": {"name": "Task"}, "priority": {"name": "Medium"}}}'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_issue
+
+nodes:
+  - id: invoke_create_issue
+    type: toolkit
+    tool: create_issue
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_json
+    input_mapping:
+      issue_json:
+        type: variable
+        value: issue_json
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_issue' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or null).
+          2. Verify result contains issue information (key, ID, or created message).
+          3. Result should indicate successful creation.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

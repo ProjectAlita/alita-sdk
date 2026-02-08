@@ -1,0 +1,110 @@
+name: "ADO05 - Get Wiki Page with Image Processing"
+description: "Verify 'get_wiki_page' retrieves wiki content with processed image descriptions using custom prompt"
+
+toolkits:
+  - id: ${ADO_WIKI_TOOLKIT_ID}
+    name: ${ADO_WIKI_TOOLKIT_NAME}
+
+state:
+  wiki_identified:
+    type: str
+    value: 'TestProject.wiki'
+  page_id:
+    type: str
+    value: '54'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_wiki_page
+nodes:
+  - id: invoke_get_wiki_page
+    type: toolkit
+    input:
+      - wiki_identified
+      - page_id
+      - include_content
+      - image_description_prompt
+      - recursion_level
+    input_mapping:
+      wiki_identified:
+        type: variable
+        value: wiki_identified
+      page_id:
+        type: variable
+        value: page_id
+      include_content:
+        type: fixed
+        value: true
+      image_description_prompt:
+        type: fixed
+        value: what is on the immage
+      recursion_level:
+        type: fixed
+        value: oneLevel
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_wiki_page
+    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    transition: validate_wiki
+
+  - id: validate_wiki
+    type: llm
+    input:
+      - tool_result
+      - page_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate that the wiki page content was retrieved successfully with image descriptions.
+
+          Tool Result: {tool_result}
+          Expected Page ID: {page_id}
+
+          Expected structure:
+          - eTag: string (version tag)
+          - page: object containing:
+            - id: 54
+            - path: string (e.g., "/AI tests")
+            - git_item_path: string (e.g., "/AI-tests.md")
+            - remote_url: string
+            - url: string
+            - order: number
+            - sub_pages: array (can be empty)
+            - content: string containing markdown with image descriptions (not raw attachment URLs)
+
+          Validation requirements:
+          1. Content field must be present
+          2. Image descriptions should be contextual (e.g., describing laptop, workspace, desk)
+          3. Images should NOT be raw attachment URLs - they should be processed descriptions
+          4. Content should match the pattern: ![image.png](descriptive text about the image)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "has_etag": boolean,
+            "has_page_object": boolean,
+            "page_id_matches": boolean,
+            "has_content_field": boolean,
+            "has_image_descriptions": boolean,
+            "no_raw_attachment_urls": boolean,
+            "content_contextual": boolean
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

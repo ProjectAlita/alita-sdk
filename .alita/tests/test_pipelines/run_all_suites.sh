@@ -47,8 +47,7 @@ print_usage() {
     echo "Run test suites with full workflow (setup, seed, run, cleanup)"
     echo ""
     echo "Options:"
-    echo "  -v, --verbose           Enable verbose output"
-    echo "  --show-output           Show verbose test execution in real-time (implies -v)"
+    echo "  -v, --verbose           Enable verbose output with real-time display"
     echo "  --local                 Run tests locally without backend (isolated mode)"
     echo "  --skip-initial-cleanup  Skip cleanup before starting (not recommended)"
     echo "  --skip-cleanup          Skip cleanup after tests"
@@ -68,7 +67,7 @@ print_usage() {
     echo "Examples:"
     echo "  $0                              # Run all suites with initial cleanup"
     echo "  $0 -v github_toolkit            # Run GitHub toolkit with verbose output"
-    echo "  $0 --show-output github_toolkit # Show live test execution"
+    echo "  $0 -v                           # Run all suites with verbose real-time output"
     echo "  $0 --local github_toolkit       # Run GitHub toolkit locally (no backend)"
     echo "  $0 --skip-cleanup               # Run all but skip post-test cleanup"
     echo "  $0 --skip-initial-cleanup       # Skip cleanup before starting"
@@ -79,10 +78,6 @@ print_usage() {
 while [[ $# -gt 0 ]]; do
     case $1 in
         -v|--verbose)
-            VERBOSE="--verbose"
-            shift
-            ;;
-        --show-output)
             VERBOSE="--verbose"
             SHOW_OUTPUT=true
             shift
@@ -127,6 +122,36 @@ if [ ${#SUITES[@]} -eq 0 ]; then
     SUITES=("${DEFAULT_SUITES[@]}")
 fi
 
+# Skip artifact suites when running in local mode
+if [ "$LOCAL_MODE" = true ]; then
+    FILTERED_SUITES=()
+    SKIPPED_SUITES=()
+    
+    for suite_spec in "${SUITES[@]}"; do
+        # Check if suite name contains 'artifact'
+        if [[ "$suite_spec" == *"artifact"* ]]; then
+            SKIPPED_SUITES+=("$suite_spec")
+        else
+            FILTERED_SUITES+=("$suite_spec")
+        fi
+    done
+    
+    # Show message if any suites were skipped
+    if [ ${#SKIPPED_SUITES[@]} -gt 0 ]; then
+        echo -e "${YELLOW}ℹ️  Skipping artifact suites in local mode: ${SKIPPED_SUITES[*]}${NC}"
+        echo ""
+    fi
+    
+    # Update SUITES to filtered list
+    SUITES=("${FILTERED_SUITES[@]}")
+    
+    # Exit if no suites left to run
+    if [ ${#SUITES[@]} -eq 0 ]; then
+        echo -e "${YELLOW}No suites to run (all require remote execution)${NC}"
+        exit 0
+    fi
+fi
+
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
@@ -134,6 +159,8 @@ mkdir -p "$OUTPUT_DIR"
 declare -A SUITE_RESULTS
 declare -A SUITE_PASSED
 declare -A SUITE_FAILED
+declare -A SUITE_ERRORS
+declare -A SUITE_SKIPPED
 declare -A SUITE_DURATION
 TOTAL_START=$(date +%s)
 
@@ -177,7 +204,7 @@ run_suite() {
     # Check if suite directory exists
     if [ ! -d "$suite_dir" ]; then
         print_error "Suite directory not found: $suite_dir"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
@@ -185,25 +212,40 @@ run_suite() {
     local config_file="${pipeline_file:-pipeline.yaml}"
     if [ ! -f "$suite_dir/$config_file" ]; then
         print_error "$config_file not found in $suite_dir/"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
     # Create output directory using sanitized suite name (replace : with _)
+    # Strip 'suites/' prefix to avoid duplication in output paths
     local suite_output_name="${suite_spec//:/_}"
-    local suite_output_dir="$OUTPUT_DIR/$suite_output_name"
+    suite_output_name="${suite_output_name#suites/}"
+    local suite_output_dir="$OUTPUT_DIR/suites/$suite_output_name"
     mkdir -p "$suite_output_dir"
 
     # Step 1: Setup
     if [ "$SKIP_SETUP" = false ]; then
         print_step "Step 1/4: Running setup for $suite_spec"
-        if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env > "$suite_output_dir/setup.log" 2>&1; then
-            print_success "Setup completed"
+        if [ "$SHOW_OUTPUT" = true ]; then
+            # Show output in real-time while also capturing to log
+            # Set FORCE_COLOR=1 to preserve colors through tee pipe
+            if FORCE_COLOR=1 python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env 2>&1 | tee "$suite_output_dir/setup.log"; then
+                print_success "Setup completed"
+            else
+                print_error "Setup failed - see $suite_output_dir/setup.log"
+                SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
+                return 1
+            fi
         else
-            print_error "Setup failed - see $suite_output_dir/setup.log"
-            SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
-            cat "$suite_output_dir/setup.log"
-            return 1
+            # Capture to log only
+            if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env > "$suite_output_dir/setup.log" 2>&1; then
+                print_success "Setup completed"
+            else
+                print_error "Setup failed - see $suite_output_dir/setup.log"
+                SUITE_RESULTS["$suite_spec"]="SETUP_FAILED"
+                cat "$suite_output_dir/setup.log"
+                return 1
+            fi
         fi
     else
         echo "  Skipping setup (using existing environment)"
@@ -211,28 +253,46 @@ run_suite() {
 
     # Step 2: Seed pipelines
     print_step "Step 2/4: Seeding pipelines for $suite_spec"
-    if python scripts/seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
-        print_success "Pipelines seeded"
+    if [ "$SHOW_OUTPUT" = true ]; then
+        # Show output in real-time while also capturing to log
+        # Set FORCE_COLOR=1 to preserve colors through tee pipe
+        if FORCE_COLOR=1 python scripts/seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE 2>&1 | tee "$suite_output_dir/seed.log"; then
+            print_success "Pipelines seeded"
+        else
+            print_error "Seeding failed - see $suite_output_dir/seed.log"
+            SUITE_RESULTS["$suite_spec"]="SEED_FAILED"
+            return 1
+        fi
     else
-        print_error "Seeding failed - see $suite_output_dir/seed.log"
-        SUITE_RESULTS[$suite_spec]="SEED_FAILED"
-        cat "$suite_output_dir/seed.log"
-        return 1
+        # Capture to log only
+        if python scripts/seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
+            print_success "Pipelines seeded"
+        else
+            print_error "Seeding failed - see $suite_output_dir/seed.log"
+            SUITE_RESULTS["$suite_spec"]="SEED_FAILED"
+            cat "$suite_output_dir/seed.log"
+            return 1
+        fi
     fi
 
     # Step 3: Run tests
     print_step "Step 3/4: Running tests for $suite_spec"
     local results_file="$suite_output_dir/results.json"
 
+    # Extract timeout from config (will be overridden by run_suite.py if not found)
+    # Note: run_suite.py will use config value automatically, no need to pass --timeout
+    # unless we want to override it
+
     # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
     # Now verbose output goes to stderr, so we can use both --json and $VERBOSE together
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
-        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        # Set FORCE_COLOR=1 to preserve colors through tee pipe
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
-            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
             cat "$suite_output_dir/run.log"
             return 1
         fi
@@ -242,7 +302,7 @@ run_suite() {
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
-            SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
             cat "$suite_output_dir/run.log"
             return 1
         fi
@@ -252,22 +312,26 @@ run_suite() {
     if [ -f "$results_file" ]; then
         local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
         local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+        local errors=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('errors', 0))" 2>/dev/null || echo "0")
+        local skipped=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
         local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total', 0))" 2>/dev/null || echo "0")
 
-        SUITE_PASSED[$suite_spec]=$passed
-        SUITE_FAILED[$suite_spec]=$failed
+        SUITE_PASSED["$suite_spec"]=$passed
+        SUITE_FAILED["$suite_spec"]=$failed
+        SUITE_ERRORS["$suite_spec"]=$errors
+        SUITE_SKIPPED["$suite_spec"]=$skipped
 
-        echo "  Results: $passed passed, $failed failed (total: $total)"
+        echo "  Results: $passed passed, $failed failed, $errors errors, $skipped skipped (total: $total)"
 
-        if [ "$failed" -gt 0 ]; then
-            SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
+        if [ "$failed" -gt 0 ] || [ "$errors" -gt 0 ]; then
+            SUITE_RESULTS["$suite_spec"]="TESTS_FAILED"
             print_error "Some tests failed"
         else
-            SUITE_RESULTS[$suite_spec]="PASSED"
+            SUITE_RESULTS["$suite_spec"]="PASSED"
         fi
     else
         print_error "Test execution failed - see $suite_output_dir/run.log"
-        SUITE_RESULTS[$suite_spec]="RUN_FAILED"
+        SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
         cat "$suite_output_dir/run.log"
         return 1
     fi
@@ -287,7 +351,7 @@ run_suite() {
 
     local suite_end=$(date +%s)
     local suite_duration=$((suite_end - suite_start))
-    SUITE_DURATION[$suite_spec]=$suite_duration
+    SUITE_DURATION["$suite_spec"]=$suite_duration
 
     print_success "Suite $suite_spec completed in ${suite_duration}s"
 
@@ -315,7 +379,7 @@ run_suite_local() {
     # Check if suite directory exists
     if [ ! -d "$suite_dir" ]; then
         print_error "Suite directory not found: $suite_dir"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
@@ -323,56 +387,71 @@ run_suite_local() {
     local config_file="${pipeline_file:-pipeline.yaml}"
     if [ ! -f "$suite_dir/$config_file" ]; then
         print_error "$config_file not found in $suite_dir/"
-        SUITE_RESULTS[$suite_spec]="FAILED"
+        SUITE_RESULTS["$suite_spec"]="FAILED"
         return 1
     fi
 
     # Create output directory using sanitized suite name (replace : with _)
+    # Strip 'suites/' prefix to avoid duplication in output paths
     local suite_output_name="${suite_spec//:/_}"
-    local suite_output_dir="$OUTPUT_DIR/$suite_output_name"
+    suite_output_name="${suite_output_name#suites/}"
+    local suite_output_dir="$OUTPUT_DIR/suites/$suite_output_name"
     mkdir -p "$suite_output_dir"
 
-    # Step 1: Setup (with --local flag)
-    print_step "Step 1/3: Running setup for $suite_spec (local)"
-    if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env --local > "$suite_output_dir/setup.log" 2>&1; then
-        print_success "Setup completed"
-    else
-        print_error "Setup failed - see $suite_output_dir/setup.log"
-        SUITE_RESULTS[$suite_spec]="SETUP_FAILED"
-        cat "$suite_output_dir/setup.log"
-        return 1
-    fi
-
-    # Step 3: Run tests (with --local flag)
-    print_step "Step 2/3: Running tests for $suite_spec (local)"
+    # Note: Local mode setup is handled internally by run_suite.py
+    # No separate setup step needed - run_suite.py executes setup and runs tests
+    
+    # Step 1: Run tests (with --local flag, includes internal setup)
+    print_step "Step 1/2: Running tests for $suite_spec (local)"
     local results_file="$suite_output_dir/results.json"
 
-    if python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> "$suite_output_dir/run.log"; then
-        print_success "Tests completed"
-
-        # Parse results
-        if [ -f "$results_file" ]; then
-            local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
-            local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
-            local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total_tests', 0))" 2>/dev/null || echo "0")
-
-            SUITE_PASSED[$suite_spec]=$passed
-            SUITE_FAILED[$suite_spec]=$failed
-
-            echo "  Results: $passed passed, $failed failed (total: $total)"
-
-            if [ "$failed" -gt 0 ]; then
-                SUITE_RESULTS[$suite_spec]="TESTS_FAILED"
-                print_error "Some tests failed"
-            else
-                SUITE_RESULTS[$suite_spec]="PASSED"
-            fi
+    # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
+    # run_suite.py --local executes setup internally and then runs tests
+    # Logger routes setup output to stderr so it doesn't pollute JSON on stdout
+    if [ "$SHOW_OUTPUT" = true ]; then
+        # Show verbose output in real-time while also capturing to log
+        # Set FORCE_COLOR=1 to preserve colors through tee pipe
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+            print_success "Tests completed"
+        else
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
+            return 1
         fi
     else
-        print_error "Test execution failed - see $suite_output_dir/run.log"
-        SUITE_RESULTS[$suite_spec]="RUN_FAILED"
-        cat "$suite_output_dir/run.log"
-        return 1
+        # Capture verbose output to log file only
+        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> "$suite_output_dir/run.log"; then
+            print_success "Tests completed"
+        else
+            print_error "Test execution failed - see $suite_output_dir/run.log"
+            SUITE_RESULTS["$suite_spec"]="RUN_FAILED"
+            cat "$suite_output_dir/run.log"
+            return 1
+        fi
+    fi
+
+    # Parse results
+    if [ -f "$results_file" ]; then
+        local passed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
+        local failed=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+        local errors=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('errors', 0))" 2>/dev/null || echo "0")
+        local skipped=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
+        local total=$(python -c "import json; data=json.load(open('$results_file')); print(data.get('total', 0))" 2>/dev/null || echo "0")
+
+        SUITE_PASSED["$suite_spec"]=$passed
+        SUITE_FAILED["$suite_spec"]=$failed
+        SUITE_ERRORS["$suite_spec"]=$errors
+        SUITE_SKIPPED["$suite_spec"]=$skipped
+
+        echo "  Results: $passed passed, $failed failed, $errors errors, $skipped skipped (total: $total)"
+
+        if [ "$failed" -gt 0 ] || [ "$errors" -gt 0 ]; then
+            SUITE_RESULTS["$suite_spec"]="TESTS_FAILED"
+            print_error "Some tests failed"
+        else
+            SUITE_RESULTS["$suite_spec"]="PASSED"
+        fi
     fi
 
     # Step 3: Cleanup (with --local flag)
@@ -390,7 +469,7 @@ run_suite_local() {
 
     local suite_end=$(date +%s)
     local suite_duration=$((suite_end - suite_start))
-    SUITE_DURATION[$suite_spec]=$suite_duration
+    SUITE_DURATION["$suite_spec"]=$suite_duration
 
     print_success "Suite $suite_spec (LOCAL) completed in ${suite_duration}s"
 
@@ -426,10 +505,17 @@ if [ "$SKIP_INITIAL_CLEANUP" = false ]; then
 
         if [ -d "$suite_dir" ] && [ -f "$suite_dir/pipeline.yaml" ]; then
             echo "  Cleaning up $suite_spec..."
-            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$OUTPUT_DIR/${log_name}_initial_cleanup.log" 2>&1; then
+            
+            # Create suite-specific output directory
+            # Strip 'suites/' prefix to avoid duplication
+            clean_log_name="${log_name#suites/}"
+            suite_output_dir="$OUTPUT_DIR/suites/$clean_log_name"
+            mkdir -p "$suite_output_dir"
+            
+            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/initial_cleanup.log" 2>&1; then
                 echo "    ✓ Cleaned"
             else
-                echo "    ⚠ Cleanup had issues (see $OUTPUT_DIR/${log_name}_initial_cleanup.log)"
+                echo "    ⚠ Cleanup had issues (see $suite_output_dir/initial_cleanup.log)"
                 CLEANUP_FAILED=true
             fi
         fi
@@ -564,13 +650,15 @@ print_header "Execution Summary"
 
 echo "Suite Results:"
 echo ""
-printf "%-20s %-15s %-10s %-10s %-10s\n" "SUITE" "STATUS" "PASSED" "FAILED" "DURATION"
-echo "─────────────────────────────────────────────────────────────────────"
+printf "%-20s %-15s %-8s %-8s %-8s %-8s %-10s\n" "SUITE" "STATUS" "PASSED" "FAILED" "ERRORS" "SKIPPED" "DURATION"
+echo "─────────────────────────────────────────────────────────────────────────────────────"
 
 for suite_spec in "${SUITES[@]}"; do
     status="${SUITE_RESULTS[$suite_spec]:-NOT_RUN}"
     passed="${SUITE_PASSED[$suite_spec]:-0}"
     failed="${SUITE_FAILED[$suite_spec]:-0}"
+    errors="${SUITE_ERRORS[$suite_spec]:-0}"
+    skipped="${SUITE_SKIPPED[$suite_spec]:-0}"
     duration="${SUITE_DURATION[$suite_spec]:-0}"
 
     # Color code status
@@ -592,21 +680,33 @@ for suite_spec in "${SUITES[@]}"; do
 
     # Calculate padding for status to align with 15 char column
     status_len=${#status}
-    status_padding=$((15 - status_len))
-    status_spaces=$(printf "%${status_padding}s" "")
+    if [ "$status_len" -lt 15 ]; then
+        status_padding=$((15 - status_len))
+        status_spaces=$(printf "%${status_padding}s" "")
+    else
+        status_spaces=""
+    fi
 
     # Format other columns
-    printf -v passed_col "%-10s" "$passed"
-    printf -v failed_col "%-10s" "$failed"
+    printf -v passed_col "%-8s" "$passed"
+    printf -v failed_col "%-8s" "$failed"
+    printf -v errors_col "%-8s" "$errors"
+    printf -v skipped_col "%-8s" "$skipped"
     printf -v duration_col "%-10s" "${duration}s"
 
     # Print with color interpretation
-    echo -e "${suite_col} ${status_colored}${status_spaces} ${passed_col} ${failed_col} ${duration_col}"
+    echo -e "${suite_col} ${status_colored}${status_spaces} ${passed_col} ${failed_col} ${errors_col} ${skipped_col} ${duration_col}"
 done
 
 echo ""
 echo "Total execution time: ${TOTAL_DURATION}s"
-echo "Results saved to: $OUTPUT_DIR/"
+echo ""
+echo "Results saved to:"
+for suite_spec in "${SUITES[@]}"; do
+    suite_output_name="${suite_spec//:/_}"
+    suite_output_name="${suite_output_name#suites/}"
+    echo "  - $OUTPUT_DIR/suites/$suite_output_name/"
+done
 echo ""
 
 # Calculate overall success
