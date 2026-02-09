@@ -601,37 +601,33 @@ class Assistant:
 
     def _create_swarm_agent(self, all_tools: list, agent_tools: list):
         """
-        Create a swarm-style multi-agent system using the official langgraph-swarm library.
+        Create a swarm-style multi-agent system where all child agents share message history.
 
-        Uses create_swarm() with compiled subgraphs per agent and Command-based handoffs.
-        Each agent is a self-contained subgraph with its own model→tools loop.
-        When an agent finishes (no tool calls), the graph ends naturally with the
-        agent's last text response as output — no redundant parent re-summarization.
+        This implementation manually builds the swarm using StateGraph to avoid
+        version incompatibilities with langgraph_swarm's create_swarm function.
 
         Architecture:
-        - Parent agent is the default entry point (compiled subgraph)
-        - Child agents are compiled subgraphs accessible via handoff tools
-        - Handoffs use Command(goto=X, graph=Command.PARENT) from official create_handoff_tool()
-        - All agents share message history via SwarmState
+        - Parent agent is the default entry point
+        - Child agents are accessible via handoff tools
+        - All agents share the same message history via SwarmState
+        - Control flows between agents based on handoffs
 
         Args:
             all_tools: All tools including agent tools
             agent_tools: Subset of tools that are Application (child agent) tools
         """
-        from typing import Optional
+        from typing import Literal, Optional, Annotated
         from langchain_core.messages import AIMessage, ToolMessage
-        from langchain_core.callbacks.manager import dispatch_custom_event
-        from langchain_core.runnables import RunnableConfig
+        from langchain_core.tools import StructuredTool
         from langgraph.graph import StateGraph, END, START, MessagesState
         from langgraph.prebuilt import ToolNode
         from langgraph.checkpoint.memory import MemorySaver
-        from langgraph_swarm import create_swarm, create_handoff_tool
 
         # For swarm mode, always use a fresh MemorySaver to avoid corrupted state
         # from previous failed runs. The message history is passed via invoke(),
         # so we don't need to persist across invocations.
         checkpointer = MemorySaver()
-        logger.info("[SWARM] Using fresh MemorySaver for swarm mode")
+        logger.info("[SWARM] Using fresh MemorySaver for swarm mode (avoiding shared memory corruption)")
 
         # Separate regular tools from agent tools
         regular_tools = [t for t in all_tools if t not in agent_tools]
@@ -639,167 +635,51 @@ class Assistant:
         # Resolve prompt
         prompt_instructions = self._resolve_jinja2_variables(self.prompt)
 
-        # --- Helper: filter orphaned tool_use blocks from message history ---
-        def filter_orphaned_tool_calls(messages: list) -> list:
-            """
-            Remove or fix orphaned tool_use blocks that don't have matching tool_result blocks.
-            Anthropic requires every tool_use to have a corresponding tool_result immediately after.
-            """
-            if not messages:
-                return messages
+        # Build agent name list for type hints
+        agent_names = ["parent"] + [t.name for t in agent_tools]
 
-            # Collect all tool_call_ids that have corresponding ToolMessages
-            tool_result_ids = set()
-            for msg in messages:
-                if isinstance(msg, ToolMessage):
-                    if hasattr(msg, 'tool_call_id') and msg.tool_call_id:
-                        tool_result_ids.add(msg.tool_call_id)
+        # Create SwarmState class with active_agent tracking
+        class SwarmState(MessagesState):
+            """State schema for the multi-agent swarm."""
+            active_agent: Optional[str] = None
 
-            # Filter messages, removing AIMessages with orphaned tool_calls
-            cleaned_messages = []
-            for msg in messages:
-                if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
-                    orphaned_calls = []
-                    valid_calls = []
-                    for tc in msg.tool_calls:
-                        tc_id = tc.get('id', '')
-                        if tc_id in tool_result_ids:
-                            valid_calls.append(tc)
-                        else:
-                            orphaned_calls.append(tc)
-                            logger.warning(f"[SWARM] Filtering orphaned tool_call: {tc_id}")
+        # Create simple handoff tools that return messages instead of Command objects
+        def create_simple_handoff_tool(target_agent: str, description: str):
+            """Create a simple handoff tool that returns a string message."""
+            def handoff_func() -> str:
+                return f"Successfully transferred to {target_agent}"
 
-                    if orphaned_calls and not valid_calls:
-                        if msg.content:
-                            cleaned_messages.append(AIMessage(content=msg.content))
-                    elif orphaned_calls:
-                        cleaned_messages.append(AIMessage(content=msg.content, tool_calls=valid_calls))
-                    else:
-                        cleaned_messages.append(msg)
-                else:
-                    cleaned_messages.append(msg)
+            return StructuredTool.from_function(
+                func=handoff_func,
+                name=f"transfer_to_{target_agent}",
+                description=description
+            )
 
-            return cleaned_messages
-
-        # --- Helper: create agent model node with custom event emission ---
-        def make_agent_node(model, tools, prompt, agent_name):
-            """Create an agent model node function with swarm event emission."""
-            if tools:
-                model_with_tools = model.bind_tools(tools)
-            else:
-                model_with_tools = model
-
-            def agent_node(state: MessagesState, config: RunnableConfig = None):
-                messages = state["messages"]
-                # Filter out existing system messages to avoid "multiple non-consecutive system messages" error
-                filtered_messages = [m for m in messages if not isinstance(m, SystemMessage)]
-                # Filter orphaned tool_use blocks to avoid Anthropic API errors
-                filtered_messages = filter_orphaned_tool_calls(filtered_messages)
-
-                # Emit swarm agent start event
-                if config:
-                    try:
-                        dispatch_custom_event(
-                            "swarm_agent_start",
-                            {
-                                "agent_name": agent_name,
-                                "is_parent": agent_name == "parent",
-                                "message_count": len(filtered_messages),
-                            },
-                            config=config
-                        )
-                    except Exception as e:
-                        logger.debug(f"[SWARM] Failed to emit swarm_agent_start event: {e}")
-
-                system_msg = SystemMessage(content=prompt)
-                response = model_with_tools.invoke([system_msg] + filtered_messages, config)
-
-                # Emit swarm agent response event
-                if config:
-                    try:
-                        content = response.content if hasattr(response, 'content') else str(response)
-                        has_tool_calls = bool(getattr(response, 'tool_calls', None))
-                        tool_call_names = [tc.get('name') for tc in (response.tool_calls or [])] if has_tool_calls else []
-                        dispatch_custom_event(
-                            "swarm_agent_response",
-                            {
-                                "agent_name": agent_name,
-                                "is_parent": agent_name == "parent",
-                                "content": content,
-                                "has_tool_calls": has_tool_calls,
-                                "tool_calls": tool_call_names,
-                            },
-                            config=config
-                        )
-
-                        # Emit swarm_handoff event if this response contains a handoff tool call
-                        for tc_name in tool_call_names:
-                            if tc_name.startswith('transfer_to_'):
-                                to_agent = tc_name.replace('transfer_to_', '')
-                                dispatch_custom_event(
-                                    "swarm_handoff",
-                                    {
-                                        "from_agent": agent_name,
-                                        "to_agent": to_agent,
-                                    },
-                                    config=config
-                                )
-                                logger.info(f"[SWARM] Handoff detected: transferring from {agent_name} to {to_agent}")
-                                break
-                    except Exception as e:
-                        logger.debug(f"[SWARM] Failed to emit swarm event: {e}")
-
-                return {"messages": [response]}
-
-            return agent_node
-
-        # --- Helper: build a compiled agent subgraph ---
-        def build_agent_subgraph(model, tools, system_prompt, agent_name):
-            """Build a compiled agent subgraph with model→tools loop."""
-            builder = StateGraph(MessagesState)
-
-            # Model node with custom events + orphaned tool filtering
-            model_node = make_agent_node(model, tools, system_prompt, agent_name)
-            builder.add_node("model", model_node)
-
-            # Standard ToolNode — handles Command objects natively for handoffs
-            if tools:
-                tool_node = ToolNode(tools)
-                builder.add_node("tools", tool_node)
-
-            def should_continue(state):
-                last = state["messages"][-1]
-                if isinstance(last, AIMessage) and getattr(last, 'tool_calls', None):
-                    return "tools"
-                return END
-
-            builder.add_edge(START, "model")
-            if tools:
-                builder.add_conditional_edges("model", should_continue, {"tools": "tools", END: END})
-                builder.add_edge("tools", "model")
-            else:
-                builder.add_edge("model", END)
-
-            return builder.compile(name=agent_name)
-
-        # --- Build child agent configurations ---
+        # Create handoff tools for each child agent
         parent_handoff_tools = []
         child_agent_descriptions = []
-        child_configs = []
+
+        # Handoff tool to return to parent
+        handoff_to_parent = create_simple_handoff_tool(
+            "parent",
+            "Hand control back to the main assistant when done with the specialized task"
+        )
+
+        child_configs = []  # Store child agent configurations
 
         for agent_tool in agent_tools:
             agent_name = agent_tool.name
             original_name = agent_tool.metadata.get('original_name', agent_name) if hasattr(agent_tool, 'metadata') else agent_name
 
-            # Create official Command-based handoff tool for parent → child
+            # Create handoff tool for parent to call this child
             handoff_tool_name = f"transfer_to_{agent_name}"
-            handoff_to_child = create_handoff_tool(
-                agent_name=agent_name,
-                description=f"Hand off to {original_name}: {agent_tool.description}"
+            handoff_to_child = create_simple_handoff_tool(
+                agent_name,
+                f"Hand off to {original_name}: {agent_tool.description}"
             )
             parent_handoff_tools.append(handoff_to_child)
 
-            # Track child agent info for prompt addon
+            # Track child agent info
             child_agent_descriptions.append({
                 'name': original_name,
                 'handoff_tool': handoff_tool_name,
@@ -831,11 +711,11 @@ class Assistant:
                 logger.warning(f"[SWARM] Failed to resolve toolkit tools for child agent '{original_name}': {e}. Falling back to Application wrapper.")
                 child_toolkit_tools = [agent_tool]
 
-            # Child prompt: no transfer_to_parent — children end naturally when done
-            child_system_prompt = f"You are {original_name}. {agent_tool.description}\n\nComplete your task using the available tools. When you have finished your task, provide your final response directly to the user."
+            # Store child config for later node creation
+            child_system_prompt = f"You are {original_name}. {agent_tool.description}\n\nComplete your task using the available tools. When done, use 'transfer_to_parent' to return control to the main assistant."
             child_configs.append({
                 'name': agent_name,
-                'tools': child_toolkit_tools,
+                'tools': child_toolkit_tools + [handoff_to_parent],
                 'prompt': child_system_prompt
             })
 
@@ -843,28 +723,297 @@ class Assistant:
         swarm_prompt_addon = self._build_swarm_prompt_addon(child_agent_descriptions)
         enhanced_prompt = f"{prompt_instructions}\n\n{swarm_prompt_addon}"
 
-        # Parent tools = regular tools + official handoff tools to children
+        # Parent tools = regular tools + handoff tools to children
         parent_tools = regular_tools + parent_handoff_tools
 
-        # --- Build compiled subgraphs for all agents ---
-        parent_graph = build_agent_subgraph(self.client, parent_tools, enhanced_prompt, "parent")
+        # Build the swarm StateGraph manually
+        workflow = StateGraph(SwarmState)
 
-        child_graphs = []
-        for cfg in child_configs:
-            child_graph = build_agent_subgraph(self.client, cfg['tools'], cfg['prompt'], cfg['name'])
-            child_graphs.append(child_graph)
+        # Helper function to filter orphaned tool_use blocks from message history
+        def filter_orphaned_tool_calls(messages: list) -> list:
+            """
+            Remove or fix orphaned tool_use blocks that don't have matching tool_result blocks.
+            Anthropic requires every tool_use to have a corresponding tool_result immediately after.
+            """
+            if not messages:
+                return messages
 
-        # --- Wire with official create_swarm() ---
+            # Collect all tool_call_ids that have corresponding ToolMessages
+            tool_result_ids = set()
+            for msg in messages:
+                if isinstance(msg, ToolMessage):
+                    if hasattr(msg, 'tool_call_id') and msg.tool_call_id:
+                        tool_result_ids.add(msg.tool_call_id)
+
+            # Filter messages, removing AIMessages with orphaned tool_calls
+            cleaned_messages = []
+            for msg in messages:
+                if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    # Check if all tool_calls have matching results
+                    orphaned_calls = []
+                    valid_calls = []
+                    for tc in msg.tool_calls:
+                        tc_id = tc.get('id', '')
+                        if tc_id in tool_result_ids:
+                            valid_calls.append(tc)
+                        else:
+                            orphaned_calls.append(tc)
+                            logger.warning(f"[SWARM] Filtering orphaned tool_call: {tc_id}")
+
+                    if orphaned_calls and not valid_calls:
+                        # All tool_calls are orphaned - convert to plain AIMessage without tool_calls
+                        if msg.content:
+                            cleaned_msg = AIMessage(content=msg.content)
+                            cleaned_messages.append(cleaned_msg)
+                        # Skip if no content either
+                    elif orphaned_calls:
+                        # Some tool_calls are orphaned - create new message with only valid calls
+                        cleaned_msg = AIMessage(content=msg.content, tool_calls=valid_calls)
+                        cleaned_messages.append(cleaned_msg)
+                    else:
+                        # All tool_calls have matching results
+                        cleaned_messages.append(msg)
+                else:
+                    cleaned_messages.append(msg)
+
+            return cleaned_messages
+
+        # Helper function to create agent node
+        def make_agent_node(model, tools, prompt, agent_name):
+            """Create an agent node function with swarm event emission."""
+            from langchain_core.callbacks.manager import dispatch_custom_event
+            from langchain_core.runnables import RunnableConfig
+
+            if tools:
+                model_with_tools = model.bind_tools(tools)
+            else:
+                model_with_tools = model
+
+            def agent_node(state: SwarmState, config: RunnableConfig = None):
+                messages = state["messages"]
+                # Filter out existing system messages to avoid "multiple non-consecutive system messages" error
+                filtered_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+                # Filter orphaned tool_use blocks to avoid Anthropic API errors
+                filtered_messages = filter_orphaned_tool_calls(filtered_messages)
+
+                # Emit swarm agent start event
+                if config:
+                    try:
+                        dispatch_custom_event(
+                            "swarm_agent_start",
+                            {
+                                "agent_name": agent_name,
+                                "is_parent": agent_name == "parent",
+                                "message_count": len(filtered_messages),
+                            },
+                            config=config
+                        )
+                    except Exception as e:
+                        logger.debug(f"[SWARM] Failed to emit swarm_agent_start event: {e}")
+
+                system_msg = SystemMessage(content=prompt)
+                response = model_with_tools.invoke([system_msg] + filtered_messages, config)
+
+                # Emit swarm agent response event
+                if config:
+                    try:
+                        content = response.content if hasattr(response, 'content') else str(response)
+                        has_tool_calls = bool(getattr(response, 'tool_calls', None))
+                        dispatch_custom_event(
+                            "swarm_agent_response",
+                            {
+                                "agent_name": agent_name,
+                                "is_parent": agent_name == "parent",
+                                "content": content,
+                                "has_tool_calls": has_tool_calls,
+                                "tool_calls": [tc.get('name') for tc in (response.tool_calls or [])] if has_tool_calls else [],
+                            },
+                            config=config
+                        )
+                    except Exception as e:
+                        logger.debug(f"[SWARM] Failed to emit swarm_agent_response event: {e}")
+
+                return {"messages": [response]}
+
+            return agent_node
+
+        # Helper to check for handoff in tool calls
+        def get_handoff_destination(message: AIMessage) -> Optional[str]:
+            """Check if the message contains a handoff tool call."""
+            if not hasattr(message, 'tool_calls') or not message.tool_calls:
+                return None
+            for tool_call in message.tool_calls:
+                tool_name = tool_call.get('name', '')
+                if tool_name.startswith('transfer_to_'):
+                    return tool_name.replace('transfer_to_', '')
+            return None
+
+        # Custom tool node that updates active_agent on handoff
+        def make_tool_node_with_handoff(tools, agent_names_list):
+            """Create a tool node that handles handoff state updates with event emission."""
+            from langchain_core.callbacks.manager import dispatch_custom_event
+            from langchain_core.runnables import RunnableConfig
+
+            base_tool_node = ToolNode(tools)
+
+            def tool_node_with_handoff(state: SwarmState, config: RunnableConfig = None):
+                # Execute tools normally
+                result = base_tool_node.invoke(state, config)
+
+                # Check if there was a handoff in the last AI message
+                messages = state.get("messages", [])
+                for msg in reversed(messages):
+                    if isinstance(msg, AIMessage):
+                        handoff_dest = get_handoff_destination(msg)
+                        if handoff_dest and handoff_dest in agent_names_list:
+                            from_agent = state.get("active_agent", "parent") or "parent"
+
+                            # Update active_agent in the result
+                            if isinstance(result, dict):
+                                result["active_agent"] = handoff_dest
+                            else:
+                                result = {"messages": result.get("messages", []), "active_agent": handoff_dest}
+
+                            # Emit handoff event
+                            if config:
+                                try:
+                                    dispatch_custom_event(
+                                        "swarm_handoff",
+                                        {
+                                            "from_agent": from_agent,
+                                            "to_agent": handoff_dest,
+                                        },
+                                        config=config
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"[SWARM] Failed to emit swarm_handoff event: {e}")
+
+                            logger.info(f"[SWARM] Handoff detected: transferring from {from_agent} to {handoff_dest}")
+                        break
+                return result
+
+            return tool_node_with_handoff
+
+        # Add parent agent node
+        parent_node = make_agent_node(self.client, parent_tools, enhanced_prompt, "parent")
+        workflow.add_node("parent", parent_node)
+
+        # Add parent tools node with handoff handling
+        if parent_tools:
+            workflow.add_node("parent_tools", make_tool_node_with_handoff(parent_tools, agent_names))
+
+        # Add child agent nodes
+        for config in child_configs:
+            child_node = make_agent_node(self.client, config['tools'], config['prompt'], config['name'])
+            workflow.add_node(config['name'], child_node)
+            # Add child tools node with handoff handling
+            if config['tools']:
+                workflow.add_node(f"{config['name']}_tools", make_tool_node_with_handoff(config['tools'], agent_names))
+
+        # Router function to route to active agent
+        def route_to_active_agent(state: SwarmState) -> str:
+            return state.get("active_agent", "parent") or "parent"
+
+        # Routing logic after parent agent
+        def route_after_parent(state: SwarmState) -> str:
+            messages = state["messages"]
+            if not messages:
+                return END
+            last_message = messages[-1]
+            if isinstance(last_message, AIMessage):
+                # Check for handoff
+                handoff_dest = get_handoff_destination(last_message)
+                if handoff_dest and handoff_dest != "parent":
+                    return "parent_tools"  # Process handoff tool first
+                if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                    return "parent_tools"
+            return END
+
+        # Routing logic after parent tools
+        def route_after_parent_tools(state: SwarmState) -> str:
+            # Check active_agent first (set by handoff)
+            active = state.get("active_agent")
+            if active and active in agent_names and active != "parent":
+                return active
+
+            messages = state["messages"]
+            if not messages:
+                return "parent"
+            # Check the last AI message for handoff
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage):
+                    handoff_dest = get_handoff_destination(msg)
+                    if handoff_dest and handoff_dest in agent_names:
+                        return handoff_dest
+                    break
+            return "parent"
+
+        # Add routing from START
+        workflow.add_conditional_edges(START, route_to_active_agent, {name: name for name in agent_names})
+
+        # Add routing after parent
+        workflow.add_conditional_edges("parent", route_after_parent, {
+            "parent_tools": "parent_tools",
+            END: END
+        })
+
+        # Add routing after parent tools
+        tool_routes = {name: name for name in agent_names}
+        tool_routes["parent"] = "parent"
+        workflow.add_conditional_edges("parent_tools", route_after_parent_tools, tool_routes)
+
+        # Add routing for child agents
+        for config in child_configs:
+            child_name = config['name']
+
+            def make_child_router(child_name):
+                def route_after_child(state: SwarmState) -> str:
+                    messages = state["messages"]
+                    if not messages:
+                        return END
+                    last_message = messages[-1]
+                    if isinstance(last_message, AIMessage):
+                        handoff_dest = get_handoff_destination(last_message)
+                        if handoff_dest:
+                            return f"{child_name}_tools"
+                        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                            return f"{child_name}_tools"
+                    return END
+                return route_after_child
+
+            def make_child_tools_router(child_name, agent_names_list):
+                def route_after_child_tools(state: SwarmState) -> str:
+                    # Check active_agent first (set by handoff)
+                    active = state.get("active_agent")
+                    if active and active in agent_names_list and active != child_name:
+                        return active
+
+                    messages = state["messages"]
+                    for msg in reversed(messages):
+                        if isinstance(msg, AIMessage):
+                            handoff_dest = get_handoff_destination(msg)
+                            if handoff_dest and handoff_dest in agent_names_list:
+                                return handoff_dest
+                            break
+                    return child_name
+                return route_after_child_tools
+
+            workflow.add_conditional_edges(child_name, make_child_router(child_name), {
+                f"{child_name}_tools": f"{child_name}_tools",
+                END: END
+            })
+
+            child_tool_routes = {name: name for name in agent_names}
+            child_tool_routes[child_name] = child_name
+            workflow.add_conditional_edges(f"{child_name}_tools", make_child_tools_router(child_name, agent_names), child_tool_routes)
+
+        # Compile with checkpointer
         try:
-            swarm = create_swarm(
-                [parent_graph] + child_graphs,
-                default_active_agent="parent"
-            )
-            compiled = swarm.compile(checkpointer=checkpointer, store=self.store)
-            logger.info(f"[SWARM] Created swarm agent with {len(agent_tools)} child agents: {[t.name for t in agent_tools]}")
+            compiled = workflow.compile(checkpointer=checkpointer, store=self.store)
+            logger.info(f"Created manual swarm agent with {len(agent_tools)} child agents: {[t.name for t in agent_tools]}")
             return compiled
         except Exception as e:
-            logger.error(f"[SWARM] Failed to compile swarm: {type(e).__name__}: {e}", exc_info=True)
+            logger.error(f"Failed to compile swarm: {type(e).__name__}: {e}", exc_info=True)
             raise
 
     def _build_swarm_prompt_addon(self, child_agents: list) -> str:
@@ -885,7 +1034,7 @@ class Assistant:
             "",
             "You can delegate tasks to the following specialist agents by using their handoff tools.",
             "When you hand off to a specialist, they will have access to the full conversation history.",
-            "The specialist will complete the task and respond directly to the user.",
+            "After completing their task, control will return to you.",
             ""
         ]
 
@@ -900,7 +1049,7 @@ class Assistant:
             "",
             "- Hand off when a task requires the specialist's specific capabilities",
             "- You can hand off multiple times to different specialists as needed",
-            "- After a specialist completes their work, the response will be delivered to the user",
+            "- After a specialist completes their work, continue coordinating the overall task",
         ])
 
         return "\n".join(lines)
