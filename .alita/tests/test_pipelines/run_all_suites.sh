@@ -133,36 +133,6 @@ if [ ${#SUITES[@]} -eq 0 ]; then
     SUITES=("${DEFAULT_SUITES[@]}")
 fi
 
-# Skip artifact suites when running in local mode
-if [ "$LOCAL_MODE" = true ]; then
-    FILTERED_SUITES=()
-    SKIPPED_SUITES=()
-    
-    for suite_spec in "${SUITES[@]}"; do
-        # Check if suite name contains 'artifact'
-        if [[ "$suite_spec" == *"artifact"* ]]; then
-            SKIPPED_SUITES+=("$suite_spec")
-        else
-            FILTERED_SUITES+=("$suite_spec")
-        fi
-    done
-    
-    # Show message if any suites were skipped
-    if [ ${#SKIPPED_SUITES[@]} -gt 0 ]; then
-        echo -e "${YELLOW}ℹ️  Skipping artifact suites in local mode: ${SKIPPED_SUITES[*]}${NC}"
-        echo ""
-    fi
-    
-    # Update SUITES to filtered list
-    SUITES=("${FILTERED_SUITES[@]}")
-    
-    # Exit if no suites left to run
-    if [ ${#SUITES[@]} -eq 0 ]; then
-        echo -e "${YELLOW}No suites to run (all require remote execution)${NC}"
-        exit 0
-    fi
-fi
-
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
