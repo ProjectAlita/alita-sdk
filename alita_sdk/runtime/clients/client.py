@@ -521,10 +521,7 @@ class AlitaClient:
                               e.g., {'supports_vision': True, 'name': '*claude*'}
 
         Returns:
-            An instance of ChatOpenAI or ChatAnthropic configured as a low-tier model.
-
-        Raises:
-            ValueError: If no low-tier models are available.
+            An instance of ChatOpenAI or ChatAnthropic configured as a low-tier model or None if no suitable model is available.
 
         Example:
             >>> # Get a basic low-tier model
@@ -550,7 +547,8 @@ class AlitaClient:
         low_tier_models = self.get_filtered_models(filters)
 
         if not low_tier_models:
-            raise ValueError("No low-tier models available matching the specified criteria")
+            logger.warning("No low-tier models available matching the specified criteria")
+            return None
 
         # Select the first available low-tier model
         selected_model = low_tier_models[0]
@@ -662,7 +660,7 @@ class AlitaClient:
                     llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
                     conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None,
                     is_subgraph: bool = False, middleware: Optional[list] = None,
-                    exception_handling_enabled: bool = True):
+                    exception_handling_enabled: bool = False):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -992,7 +990,7 @@ class AlitaClient:
                       mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None,
                       ignored_mcp_servers: Optional[list] = None, persona: Optional[str] = "generic",
                       lazy_tools_mode: Optional[bool] = False, internal_tools: Optional[list] = None,
-                      exception_handling_enabled: bool = True):
+                      exception_handling_enabled: bool = False):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -1013,7 +1011,7 @@ class AlitaClient:
             lazy_tools_mode: Enable lazy tools mode to reduce token usage with many toolkits (default: False)
             internal_tools: Optional list of internal tool names (e.g., ['swarm', 'planner']).
                            Enables special modes like swarm for multi-agent collaboration.
-            exception_handling_enabled: Enable automatic exception handling with ToolExceptionHandlerMiddleware (default: True)
+            exception_handling_enabled: Enable automatic exception handling with ToolExceptionHandlerMiddleware (default: False)
 
         Returns:
             Runnable agent ready for execution
