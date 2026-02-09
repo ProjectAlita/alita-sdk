@@ -15,12 +15,17 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
-  branch:
+  test_branch_name:
+    type: str
+  source_branch:
     type: str
     value: main
+  create_branch_result:
+    type: str
+  cleanup_branch_result:
+    type: str
   test_file_path:
     type: str
-    value: test-files/bb14-invalid-update.txt
   initial_content:
     type: str
     value: |
@@ -56,13 +61,59 @@ state:
   test_results:
     type: dict
 
-entry_point: create_test_file
+entry_point: prepare_test_data
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+        # Generate unique branch name
+        test_branch_name = f"test/bb14-invalid-update-{timestamp}-{random_suffix}"
+
+        # Generate unique file path
+        test_file_path = f"test-files/bb14-invalid-update-{timestamp}-{random_suffix}.txt"
+
+        {"test_branch_name": test_branch_name, "test_file_path": test_file_path}
+    output:
+      - test_branch_name
+      - test_file_path
+    structured_output: true
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    input:
+      - test_branch_name
+      - source_branch
+    input_mapping:
+      branch:
+        type: variable
+        value: test_branch_name
+      from_branch:
+        type: variable
+        value: source_branch
+    output:
+      - create_branch_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_test_file
+
   - id: create_test_file
     type: toolkit
     input:
       - test_file_path
       - initial_content
+      - test_branch_name
     input_mapping:
       file_path:
         type: variable
@@ -72,7 +123,7 @@ nodes:
         value: initial_content
       branch:
         type: variable
-        value: branch
+        value: test_branch_name
     output:
       - create_result
     structured_output: true
@@ -85,6 +136,7 @@ nodes:
     input:
       - test_file_path
       - invalid_update_non_matching
+      - test_branch_name
     input_mapping:
       file_path:
         type: variable
@@ -94,7 +146,7 @@ nodes:
         value: invalid_update_non_matching
       branch:
         type: variable
-        value: branch
+        value: test_branch_name
     output:
       - invalid_result_1
     structured_output: true
@@ -107,6 +159,7 @@ nodes:
     input:
       - test_file_path
       - invalid_update_missing_new
+      - test_branch_name
     input_mapping:
       file_path:
         type: variable
@@ -116,7 +169,7 @@ nodes:
         value: invalid_update_missing_new
       branch:
         type: variable
-        value: branch
+        value: test_branch_name
     output:
       - invalid_result_2
     structured_output: true
@@ -128,17 +181,33 @@ nodes:
     type: toolkit
     input:
       - test_file_path
+      - test_branch_name
     input_mapping:
       file_path:
         type: variable
         value: test_file_path
       branch:
         type: variable
-        value: branch
+        value: test_branch_name
     output:
       - current_content
     structured_output: true
     tool: read_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
@@ -151,6 +220,7 @@ nodes:
       - current_content
       - initial_content
       - expected_error_indicators
+      - cleanup_branch_result
     input_mapping:
       chat_history:
         type: fixed
@@ -169,6 +239,7 @@ nodes:
           Current Content After Attempts: {current_content}
           Initial Content: {initial_content}
           Expected Error Indicators: {expected_error_indicators}
+          Branch Cleanup Result: {cleanup_branch_result}
 
           This is a NEGATIVE test - we expect both invalid updates to fail gracefully.
 
@@ -180,18 +251,20 @@ nodes:
           4. content_preserved: Current content matches initial content
           5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
           6. no_partial_modification: File was not partially modified
+          7. branch_cleanup_successful: Test branch was deleted successfully
           
           OPTIONAL (nice to have, but not required for test to pass):
-          7. errors_are_clear: Error messages indicate what went wrong
+          8. errors_are_clear: Error messages indicate what went wrong
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (SET TO TRUE if: file_created AND first_update_failed AND second_update_failed AND content_preserved AND no_unhandled_exception AND no_partial_modification),
+            "test_passed": boolean (SET TO TRUE if: file_created AND first_update_failed AND second_update_failed AND content_preserved AND no_unhandled_exception AND no_partial_modification AND branch_cleanup_successful),
             "file_created": boolean,
             "first_update_failed": boolean,
             "second_update_failed": boolean,
             "content_preserved": boolean,
             "no_unhandled_exception": boolean,
+            "branch_cleanup_successful": boolean,
             "errors_are_clear": boolean (optional, does not affect test_passed),
             "no_partial_modification": boolean,
             "error_indicator_found_1": "which indicator in first error or 'none'",

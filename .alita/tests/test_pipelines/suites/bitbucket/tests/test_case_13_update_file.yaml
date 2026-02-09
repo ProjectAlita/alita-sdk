@@ -15,9 +15,17 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
+  test_branch_name:
+    type: str
+  source_branch:
+    type: str
+    value: main
+  create_branch_result:
+    type: str
+  cleanup_branch_result:
+    type: str
   test_file_path:
     type: str
-    value: test-files/bb13-update-test.py
   initial_content:
     type: str
     value: |
@@ -59,68 +67,190 @@ state:
   test_results:
     type: dict
 
-entry_point: create_test_file
+entry_point: prepare_test_data
+state:
+  cleanup_branch_result:
+    type: str
+  create_branch_result:
+    type: str
+  create_result:
+    type: str
+  error_indicators:
+    type: list
+    value:
+      - error
+      - failed
+      - not found
+      - exception
+  expected_new_content:
+    type: str
+    value: Welcome
+  expected_unchanged:
+    type: str
+    value: calculate
+  initial_content:
+    type: str
+    value: |
+      # Test file for BB13
+      def greet(name):
+          return f"Hello, {name}!"
+
+      def calculate(a, b):
+          return a + b
+
+      # Main execution
+      if __name__ == "__main__":
+          print(greet("World"))
+          print(calculate(5, 3))
+  source_branch:
+    type: str
+    value: main
+  test_branch_name:
+    type: str
+  test_file_path:
+    type: str
+  test_results:
+    type: dict
+  update_query:
+    type: str
+    value: |
+      OLD
+      def greet(name):
+          return f"Hello, {name}!"
+      NEW
+      def greet(name):
+          return f"Welcome, {name}! How are you today?"
+  update_result:
+    type: str
+  updated_content:
+    type: str
+entry_point: prepare_test_data
+
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+        # Generate unique branch name
+        test_branch_name = f"test/bb13-update-file-{timestamp}-{random_suffix}"
+
+        # Generate unique file path
+        test_file_path = f"test-files/bb13-update-test-{timestamp}-{random_suffix}.py"
+
+        {"test_branch_name": test_branch_name, "test_file_path": test_file_path}
+    output:
+      - test_branch_name
+      - test_file_path
+    structured_output: true
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    input:
+      - test_branch_name
+      - source_branch
+    input_mapping:
+      branch:
+        type: variable
+        value: test_branch_name
+      from_branch:
+        type: variable
+        value: source_branch
+    output:
+      - create_branch_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: bitbucket-testing
+    transition: create_test_file
+
   - id: create_test_file
     type: toolkit
     input:
       - test_file_path
       - initial_content
+      - test_branch_name
     input_mapping:
-      file_path:
+      branch:
         type: variable
-        value: test_file_path
+        value: test_branch_name
       file_contents:
         type: variable
         value: initial_content
-      branch:
+      file_path:
         type: variable
-        value: ACTIVE_BRANCH
+        value: test_file_path
     output:
       - create_result
     structured_output: true
     tool: create_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: update_file_content
+    toolkit_name: bitbucket-testing
+    transition: Call update file
 
-  - id: update_file_content
-    type: toolkit
+  - id: Call update file
+    type: llm
     input:
+      - test_branch_name
       - test_file_path
       - update_query
     input_mapping:
-      file_path:
-        type: variable
-        value: test_file_path
-      update_query:
-        type: variable
-        value: update_query
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: 'You are file updater '
+      task:
+        type: fstring
+        value: Update {test_file_path} on {test_branch_name} with this content {update_query}
     output:
       - update_result
     structured_output: true
-    tool: update_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    tool_names:
+      bitbucket-testing:
+        - update_file
     transition: verify_update
 
   - id: verify_update
     type: toolkit
     input:
       - test_file_path
+      - test_branch_name
     input_mapping:
+      branch:
+        type: variable
+        value: test_branch_name
       file_path:
         type: variable
         value: test_file_path
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
     output:
       - updated_content
     structured_output: true
     tool: read_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    toolkit_name: bitbucket-testing
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: bitbucket-testing
     transition: validate_results
 
   - id: validate_results
@@ -133,6 +263,7 @@ nodes:
       - expected_new_content
       - expected_unchanged
       - error_indicators
+      - cleanup_branch_result
     input_mapping:
       chat_history:
         type: fixed
@@ -152,6 +283,7 @@ nodes:
           Expected New Content Indicator: {expected_new_content}
           Expected Unchanged Indicator: {expected_unchanged}
           Error Indicators: {error_indicators}
+          Branch Cleanup Result: {cleanup_branch_result}
 
           This is a POSITIVE test - we expect successful file update.
 
@@ -163,6 +295,7 @@ nodes:
           5. calculate_function_unchanged: Calculate function remains in updated content
           6. markers_processed: OLD/NEW markers were correctly processed
           7. main_block_preserved: Main execution block remains intact
+          8. branch_cleanup_successful: Test branch was deleted successfully
 
           Return JSON test_results:
           {{
@@ -174,15 +307,18 @@ nodes:
             "calculate_function_unchanged": boolean,
             "markers_processed": boolean,
             "main_block_preserved": boolean,
+            "branch_cleanup_successful": boolean,
             "contains_welcome": boolean,
             "contains_calculate": boolean,
             "error": string | null
           }}
 
           Return ONLY the JSON object.
-    model: ${DEFAULT_LLM_MODEL}
+    model: gpt-4o-2024-11-20
     output:
       - test_results
     structured_output_dict:
       test_results: dict
     transition: END
+
+
