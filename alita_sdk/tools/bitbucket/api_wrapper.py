@@ -291,18 +291,15 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
                     f"Available branches: {', '.join(branches[:20])}"
                 )
             
-            # Delete the branch
-            self._bitbucket.delete_branch(branch_name)
-            
             # If the deleted branch was the active branch, switch to main
             if self._active_branch == branch_name:
-                self._active_branch = 'main' if 'main' in branches else 'master'
-                return (
-                    f"Branch '{branch_name}' deleted successfully. "
-                    f"Active branch switched to '{self._active_branch}'."
+                raise ToolException(
+                    f"Branch '{branch_name}' cannot be deleted because it is currently the active branch. "
+                    "Please switch to a different branch before deleting."
                 )
             
-            return f"Branch '{branch_name}' deleted successfully."
+            # Delete the branch
+            self._bitbucket.delete_branch(branch_name)
             
         except ToolException:
             raise
