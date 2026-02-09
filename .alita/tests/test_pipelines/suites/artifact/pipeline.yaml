@@ -56,10 +56,10 @@ setup:
     type: toolkit
     action: create_or_update
     config:
+      # Load base config from tool_configs
+      config_file: ../../configs/artifact-config.json
       toolkit_type: artifact
       toolkit_name: ${ARTIFACT_TOOLKIT_NAME:artifact-testing}
-      settings:
-        bucket: ${ARTIFACT_BUCKET:artifact-test-bucket}
     save_to_env:
       - key: ARTIFACT_TOOLKIT_ID
         value: $.id
