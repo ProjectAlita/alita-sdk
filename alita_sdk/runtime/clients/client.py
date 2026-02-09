@@ -639,7 +639,11 @@ class AlitaClient:
 
     @staticmethod
     def _sanitize_artifact_name(filename: str) -> tuple:
-        """Sanitize filename for safe storage and regex pattern matching."""
+        """Sanitize filename for safe storage and regex pattern matching.
+        
+        Preserves directory structure (path prefixes) while sanitizing each component.
+        Preserves hyphens, underscores in the file and directory names if passed.
+        """
         import re
         from pathlib import Path
         
@@ -648,21 +652,48 @@ class AlitaClient:
         
         original = filename
         path_obj = Path(filename)
+        
+        # Get parent directory path (may be empty for flat files)
+        parent_parts = path_obj.parent.parts
+        
+        # Sanitize each directory component
+        def sanitize_component(component: str) -> str:
+            """Sanitize a single path component (directory or filename without extension).
+            
+            Preserves internal hyphens (including multiple consecutive dashes),
+            but strips leading and trailing dashes.
+            """
+            # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
+            sanitized = re.sub(r'[^\w\s-]', '', component, flags=re.UNICODE)
+            # Collapse multiple spaces into single dash, but preserve consecutive dashes
+            sanitized = re.sub(r'\s+', '-', sanitized)
+            # Remove leading/trailing dashes
+            sanitized = sanitized.strip('-').strip()
+            
+            return sanitized if sanitized else "unnamed"
+        
+        # Sanitize parent directories
+        sanitized_parents = [sanitize_component(part) for part in parent_parts if part and part != '.']
+        
+        # Sanitize filename (stem + extension)
         name = path_obj.stem
         extension = path_obj.suffix
         
-        # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
-        sanitized_name = re.sub(r'[^\w\s-]', '', name, flags=re.UNICODE)
-        sanitized_name = re.sub(r'[-\s]+', '-', sanitized_name)
-        sanitized_name = sanitized_name.strip('-').strip()
-        
+        sanitized_name = sanitize_component(name)
         if not sanitized_name:
             sanitized_name = "file"
         
         if extension:
             extension = re.sub(r'[^\w.-]', '', extension, flags=re.UNICODE)
         
-        sanitized = sanitized_name + extension
+        sanitized_filename = sanitized_name + extension
+        
+        # Reconstruct full path with sanitized components
+        if sanitized_parents:
+            sanitized = '/'.join(sanitized_parents) + '/' + sanitized_filename
+        else:
+            sanitized = sanitized_filename
+        
         return sanitized, (sanitized != original)
 
     def download_artifact(self, bucket_name, artifact_name):
