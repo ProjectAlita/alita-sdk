@@ -37,7 +37,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, ToolException
 
 from ..utils.prompts_loader import TransformErrorPrompts
-from ..langchain.langraph_agent import normalize_message_content
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +263,7 @@ class TransformErrorStrategy(ExceptionHandlerStrategy):
             response = self.llm.invoke(messages)
 
             if hasattr(response, 'content'):
-                return normalize_message_content(response.content)
+                return response.content.strip()
 
             return None
 

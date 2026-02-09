@@ -47,7 +47,6 @@ from .strategies import (
     CircuitBreakerStrategy,
     LoggingStrategy
 )
-from ..tools.application import Application
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +111,8 @@ class ToolExceptionHandlerMiddleware(Middleware):
         self.strategies = strategies
         self.excluded_tools = set(excluded_tools or [])
 
-        # Wrapped tools cache to avoid double-wrapping (keyed by object id)
-        self._wrapped_tools_cache: Dict[int, BaseTool] = {}
+        # Wrapped tools cache to avoid double-wrapping
+        self._wrapped_tools_cache: Dict[str, BaseTool] = {}
 
         logger.info(
             f"ToolExceptionHandlerMiddleware initialized with {len(strategies)} strategies: "
@@ -202,26 +201,15 @@ When a tool fails with an error:
         Returns:
             Wrapped tool with error handling, or original if excluded/already wrapped
         """
-        # Don't wrap Application tools - they have their own invocation logic
-        # and wrapping causes state variables to be lost due to args_schema filtering
-        if isinstance(tool, Application):
-            logger.debug(f"Tool '{tool.name}' is an Application, skipping error handling wrapper")
-            return tool
-
         # Don't wrap if tool is in exclusion list
         if tool.name in self.excluded_tools:
             logger.debug(f"Tool '{tool.name}' is excluded from error handling")
             return tool
 
         # Check if already wrapped (avoid double-wrapping)
-        # Use object identity (id) as cache key, not tool.name, because different toolkits
-        # can have tools with the same name (e.g., index_data in both GitHub and Confluence).
-        # Name-based caching would return the same wrapped object for both, breaking
-        # the dedup logic in Assistant.__init__ which relies on distinct objects.
-        cache_key = id(tool)
-        if cache_key in self._wrapped_tools_cache:
+        if tool.name in self._wrapped_tools_cache:
             logger.debug(f"Tool '{tool.name}' already wrapped, returning cached version")
-            return self._wrapped_tools_cache[cache_key]
+            return self._wrapped_tools_cache[tool.name]
 
         # Get the original function to wrap
         original_func = self._get_tool_function(tool)
@@ -292,13 +280,8 @@ When a tool fails with an error:
             if hasattr(tool, 'metadata'):
                 wrapped_tool.metadata = tool.metadata
 
-            # Preserve a reference to the original tool so that downstream code
-            # (e.g., swarm agent detection) can inspect the unwrapped type and
-            # attributes like Application.client, Application.args_runnable, etc.
-            wrapped_tool._original_tool = tool
-
-            # Cache the wrapped tool by object identity
-            self._wrapped_tools_cache[cache_key] = wrapped_tool
+            # Cache the wrapped tool
+            self._wrapped_tools_cache[tool.name] = wrapped_tool
 
             logger.debug(f"Successfully wrapped tool '{tool.name}' with error handling")
             return wrapped_tool

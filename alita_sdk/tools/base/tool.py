@@ -22,9 +22,6 @@ class BaseAction(BaseTool):
         **kwargs: Any,
     ) -> ToolException | str:
         """Use the Confluence API to run an operation."""
-        # Strip None values — LLM sends explicit nulls for optional params
-        # (Pydantic schemas show "default": null), which can cause failures
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
         # Strip numeric suffix added for deduplication (_2, _3, etc.)
         # to get the original tool name that exists in the wrapper
         import re
