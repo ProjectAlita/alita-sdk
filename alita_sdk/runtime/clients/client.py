@@ -660,7 +660,8 @@ class AlitaClient:
         def sanitize_component(component: str) -> str:
             """Sanitize a single path component (directory or filename without extension).
             
-            Preserves double dashes (--) as they're used as delimiters.
+            Preserves internal hyphens (including multiple consecutive dashes),
+            but strips leading and trailing dashes.
             """
             # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
             sanitized = re.sub(r'[^\w\s-]', '', component, flags=re.UNICODE)
