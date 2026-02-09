@@ -1,0 +1,126 @@
+name: "GL15 - Comment on Issue"
+priority: Critical
+description: |
+  Verify comment_on_issue tool adds comment to an issue.
+  
+  Objective: Confirm issue commenting functionality
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Comment is added to the existing test issue
+  - Returns confirmation with comment ID
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  issue_number:
+    type: int
+    value: ${GITLAB_TEST_ISSUE_NUMBER}
+  comment_query:
+    type: str
+  comment_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: prepare_comment
+
+nodes:
+  - id: prepare_comment
+    type: code
+    description: "Generate unique comment text"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Get issue number from state
+        issue_num = alita_state.get('issue_number', 1)
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Build comment text
+        comment_text = f"Automated test comment from GL15 at {timestamp}-{random_suffix}"
+        
+        # Build comment query using chr(10) for newline instead of string literals
+        sep = chr(10) + chr(10)
+        comment_query = str(issue_num) + sep + comment_text
+        
+        {"comment_query": comment_query}
+    input:
+      - issue_number
+    output:
+      - comment_query
+    structured_output: true
+    transition: invoke_comment_on_issue
+  
+  - id: invoke_comment_on_issue
+    type: toolkit
+    description: "Add comment to existing test issue"
+    tool: comment_on_issue
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - comment_query
+    input_mapping:
+      comment_query:
+        type: variable
+        value: comment_query
+    output:
+      - comment_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    description: "Validate comment operation"
+    model: gpt-4o-2024-11-20
+    input:
+      - comment_result
+      - issue_number
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'comment_on_issue' tool execution.
+
+          Comment Operation: {comment_result}
+          Issue Number: {issue_number}
+
+          This is a POSITIVE test - we expect successful comment addition to existing issue.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: comment_on_issue tool ran and returned results
+          2. no_errors: Output does NOT contain error indicators
+          3. comment_added: Output confirms comment was added to the issue
+          4. operation_confirmed: Comment operation is confirmed in response
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "comment_added": boolean,
+            "operation_confirmed": boolean,
+            "issue_number": {issue_number},
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

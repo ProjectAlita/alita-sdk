@@ -65,6 +65,11 @@ CreateBranchModel = create_model(
     "CreateBranchModel",
     branch_name=(str, Field(description="The name of the branch, e.g. `my_branch`.")),
 )
+DeleteBranchModel = create_model(
+    "DeleteBranchModel",
+    branch_name=(str, Field(description="The name of the branch to delete, e.g. `my_branch`. Cannot delete main or master branches.")),
+    force=(bool, Field(default=False, description="If True, allows deleting the active branch (will auto-reset to base branch). Default is False.")),
+)
 ListBranchesInRepoModel = create_model(
     "ListBranchesInRepoModel",
     limit=(Optional[int], Field(default=20, description="Maximum number of branches to return. If not provided, all branches will be returned.", gt=0)),
@@ -262,6 +267,48 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             return f"Unable to create branch due to error:\n{e}"
         self._active_branch = branch_name
         return f"Branch {branch_name} created successfully and set as active"
+
+    def delete_branch(self, branch_name: str, force: bool = False) -> str:
+        """
+        Delete a branch from the GitLab repository.
+        
+        Args:
+            branch_name: Name of the branch to delete
+            force: If True, allows deleting active branch (with auto-recovery). Default is False.
+        
+        Returns:
+            str: Success message
+        
+        Raises:
+            ToolException: If attempting to delete protected branch or active branch (without force)
+        """
+        # Layer 1: Protected branches (always blocked)
+        protected_branches = {'main', 'master', self.branch}
+        if branch_name.lower() in {b.lower() for b in protected_branches}:
+            raise ToolException(
+                f"Cannot delete protected branch '{branch_name}'. "
+                f"Protected branches: {', '.join(protected_branches)}"
+            )
+        
+        # Layer 2: Active branch check (unless force=True)
+        if self._active_branch == branch_name and not force:
+            raise ToolException(
+                f"Cannot delete active branch '{branch_name}'. "
+                f"Either switch branches first or use force=True parameter."
+            )
+        
+        # Layer 3: Delete the branch
+        try:
+            self.repo_instance.branches.delete(branch_name)
+        except Exception as e:
+            raise ToolException(f"Failed to delete branch '{branch_name}': {str(e)}")
+        
+        # Layer 4: Auto-recovery - reset active branch if we deleted it
+        if self._active_branch == branch_name:
+            self._active_branch = self.branch
+            return f"Successfully deleted branch '{branch_name}' and reset active branch to '{self.branch}'"
+        
+        return f"Successfully deleted branch '{branch_name}'"
 
     def parse_issues(self, issues: List[Any]) -> List[dict]:
         parsed = []
@@ -612,6 +659,12 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
                 "ref": self.create_branch,
                 "description": self.create_branch.__doc__ or "Create a new branch in the repository.",
                 "args_schema": CreateBranchModel,
+            },
+            {
+                "name": "delete_branch",
+                "ref": self.delete_branch,
+                "description": self.delete_branch.__doc__ or "Delete a branch from the repository. Cannot delete main or master branches.",
+                "args_schema": DeleteBranchModel,
             },
             {
                 "name": "list_branches_in_repo",
