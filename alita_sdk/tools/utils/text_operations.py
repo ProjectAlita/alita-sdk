@@ -6,6 +6,7 @@ Provides common functionality for:
 - Text file validation
 - Line-based slicing and partial reads
 - Content searching with context
+- Filepath parsing (/{bucket}/{filename} format)
 """
 import re
 import logging
@@ -21,6 +22,32 @@ TEXT_EDITABLE_EXTENSIONS = {
     '.rb', '.php', '.c', '.cpp', '.h', '.hpp', '.cs',
     '.sql', '.r', '.m', '.swift', '.kt', '.rs', '.scala'
 }
+
+
+def parse_filepath(filepath: str) -> Tuple[str, str]:
+    """
+    Parse /{bucket}/{filename} format into (bucket, filename).
+    
+    Args:
+        filepath: Path in format /{bucket}/{filename}
+        
+    Returns:
+        Tuple of (bucket_name, filename)
+        
+    Raises:
+        ValueError: If filepath format is invalid
+        
+    Example:
+        >>> parse_filepath('/attachments/document.pdf')
+        ('attachments', 'document.pdf')
+        >>> parse_filepath('/my-bucket/folder/file.txt')
+        ('my-bucket', 'folder/file.txt')
+    """
+    path = filepath.lstrip('/')
+    parts = path.split('/', 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid filepath format: {filepath}. Expected /{{bucket}}/{{filename}}")
+    return parts[0], parts[1]
 
 
 def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:

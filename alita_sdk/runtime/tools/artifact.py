@@ -14,11 +14,19 @@ from pydantic import create_model, Field, model_validator
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...tools.utils.available_tools_decorator import extend_with_parent_available_tools
 from ...tools.elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
+from ...tools.utils.text_operations import (
+    apply_line_slice,
+    is_text_editable,
+    parse_filepath,
+    parse_old_new_markers,
+    search_in_content,
+    try_apply_edit,
+)
 from ...runtime.utils.utils import IndexerKeywords
 
 # Error message returned when file content exceeds single read size limit
 CONTENT_TOO_LARGE_ERROR = "[File content exceeds size limit. Use chunked read operations to access specific portions of this file.]"
-DEFAULT_MAX_SINGLE_READ_SIZE = 200000
+DEFAULT_MAX_SINGLE_READ_SIZE = 60000
 
 
 class ArtifactWrapper(NonCodeIndexerToolkit):
@@ -28,37 +36,6 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
 
     # Override file operation methods to support bucket_name parameter
     # (instead of importing from BaseCodeToolApiWrapper which uses 'branch')
-
-    def read_file_chunk(
-        self,
-        file_path: str,
-        start_line: int,
-        end_line: Optional[int] = None,
-        bucket_name: str = None
-    ) -> str:
-        """
-        Read a specific range of lines from a file in an artifact bucket.
-
-        Args:
-            file_path: Path to the file to read
-            start_line: Starting line number (1-indexed, inclusive)
-            end_line: Ending line number (1-indexed, inclusive). If None, reads to end.
-            bucket_name: Bucket name. If not provided, uses toolkit-configured default bucket.
-
-        Returns:
-            File content for the specified line range
-        """
-        from ...tools.utils.text_operations import apply_line_slice
-
-        # Calculate offset and limit from start_line and end_line
-        offset = start_line
-        limit = (end_line - start_line + 1) if end_line is not None else None
-
-        # Read the file with bucket_name support
-        content = self._read_file(file_path, branch=None, bucket_name=bucket_name, offset=offset, limit=limit)
-
-        # Apply client-side slicing if toolkit doesn't support partial reads
-        return apply_line_slice(content, offset=offset, limit=limit)
 
     def read_multiple_files(
         self,
@@ -79,8 +56,6 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         Returns:
             Dict mapping file paths to their content
         """
-        from ...tools.utils.text_operations import apply_line_slice
-
         results = {}
         
         for path in file_paths:
@@ -118,8 +93,6 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         Returns:
             Formatted string with match results and context
         """
-        from ...tools.utils.text_operations import search_in_content
-
         content = self._read_file(file_path, branch=None, bucket_name=bucket_name)
         matches = search_in_content(content, pattern, is_regex=is_regex, context_lines=context_lines)
 
@@ -157,9 +130,6 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         Returns:
             Success message or error description
         """
-        from ...tools.utils.text_operations import parse_old_new_markers, is_text_editable, try_apply_edit
-        from langchain_core.tools import ToolException
-
         # Validate file type
         if not is_text_editable(file_path):
             raise ToolException(f"File '{file_path}' is not a text-editable file type")
@@ -200,21 +170,6 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         toolkit-specific schemas for file operation tools.
         """
         # Artifact-specific schemas with bucket_name instead of branch
-        ArtifactReadFileChunkInput = create_model(
-            "ArtifactReadFileChunkInput",
-            file_path=(str, Field(description="Path to the file to read")),
-            bucket_name=(Optional[str], Field(
-                description="Bucket name. If not provided, uses toolkit-configured default bucket.",
-                default=None
-            )),
-            start_line=(int, Field(description="Starting line number (1-indexed, inclusive)", ge=1)),
-            end_line=(Optional[int], Field(
-                description="Ending line number (1-indexed, inclusive). If None, reads to end.",
-                default=None,
-                ge=1
-            )),
-        )
-
         ArtifactReadMultipleFilesInput = create_model(
             "ArtifactReadMultipleFilesInput",
             file_paths=(List[str], Field(description="List of file paths to read", min_length=1)),
@@ -278,7 +233,6 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         )
 
         return {
-            "read_file_chunk": ArtifactReadFileChunkInput,
             "read_multiple_files": ArtifactReadMultipleFilesInput,
             "search_file": ArtifactSearchFileInput,
             "edit_file": ArtifactEditFileInput,
@@ -459,12 +413,50 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
 
 
     def read_file(self,
-                  filename: str,
+                  filename: str = None,
                   bucket_name = None,
                   is_capture_image: bool = False,
                   page_number: int = None,
                   sheet_name: str = None,
-                  excel_by_sheets: bool = False):
+                  excel_by_sheets: bool = False,
+                  filepath: str = None,
+                  start_line: int = None,
+                  end_line: int = None):
+        """
+        Read a file from the artifact bucket.
+        
+        Supports two ways to specify the file:
+        1. filename + bucket_name: Traditional approach
+        2. filepath: Full path in /{bucket}/{filename} format (extracts bucket and filename automatically)
+        
+        For large text files, use start_line/end_line to read specific portions.
+        
+        Args:
+            filename: Name of the file (required if filepath not provided)
+            bucket_name: Bucket name (uses default if None, ignored if filepath provided)
+            is_capture_image: Whether to capture images in documents
+            page_number: Specific page to read (for PDFs)
+            sheet_name: Specific sheet to read (for Excel)
+            excel_by_sheets: Read Excel by sheets
+            filepath: Full path in /{bucket}/{filename} format (alternative to filename+bucket_name)
+            start_line: Starting line number (1-indexed, inclusive) for partial read
+            end_line: Ending line number (1-indexed, inclusive) for partial read
+            
+        Returns:
+            File content or error message if content exceeds size limit
+        """
+        # Handle filepath parameter - extract bucket and filename
+        if filepath:
+            try:
+                extracted_bucket, extracted_filename = parse_filepath(filepath)
+                bucket_name = extracted_bucket
+                filename = extracted_filename
+            except ValueError as e:
+                raise ToolException(f"Invalid filepath format: {e}")
+        
+        if not filename:
+            raise ToolException("Must provide either 'filename' or 'filepath' parameter")
+        
         content = self.artifact.get(artifact_name=filename,
                                  bucket_name=bucket_name,
                                   is_capture_image=is_capture_image,
@@ -473,7 +465,17 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                                   excel_by_sheets=excel_by_sheets,
                                   llm=self.llm)
 
+        # Apply line range slicing if requested (for text content only)
+        if isinstance(content, str) and (start_line is not None or end_line is not None):
+            offset = start_line if start_line is not None else 1
+            limit = (end_line - offset + 1) if end_line is not None else None
+            content = apply_line_slice(content, offset=offset, limit=limit)
+
+        # Check content size limit (after slicing if applicable)
         if isinstance(content, str) and len(content) > self.max_single_read_size:
+            # If doing partial read and still too large, return error with helpful message
+            if start_line is not None or end_line is not None:
+                return f"{CONTENT_TOO_LARGE_ERROR} Requested range still exceeds limit. Try a smaller line range."
             return CONTENT_TOO_LARGE_ERROR
 
         return content
@@ -863,13 +865,26 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             {
                 "ref": self.read_file,
                 "name": "readFile",
-                "description": "Read a file in the artifact",
+                "description": "Read a file from the artifact bucket. Supports full filepath (/{bucket}/{filename}) from attachment descriptions or filename+bucket_name. For large text files that exceed size limits, use start_line/end_line to read specific portions.",
                 "args_schema": create_model(
                     "readFile", 
-                    filename=(str, Field(description="Filename")),
+                    filename=(Optional[str], Field(
+                        description="Filename (required if filepath not provided)",
+                        default=None)),
+                    filepath=(Optional[str], Field(
+                        description="Full path in /{bucket}/{filename} format. Use this when filepath is provided in attachment descriptions. Alternative to filename+bucket_name.",
+                        default=None)),
                     bucket_name=bucket_name,
+                    start_line=(Optional[int], Field(
+                        description="Starting line number (1-indexed, inclusive) for partial read of text files. Use with end_line to read specific portions of large files.",
+                        default=None,
+                        ge=1)),
+                    end_line=(Optional[int], Field(
+                        description="Ending line number (1-indexed, inclusive) for partial read of text files. If not provided, reads to end of file.",
+                        default=None,
+                        ge=1)),
                     is_capture_image=(Optional[bool],
-                                      Field(description="Determines is pictures in the document should be recognized.",
+                                      Field(description="Determines if pictures in the document should be recognized.",
                                             default=False)),
                     page_number=(Optional[int], Field(
                         description="Specifies which page to read. If it is None, then full document will be read.",
