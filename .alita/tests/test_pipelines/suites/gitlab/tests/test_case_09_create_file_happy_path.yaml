@@ -1,0 +1,179 @@
+name: "GL09 - Create File"
+priority: Critical
+description: |
+  Verify create_file tool creates a new file in the repository.
+  
+  Objective: Confirm file creation functionality with self-contained test data
+  
+  Expected Behavior:
+  - Creates unique test branch
+  - Tool executes successfully without errors
+  - File is created in the test branch with unique name
+  - Returns confirmation with file path
+  - Cleanup removes test branch and file
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+  test_file_path:
+    type: str
+  file_contents:
+    type: str
+    value: |
+      This is a test file created by GL09 automated testing.
+      Line 2: Test content for file creation.
+      Line 3: Special chars test: !@#$%^&*()
+  create_branch_result:
+    type: dict
+  create_file_result:
+    type: dict
+  cleanup_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch and file names"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Generate unique branch and file names
+        test_branch_name = f"gl09-create-file-{timestamp}-{random_suffix}"
+        test_file_path = f"test-data/gl09-{timestamp}-{random_suffix}.txt"
+        
+        {"test_branch_name": test_branch_name, "test_file_path": test_file_path}
+    output:
+      - test_branch_name
+      - test_file_path
+    structured_output: true
+    transition: create_test_branch
+  
+  - id: create_test_branch
+    type: toolkit
+    description: "Create test branch"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_branch_result
+    structured_output: true
+    transition: invoke_create_file
+
+  - id: invoke_create_file
+    type: toolkit
+    description: "Create test file"
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_file_path
+      - file_contents
+      - test_branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: variable
+        value: file_contents
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_file_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    description: "Validate file creation"
+    model: gpt-4o-2024-11-20
+    input:
+      - create_branch_result
+      - create_file_result
+      - test_branch_name
+      - test_file_path
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_file' tool execution.
+
+          Branch Creation: {create_branch_result}
+          File Creation: {create_file_result}
+          Test Branch: {test_branch_name}
+          Test File: {test_file_path}
+
+          This is a POSITIVE test - we expect successful file creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branch_created: Test branch was created successfully
+          2. tool_executed: create_file tool ran and returned results
+          3. no_errors: Output does NOT contain error indicators
+          4. file_created: Output confirms file was created
+          5. file_path_confirmed: File path appears in the response
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branch_created": boolean,
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "file_created": boolean,
+            "file_path_confirmed": boolean,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_delete_branch
+  
+  - id: cleanup_delete_branch
+    type: toolkit
+    description: "Clean up test branch (cascades to file deletion)"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      force:
+        type: fixed
+        value: true
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_result
+    structured_output: true
+    transition: END

@@ -1,0 +1,284 @@
+name: "GL18 - PR Change Comment"
+priority: High
+description: |
+  Verify create_pr_change_comment tool adds inline comment to MR diff.
+  
+  Objective: Test inline diff commenting functionality (GitLab-specific) with self-contained test data
+  
+  Expected Behavior:
+  - Creates unique test branch
+  - Creates test file with content
+  - Creates new MR
+  - Adds inline diff comment to the MR
+  - Returns confirmation with comment details
+  - Cleanup removes test branch
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+  test_file_path:
+    type: str
+  pr_title:
+    type: str
+  pr_body:
+    type: str
+    value: "This MR tests inline diff commenting functionality."
+  create_branch_result:
+    type: dict
+  file_create_result:
+    type: dict
+  create_pr_result:
+    type: dict
+  pr_number:
+    type: int
+  line_number:
+    type: int
+    value: 3
+  comment:
+    type: str
+    value: "Inline comment on this specific line."
+  tool_result:
+    type: dict
+  cleanup_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch and file names"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Generate unique branch and file names
+        test_branch_name = f"gl18-inline-comment-{timestamp}-{random_suffix}"
+        test_file_path = f"test-data/gl18-{timestamp}-{random_suffix}.md"
+        pr_title = f"Test MR: GL18 Inline Comment {timestamp}-{random_suffix}"
+        
+        {"test_branch_name": test_branch_name, "test_file_path": test_file_path, "pr_title": pr_title}
+    output:
+      - test_branch_name
+      - test_file_path
+      - pr_title
+    structured_output: true
+    transition: create_test_branch
+
+  - id: create_test_branch
+    type: toolkit
+    description: "Create test branch"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_branch_result
+    structured_output: true
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    description: "Create test file for inline comments"
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_file_path
+      - test_branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: fixed
+        value: |
+          # Test File for Inline Comments
+          Empty row.
+          This file tests inline diff commenting.
+          Line 3 will be commented on.
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - file_create_result
+    structured_output: true
+    transition: invoke_create_pr
+
+  - id: invoke_create_pr
+    type: toolkit
+    description: "Create merge request"
+    tool: create_pull_request
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_title
+      - pr_body
+      - test_branch_name
+    input_mapping:
+      pr_title:
+        type: variable
+        value: pr_title
+      pr_body:
+        type: variable
+        value: pr_body
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_pr_result
+    structured_output: true
+    transition: extract_pr_number
+
+  - id: extract_pr_number
+    type: code
+    description: "Extract MR number from create result"
+    code:
+      type: fixed
+      value: |
+        # Extract MR number from create result string
+        create_result = alita_state.get('create_pr_result', '')
+        result_str = str(create_result).strip()
+        
+        # Parse the output to get PR number
+        pr_number = 1
+        if 'PR number' in result_str or 'iid' in result_str:
+            parts = result_str.split('PR number') if 'PR number' in result_str else result_str.split('iid')
+            if len(parts) > 1:
+                try:
+                    num_str = parts[1].strip().split()[0].strip(':').strip()
+                    pr_number = int(num_str)
+                except (ValueError, IndexError):
+                    pass
+        
+        pr_number
+    input: []
+    output:
+      - pr_number
+    transition: invoke_create_pr_change_comment
+
+  - id: invoke_create_pr_change_comment
+    type: toolkit
+    description: "Add inline comment to MR diff"
+    tool: create_pr_change_comment
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_number
+      - test_file_path
+      - line_number
+      - comment
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+      file_path:
+        type: variable
+        value: test_file_path
+      line_number:
+        type: variable
+        value: line_number
+      comment:
+        type: variable
+        value: comment
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    description: "Validate inline comment workflow"
+    model: gpt-4o-2024-11-20
+    input:
+      - create_branch_result
+      - file_create_result
+      - create_pr_result
+      - tool_result
+      - test_branch_name
+      - pr_number
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the inline comment workflow.
+
+          Branch Creation: {create_branch_result}
+          File Creation: {file_create_result}
+          MR Creation: {create_pr_result}
+          Inline Comment Result: {tool_result}
+          Test Branch: {test_branch_name}
+          MR Number: {pr_number}
+
+          This is a POSITIVE test - we expect successful inline comment creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branch_created: Test branch was created successfully
+          2. file_created: Test file was created successfully
+          3. mr_created: MR was created successfully
+          4. comment_created: Inline comment was added to the specified line in the MR diff
+          5. no_errors: No error indicators in any operation
+
+          Note: If there are errors about file/line not found, that's acceptable (diff timing issue).
+          System errors would be a failure.
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branch_created": boolean,
+            "file_created": boolean,
+            "mr_created": boolean,
+            "comment_created": boolean,
+            "no_errors": boolean,
+            "pr_number": {pr_number},
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed",
+            "explanation": "explain test final result for test_passed value"
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    description: "Clean up test branch"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+     - test_branch_name
+    input_mapping:
+     force:
+       type: fixed
+       value: true
+     branch_name:
+       type: variable
+       value: test_branch_name
+    output:
+     - cleanup_result
+    structured_output: true
+    transition: END

@@ -1,0 +1,148 @@
+name: "GL13 - Create Branch"
+priority: Critical
+description: |
+  Verify create_branch tool creates a new branch in repository.
+  
+  Objective: Confirm branch creation functionality with self-contained test data
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - New branch is created with unique name
+  - Returns confirmation with branch name
+  - Cleanup removes test branch
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["created", "success", "branch"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "already exists"]
+  create_result:
+    type: dict
+  cleanup_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch name with timestamp and random suffix"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Generate unique branch name
+        test_branch_name = f"gl13-test-{timestamp}-{random_suffix}"
+        
+        {"test_branch_name": test_branch_name}
+    output:
+      - test_branch_name
+    structured_output: true
+    transition: invoke_create_branch
+
+  - id: invoke_create_branch
+    type: toolkit
+    description: "Create test branch"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    description: "Validate branch creation"
+    model: gpt-4o-2024-11-20
+    input:
+      - create_result
+      - test_branch_name
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_branch' tool.
+
+          Tool Executed: create_branch
+          Branch Name: {test_branch_name}
+          Results: {create_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful branch creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. branch_created: Output confirms branch was created (contains success indicator)
+          4. branch_name_confirmed: Branch name appears in the response
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "branch_created": boolean,
+            "branch_name_confirmed": boolean,
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    description: "Clean up test branch"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+     - test_branch_name
+    input_mapping:
+     force:
+       type: fixed
+       value: true
+     branch_name:
+       type: variable
+       value: test_branch_name
+    output:
+     - cleanup_result
+    structured_output: true
+    transition: END

@@ -1,0 +1,240 @@
+name: "GL02 - List Branches Filter"
+priority: High
+description: |
+  Verify list_branches_in_repo with wildcard filter returns matching branches.
+  
+  Objective: Test branch filtering using wildcard patterns
+  
+  Expected Behavior:
+  - Tool executes successfully with wildcard parameter
+  - Returns only branches matching the pattern
+  - Respects limit parameter if provided
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_prefix:
+    type: str
+  test_branch_1:
+    type: str
+  test_branch_2:
+    type: str
+  branch_wildcard:
+    type: str
+  limit:
+    type: int
+    value: 10
+  create_branch_1_result:
+    type: dict
+  create_branch_2_result:
+    type: dict
+  list_result:
+    type: dict
+  cleanup_1_result:
+    type: dict
+  cleanup_2_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch names for wildcard testing"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Create a unique prefix for test branches
+        test_prefix = f"gl02-test-{timestamp}-{random_suffix}"
+        
+        # Create branches that should match the wildcard pattern
+        test_branch_1 = f"{test_prefix}-feature-1"
+        test_branch_2 = f"{test_prefix}-feature-2"
+        
+        # Wildcard pattern to match test branches
+        branch_wildcard = f"{test_prefix}*"
+        
+        {"test_prefix": test_prefix, "test_branch_1": test_branch_1, "test_branch_2": test_branch_2, "branch_wildcard": branch_wildcard}
+    output:
+      - test_prefix
+      - test_branch_1
+      - test_branch_2
+      - branch_wildcard
+    structured_output: true
+    transition: create_test_branch_1
+  
+  - id: create_test_branch_1
+    type: toolkit
+    description: "Create first matching branch"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_1
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_1
+    output:
+      - create_branch_1_result
+    structured_output: true
+    transition: create_test_branch_2
+  
+  - id: create_test_branch_2
+    type: toolkit
+    description: "Create second matching branch"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_2
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_2
+    output:
+      - create_branch_2_result
+    structured_output: true
+    transition: invoke_list_branches
+  
+  - id: invoke_list_branches
+    type: toolkit
+    description: "List branches with wildcard filter"
+    tool: list_branches_in_repo
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch_wildcard
+      - limit
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_wildcard
+      limit:
+        type: variable
+        value: limit
+    output:
+      - list_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    description: "Validate wildcard filtering"
+    model: gpt-4o-2024-11-20
+    input:
+      - create_branch_1_result
+      - create_branch_2_result
+      - create_branch_3_result
+      - create_other_branch_result
+      - list_result
+      - test_branch_1
+      - test_branch_2
+      - branch_wildcard
+      - test_prefix
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_branches_in_repo' tool with wildcard filtering.
+
+          Branch Creation Results:
+          - Matching Branch 1: {create_branch_1_result}
+          - Matching Branch 2: {create_branch_2_result}
+          
+          List Branches Operation:
+          - Wildcard Pattern: {branch_wildcard}
+          - Results: {list_result}
+          
+          Expected Branches (should be in results):
+          - {test_branch_1}
+          - {test_branch_2}
+          
+          Test Prefix: {test_prefix}
+
+          This is a POSITIVE test - we expect successful wildcard filtering.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branches_created: Both branches were created successfully
+          2. tool_executed: list_branches_in_repo tool ran and returned results
+          3. no_errors: Output does NOT contain error indicators
+          4. returns_list: Output contains a list of branches
+          5. matches_found: Both matching branches ({test_prefix}*) are in results
+          6. pattern_correct: Only branches matching wildcard pattern are returned
+          7. limit_respected: Result count is within limit (10 or fewer)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branches_created": boolean,
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "returns_list": boolean,
+            "matches_found": boolean,
+            "pattern_correct": boolean,
+            "limit_respected": boolean,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_delete_branch_1
+
+  - id: cleanup_delete_branch_1
+    type: toolkit
+    description: "Clean up first test branch"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_1
+    input_mapping:
+      force:
+        type: fixed
+        value: true
+      branch_name:
+        type: variable
+        value: test_branch_1
+    output:
+      - cleanup_1_result
+    structured_output: true
+    transition: cleanup_delete_branch_2
+
+  - id: cleanup_delete_branch_2
+    type: toolkit
+    description: "Clean up second test branch"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_2
+    input_mapping:
+      force:
+        type: fixed
+        value: true
+      branch_name:
+        type: variable
+        value: test_branch_2
+    output:
+      - cleanup_2_result
+    structured_output: true
+    transition: END
