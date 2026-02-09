@@ -1,0 +1,86 @@
+name: "GL05 - List Files"
+priority: Critical
+description: |
+  Verify list_files tool returns file listing from repository.
+  
+  Objective: Confirm file listing functionality
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns list of files in the repository
+  - Output includes file paths
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_list_files
+
+nodes:
+  - id: invoke_list_files
+    type: toolkit
+    tool: list_files
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      path:
+        type: fixed
+        value: ""
+      branch:
+        type: fixed
+        value: "main"
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_files' tool.
+
+          tool executed: list_files
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns list of files in the repository
+          - output includes file paths
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain a list of files?
+          4. are file paths properly formatted?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

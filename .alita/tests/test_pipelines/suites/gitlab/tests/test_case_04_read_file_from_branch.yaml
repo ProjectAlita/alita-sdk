@@ -1,0 +1,95 @@
+name: "GL04 - Read File Branch"
+priority: High
+description: |
+  Verify read_file tool can read from specific branches.
+  
+  Objective: Test branch-specific file reading
+  
+  Expected Behavior:
+  - Tool executes successfully with branch parameter
+  - Returns content from the specified branch
+  - Handles different branches correctly
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: README.md
+  branch:
+    type: str
+    value: ${GITLAB_BASE_BRANCH}
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_read_file
+
+nodes:
+  - id: invoke_read_file
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      branch:
+        type: variable
+        value: branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'read_file' tool reading from base branch.
+
+          tool executed: read_file
+          parameters: file_path="README.md", branch="main"
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully with branch parameter
+          - returns content from the specified branch (main)
+          - content is retrieved without errors
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain file content from the branch?
+          4. is the content readable and non-empty?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

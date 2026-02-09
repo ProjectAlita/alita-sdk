@@ -1,0 +1,155 @@
+name: "GL06 - List Files Recursive"
+priority: High
+description: |
+  Verify list_files with recursive option returns nested files.
+  
+  Objective: Confirm recursive=false excludes nested files, recursive=true includes them
+  
+  Expected Behavior:
+  - Creates a test file in a subdirectory
+  - list_files with recursive=false should NOT return the nested file
+  - list_files with recursive=true SHOULD return the nested file
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  nested_file_path:
+    type: str
+    value: "qa-test/nested/recursive-test.txt"
+  file_content:
+    type: str
+    value: "Test content for recursive listing validation"
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  create_result:
+    type: dict
+  list_result_nonrecursive:
+    type: dict
+  list_result_recursive:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: create_nested_file
+
+nodes:
+  - id: create_nested_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - nested_file_path
+      - file_content
+      - branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: nested_file_path
+      file_contents:
+        type: variable
+        value: file_content
+      branch:
+        type: variable
+        value: branch
+    output:
+      - create_result
+    structured_output: true
+    transition: list_files_nonrecursive
+
+  - id: list_files_nonrecursive
+    type: toolkit
+    tool: list_files
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch
+    input_mapping:
+      path:
+        type: fixed
+        value: "qa-test"
+      recursive:
+        type: fixed
+        value: false
+      branch:
+        type: variable
+        value: branch
+    output:
+      - list_result_nonrecursive
+    structured_output: true
+    transition: list_files_recursive
+
+  - id: list_files_recursive
+    type: toolkit
+    tool: list_files
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch
+    input_mapping:
+      path:
+        type: fixed
+        value: "qa-test"
+      recursive:
+        type: fixed
+        value: true
+      branch:
+        type: variable
+        value: branch
+    output:
+      - list_result_recursive
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - nested_file_path
+      - list_result_nonrecursive
+      - list_result_recursive
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the recursive vs non-recursive file listing results.
+
+          Created Nested File: {nested_file_path}
+          Non-Recursive Result (recursive=false): {list_result_nonrecursive}
+          Recursive Result (recursive=true): {list_result_recursive}
+
+          expected behavior:
+          - non-recursive listing should NOT include the nested file (qa-test/nested/recursive-test.txt)
+          - recursive listing SHOULD include the nested file
+          - nested file path should include subdirectory structure
+
+          evaluate:
+          1. did both list_files calls execute successfully?
+          2. does non-recursive result exclude the nested file?
+          3. does recursive result include the nested file?
+          4. is the subdirectory path preserved in the recursive result?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "details": {{
+              "nonrecursive_excludes_nested": boolean,
+              "recursive_includes_nested": boolean,
+              "path_has_subdirectory": boolean
+            }},
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,103 @@
+name: "GL12 - Delete File"
+priority: High
+description: |
+  Verify delete_file tool removes file from repository.
+  
+  Objective: Test file deletion functionality
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - File is deleted from the specified branch
+  - Returns confirmation of deletion
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: test-data/to-delete.txt
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  commit_message:
+    type: str
+    value: "Delete test file"
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_delete_file
+
+nodes:
+  - id: invoke_delete_file
+    type: toolkit
+    tool: delete_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - branch
+      - commit_message
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      branch:
+        type: variable
+        value: branch
+      commit_message:
+        type: variable
+        value: commit_message
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'delete_file' tool.
+
+          tool executed: delete_file
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - file is deleted from the specified branch
+          - returns confirmation of deletion
+
+          note: if the file does not exist, that may be acceptable depending on test setup.
+          the key is that the tool executes without unexpected system errors.
+
+          evaluate:
+          1. did the tool execute?
+          2. if there are errors, are they about the file not existing (acceptable) or system errors (failure)?
+          3. does the output confirm deletion or explain why it could not be deleted?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

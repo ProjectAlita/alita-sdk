@@ -1,0 +1,132 @@
+name: "GL21 - List Folders"
+priority: Critical
+description: |
+  Verify list_folders tool returns directory listing from repository.
+  
+  Objective: Confirm directory-only listing functionality (GitLab-specific)
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns list of folders/directories only (no files)
+  - Output includes directory paths
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  nested_file_path:
+    type: str
+    value: "test-folders/subfolder1/file.txt"
+  file_content:
+    type: str
+    value: "Test file for folder listing"
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  create_result:
+    type: dict
+  path:
+    type: str
+    value: ""
+  recursive:
+    type: bool
+    value: false
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: create_nested_folders
+
+nodes:
+  - id: create_nested_folders
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - nested_file_path
+      - file_content
+      - branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: nested_file_path
+      file_contents:
+        type: variable
+        value: file_content
+      branch:
+        type: variable
+        value: branch
+    output:
+      - create_result
+    structured_output: true
+    transition: invoke_list_folders
+
+  - id: invoke_list_folders
+    type: toolkit
+    tool: list_folders
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - path
+      - recursive
+      - branch
+    input_mapping:
+      path:
+        type: variable
+        value: path
+      recursive:
+        type: variable
+        value: recursive
+      branch:
+        type: variable
+        value: branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_folders' tool.
+
+          tool executed: list_folders
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns list of directories/folders only (no files)
+          - output includes 'test-folders' directory created earlier
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain a list of directories?
+          4. are directory paths properly formatted?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

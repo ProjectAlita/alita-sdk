@@ -1,0 +1,220 @@
+# GitLab Toolkit Test Suite Configuration
+# This file defines setup, execution, and cleanup for the test suite
+
+name: gitlab_toolkit
+description: GitLab toolkit integration tests
+
+# Environment variable mappings
+env_mapping:
+  toolkit_config: ${GITLAB_CONFIG_PATH:../../../tool_configs/gitlab-config.json}
+  private_token: ${GITLAB_PRIVATE_TOKEN}
+  repository: ${GITLAB_TEST_REPO:aliaksei_breilian/byta2015}
+  base_branch: ${GITLAB_BASE_BRANCH:main}
+  url: ${GITLAB_URL:https://git.epam.com}
+
+# Setup steps executed before running tests
+setup:
+  # Step 1: Ensure GitLab credentials configuration exists
+  - name: Setup GitLab Configuration
+    type: configuration
+    config:
+      config_type: gitlab
+      alita_title: ${GITLAB_SECRET_NAME:gitlab}
+      data:
+        private_token: ${GITLAB_PRIVATE_TOKEN}
+        url: ${GITLAB_URL:https://git.epam.com}
+
+  # Step 2: Create or update the GitLab toolkit on the platform
+  - name: Create GitLab Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/gitlab-config.json
+      toolkit_type: gitlab
+      overrides:
+        gitlab_configuration:
+          private: true
+          alita_title: ${GITLAB_SECRET_NAME:gitlab}
+        repository: ${GITLAB_TEST_REPO:aliaksei_breilian/byta2015}
+        branch: ${GITLAB_BASE_BRANCH:main}
+      toolkit_name: ${GITLAB_TOOLKIT_NAME:testing}
+    save_to_env:
+      - key: GITLAB_TOOLKIT_ID
+        value: $.id
+      - key: GITLAB_TOOLKIT_NAME
+        value: $.name
+
+  # Step 3: Create a test branch for write operations
+  - name: Create Test Branch
+    type: toolkit_invoke
+    enabled: true
+    config:
+      toolkit_id: ${GITLAB_TOOLKIT_ID}
+      tool_name: create_branch
+      tool_params:
+        branch_name: tc-test-${TIMESTAMP}
+    continue_on_error: true
+    save_to_env:
+      - key: GITLAB_TEST_BRANCH
+        value: $.result.branch_name
+        default: tc-test-${TIMESTAMP}
+
+  # Step 4: Create test issue for read tests
+  - name: Create Test Issue
+    type: toolkit_invoke
+    enabled: true
+    config:
+      toolkit_id: ${GITLAB_TOOLKIT_ID}
+      tool_name: create_issue
+      tool_params:
+        title: "[Test] Automated Test Issue"
+        description: |
+          This issue is used for automated testing of the GitLab toolkit.
+          Do not close or delete this issue.
+        labels: test,automated
+    continue_on_error: true
+    save_to_env:
+      - key: GITLAB_TEST_ISSUE_NUMBER
+        value: $.result.iid
+        default: "1"
+
+  # Step 5: Create test file for file operations
+  - name: Create Test File
+    type: toolkit_invoke
+    enabled: true
+    config:
+      toolkit_id: ${GITLAB_TOOLKIT_ID}
+      tool_name: create_file
+      tool_params:
+        file_path: test-data/test-file.txt
+        file_contents: |
+          Line 1: Test content
+          Line 2: More content
+          Line 3: café with unicode
+          Line 4: Final line
+        branch: ${GITLAB_TEST_BRANCH}
+    continue_on_error: true
+    save_to_env:
+      - key: GITLAB_TEST_FILE_PATH
+        value: $.result.file_path
+        default: test-data/test-file.txt
+
+  # Step 6: Create SDK analysis toolkit for RCA pipeline
+  - name: Create SDK Analysis Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/gitlab-config.json
+      toolkit_type: gitlab
+      overrides:
+        gitlab_configuration:
+          private: true
+          alita_title: ${GITLAB_SECRET_NAME:gitlab}
+        repository: ${SDK_REPO:ProjectAlita/alita-sdk}
+        branch: ${SDK_BRANCH:main}
+      toolkit_name: sdk-analysis
+    save_to_env:
+      - key: SDK_TOOLKIT_ID
+        value: $.id
+      - key: SDK_TOOLKIT_NAME
+        value: $.name
+
+# Composable pipelines
+composable_pipelines:
+  - file: ../../composable/rca_on_failure.yaml
+    env:
+      SUITE_NAME: gitlab_toolkit
+      RCA_MODEL: ${RCA_MODEL:gpt-4o-mini}
+      SDK_TOOLKIT_ID: ${SDK_TOOLKIT_ID}
+      SDK_TOOLKIT_NAME: ${SDK_TOOLKIT_NAME:sdk-analysis}
+    save_to_env:
+      - key: RCA_PIPELINE_ID
+        value: $.id
+      - key: RCA_PIPELINE_VERSION_ID
+        value: $.versions.0.id
+
+# Test execution configuration
+execution:
+  test_directory: tests
+  order:
+    - test_case_01_*.yaml  # GL01 - List Branches (Happy Path)
+    - test_case_02_*.yaml  # GL02 - List Branches (With Filter)
+    - test_case_03_*.yaml  # GL03 - Read File (Happy Path)
+    - test_case_04_*.yaml  # GL04 - Read File (From Branch)
+    - test_case_05_*.yaml  # GL05 - List Files (Happy Path)
+    - test_case_06_*.yaml  # GL06 - List Files (Recursive)
+    - test_case_07_*.yaml  # GL07 - Get Issue (Happy Path)
+    - test_case_08_*.yaml  # GL08 - Get Issue (Nonexistent)
+    - test_case_09_*.yaml  # GL09 - Create File (Happy Path)
+    - test_case_10_*.yaml  # GL10 - Append File (Happy Path)
+    - test_case_11_*.yaml  # GL11 - Update File (Happy Path)
+    - test_case_12_*.yaml  # GL12 - Delete File (Happy Path)
+    - test_case_13_*.yaml  # GL13 - Create Branch (Happy Path)
+    - test_case_14_*.yaml  # GL14 - Set Active Branch (Happy Path)
+    - test_case_15_*.yaml  # GL15 - Comment on Issue (Happy Path)
+    - test_case_16_*.yaml  # GL16 - Get PR Changes (Happy Path)
+    - test_case_17_*.yaml  # GL17 - Merge Request Workflow (Happy Path)
+    - test_case_18_*.yaml  # GL18 - Create PR Change Comment (Happy Path)
+    - test_case_19_*.yaml  # GL19 - Get Commits (Happy Path)
+    - test_case_20_*.yaml  # GL20 - Read File Chunk (Happy Path)
+    - test_case_21_*.yaml  # GL21 - List Folders (Happy Path)
+    - test_case_22_*.yaml  # GL22 - Search File (Happy Path)
+    - test_case_23_*.yaml  # GL23 - Edit File (Happy Path)
+
+  substitutions:
+    GITLAB_TOOLKIT_ID: ${GITLAB_TOOLKIT_ID}
+    GITLAB_TOOLKIT_NAME: ${GITLAB_TOOLKIT_NAME}
+    GITLAB_BASE_BRANCH: main
+    GITLAB_TEST_BRANCH: ${GITLAB_TEST_BRANCH}
+    GITLAB_TEST_ISSUE_NUMBER: ${GITLAB_TEST_ISSUE_NUMBER}
+    GITLAB_TEST_FILE_PATH: ${GITLAB_TEST_FILE_PATH}
+
+  settings:
+    timeout: 300
+    parallel: 1
+    stop_on_failure: false
+
+# Cleanup steps
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "GL*"
+    continue_on_error: true
+
+  - name: Delete Test Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${GITLAB_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  - name: Delete SDK Analysis Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${SDK_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+# Hooks
+hooks:
+  post_test:
+    - name: rca_on_failure
+      pipeline_id: ${RCA_PIPELINE_ID}
+      condition: "result.get('test_passed') is False"
+      input_mapping:
+        failure_details: |
+          f"""**Test Name:** {result.get('pipeline_name', 'Unknown')}
+          **Toolkit:** gitlab
+          **Status:** Test Failed
+
+          **Error Message:**
+          {result.get('error') or result.get('output', {}).get('result', {}).get('error', 'No error message')}
+
+          **Pipeline ID:** {result.get('pipeline_id', 'N/A')}
+          **Version ID:** {result.get('version_id', 'N/A')}
+          **Execution Time:** {result.get('execution_time', 'N/A')}s
+          """
+      output_mapping:
+        "result['rca']": "rca_result"
+        "result['rca_summary']": "rca_summary"

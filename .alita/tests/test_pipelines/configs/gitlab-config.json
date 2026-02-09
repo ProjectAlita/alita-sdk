@@ -1,0 +1,9 @@
+{
+  "repository": "group/test-project",
+  "branch": "main",
+  "gitlab_configuration": {
+    "private": true,
+    "alita_title": "gitlab"
+  },
+  "selected_tools": []
+}

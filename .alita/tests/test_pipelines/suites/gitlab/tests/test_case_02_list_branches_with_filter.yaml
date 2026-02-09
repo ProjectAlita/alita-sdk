@@ -1,0 +1,95 @@
+name: "GL02 - List Branches Filter"
+priority: High
+description: |
+  Verify list_branches_in_repo with wildcard filter returns matching branches.
+  
+  Objective: Test branch filtering using wildcard patterns
+  
+  Expected Behavior:
+  - Tool executes successfully with wildcard parameter
+  - Returns only branches matching the pattern
+  - Respects limit parameter if provided
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  branch_wildcard:
+    type: str
+    value: "main*"
+  limit:
+    type: int
+    value: 10
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_list_branches
+
+nodes:
+  - id: invoke_list_branches
+    type: toolkit
+    tool: list_branches_in_repo
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch_wildcard
+      - limit
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_wildcard
+      limit:
+        type: variable
+        value: limit
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_branches_in_repo' tool with filtering.
+
+          tool executed: list_branches_in_repo
+          parameters: branch_wildcard="main*", limit=10
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully with filter parameters
+          - returns only branches matching the wildcard pattern
+          - result count respects the limit (10 or fewer)
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. do returned branches match the pattern (main*)?
+          4. is the result count within the limit?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

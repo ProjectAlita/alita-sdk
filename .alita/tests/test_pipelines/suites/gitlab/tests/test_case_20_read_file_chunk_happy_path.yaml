@@ -1,0 +1,109 @@
+name: "GL20 - Read File Chunk"
+priority: High
+description: |
+  Verify read_file_chunk tool reads partial file content by line range.
+  
+  Objective: Test inherited method for reading file chunks (BaseCodeToolApiWrapper)
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns only requested line range
+  - Content matches specified lines
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: ${GITLAB_TEST_FILE_PATH}
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  start_line:
+    type: int
+    value: 1
+  end_line:
+    type: int
+    value: 2
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_read_file_chunk
+
+nodes:
+  - id: invoke_read_file_chunk
+    type: toolkit
+    tool: read_file_chunk
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - branch
+      - start_line
+      - end_line
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      branch:
+        type: variable
+        value: branch
+      start_line:
+        type: variable
+        value: start_line
+      end_line:
+        type: variable
+        value: end_line
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'read_file_chunk' tool.
+
+          tool executed: read_file_chunk
+          parameters: offset=1, limit=2 (read lines 1-2)
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns only the requested line range (2 lines)
+          - content matches lines 1-2 of the file
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain partial file content?
+          4. does the content appear to be limited to the requested lines?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

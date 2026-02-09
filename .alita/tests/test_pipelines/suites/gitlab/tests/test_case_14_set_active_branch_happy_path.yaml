@@ -1,0 +1,87 @@
+name: "GL14 - Set Active Branch"
+priority: High
+description: |
+  Verify set_active_branch tool switches the active branch context.
+  
+  Objective: Test branch context switching functionality (GitLab-specific)
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Active branch is changed to specified branch
+  - Returns confirmation of branch change
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  branch_name:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_set_active_branch
+
+nodes:
+  - id: invoke_set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'set_active_branch' tool.
+
+          tool executed: set_active_branch
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - active branch context is changed to the specified branch
+          - returns confirmation of branch change
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output confirm the active branch was changed?
+          4. is the operation confirmed in the response?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,197 @@
+name: "GL18 - PR Change Comment"
+priority: High
+description: |
+  Verify create_pr_change_comment tool adds inline comment to MR diff.
+  
+  Objective: Test inline diff commenting functionality (GitLab-specific)
+  
+  Expected Behavior:
+  - Create a new MR first
+  - Add inline diff comment to the MR
+  - Returns confirmation with comment details
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  pr_title:
+    type: str
+    value: "Test MR: Inline Diff Comment"
+  pr_body:
+    type: str
+    value: "This MR tests inline diff commenting functionality."
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  file_create_result:
+    type: dict
+  create_result:
+    type: dict
+  pr_number:
+    type: int
+  file_path:
+    type: str
+    value: "test-comment.md"
+  line_number:
+    type: int
+    value: 1
+  comment:
+    type: str
+    value: "Inline comment on this specific line."
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: create_test_file
+
+nodes:
+  - id: create_test_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch
+    input_mapping:
+      file_path:
+        type: fixed
+        value: "test-comment.md"
+      file_contents:
+        type: fixed
+        value: |
+          # Test File for Inline Comments
+          Empty row.
+          This file tests inline diff commenting.
+          Line 3 will be commented on.
+      branch:
+        type: variable
+        value: branch
+    output:
+      - file_create_result
+    structured_output: true
+    transition: invoke_create_pr
+
+  - id: invoke_create_pr
+    type: toolkit
+    tool: create_pull_request
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_title
+      - pr_body
+      - branch
+    input_mapping:
+      pr_title:
+        type: variable
+        value: pr_title
+      pr_body:
+        type: variable
+        value: pr_body
+      branch:
+        type: variable
+        value: branch
+    output:
+      - create_result
+    structured_output: true
+    transition: extract_pr_number
+
+  - id: extract_pr_number
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Extract MR number from create result string
+        create_result = alita_state.get('create_result', '')
+        result_str = str(create_result).strip()
+        
+        # Parse the output to get PR number
+        pr_number = 1
+        if 'PR number' in result_str:
+            parts = result_str.split('PR number')
+            if len(parts) > 1:
+                try:
+                    num_str = parts[1].strip().split()[0]
+                    pr_number = int(num_str)
+                except (ValueError, IndexError):
+                    pass
+        
+        pr_number
+    input: []
+    output:
+      - pr_number
+    transition: invoke_create_pr_change_comment
+
+  - id: invoke_create_pr_change_comment
+    type: toolkit
+    tool: create_pr_change_comment
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_number
+      - file_path
+      - line_number
+      - comment
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+      file_path:
+        type: variable
+        value: file_path
+      line_number:
+        type: variable
+        value: line_number
+      comment:
+        type: variable
+        value: comment
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - pr_number
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the inline comment workflow.
+
+          created MR number: {pr_number}
+          inline comment result: {tool_result}
+
+          expected behavior:
+          - MR created successfully
+          - inline comment added to the specified line in the MR diff
+          - returns confirmation with comment details
+
+          evaluate:
+          1. was the MR created successfully?
+          2. did the inline comment tool execute?
+          3. if successful, does the output confirm the comment was created?
+          4. if there are errors, are they about file/line not found (acceptable) or system errors (failure)?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed",
+            "explanation": explain test final result for test_passed value
+            pr_number: {pr_number}
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

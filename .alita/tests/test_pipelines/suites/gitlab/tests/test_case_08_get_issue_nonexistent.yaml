@@ -1,0 +1,90 @@
+name: "GL08 - Get Issue Invalid"
+priority: High
+description: |
+  Verify get_issue handles nonexistent issue gracefully.
+  
+  Objective: Test error handling for invalid issue numbers
+  
+  Expected Behavior:
+  - Tool executes and returns appropriate error
+  - Error message indicates issue not found
+  - No system crash or unexpected failure
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  issue_number:
+    type: int
+    value: 999999
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_issue
+
+nodes:
+  - id: invoke_get_issue
+    type: toolkit
+    tool: get_issue
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - issue_number
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_issue' tool for invalid issue number.
+
+          tool executed: get_issue
+          parameters: issue_number=999999 (nonexistent)
+          results: {tool_result}
+
+          this test validates error handling for invalid issue numbers.
+
+          perform the following checks:
+          1. confirm the tool executed (result is not empty or null).
+          2. examine any error message for specific meaning. valid error patterns for invalid issues include:
+             - issue does not exist or not found
+             - issue number is invalid
+             - insufficient permissions to view the issue
+             - http error codes 404 (not found) or 403 (forbidden)
+          3. determine if the error is about the invalid issue itself.
+             errors like "issue 999999 not found" are expected and correct.
+             system errors unrelated to the invalid issue number are failures.
+
+          return a json object with:
+          {{
+            "test_passed": true/false (true if error occurred as expected),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

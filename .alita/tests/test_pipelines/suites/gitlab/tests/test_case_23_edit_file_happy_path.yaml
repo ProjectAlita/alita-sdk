@@ -1,0 +1,108 @@
+name: "GL23 - Edit File"
+priority: High
+description: |
+  Verify edit_file tool performs precise text replacement in file.
+  
+  Objective: Test inherited precise editing method (BaseCodeToolApiWrapper)
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Exact text is replaced with new text
+  - Returns confirmation of edit operation
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: ${GITLAB_TEST_FILE_PATH}
+  file_query:
+    type: str
+    value: |
+      OLD <<<<
+      Line 1: Test content
+      >>>> OLD
+      NEW <<<<
+      Line 1: Edited test content
+      >>>> NEW
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_edit_file
+
+nodes:
+  - id: invoke_edit_file
+    type: toolkit
+    tool: edit_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_query
+      - branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_query:
+        type: variable
+        value: file_query
+      branch:
+        type: variable
+        value: branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'edit_file' tool.
+
+          tool executed: edit_file
+          parameters: old_text="Line 1: Test content", new_text="Line 1: Edited test content"
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - exact text match is replaced with new text
+          - returns confirmation of edit operation
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output confirm the text was replaced?
+          4. is the operation confirmed in the response?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

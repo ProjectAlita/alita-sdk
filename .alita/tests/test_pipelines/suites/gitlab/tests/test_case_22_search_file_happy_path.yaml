@@ -1,0 +1,116 @@
+name: "GL22 - Search File"
+priority: High
+description: |
+  Verify search_file tool searches for pattern within file content.
+  
+  Objective: Test inherited content search method (BaseCodeToolApiWrapper)
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns lines matching the search pattern
+  - Includes line numbers and context
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: ${GITLAB_TEST_FILE_PATH}
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  pattern:
+    type: str
+    value: "Line"
+  is_regex:
+    type: bool
+    value: false
+  context_lines:
+    type: int
+    value: 1
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_search_file
+
+nodes:
+  - id: invoke_search_file
+    type: toolkit
+    tool: grep_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - branch
+      - pattern
+      - is_regex
+      - context_lines
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      branch:
+        type: variable
+        value: branch
+      pattern:
+        type: variable
+        value: pattern
+      is_regex:
+        type: variable
+        value: is_regex
+      context_lines:
+        type: variable
+        value: context_lines
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'search_file' tool.
+
+          tool executed: search_file
+          parameters: pattern="Line", context_lines=1
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns lines matching the search pattern
+          - includes line numbers and surrounding context
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain search results with matching lines?
+          4. are line numbers and context included in the results?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

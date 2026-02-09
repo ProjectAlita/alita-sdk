@@ -1,0 +1,101 @@
+name: "GL11 - Update File"
+priority: Critical
+description: |
+  Verify update_file tool modifies file content using edit query.
+  
+  Objective: Confirm file update functionality with precise editing
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - File content is updated as specified
+  - Returns confirmation with updated content
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  file_query:
+    type: str
+    value: |
+      ${GITLAB_TEST_FILE_PATH}
+      OLD <<<<
+      Line 2: More content
+      >>>> OLD
+      NEW <<<<
+      Line 2: Updated content
+      >>>> NEW
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_update_file
+
+nodes:
+  - id: invoke_update_file
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - file_query
+      - branch
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+      branch:
+        type: variable
+        value: branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_file' tool.
+
+          tool executed: update_file
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - file content is updated with specified changes
+          - returns confirmation with updated content or status
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output confirm the file was updated?
+          4. is the update operation confirmed in the response?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

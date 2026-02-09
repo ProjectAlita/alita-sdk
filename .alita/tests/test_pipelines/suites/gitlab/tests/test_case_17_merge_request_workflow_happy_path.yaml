@@ -1,0 +1,155 @@
+name: "GL17 - MR Workflow"
+priority: Critical
+description: |
+  Verify create_pull_request tool creates merge request and comment_on_pr adds comment.
+  
+  Objective: Confirm merge request workflow (create MR + add comment)
+  
+  Expected Behavior:
+  - Create MR executes successfully
+  - Returns MR number and details
+  - Comment on MR executes successfully
+  - Returns comment confirmation
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  pr_title:
+    type: str
+    value: "Test MR: Automated Testing"
+  pr_body:
+    type: str
+    value: "This is an automated test merge request. Do not merge."
+  branch:
+    type: str
+    value: ${GITLAB_TEST_BRANCH}
+  create_result:
+    type: dict
+  pr_number:
+    type: int
+  comment:
+    type: str
+    value: "This is a test comment on the merge request."
+  comment_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_create_pr
+
+nodes:
+  - id: invoke_create_pr
+    type: toolkit
+    tool: create_pull_request
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_title
+      - pr_body
+      - branch
+    input_mapping:
+      pr_title:
+        type: variable
+        value: pr_title
+      pr_body:
+        type: variable
+        value: pr_body
+      branch:
+        type: variable
+        value: branch
+    output:
+      - create_result
+    structured_output: true
+    transition: extract_pr_number
+
+  - id: extract_pr_number
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Extract MR number from create result string
+        create_result = alita_state.get('create_result', '')
+        result_str = str(create_result).strip()
+        
+        # Parse the output to get PR number
+        pr_number = 1
+        if 'PR number' in result_str:
+            parts = result_str.split('PR number')
+            if len(parts) > 1:
+                try:
+                    num_str = parts[1].strip().split()[0]
+                    pr_number = int(num_str)
+                except (ValueError, IndexError):
+                    pass
+        
+        pr_number
+    input: []
+    output:
+      - pr_number
+    transition: invoke_comment_on_pr
+
+  - id: invoke_comment_on_pr
+    type: toolkit
+    tool: comment_on_pr
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_number
+      - comment
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+      comment:
+        type: variable
+        value: comment
+    output:
+      - comment_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - create_result
+      - comment_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the merge request workflow results.
+
+          create merge request result: {create_result}
+          comment on merge request result: {comment_result}
+
+          expected behavior:
+          - create_pull_request executes successfully and returns MR details
+          - comment_on_pr executes successfully and adds comment to the MR
+
+          evaluate:
+          1. did both tools execute successfully?
+          2. are there any errors in either operation?
+          3. was the merge request created?
+          4. was the comment added to the merge request?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed",
+            "pr_number": {pr_number}
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
