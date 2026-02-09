@@ -257,82 +257,8 @@ class BaseToolApiWrapper(BaseModel):
         # Mode is now the clean tool name (no prefix to remove)
         for tool in self.get_available_tools():
             if tool["name"] == mode:
-                try:
-                    execution = tool["ref"](*args, **kwargs)
-                    # if not isinstance(execution, str):
-                    #     execution = str(execution)
-                    return execution
-                except Exception as e:
-                    # Re-raise McpAuthorizationRequired directly without wrapping
-                    from alita_sdk.runtime.utils.mcp_oauth import McpAuthorizationRequired
-                    if isinstance(e, McpAuthorizationRequired):
-                        raise
-                    
-                    # Catch all tool execution exceptions and provide user-friendly error messages
-                    error_type = type(e).__name__
-                    error_message = str(e)
-                    full_traceback = traceback.format_exc()
-                    
-                    # Log the full exception details for debugging
-                    logger.error(f"Tool execution failed for '{mode}': {error_type}: {error_message}")
-                    logger.error(f"Full traceback:\n{full_traceback}")
-                    logger.debug(f"Tool execution parameters - args: {args}, kwargs: {kwargs}")
-                    
-                    # Provide specific error messages for common issues
-                    if isinstance(e, TypeError) and "unexpected keyword argument" in error_message:
-                        # Extract the problematic parameter name from the error message
-                        import re
-                        match = re.search(r"unexpected keyword argument '(\w+)'", error_message)
-                        if match:
-                            bad_param = match.group(1)
-                            # Try to get expected parameters from the tool's args_schema if available
-                            expected_params = "unknown"
-                            if "args_schema" in tool and hasattr(tool["args_schema"], "__fields__"):
-                                expected_params = list(tool["args_schema"].__fields__.keys())
-                            
-                            user_friendly_message = (
-                                f"Parameter error in tool '{mode}': unexpected parameter '{bad_param}'. "
-                                f"Expected parameters: {expected_params}\n\n"
-                                f"Full traceback:\n{full_traceback}"
-                            )
-                        else:
-                            user_friendly_message = (
-                                f"Parameter error in tool '{mode}': {error_message}\n\n"
-                                f"Full traceback:\n{full_traceback}"
-                            )
-                    elif isinstance(e, TypeError):
-                        user_friendly_message = (
-                            f"Parameter error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, ValueError):
-                        user_friendly_message = (
-                            f"Value error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, KeyError):
-                        user_friendly_message = (
-                            f"Missing required configuration or data in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, ConnectionError):
-                        user_friendly_message = (
-                            f"Connection error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    elif isinstance(e, TimeoutError):
-                        user_friendly_message = (
-                            f"Timeout error in tool '{mode}': {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    else:
-                        user_friendly_message = (
-                            f"Tool '{mode}' execution failed: {error_type}: {error_message}\n\n"
-                            f"Full traceback:\n{full_traceback}"
-                        )
-                    
-                    # Re-raise with the user-friendly message while preserving the original exception
-                    raise ToolException(user_friendly_message) from e
+                execution = tool["ref"](*args, **kwargs)
+                return execution
         else:
             raise ValueError(f"Unknown mode: {mode}. "
                              f"Available modes: {', '.join([tool['name'] for tool in self.get_available_tools()])}. "
