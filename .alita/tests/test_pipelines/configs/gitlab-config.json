@@ -13,6 +13,7 @@
     "list_folders",
     "create_file",
     "read_file",
+    "read_file_chunk",
     "update_file",
     "append_file",
     "edit_file",

@@ -28,11 +28,12 @@ This test suite validates all 22 GitLab toolkit tools (18 native + 4 inherited) 
 | get_pr_changes | test_case_16 | High | ✅ Created (GitLab-specific) |
 | create_pr_change_comment | test_case_18 | High | ✅ Created (GitLab-specific) |
 | get_commits | test_case_19 | Critical | ✅ Created |
+| read_file_chunk | test_case_20 | High | ✅ Created (inherited) |
 | read_multiple_files | - | - | ⏭️ Covered by read_file tests |
 | search_file | test_case_22 | High | ✅ Created (inherited) |
 | edit_file | test_case_23 | High | ✅ Created (inherited) |
 
-**Total:** 22 test files covering all 22 tools
+**Total:** 23 test files covering all 22 tools
 
 ## Setup Artifacts
 
