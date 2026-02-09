@@ -44,6 +44,10 @@ class BitbucketApiAbstract(ABC):
         pass
 
     @abstractmethod
+    def delete_branch(self, branch_name: str) -> None:
+        pass
+
+    @abstractmethod
     def create_pull_request(self, pr_json_data: str) -> Any:
         pass
 
@@ -75,6 +79,10 @@ class BitbucketApiAbstract(ABC):
     def add_pull_request_comment(self, pr_id: str, text: str) -> str:
         pass
 
+    @abstractmethod
+    def close_pull_request(self, pr_id: str, message: str = None) -> Any:
+        pass
+
 
 class BitbucketServerApi(BitbucketApiAbstract):
     api_client: Bitbucket
@@ -97,6 +105,19 @@ class BitbucketServerApi(BitbucketApiAbstract):
             self.repository,
             branch_name,
             branch_from
+        )
+
+    def delete_branch(self, branch_name: str) -> None:
+        """
+        Delete a branch from Bitbucket Server.
+        
+        Parameters:
+            branch_name (str): The name of the branch to delete
+        """
+        self.api_client.delete_branch(
+            project_key=self.project,
+            repository_slug=self.repository,
+            name=branch_name
         )
 
     def create_pull_request(self, pr_json_data: str) -> Any:
@@ -283,6 +304,29 @@ class BitbucketServerApi(BitbucketApiAbstract):
             **comment_data
         )
 
+    def close_pull_request(self, pr_id: str, message: str = None) -> Any:
+        """
+        Decline (close) a pull request without merging it.
+        Parameters:
+            pr_id (str): the pull request ID
+            message (str, optional): Optional message explaining why the pull request is being declined
+        Returns:
+            The API response
+        """
+        # Bitbucket Server API uses 'decline' to close a PR without merging
+        response = self.api_client.decline_pull_request(
+            project_key=self.project,
+            repository_slug=self.repository,
+            pull_request_id=pr_id,
+            version=None  # Use latest version
+        )
+        
+        # If a message is provided, add it as a comment
+        if message:
+            self.add_pull_request_comment(pr_id=pr_id, content=message)
+        
+        return normalize_response(response)
+
 
 class BitbucketCloudApi(BitbucketApiAbstract):
     api_client: Cloud
@@ -322,6 +366,17 @@ class BitbucketCloudApi(BitbucketApiAbstract):
         commits_name = self._get_branch(branch_from).hash
         # create new branch from last commit
         return self.repository.branches.create(branch_name, commits_name)
+
+    def delete_branch(self, branch_name: str) -> None:
+        """
+        Delete a branch from Bitbucket Cloud.
+        
+        Parameters:
+            branch_name (str): The name of the branch to delete
+        """
+        # URL-encode branch name to handle special characters like forward slashes
+        encoded_branch = quote(branch_name, safe='')
+        self.repository.branches.delete(encoded_branch)
 
     def create_pull_request(self, pr_json_data: str) -> Any:
         response = self.repository.pullrequests.post(None, data=json.loads(pr_json_data))
@@ -521,3 +576,20 @@ class BitbucketCloudApi(BitbucketApiAbstract):
 
         response = self.repository.pullrequests.get(pr_id).post("comments", data)
         return response['links']['html']['href']
+
+    def close_pull_request(self, pr_id: str, message: str = None) -> Any:
+        """
+        Decline (close) a pull request without merging it.
+        Parameters:
+            pr_id (str): the pull request ID
+            message (str, optional): Optional message explaining why the pull request is being declined
+        Returns:
+            The API response
+        """
+        # If a message is provided, add it as a comment before declining
+        if message:
+            self.add_pull_request_comment(pr_id=pr_id, content=message)
+        
+        # Decline the pull request using the built-in decline method
+        response = self.repository.pullrequests.get(pr_id).decline()
+        return normalize_response(response)
