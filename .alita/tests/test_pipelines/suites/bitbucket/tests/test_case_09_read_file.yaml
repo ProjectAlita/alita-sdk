@@ -1,11 +1,12 @@
-name: "BB09 - read_file: Read existing file from main branch"
+name: "BB09 - read_file: Read existing file successfully"
 description: |
-  Verify the Bitbucket 'read_file' tool correctly reads file contents from the main branch.
+  Verify the Bitbucket 'read_file' tool correctly reads file contents.
 
-  Objective: Test file reading with line breaks and content validation
+  Objective: Test file reading with special characters and line breaks
 
   Expected Behavior:
-  - File content is read completely from main branch
+  - File content is read completely
+  - Special characters are preserved
   - Line breaks are maintained
   - Content matches exactly (byte-for-byte)
 
@@ -14,9 +15,19 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
-  branch_name:
+  test_branch_name:
+    type: str
+  source_branch:
     type: str
     value: main
+  create_branch_result:
+    type: str
+  cleanup_branch_result:
+    type: str
+  cleanup_result:
+    type: str
+  create_result:
+    type: str
   error_indicators:
     type: list
     value:
@@ -27,33 +38,67 @@ state:
       - failed to read
   expected_line_count:
     type: int
-    value: 3
+    value: 4
+  expected_special_chars:
+    type: list
+    value:
+      - '@'
+      - '#'
+      - $
+      - '%'
+      - ^
+      - '&'
+      - '*'
+      - (
+      - )
   file_content:
     type: str
-  expected_content:
+  main_branch_content:
+    type: str
+  test_content:
     type: str
     value: |
-      Line 1: This is the original content
-      Line 2: This line will be referenced
-      Line 3: This is the end
+      This is a test file for BB09.
+      It contains multiple lines of text.
+      Including special characters: @#$%^&*()
+      And numbers: 123456789
   test_file_path:
     type: str
-    value: test-files/bb14-invalid-update.txt
+    value: test-files/bb09-read-test.txt
   test_results:
     type: dict
-
-entry_point: read_file_content
-
+entry_point: create_test_branch
 nodes:
+  - id: create_test_file
+    type: toolkit
+    input:
+      - test_file_path
+      - test_content
+    input_mapping:
+      branch:
+        type: variable
+        value: branch
+      file_contents:
+        type: variable
+        value: test_content
+      file_path:
+        type: variable
+        value: test_file_path
+    output:
+      - create_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: bitbucket-testing
+    transition: read_file_content
   - id: read_file_content
     type: toolkit
     input:
       - test_file_path
-      - branch_name
+      - test_branch_name
     input_mapping:
       branch:
         type: variable
-        value: branch_name
+        value: test_branch_name
       file_path:
         type: variable
         value: test_file_path
@@ -62,15 +107,34 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: bitbucket-testing
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: bitbucket-testing
     transition: validate_results
 
   - id: validate_results
     type: llm
     input:
+      - create_result
       - file_content
-      - expected_content
+      - test_content
+      - cleanup_result
       - expected_line_count
+      - expected_special_chars
       - error_indicators
+      - cleanup_branch_result
     input_mapping:
       chat_history:
         type: fixed
@@ -83,27 +147,38 @@ nodes:
         value: |
           Analyze the output from the 'read_file' tool execution.
 
+          Create Result: {create_result}
           Read Content: {file_content}
-          Expected Content: {expected_content}
+          Expected Content: {test_content}
+          Cleanup Result: {cleanup_result}
+          Branch Cleanup Result: {cleanup_branch_result}
           Expected Line Count: {expected_line_count}
+          Expected Special Characters: {expected_special_chars}
           Error Indicators: {error_indicators}
 
           This is a POSITIVE test - we expect successful file reading with exact content match.
 
           Validation Criteria (ALL must pass for test_passed=true):
-          1. no_read_errors: Read operation has no error indicators
-          2. exact_match: Read content EXACTLY matches expected content (including whitespace)
-          3. line_count_correct: Number of lines matches expected ({expected_line_count})
-          4. newlines_preserved: Line breaks are maintained correctly
+          1. file_created: File was created successfully
+          2. no_read_errors: Read operation has no error indicators
+          3. exact_match: Read content EXACTLY matches expected content (including whitespace)
+          4. line_count_correct: Number of lines matches expected ({expected_line_count})
+          5. special_chars_preserved: ALL special characters are present in read content
+          6. newlines_preserved: Line breaks are maintained correctly
+          7. branch_cleanup_successful: Test branch was deleted successfully
 
           Return JSON test_results:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
+            "file_created": boolean,
             "no_read_errors": boolean,
             "exact_match": boolean,
             "line_count_correct": boolean,
+            "special_chars_preserved": boolean,
             "newlines_preserved": boolean,
+            "branch_cleanup_successful": boolean,
             "actual_line_count": number,
+            "missing_special_chars": [list of missing special chars],
             "content_length_expected": number (length of expected content),
             "content_length_actual": number (length of read content),
             "error": string | null

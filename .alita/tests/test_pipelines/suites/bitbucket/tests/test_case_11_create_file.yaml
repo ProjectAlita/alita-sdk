@@ -82,7 +82,7 @@ nodes:
       - test_branch_name
       - source_branch
     input_mapping:
-      branch_name:
+      branch:
         type: variable
         value: test_branch_name
       from_branch:
@@ -135,6 +135,21 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results
@@ -145,6 +160,7 @@ nodes:
       - test_content
       - expected_success_indicators
       - error_indicators
+      - cleanup_branch_result
     input_mapping:
       chat_history:
         type: fixed
@@ -162,6 +178,7 @@ nodes:
           Original Content: {test_content}
           Expected Success Indicators: {expected_success_indicators}
           Error Indicators: {error_indicators}
+          Branch Cleanup Result: {cleanup_branch_result}
 
           This is a POSITIVE test - we expect successful file creation.
 
@@ -172,6 +189,7 @@ nodes:
           4. special_chars_preserved: Special characters and Unicode are preserved in read result
           5. read_succeeded: File was successfully read back after creation
           6. commit_confirmed: Create result indicates a commit was made
+          7. branch_cleanup_successful: Test branch was deleted successfully
 
           Return JSON test_results:
           {{
@@ -182,6 +200,7 @@ nodes:
             "special_chars_preserved": boolean,
             "read_succeeded": boolean,
             "commit_confirmed": boolean,
+            "branch_cleanup_successful": boolean,
             "content_length_original": number,
             "content_length_read": number,
             "error": string | null
@@ -193,20 +212,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_branch
-
-  - id: cleanup_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - test_branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: test_branch_name
-    output:
-      - cleanup_branch_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: END

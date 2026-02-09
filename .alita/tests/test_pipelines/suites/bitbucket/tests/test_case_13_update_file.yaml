@@ -159,7 +159,7 @@ nodes:
       - test_branch_name
       - source_branch
     input_mapping:
-      branch_name:
+      branch:
         type: variable
         value: test_branch_name
       from_branch:
@@ -236,6 +236,21 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: bitbucket-testing
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: bitbucket-testing
     transition: validate_results
 
   - id: validate_results
@@ -248,6 +263,7 @@ nodes:
       - expected_new_content
       - expected_unchanged
       - error_indicators
+      - cleanup_branch_result
     input_mapping:
       chat_history:
         type: fixed
@@ -267,6 +283,7 @@ nodes:
           Expected New Content Indicator: {expected_new_content}
           Expected Unchanged Indicator: {expected_unchanged}
           Error Indicators: {error_indicators}
+          Branch Cleanup Result: {cleanup_branch_result}
 
           This is a POSITIVE test - we expect successful file update.
 
@@ -276,7 +293,9 @@ nodes:
           3. update_succeeded: Update operation completed without errors
           4. greet_function_updated: Updated content contains "Welcome" instead of "Hello"
           5. calculate_function_unchanged: Calculate function remains in updated content
-          6. main_block_preserved: Main execution block remains intact
+          6. markers_processed: OLD/NEW markers were correctly processed
+          7. main_block_preserved: Main execution block remains intact
+          8. branch_cleanup_successful: Test branch was deleted successfully
 
           Return JSON test_results:
           {{
@@ -286,7 +305,9 @@ nodes:
             "update_succeeded": boolean,
             "greet_function_updated": boolean,
             "calculate_function_unchanged": boolean,
+            "markers_processed": boolean,
             "main_block_preserved": boolean,
+            "branch_cleanup_successful": boolean,
             "contains_welcome": boolean,
             "contains_calculate": boolean,
             "error": string | null
@@ -298,22 +319,6 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_branch
-
-  - id: cleanup_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - test_branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: test_branch_name
-    output:
-      - cleanup_branch_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: bitbucket-testing
     transition: END
 
 

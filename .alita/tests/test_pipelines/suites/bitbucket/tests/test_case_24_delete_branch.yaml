@@ -1,0 +1,183 @@
+name: "BB24 - delete_branch: Delete branch successfully"
+description: |
+  Verify the Bitbucket 'delete_branch' tool deletes an existing branch successfully.
+
+  Objective: Test successful branch deletion
+
+  Expected Behavior:
+  - Branch is created successfully for testing
+  - Branch is deleted without errors
+  - Branch no longer appears in repository branch list
+  - Appropriate success message is returned
+  - No error indicators in output
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  branch_name:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["deleted successfully", "deleted", "removed", "success"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "permission denied", "not found", "does not exist"]
+  create_result:
+    type: str
+  delete_result:
+    type: str
+  branch_list_before:
+    type: str
+  branch_list_after:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique branch name
+        branch_name = f"test-delete-bb24-{timestamp}-{random_suffix}"
+
+        {"branch_name": branch_name}
+    output:
+      - branch_name
+    structured_output: true
+    transition: create_test_branch
+
+  - id: create_test_branch
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - create_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_branch_created
+
+  - id: verify_branch_created
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_name
+    output:
+      - branch_list_before
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: delete_branch
+
+  - id: delete_branch
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_branch_deleted
+
+  - id: verify_branch_deleted
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_name
+    output:
+      - branch_list_after
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - delete_result
+      - branch_list_before
+      - branch_list_after
+      - branch_name
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'delete_branch' tool execution.
+
+          Branch Name: {branch_name}
+          Create Result: {create_result}
+          Branch List Before Deletion: {branch_list_before}
+          Delete Result: {delete_result}
+          Branch List After Deletion: {branch_list_after}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful branch deletion.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: All tools ran and returned results
+          2. branch_created: Branch was created successfully
+          3. branch_in_list_before: Branch appeared in list before deletion
+          4. no_errors: Delete result does NOT contain any error indicators
+          5. deletion_success: Delete result indicates success (contains success indicator)
+          6. branch_not_in_list_after: Branch name does NOT appear in the branch list after deletion
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "branch_created": boolean,
+            "branch_in_list_before": boolean,
+            "no_errors": boolean,
+            "deletion_success": boolean,
+            "branch_not_in_list_after": boolean,
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "branches_found_after": [list of branch names from branch_list_after],
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
