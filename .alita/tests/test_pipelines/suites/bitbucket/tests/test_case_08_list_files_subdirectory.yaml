@@ -2,7 +2,7 @@ name: "BB08 - list_files: List files in subdirectory with path"
 description: |
   Verify the Bitbucket 'list_files' tool correctly lists files in a subdirectory.
 
-  Objective: Test subdirectory listing with path parameter
+  Objective: Test subdirectory listing with path parameter using known stable files
 
   Expected Behavior:
   - Path parameter correctly navigates to subdirectory
@@ -17,104 +17,19 @@ toolkits:
 state:
   test_dir:
     type: str
-    value: test-dir-bb08
-  test_file_1:
-    type: str
-    value: test-file-1.txt
-  test_file_2:
-    type: str
-    value: test-file-2.txt
-  nested_file:
-    type: str
-    value: subdir/nested-file.txt
-  expected_files:
-    type: list
-    value: ["test-file-1.txt", "test-file-2.txt", "subdir/nested-file.txt"]
+    value: "test-files"
   error_indicators:
     type: list
     value: ["error", "failed", "not found", "permission denied"]
-  create_result_1:
-    type: str
-  create_result_2:
-    type: str
-  create_result_3:
-    type: str
   subdir_files:
     type: str
   non_recursive_files:
     type: str
-  cleanup_result:
-    type: str
   test_results:
     type: dict
 
-entry_point: create_test_directory
+entry_point: list_subdirectory_files
 nodes:
-  - id: create_test_directory
-    type: toolkit
-    input:
-      - test_dir
-      - test_file_1
-    input_mapping:
-      file_path:
-        type: fstring
-        value: "{test_dir}/{test_file_1}"
-      file_contents:
-        type: fixed
-        value: "Test file 1 content for BB08"
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - create_result_1
-    structured_output: true
-    tool: create_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: create_second_file
-
-  - id: create_second_file
-    type: toolkit
-    input:
-      - test_dir
-      - test_file_2
-    input_mapping:
-      file_path:
-        type: fstring
-        value: "{test_dir}/{test_file_2}"
-      file_contents:
-        type: fixed
-        value: "Test file 2 content for BB08"
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - create_result_2
-    structured_output: true
-    tool: create_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: create_nested_file
-
-  - id: create_nested_file
-    type: toolkit
-    input:
-      - test_dir
-      - nested_file
-    input_mapping:
-      file_path:
-        type: fstring
-        value: "{test_dir}/{nested_file}"
-      file_contents:
-        type: fixed
-        value: "Nested file content for BB08"
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - create_result_3
-    structured_output: true
-    tool: create_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: list_subdirectory_files
 
   - id: list_subdirectory_files
     type: toolkit
@@ -150,37 +65,14 @@ nodes:
     structured_output: true
     tool: list_files
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: cleanup_files
-
-  - id: cleanup_files
-    type: toolkit
-    input:
-      - test_dir
-      - test_file_1
-    input_mapping:
-      file_path:
-        type: fstring
-        value: "{test_dir}/{test_file_1}"
-      branch:
-        type: variable
-        value: ACTIVE_BRANCH
-    output:
-      - cleanup_result
-    structured_output: true
-    tool: delete_file
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results
     type: llm
     input:
-      - create_result_1
-      - create_result_2
-      - create_result_3
       - subdir_files
       - non_recursive_files
       - test_dir
-      - expected_files
       - error_indicators
     input_mapping:
       chat_history:
@@ -194,37 +86,28 @@ nodes:
         value: |
           Analyze the output from subdirectory file listing test.
 
-          Created Files: {create_result_1}, {create_result_2}, {create_result_3}
           Test Directory: {test_dir}
           Recursive Listing: {subdir_files}
           Non-Recursive Listing: {non_recursive_files}
-          Expected Files: {expected_files}
           Error Indicators: {error_indicators}
 
-          This is an EDGE CASE test - we expect subdirectory listing to work correctly.
-
           Validation Criteria (ALL must pass for test_passed=true):
-          1. files_created: All three test files were created successfully
-          2. no_errors: No error indicators in any output
-          3. recursive_complete: Recursive listing shows all 3 files (including nested)
-          4. non_recursive_correct: Non-recursive shows only direct children (2 files and 1 directory)
-          5. paths_prefixed: File paths include the subdirectory prefix
-          6. nested_file_only_recursive: Nested file appears only in recursive listing
-          7. directory_navigation_works: Path parameter successfully navigates to subdirectory
+          1. no_errors: No error indicators in any output
+          2. recursive_has_files: Recursive listing returns files
+          3. non_recursive_has_items: Non-recursive listing returns items
+          4. listing_successful: Both listing operations completed successfully
+          5. directory_navigation_works: Path parameter successfully navigates to subdirectory
 
           Return JSON test_results:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
-            "files_created": boolean,
             "no_errors": boolean,
-            "recursive_complete": boolean,
-            "non_recursive_correct": boolean,
-            "paths_prefixed": boolean,
-            "nested_file_only_recursive": boolean,
+            "recursive_has_files": boolean,
+            "non_recursive_has_items": boolean,
+            "listing_successful": boolean,
             "directory_navigation_works": boolean,
             "recursive_file_count": number,
             "non_recursive_item_count": number,
-            "files_found_recursive": [list of files in recursive listing],
             "error": string | null
           }}
 

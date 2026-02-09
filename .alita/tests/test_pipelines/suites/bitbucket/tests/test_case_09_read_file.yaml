@@ -15,9 +15,15 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
-  branch:
+  test_branch_name:
+    type: str
+  source_branch:
     type: str
     value: main
+  create_branch_result:
+    type: str
+  cleanup_branch_result:
+    type: str
   cleanup_result:
     type: str
   create_result:
@@ -61,7 +67,7 @@ state:
     value: test-files/bb09-read-test.txt
   test_results:
     type: dict
-entry_point: create_test_file
+entry_point: create_test_branch
 nodes:
   - id: create_test_file
     type: toolkit
@@ -88,10 +94,11 @@ nodes:
     type: toolkit
     input:
       - test_file_path
+      - test_branch_name
     input_mapping:
       branch:
         type: variable
-        value: branch
+        value: test_branch_name
       file_path:
         type: variable
         value: test_file_path
@@ -100,7 +107,23 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: bitbucket-testing
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: bitbucket-testing
     transition: validate_results
+
   - id: validate_results
     type: llm
     input:
@@ -111,6 +134,7 @@ nodes:
       - expected_line_count
       - expected_special_chars
       - error_indicators
+      - cleanup_branch_result
     input_mapping:
       chat_history:
         type: fixed
@@ -127,6 +151,7 @@ nodes:
           Read Content: {file_content}
           Expected Content: {test_content}
           Cleanup Result: {cleanup_result}
+          Branch Cleanup Result: {cleanup_branch_result}
           Expected Line Count: {expected_line_count}
           Expected Special Characters: {expected_special_chars}
           Error Indicators: {error_indicators}
@@ -140,7 +165,7 @@ nodes:
           4. line_count_correct: Number of lines matches expected ({expected_line_count})
           5. special_chars_preserved: ALL special characters are present in read content
           6. newlines_preserved: Line breaks are maintained correctly
-          7. cleanup_successful: File was deleted successfully
+          7. branch_cleanup_successful: Test branch was deleted successfully
 
           Return JSON test_results:
           {{
@@ -151,7 +176,7 @@ nodes:
             "line_count_correct": boolean,
             "special_chars_preserved": boolean,
             "newlines_preserved": boolean,
-            "cleanup_successful": boolean,
+            "branch_cleanup_successful": boolean,
             "actual_line_count": number,
             "missing_special_chars": [list of missing special chars],
             "content_length_expected": number (length of expected content),

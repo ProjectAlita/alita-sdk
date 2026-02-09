@@ -53,6 +53,7 @@ If you have access to the active terminal context:
    - Most recently ran a test command
    - Exited non-zero
    - Contains the most recent failure stack trace
+4. Look for log files located in .alita/tests/test_pipelines/test_results/suites/{{sute_name_detected_from_terminal}}
 
 If the output is very large/truncated, ask for:
 - The failing section only (first error + full traceback), or

@@ -5,7 +5,8 @@ description: |
   Test Structure:
   - Branch Operations (BB01-BB06): Test branch management operations
   - File Operations (BB07-BB16): Test file CRUD operations
-  - Pull Request Operations (BB17-BB23): Test PR management operations
+  - Pull Request Operations (BB17-BB27): Test PR management operations
+  - Branch Deletion Operations (BB24-BB25): Test branch deletion operations
 
 env_mapping:
   toolkit_config: ${BITBUCKET_CONFIG_PATH:../../configs/bitbucket-cloud-config.json}
@@ -65,7 +66,7 @@ execution:
     - test_case_15_*.yaml  # delete_file (Critical)
     - test_case_16_*.yaml  # append_file (High)
 
-    # Pull Request Operations (BB17-BB23)
+    # Pull Request Operations (BB17-BB27)
     - test_case_17_*.yaml  # create_pull_request cloud (Critical)
     - test_case_18_*.yaml  # create_pull_request server (High)
     - test_case_19_*.yaml  # get_pull_request (Critical)
@@ -73,6 +74,12 @@ execution:
     - test_case_21_*.yaml  # get_pull_requests_changes (High)
     - test_case_22_*.yaml  # add_pull_request_comment (Critical)
     - test_case_23_*.yaml  # add_pull_request_comment inline (High)
+    - test_case_26_*.yaml  # close_pull_request cloud (Critical)
+    - test_case_27_*.yaml  # close_pull_request invalid (High)
+
+    # Branch Deletion Operations (BB24-BB25)
+    - test_case_24_*.yaml  # delete_branch (Critical)
+    - test_case_25_*.yaml  # delete_branch protected branches (Critical)
 
   substitutions:
     BITBUCKET_TOOLKIT_ID: ${BITBUCKET_TOOLKIT_ID}
@@ -99,32 +106,3 @@ cleanup:
       toolkit_id: ${BITBUCKET_TOOLKIT_ID}
     enabled: true
     continue_on_error: true
-
-# Test Coverage Summary:
-# Branch Operations (6 tests):
-#   - BB01-BB02: create_branch (happy path, edge case)
-#   - BB03-BB04: set_active_branch (existing branch, non-existent branch)
-#   - BB05-BB06: list_branches_in_repo (basic list, filtered with wildcard)
-#
-# File Operations (9 tests):
-#   - BB07-BB08: list_files (root directory, subdirectory with recursive)
-#   - BB09-BB10: read_file (existing file, non-existent file)
-#   - BB11-BB12: create_file (happy path with cleanup, duplicate file error)
-#   - BB13-BB14: update_file (valid OLD/NEW markers, invalid markers)
-#   - BB15: delete_file (delete existing file)
-#   - BB16: append_file (append content to existing file)
-#
-# Pull Request Operations (8 tests):
-#   - BB17-BB18: create_pull_request (cloud format, server format)
-#   - BB19: get_pull_request (retrieve PR details)
-#   - BB20: get_pull_requests_commits (list commits in PR)
-#   - BB21: get_pull_requests_changes (list changed files)
-#   - BB22-BB23: add_pull_request_comment (regular comment, inline comment)
-#
-# Total: 23 test cases covering all 14 Bitbucket tools
-#
-# Configuration:
-# Use one of the following toolkit configurations:
-#   - For Bitbucket Cloud: Set BITBUCKET_CONFIG_PATH to point to bitbucket-cloud-config.json
-#   - For Bitbucket Server: Set BITBUCKET_CONFIG_PATH to point to bitbucket-server-config.json
-# See configs/README-bitbucket.md for detailed setup instructions

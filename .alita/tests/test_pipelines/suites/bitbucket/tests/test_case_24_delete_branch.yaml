@@ -1,13 +1,14 @@
-name: "BB01 - create_branch: Create new branch successfully"
+name: "BB24 - delete_branch: Delete branch successfully"
 description: |
-  Verify the Bitbucket 'create_branch' tool creates a new branch from the current active branch.
+  Verify the Bitbucket 'delete_branch' tool deletes an existing branch successfully.
 
-  Objective: Test successful branch creation
+  Objective: Test successful branch deletion
 
   Expected Behavior:
-  - Branch is created without errors
-  - Branch appears in repository branch list
-  - Branch name matches exactly
+  - Branch is created successfully for testing
+  - Branch is deleted without errors
+  - Branch no longer appears in repository branch list
+  - Appropriate success message is returned
   - No error indicators in output
 
 toolkits:
@@ -19,15 +20,17 @@ state:
     type: str
   expected_success_indicators:
     type: list
-    value: ["created", "success", "branch", "refs/heads/test-branch-bb01"]
+    value: ["deleted successfully", "deleted", "removed", "success"]
   error_indicators:
     type: list
-    value: ["error", "failed", "exception", "already exists", "permission denied"]
+    value: ["error", "failed", "exception", "permission denied", "not found", "does not exist"]
   create_result:
     type: str
-  branch_list:
-    type: str
   delete_result:
+    type: str
+  branch_list_before:
+    type: str
+  branch_list_after:
     type: str
   test_results:
     type: dict
@@ -48,7 +51,7 @@ nodes:
         random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
 
         # Generate unique branch name
-        branch_name = f"test-branch-bb01-{timestamp}-{random_suffix}"
+        branch_name = f"test-delete-bb24-{timestamp}-{random_suffix}"
 
         {"branch_name": branch_name}
     output:
@@ -69,9 +72,9 @@ nodes:
     structured_output: true
     tool: create_branch
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: verify_branch_exists
+    transition: verify_branch_created
 
-  - id: verify_branch_exists
+  - id: verify_branch_created
     type: toolkit
     input:
       - branch_name
@@ -80,7 +83,37 @@ nodes:
         type: variable
         value: branch_name
     output:
-      - branch_list
+      - branch_list_before
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: delete_branch
+
+  - id: delete_branch
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_branch_deleted
+
+  - id: verify_branch_deleted
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_name
+    output:
+      - branch_list_after
     structured_output: true
     tool: list_branches_in_repo
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
@@ -90,7 +123,9 @@ nodes:
     type: llm
     input:
       - create_result
-      - branch_list
+      - delete_result
+      - branch_list_before
+      - branch_list_after
       - branch_name
       - expected_success_indicators
       - error_indicators
@@ -104,34 +139,38 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the output from the 'create_branch' tool execution.
+          Analyze the output from the 'delete_branch' tool execution.
 
           Branch Name: {branch_name}
           Create Result: {create_result}
-          Branch List After Creation: {branch_list}
+          Branch List Before Deletion: {branch_list_before}
+          Delete Result: {delete_result}
+          Branch List After Deletion: {branch_list_after}
           Expected Success Indicators: {expected_success_indicators}
           Error Indicators: {error_indicators}
 
-          This is a POSITIVE test - we expect successful branch creation.
+          This is a POSITIVE test - we expect successful branch deletion.
 
           Validation Criteria (ALL must pass for test_passed=true):
-          1. tool_executed: Both tools ran and returned results
-          2. no_errors: Output does NOT contain any error indicators
-          3. branch_created: Create result indicates success (contains success indicator)
-          4. branch_in_list: Branch name appears in the branch list
-          5. exact_match: Branch name in list matches exactly (case-sensitive)
+          1. tool_executed: All tools ran and returned results
+          2. branch_created: Branch was created successfully
+          3. branch_in_list_before: Branch appeared in list before deletion
+          4. no_errors: Delete result does NOT contain any error indicators
+          5. deletion_success: Delete result indicates success (contains success indicator)
+          6. branch_not_in_list_after: Branch name does NOT appear in the branch list after deletion
 
           Return JSON test_results:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
             "tool_executed": boolean,
-            "no_errors": boolean,
             "branch_created": boolean,
-            "branch_in_list": boolean,
-            "exact_match": boolean,
+            "branch_in_list_before": boolean,
+            "no_errors": boolean,
+            "deletion_success": boolean,
+            "branch_not_in_list_after": boolean,
             "success_indicator_found": "which indicator was found or 'none'",
             "error_indicator_found": "which error indicator was found or 'none'",
-            "branches_found": [list of branch names from branch_list],
+            "branches_found_after": [list of branch names from branch_list_after],
             "error": string | null
           }}
 
@@ -141,20 +180,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_delete_branch
-
-  - id: cleanup_delete_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: branch_name
-    output:
-      - delete_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: END

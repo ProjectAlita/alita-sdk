@@ -24,6 +24,11 @@ CreateBranchModel = create_model(
     branch_name=(str, Field(description="The name of the branch, e.g. `my_branch`.")),
 )
 
+DeleteBranchModel = create_model(
+    "DeleteBranchModel",
+    branch_name=(str, Field(description="The name of the branch to delete, e.g. `my_branch`. Cannot delete main or master branches.")),
+)
+
 CreatePullRequestModel = create_model(
     "CreatePullRequestModel",
     pr_json_data=(str, Field(description=create_pr_data)),
@@ -87,6 +92,12 @@ AddPullRequestCommentModel = create_model(
     pr_id=(str, Field(description="The ID of the pull request to add a comment to")),
     content=(str, Field(description="The comment content")),
     inline=(Optional[dict], Field(default=None, description="Inline comment details. Example: {'from': 57, 'to': 122, 'path': '<string>'}"))
+)
+
+ClosePullRequestModel = create_model(
+    "ClosePullRequestModel",
+    pr_id=(str, Field(description="The ID of the pull request to close")),
+    message=(Optional[str], Field(default=None, description="Optional message explaining why the pull request is being closed")),
 )
 
 DeleteFileModel = create_model(
@@ -250,6 +261,51 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         self._active_branch = branch_name
         return f"Branch {branch_name} created successfully and set as active"
 
+    def delete_branch(self, branch_name: str) -> str:
+        """
+        Delete a branch from the repository.
+        
+        Parameters:
+            branch_name (str): The name of the branch to delete
+            
+        Returns:
+            str: Success message if branch is deleted, or ToolException if branch cannot be deleted
+            
+        Raises:
+            ToolException: If attempting to delete main/master branch or if deletion fails
+        """
+        # Prevent deletion of protected branches
+        if branch_name.lower() in ['main', 'master']:
+            raise ToolException(
+                f"Cannot delete branch '{branch_name}'. "
+                "Deletion of main or master branches is forbidden for safety reasons."
+            )
+        
+        try:
+            # Fetch all branches to verify the branch exists
+            branches = self._bitbucket.list_branches()
+            
+            if branch_name not in branches:
+                raise ToolException(
+                    f"Branch '{branch_name}' does not exist in the repository. "
+                    f"Available branches: {', '.join(branches[:20])}"
+                )
+            
+            # If the deleted branch was the active branch, switch to main
+            if self._active_branch == branch_name:
+                raise ToolException(
+                    f"Branch '{branch_name}' cannot be deleted because it is currently the active branch. "
+                    "Please switch to a different branch before deleting."
+                )
+            
+            # Delete the branch
+            self._bitbucket.delete_branch(branch_name)
+            
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(f"Failed to delete branch '{branch_name}': {str(e)}")
+
     def create_pull_request(self, pr_json_data: str) -> str:
         """
         Makes a pull request from the bot's branch to the base branch
@@ -382,6 +438,21 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         except Exception as e:
             return ToolException(f"Can't add comment to pull request `{pr_id}` due to error:\n{str(e)}")
 
+    def close_pull_request(self, pr_id: str, message: str = None) -> str:
+        """
+        Close (decline) a pull request without merging it.
+        Parameters:
+            pr_id (str): the pull request ID
+            message (str, optional): Optional message explaining why the pull request is being closed
+        Returns:
+            str: A success or failure message
+        """
+        try:
+            result = self._bitbucket.close_pull_request(pr_id=pr_id, message=message)
+            return f"Successfully closed pull request {pr_id}\n{str(result)}"
+        except Exception as e:
+            return ToolException(f"Can't close pull request `{pr_id}` due to error:\n{str(e)}")
+
     def _get_files(self, path: str, branch: str, recursive: bool = True) -> str:
         """
         Get files from the bitbucket repo
@@ -492,6 +563,12 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
                 "args_schema": CreateBranchModel,
             },
             {
+                "name": "delete_branch",
+                "ref": self.delete_branch,
+                "description": self.delete_branch.__doc__ or "Delete a branch from the repository. Cannot delete main or master branches.",
+                "args_schema": DeleteBranchModel,
+            },
+            {
                 "name": "list_branches_in_repo",
                 "ref": self.list_branches_in_repo,
                 "description": self.list_branches_in_repo.__doc__ or "List branches in the repository with optional limit and wildcard filtering.",
@@ -556,5 +633,11 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
                 "ref": self.add_pull_request_comment,
                 "description": self.add_pull_request_comment.__doc__ or "Add a comment to a pull request in the repository.",
                 "args_schema": AddPullRequestCommentModel,
+            },
+            {
+                "name": "close_pull_request",
+                "ref": self.close_pull_request,
+                "description": self.close_pull_request.__doc__ or "Close (decline) a pull request without merging it.",
+                "args_schema": ClosePullRequestModel,
             }
         ]

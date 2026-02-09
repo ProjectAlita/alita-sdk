@@ -28,6 +28,8 @@ state:
     type: str
   branch_list_result:
     type: str
+  delete_result:
+    type: str
   test_results:
     type: dict
 
@@ -118,4 +120,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: END
+    transition: cleanup_delete_branch
