@@ -214,8 +214,8 @@ alita_state = json.loads(state_json)
                     return messages_dict
                 else:
                     return { self.output_variables[0]: tool_result }
-        # save whole error message to tool's output
-        except Exception:
+        # save the whole error message to the tool's output
+        except Exception as e:
             return {"messages": [
                 {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised Exception. 
                         \n\nTool schema is {safe_serialize(params)}. \n\n Details: {e}"""}]}
