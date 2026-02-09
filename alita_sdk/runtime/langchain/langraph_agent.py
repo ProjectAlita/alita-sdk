@@ -1264,18 +1264,19 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Don't use invoke(None) as that just returns current state without running
                     logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
 
-                    # FIX: When input contains 'messages' (e.g., regeneration scenario),
-                    # clear old checkpoint messages first to prevent duplication.
+                    # FIX: Clear old checkpoint messages to prevent duplication.
                     # The add_messages reducer would otherwise APPEND new messages to existing ones.
-                    if input.get('messages'):
-                        existing_messages = checkpoint_state.values.get('messages', [])
-                        if existing_messages:
-                            logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
-                            # Create RemoveMessage objects for all existing messages
-                            remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if hasattr(msg, 'id') and msg.id]
-                            if remove_msgs:
-                                # Update state to remove old messages before invoking
-                                self.update_state(config, {'messages': remove_msgs})
+                    # Use 'in' check instead of truthiness - empty list [] is falsy but means
+                    # "messages key exists with no history" (e.g., after chat clear), which still
+                    # requires clearing the old checkpoint to avoid stale SystemMessages.
+                    existing_messages = checkpoint_state.values.get('messages', [])
+                    if existing_messages:
+                        logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
+                        # Create RemoveMessage objects for all existing messages
+                        remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if hasattr(msg, 'id') and msg.id]
+                        if remove_msgs:
+                            # Update state to remove old messages before invoking
+                            self.update_state(config, {'messages': remove_msgs})
 
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:

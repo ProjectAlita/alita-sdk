@@ -332,7 +332,7 @@ class LLMNode(BaseTool):
                     content = initial_completion.content
                     fallback_content = content if isinstance(content, str) else str(content)
 
-            result['messages'] = messages + [AIMessage(content=fallback_content)]
+            result['messages'] = self._strip_system_messages(messages + [AIMessage(content=fallback_content)])
 
         return result
 
@@ -666,7 +666,7 @@ class LLMNode(BaseTool):
                         self.__perform_tool_calling(completion, messages, llm_client, config)
                     )
 
-                    output_msgs = {"messages": new_messages}
+                    output_msgs = {"messages": self._strip_system_messages(new_messages)}
                     if self.output_variables:
                         if self.output_variables[0] == 'messages':
                             return output_msgs
@@ -748,12 +748,12 @@ class LLMNode(BaseTool):
                         # set response to be the first output variable for non-structured output
                         response_data = {json_output_vars[0]: text_content}
                         new_messages = messages + [ai_message]
-                        response_data['messages'] = new_messages
+                        response_data['messages'] = self._strip_system_messages(new_messages)
                         return response_data
 
                     # Simple text response (either no output variables or JSON parsing failed)
                     new_messages = messages + [ai_message]
-                    return {"messages": new_messages}
+                    return {"messages": self._strip_system_messages(new_messages)}
 
         except Exception as e:
             # Enhanced error logging with model diagnostics
@@ -764,7 +764,18 @@ class LLMNode(BaseTool):
             
             error_msg = f"Error: {e}"
             new_messages = messages + [AIMessage(content=error_msg)]
-            return {"messages": new_messages}
+            return {"messages": self._strip_system_messages(new_messages)}
+
+    @staticmethod
+    def _strip_system_messages(messages: list) -> list:
+        """Strip SystemMessage objects from a message list before returning to graph state.
+
+        The LLMNode constructs SystemMessage on-the-fly from its input_mapping['system']
+        for each invocation. Storing SystemMessages in the graph state would cause them
+        to accumulate in checkpoints, leading to "multiple non-consecutive system messages"
+        errors on subsequent turns (especially with Anthropic models).
+        """
+        return [m for m in messages if not isinstance(m, SystemMessage)]
 
     def _run(self, *args, **kwargs):
         # Legacy support for old interface
