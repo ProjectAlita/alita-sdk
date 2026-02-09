@@ -14,6 +14,7 @@ from .constants import (
     DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
     SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS
 )
+from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
 from ..middleware.base import Middleware, MiddlewareManager
 
 logger = logging.getLogger(__name__)
@@ -172,7 +173,8 @@ class Assistant:
         self._always_bind_tools = []  # Tools to always bind directly (not via ToolRegistry)
         if middleware:
             for mw in middleware:
-                self.middleware_manager.add(mw)
+                if not isinstance(mw, ToolExceptionHandlerMiddleware):
+                    self.middleware_manager.add(mw)
             # Get tools from all middleware - these are always-bind tools
             middleware_tools = self.middleware_manager.get_all_tools()
             if middleware_tools:
@@ -188,6 +190,27 @@ class Assistant:
                 context_messages = self.middleware_manager.start_conversation(conversation_id)
                 if context_messages:
                     logger.info(f"Middleware context: {context_messages}")
+
+            # Apply tool wrapping from ToolExceptionHandlerMiddleware if present
+            exception_handlers = [mw for mw in middleware if isinstance(mw, ToolExceptionHandlerMiddleware)]
+            if exception_handlers:
+                # Validate only one exception handler is present
+                if len(exception_handlers) > 1:
+                    raise ValueError(
+                        f"Only one ToolExceptionHandlerMiddleware is supported per assistant. "
+                        f"Found {len(exception_handlers)} instances."
+                    )
+
+                # Use the exception handler middleware
+                exception_handler = exception_handlers[0]
+                wrapped_tools = []
+                for tool in self.tools:
+                    wrapped_tool = exception_handler.wrap_tool(tool)
+                    wrapped_tools.append(wrapped_tool)
+                self.tools = wrapped_tools
+                # Also wrap always-bind tools
+                self._always_bind_tools = [exception_handler.wrap_tool(t) for t in self._always_bind_tools]
+                logger.info(f"Wrapped {len(self.tools)} tools with ToolExceptionHandlerMiddleware")
 
         # In lazy tools mode, don't rename tools - ToolRegistry handles namespacing by toolkit
         # Only add suffixes in non-lazy mode where tools are bound directly to LLM

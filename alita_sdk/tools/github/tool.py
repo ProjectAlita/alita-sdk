@@ -22,17 +22,14 @@ class GitHubAction(BaseTool):
         return v.replace(' ', '')
 
     def _run(
-        self,
-        *args,
-        run_manager: Optional[CallbackManagerForToolRun] = None,
-        **kwargs,
+            self,
+            *args,
+            run_manager: Optional[CallbackManagerForToolRun] = None,
+            **kwargs,
     ) -> str:
         """Use the GitHub API to run an operation."""
-        try:
-            # Strip numeric suffix added for deduplication (_2, _3, etc.)
-            # to get the original tool name that exists in the wrapper
-            import re
-            mode = re.sub(r'_\d+$', '', self.mode) if self.mode else self.mode
-            return self.api_wrapper.run(mode, *args, **kwargs)
-        except Exception as e:
-            return f"Error: {format_exc()}"
+        # Strip numeric suffix added for deduplication (_2, _3, etc.)
+        # to get the original tool name that exists in the wrapper
+        import re
+        mode = re.sub(r'_\d+$', '', self.mode) if self.mode else self.mode
+        return self.api_wrapper.run(mode, *args, **kwargs)

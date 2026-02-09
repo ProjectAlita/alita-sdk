@@ -84,6 +84,7 @@ jobs:
     - name: Build package
       run: |
         pip install build
+        python setup.py generate_docs
         python -m build
 
     - name: Publish package distributions to PyPI
