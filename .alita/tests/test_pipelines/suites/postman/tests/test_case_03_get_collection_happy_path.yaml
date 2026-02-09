@@ -1,0 +1,86 @@
+name: "PST03 get collection happy path"
+priority: Critical
+description: |
+  Validates that the get_collection tool successfully retrieves a specific collection
+  in flattened format with path-based structure.
+  
+  Objective: Verify collection retrieval in flattened format
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns flattened collection structure
+  - Includes folders and requests organized by path
+  - Contains collection metadata and variables
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  collection_id:
+    type: str
+    value: ${TEST_COLLECTION_ID}
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_collection
+
+nodes:
+  - id: invoke_get_collection
+    type: toolkit
+    tool: get_collection
+    toolkit_name: ${TOOLKIT_NAME}
+    input:
+      - collection_id
+    input_mapping:
+      collection_id:
+        type: variable
+        value: collection_id
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_collection' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that get_collection returns a flattened collection structure.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result contains collection information.
+          3. Check for flattened structure with paths for folders and requests.
+          4. Validate presence of collection metadata (name, id, description, variables).
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if collection was retrieved in flattened format),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

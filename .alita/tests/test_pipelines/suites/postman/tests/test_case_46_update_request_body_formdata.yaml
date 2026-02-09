@@ -1,0 +1,105 @@
+name: "PST46 update request body"
+priority: High
+description: |
+  Validates that the update_request_body tool properly handles updating
+  request body with form data mode.
+  
+  Objective: Verify form data body updates
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Form data body is properly set
+  - Form fields are structured correctly
+  - Returns confirmation of the update
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  request_path:
+    type: str
+    value: ${TEST_REQUEST_PATH}
+  mode:
+    type: str
+    value: "formdata"
+  body:
+    type: dict
+    value:
+      mode: "formdata"
+      formdata:
+        - key: "name"
+          value: "Test User"
+          type: "text"
+        - key: "email"
+          value: "test@example.com"
+          type: "text"
+
+entry_point: invoke_update_request_body
+
+nodes:
+  - id: invoke_update_request_body
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_request_body
+    input:
+      - request_path
+      - body
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+      body:
+        type: variable
+        value: body
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_request_body' tool with form data.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that update_request_body handles form data bodies.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the form data body was accepted.
+          3. Check that form fields are properly structured.
+          4. Validate the update completed successfully.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if form data body was updated),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

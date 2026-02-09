@@ -1,0 +1,97 @@
+name: "PST30 update folder invalid path"
+priority: High
+description: |
+  Validates that the update_folder tool properly handles attempts to update
+  a folder that doesn't exist or has an invalid path.
+  
+  Objective: Verify error handling for invalid folder paths
+  
+  Expected Behavior:
+  - Tool executes without crashing
+  - Returns appropriate error message
+  - Error indicates folder not found
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  invalid_folder_path:
+    type: str
+    value: "Invalid/Folder/Path"
+  new_name:
+    type: str
+    value: "Updated Name"
+entry_point: invoke_update_folder
+
+nodes:
+  - id: invoke_update_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_folder
+    input:
+      - invalid_folder_path
+      - new_name
+    input_mapping:
+      folder_path:
+        type: variable
+        value: invalid_folder_path
+      name:
+        type: variable
+        value: new_name
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_folder' tool with an invalid path.
+          
+          Tool Result: {tool_result}
+          
+          This test validates error handling for invalid folder paths.
+          
+          Perform the following checks:
+          1. Confirm the tool executed (result is not empty or null).
+          2. Examine any error message for specific meaning. Valid error patterns include:
+             - folder not found or does not exist
+             - invalid folder path
+             - folder path cannot be located
+             - no folder at specified path
+          3. Determine if the error is about the invalid path itself.
+             Errors like "folder not found" are expected and correct.
+             System errors unrelated to the invalid path are failures.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if appropriate error was returned for invalid path),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

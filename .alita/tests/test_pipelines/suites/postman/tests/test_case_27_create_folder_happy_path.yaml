@@ -1,0 +1,93 @@
+name: "PST27 create folder happy path"
+priority: Critical
+description: |
+  Validates that the create_folder tool successfully creates a new folder
+  in the collection.
+  
+  Objective: Verify folder creation functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - New folder is created in collection
+  - Folder has the specified name and properties
+  - Returns folder ID and confirmation
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  folder_name:
+    type: str
+    value: "Test Folder"
+  folder_description:
+    type: str
+    value: "Test folder for API requests"
+entry_point: invoke_create_folder
+
+nodes:
+  - id: invoke_create_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - folder_name
+      - folder_description
+    input_mapping:
+      name:
+        type: variable
+        value: folder_name
+      description:
+        type: variable
+        value: folder_description
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_folder' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that create_folder creates a new folder.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result indicates a new folder was created.
+          3. Check for folder ID or confirmation.
+          4. Validate the folder has the specified name and description.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if folder was created successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

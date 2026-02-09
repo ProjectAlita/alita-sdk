@@ -1,0 +1,93 @@
+name: "PST13 search requests happy path"
+priority: Critical
+description: |
+  Validates that the search_requests tool successfully searches for requests
+  across the collection by name.
+  
+  Objective: Verify request search functionality by name
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Returns matching requests based on query
+  - Search results include relevant request details
+  - Results are properly filtered by search criteria
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  search_query:
+    type: str
+    value: "GET"
+  search_in:
+    type: str
+    value: "name"
+entry_point: invoke_search_requests
+
+nodes:
+  - id: invoke_search_requests
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: search_requests
+    input:
+      - search_query
+      - search_in
+    input_mapping:
+      query:
+        type: variable
+        value: search_query
+      search_in:
+        type: variable
+        value: search_in
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'search_requests' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that search_requests finds matching requests by name.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result contains search results (may be empty if no matches).
+          3. Check that matching requests include relevant details.
+          4. Validate the search operated on request names as specified.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if search executed successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

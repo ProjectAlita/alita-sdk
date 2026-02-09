@@ -1,0 +1,90 @@
+name: "PST10 get request by id invalid"
+priority: High
+description: |
+  Validates that the get_request_by_id tool properly handles requests with
+  non-existent or invalid request IDs.
+  
+  Objective: Verify error handling for invalid request IDs
+  
+  Expected Behavior:
+  - Tool executes without crashing
+  - Returns appropriate error message
+  - Error indicates request not found or invalid ID
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  invalid_request_id:
+    type: str
+    value: "invalid-request-id-12345"
+entry_point: invoke_get_request_by_id
+
+nodes:
+  - id: invoke_get_request_by_id
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: get_request_by_id
+    input:
+      - invalid_request_id
+    input_mapping:
+      request_id:
+        type: variable
+        value: invalid_request_id
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_request_by_id' tool with an invalid ID.
+          
+          Tool Result: {tool_result}
+          
+          This test validates error handling for invalid request IDs.
+          
+          Perform the following checks:
+          1. Confirm the tool executed (result is not empty or null).
+          2. Examine any error message for specific meaning. Valid error patterns include:
+             - request not found or does not exist
+             - invalid request id
+             - request id cannot be located
+             - no request with specified id
+          3. Determine if the error is about the invalid ID itself.
+             Errors like "request not found" are expected and correct.
+             System errors unrelated to the invalid ID are failures.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if appropriate error was returned for invalid ID),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

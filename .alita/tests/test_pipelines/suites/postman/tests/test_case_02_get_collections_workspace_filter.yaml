@@ -1,0 +1,85 @@
+name: "PST02 get collections workspace"
+priority: High
+description: |
+  Validates that get_collections properly filters collections by workspace when
+  the workspace_id is configured in the toolkit settings.
+  
+  Objective: Verify workspace filtering functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Returns collections specific to the configured workspace
+  - Response is valid JSON with collection metadata
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+entry_point: invoke_get_collections
+nodes:
+  - id: invoke_get_collections
+
+    type: toolkit
+
+    tool: get_collections
+
+    toolkit_name: ${TOOLKIT_NAME}
+
+    input: []
+
+    input_mapping: {}
+
+    output:
+
+      - tool_result
+
+    structured_output: true
+
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_collections' tool with workspace filtering.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that get_collections correctly applies workspace filtering.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the response is valid JSON.
+          3. Check that collections data is present.
+          4. Validate the structure includes workspace-related information if available.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if workspace-filtered collections were retrieved),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,93 @@
+name: "PST18 execute request with"
+priority: High
+description: |
+  Validates that the execute_request tool properly handles variable overrides,
+  allowing custom values to be passed at execution time.
+  
+  Objective: Verify request execution with override variables
+  
+  Expected Behavior:
+  - Tool executes with override variables
+  - Override values take precedence over environment/collection variables
+  - Request uses overridden values correctly
+  - Response reflects the overridden parameters
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  request_path:
+    type: str
+    value: ${TEST_REQUEST_PATH}
+  test_var:
+    type: str
+    value: "override_value"
+entry_point: invoke_execute_request
+
+nodes:
+  - id: invoke_execute_request
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: execute_request
+    input:
+      - request_path
+      - override_variables
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+      override_variables:
+        type: variable
+        value: override_variables
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'execute_request' tool with variable overrides.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that execute_request uses override variables correctly.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the request was executed with overridden values.
+          3. Check that response indicates variable substitution occurred.
+          4. Validate that override took precedence over default values.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if request executed with overrides),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

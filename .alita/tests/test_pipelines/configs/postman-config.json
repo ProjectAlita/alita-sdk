@@ -1,0 +1,43 @@
+{
+  "postman_configuration": {
+    "private": true,
+    "alita_title": "postman"
+  },
+  "collection_id": "",
+  "workspace_id": "",
+  "base_url": "https://api.getpostman.com",
+  "environment_config": {
+    "base_url": "https://api.example.com",
+    "api_key": "test_api_key"
+  },
+  "selected_tools": [
+    "get_collections",
+    "get_collection",
+    "get_folder",
+    "get_request_by_path",
+    "get_request_by_id",
+    "get_request_script",
+    "search_requests",
+    "analyze",
+    "execute_request",
+    "update_collection_description",
+    "update_collection_variables",
+    "update_collection_auth",
+    "duplicate_collection",
+    "create_folder",
+    "update_folder",
+    "move_folder",
+    "create_request",
+    "update_request_name",
+    "update_request_method",
+    "update_request_url",
+    "update_request_description",
+    "update_request_headers",
+    "update_request_body",
+    "update_request_auth",
+    "update_request_tests",
+    "update_request_pre_script",
+    "duplicate_request",
+    "move_request"
+  ]
+}

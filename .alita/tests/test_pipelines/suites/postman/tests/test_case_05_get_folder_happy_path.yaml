@@ -1,0 +1,87 @@
+name: "PST05 get folder happy path"
+priority: Critical
+description: |
+  Validates that the get_folder tool successfully retrieves a specific folder
+  in flattened format with path-based structure.
+  
+  Objective: Verify folder retrieval with flattened structure
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Returns folder details in flattened format
+  - Includes nested folders and requests with paths
+  - Contains folder metadata (name, description, auth)
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  folder_path:
+    type: str
+    value: ${TEST_FOLDER_PATH}
+
+entry_point: invoke_get_folder
+
+nodes:
+  - id: invoke_get_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: get_folder
+    input:
+      - folder_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_folder' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that get_folder returns a folder in flattened format.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result contains folder information.
+          3. Check for flattened structure with paths for nested items.
+          4. Validate presence of folder metadata (name, path, requests).
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if folder was retrieved in flattened format),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

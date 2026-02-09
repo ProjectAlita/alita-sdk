@@ -1,0 +1,93 @@
+name: "PST39 update request url happy"
+priority: Critical
+description: |
+  Validates that the update_request_url tool successfully updates the URL
+  of an existing request.
+  
+  Objective: Verify request URL update functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Request URL is updated
+  - Changes are persisted
+  - Returns confirmation of the update
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  request_path:
+    type: str
+    value: ${TEST_REQUEST_PATH}
+  new_url:
+    type: str
+    value: "https://api.example.com/v2/users"
+entry_point: invoke_update_request_url
+
+nodes:
+  - id: invoke_update_request_url
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_request_url
+    input:
+      - request_path
+      - new_url
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+      url:
+        type: variable
+        value: new_url
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_request_url' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that update_request_url updates the request URL.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result indicates URL was updated.
+          3. Check for success confirmation.
+          4. Validate the URL change was applied.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if request URL was updated successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

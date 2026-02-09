@@ -1,0 +1,93 @@
+name: "PST56 move request to root"
+priority: High
+description: |
+  Validates that the move_request tool can move a request to the root level
+  of the collection (not inside any folder).
+  
+  Objective: Verify moving request to collection root
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Request is moved to collection root
+  - Request becomes a top-level item
+  - Returns confirmation of the move
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  request_path:
+    type: str
+    value: ${TEST_REQUEST_PATH}
+  target_folder_path:
+    type: str
+    value: null
+entry_point: invoke_move_request
+
+nodes:
+  - id: invoke_move_request
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: move_request
+    input:
+      - request_path
+      - target_folder_path
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+      target_folder_path:
+        type: variable
+        value: target_folder_path
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'move_request' tool for moving to root.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that move_request can move a request to collection root.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the request was moved to root level.
+          3. Check for success confirmation.
+          4. Validate the request is now a top-level item.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if request was moved to root successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
