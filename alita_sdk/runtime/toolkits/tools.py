@@ -8,7 +8,6 @@ from alita_sdk.tools import get_toolkits as alita_toolkits
 from alita_sdk.tools import get_tools as alita_tools
 from .application import ApplicationToolkit
 from .artifact import ArtifactToolkit
-from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from .mcp import McpToolkit
 from .mcp_config import McpConfigToolkit, get_mcp_config_toolkit_schemas
@@ -145,20 +144,6 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     # This is common for conversation participants that reference stale agents
                     logger.warning(f"Skipping application tool '{tool.get('name', 'unknown')}': {app_err}")
                     continue
-                # TODO: deprecate next release (1/15/2026)
-                # if is_pipeline_subgraph:
-                #     # static get_toolkit returns a list of CompiledStateGraph stubs
-                #     # Pass is_subgraph=True to enable PrinterNode filtering
-                #     logger.info(f"Processing pipeline as subgraph, will filter PrinterNodes")
-                #     tools.extend(SubgraphToolkit.get_toolkit(
-                #         alita_client,
-                #         application_id=int(tool['settings']['application_id']),
-                #         application_version_id=int(tool['settings']['application_version_id']),
-                #         app_api_key=alita_client.auth_token,
-                #         selected_tools=[],
-                #         llm=llm,
-                #         is_subgraph=True  # Enable PrinterNode filtering for pipelines used as subgraphs
-                #     ))
             elif tool['type'] == 'memory':
                 tool_handled = True
                 tools += MemoryToolkit.get_toolkit(
