@@ -137,7 +137,8 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         ignored_mcp_servers=ignored_mcp_servers,
                         is_subgraph=is_pipeline_subgraph,  # Pass is_subgraph for pipelines
                         mcp_tokens=mcp_tokens,
-                        project_id=app_project_id  # Use agent's project, not conversation's
+                        project_id=app_project_id,  # Use agent's project, not conversation's
+                        conversation_id=conversation_id
                     ).get_tools())
                 except Exception as app_err:
                     # Gracefully skip application tools that fail to load (e.g., deleted agents)
