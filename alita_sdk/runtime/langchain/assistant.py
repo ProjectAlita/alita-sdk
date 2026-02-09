@@ -686,11 +686,36 @@ class Assistant:
                 'description': agent_tool.description
             })
 
+            # Resolve the child agent's actual toolkit tools from its version_details.
+            # Without this, the child node only gets the Application wrapper (a meta-tool)
+            # and cannot invoke its configured toolkits (Jira, GitHub, etc.).
+            child_toolkit_tools = []
+            try:
+                version_details = getattr(agent_tool, 'args_runnable', {}).get('version_details')
+                if version_details and 'tools' in version_details:
+                    from ..toolkits.tools import get_tools
+                    child_toolkit_tools = get_tools(
+                        version_details['tools'],
+                        alita_client=agent_tool.client,
+                        llm=agent_tool.args_runnable.get('llm', self.client),
+                        memory_store=agent_tool.args_runnable.get('store', self.store),
+                        mcp_tokens=agent_tool.args_runnable.get('mcp_tokens'),
+                        conversation_id=agent_tool.args_runnable.get('conversation_id'),
+                        ignored_mcp_servers=agent_tool.args_runnable.get('ignored_mcp_servers'),
+                    )
+                    logger.info(f"[SWARM] Resolved {len(child_toolkit_tools)} toolkit tools for child agent '{original_name}'")
+                else:
+                    logger.warning(f"[SWARM] No version_details found for child agent '{original_name}', using Application wrapper as fallback")
+                    child_toolkit_tools = [agent_tool]
+            except Exception as e:
+                logger.warning(f"[SWARM] Failed to resolve toolkit tools for child agent '{original_name}': {e}. Falling back to Application wrapper.")
+                child_toolkit_tools = [agent_tool]
+
             # Store child config for later node creation
             child_system_prompt = f"You are {original_name}. {agent_tool.description}\n\nComplete your task using the available tools. When done, use 'transfer_to_parent' to return control to the main assistant."
             child_configs.append({
                 'name': agent_name,
-                'tools': [agent_tool, handoff_to_parent],
+                'tools': child_toolkit_tools + [handoff_to_parent],
                 'prompt': child_system_prompt
             })
 
