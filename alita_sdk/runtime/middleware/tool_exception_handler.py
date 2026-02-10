@@ -285,6 +285,11 @@ When a tool fails with an error:
             if hasattr(tool, 'metadata'):
                 wrapped_tool.metadata = tool.metadata
 
+            # Preserve a reference to the original tool so that downstream code
+            # (e.g., swarm agent detection) can inspect the unwrapped type and
+            # attributes like Application.client, Application.args_runnable, etc.
+            wrapped_tool._original_tool = tool
+
             # Cache the wrapped tool by object identity
             self._wrapped_tools_cache[cache_key] = wrapped_tool
 
