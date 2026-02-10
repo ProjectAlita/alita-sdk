@@ -196,6 +196,129 @@ cat suites/<suite_name>/README.md
 cat suites/<suite_name>/pipeline.yaml
 ```
 
+## Logging & Output Flow (--local mode)
+
+### Output Routing Summary
+
+| **Output Source** | **Destination** | **Content** | **Format** | **Control Flag** |
+|-------------------|-----------------|-------------|------------|------------------|
+| **Python logging.getLogger()** | `run.log` (FileHandler) | All levels: DEBUG, INFO, WARNING, ERROR from all modules | `%(asctime)s - %(name)s - %(levelname)s - %(message)s` | Always enabled |
+| **Python logging.getLogger()** | Console (StreamHandler) | `-v`: INFO (utils_local only) + WARNING/ERROR (all)<br>`no -v`: WARNING/ERROR (all) | Plain text with ANSI codes | `-v` flag |
+| **TestLogger (custom)** | stderr → `run.log` (via tee) + Console | Test progress messages with ANSI color codes | `[INFO] message`, `[ERROR] message` | Always enabled |
+| **print()** statements | stdout → Console | Debug/info messages from scripts | Plain text | Always enabled |
+| **--output-json** | `results.json` | Test results structure (pass/fail, assertions, timing) | JSON | `--output-json` flag |
+
+### Shell Redirection Pattern
+
+```bash
+# run_all_suites.sh
+python scripts/run_suite.py "$suite_spec" $VERBOSE --output-json "$results_file" \
+  2> >(tee "$suite_output_dir/run.log" >&2)
+```
+
+**How it works:**
+- `2>` redirects stderr to process substitution
+- `tee` reads stdin, writes to both `run.log` file AND stdout
+- `>&2` redirects tee's stdout back to stderr
+- **Result**: stderr → tee → (run.log + stderr passthrough to console)
+
+### What Appears Where
+
+| **File/Stream** | **Content** | **Filtering** |
+|-----------------|-------------|---------------|
+| **run.log** | • Python logging (DEBUG+) with timestamps/logger names<br>• TestLogger stderr (ANSI codes)<br>• All error messages | None - captures everything |
+| **Console** | • `-v`: INFO from utils_local + WARNING/ERROR from all<br>• `no -v`: Only WARNING/ERROR from all<br>• TestLogger progress messages<br>• print() statements | ConsoleInfoFilter + verbose flag |
+| **results.json** | • Test execution results<br>• Assertions pass/fail<br>• Timing data<br>• Error messages | Only test results (no logs) |
+
+### Key Implementation Details
+
+1. **FileHandler** (run.log): Writes directly to file, DEBUG level, includes all alita_sdk modules
+2. **StreamHandler** (console): Writes to stderr, INFO/WARNING level depending on `-v`, filtered by ConsoleInfoFilter
+3. **ConsoleInfoFilter**: Custom filter allowing only utils_local INFO on console, blocks all DEBUG
+4. **configure_file_logging()**: Called once in run_suite.py to set up DEBUG file logging
+5. **Logger configuration order**: Third-party loggers configured first, then alita_sdk loggers overridden to DEBUG
+
+### How It All Works Together
+
+#### run_all_suites.sh (with tee redirection)
+
+Complete output flow from Python scripts to final destinations:
+
+```
+┌─────────────────────────────────────────┐
+│     Python scripts (run_suite.py)       │
+└──────────────────┬──────────────────────┘
+                   │
+        ┌──────────┼──────────┐
+        ↓          ↓          ↓
+    stdout      stderr    FileHandler
+    (print)   (logging,   (direct to
+     |        TestLogger)   run.log)
+     |          |              |
+     |          └──────┬───────┘
+     |                 ↓
+     |          [shell: 2> >()]
+     |          (tee reads stderr)
+     |                 │
+     |        ┌────────┴────────┐
+     |        ↓                 ↓
+     |      run.log          stderr
+     |      (file)         (console)
+     │                        │
+     └────────────┬───────────┘
+                  ↓
+             Console Display
+   (prints, logs, errors all mixed)
+```
+
+**Key Points:**
+- **stdout** (print statements) → Console directly
+- **stderr** (logging, TestLogger) → Shell redirects through `tee` → run.log + Console
+- **FileHandler** → run.log directly (bypasses stdout/stderr, formatted output)
+- **Console** receives: stdout + stderr (mixed together)
+- **run.log** receives: FileHandler output + tee-captured stderr
+
+#### run_test.sh (no tee redirection)
+
+Simpler flow without stderr capture:
+
+```
+┌─────────────────────────────────────────┐
+│     Python scripts (run_suite.py)       │
+└──────────────────┬──────────────────────┘
+                   │
+        ┌──────────┼──────────┐
+        ↓          ↓          ↓
+    stdout      stderr    FileHandler
+    (print)   (logging,   (direct to
+     |        TestLogger)   run.log)
+     |          |              |
+     |          ↓              ↓
+     │        Console       run.log
+     │                        │
+     └────────────┬───────────┘
+                  ↓
+             Terminal Display
+```
+
+**Key Differences:**
+- **run_all_suites.sh**: Uses `2> >(tee run.log >&2)` to capture stderr to both file and console
+- **run_test.sh**: No tee, stderr goes directly to console (TestLogger output not saved to run.log)
+- **Both**: FileHandler always writes formatted DEBUG logs directly to run.log
+
+**Why This Design:**
+```
+Test Output Routing:
+├─ stdout (print) → Console only
+├─ stderr (logging/TestLogger) → Console + run.log (via tee)
+└─ FileHandler → run.log only (formatted, DEBUG level)
+
+Results:
+✓ Console shows: real-time progress (filtered)
+✓ run.log shows: everything (DEBUG + raw ANSI)
+✓ results.json shows: test results only
+```
+
 ## Creating New Suites
 
 1. Create suite directory structure:
