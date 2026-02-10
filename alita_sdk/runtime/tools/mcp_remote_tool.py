@@ -113,8 +113,11 @@ class McpRemoteTool(McpServerTool):
             tool_name_for_server = self.name
             logger.warning(f"original_tool_name not set for '{self.name}', using: {tool_name_for_server}")
         
+        # Strip None values — MCP servers reject null for typed optional params
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
         logger.info(f"[MCP] Executing tool '{tool_name_for_server}' with session {self.session_id}")
-        
+
         try:
             # Prepare headers
             headers = {}

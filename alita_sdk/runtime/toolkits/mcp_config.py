@@ -101,9 +101,12 @@ def _create_stdio_tool_func(original_tool_name: str, server_name: str, server_co
                     # Initialize the connection
                     await session.initialize()
 
+                    # Strip None values — MCP servers reject null for typed optional params
+                    clean_args = {k: v for k, v in kwargs.items() if v is not None}
+
                     # Call the tool directly
-                    logger.debug(f"[MCP Config] Calling tool {original_tool_name} with args: {kwargs}")
-                    result = await session.call_tool(original_tool_name, kwargs)
+                    logger.debug(f"[MCP Config] Calling tool {original_tool_name} with args: {clean_args}")
+                    result = await session.call_tool(original_tool_name, clean_args)
 
                     # Format the result
                     if hasattr(result, 'content') and result.content:

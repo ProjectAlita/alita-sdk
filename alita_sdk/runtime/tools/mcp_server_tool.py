@@ -92,6 +92,8 @@ class McpServerTool(BaseTool):
         return create_model(model_name, **fields)
 
     def _run(self, *args, **kwargs):
+        # Strip None values — MCP servers reject null for typed optional params
+        clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
         # Use the tool name directly (no prefix extraction needed)
         call_data = {
             "server": self.server,
@@ -99,7 +101,7 @@ class McpServerTool(BaseTool):
             "tool_call_id": str(uuid.uuid4()),
             "params": {
                 "name": self.name,
-                "arguments": kwargs
+                "arguments": clean_kwargs
             }
         }
         

@@ -798,7 +798,7 @@ class InvokeToolTool(BaseTool):
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
         """Async version of invoke_tool."""
-        arguments = arguments or {}
+        arguments = {k: v for k, v in (arguments or {}).items() if v is not None}
 
         actual_tool = self.registry.get_tool(toolkit, tool)
 
