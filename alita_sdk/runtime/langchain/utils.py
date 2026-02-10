@@ -300,3 +300,68 @@ def parse_pydantic_type(type_name: str):
 
     # fallback: avoid Any
     return JsonValue
+
+def safe_serialize(obj: Any) -> str:
+    """
+    Safely serialize any object to a JSON string.
+    Falls back to str() conversion if json.dumps fails.
+
+    Args:
+        obj: Any object to serialize
+
+    Returns:
+        JSON string representation of the object
+    """
+    try:
+        return json.dumps(obj, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        # If json.dumps fails, convert to string
+        logger.debug(f"JSON serialization failed for {type(obj).__name__}: {e}. Falling back to str() conversion.")
+        try:
+            return json.dumps(str(obj), ensure_ascii=False)
+        except Exception:
+            # Ultimate fallback - just return string representation
+            return str(obj)
+
+
+def object_to_dict(obj: Any) -> dict | str | list | Any:
+    """Convert object to dictionary recursively, handling nested objects, lists, and various types.
+
+    Returns:
+        - Original value for primitives (str, int, float, bool, None)
+        - dict for objects with attributes
+        - list for sequences
+        - Recursively processes nested structures
+    """
+    # Handle primitives
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    # Already a dict - recursively process values
+    if isinstance(obj, dict):
+        return {k: object_to_dict(v) for k, v in obj.items()}
+
+    # Lists/tuples - recursively process items
+    if isinstance(obj, (list, tuple)):
+        return [object_to_dict(item) for item in obj]
+
+    # Pydantic models
+    if hasattr(obj, 'model_dump'):
+        return object_to_dict(obj.model_dump())
+
+    # Dataclasses
+    if hasattr(obj, '__dataclass_fields__'):
+        from dataclasses import asdict
+        return object_to_dict(asdict(obj))
+
+    # Objects with __dict__ - recursively process attributes
+    if hasattr(obj, '__dict__'):
+        result = {}
+        for key, value in obj.__dict__.items():
+            # Skip private/protected attributes
+            if not key.startswith('_'):
+                result[key] = object_to_dict(value)
+        return result
+
+    # Fallback: return as-is for unknown types
+    return obj
