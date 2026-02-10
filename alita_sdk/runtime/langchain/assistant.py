@@ -893,63 +893,32 @@ class Assistant:
 
         # --- Helper: build a pipeline subgraph that executes directly (no LLM wrapper) ---
         def build_pipeline_subgraph(pipeline_tool, agent_name):
-            """Build a subgraph that directly executes a pipeline tool.
+            """Build a subgraph that invokes the pipeline Application tool directly.
 
-            Unlike agent subgraphs which use an LLM react loop, pipeline subgraphs
-            invoke the pipeline Application tool directly — the pipeline has its own
-            internal graph orchestration (Code nodes, LLM nodes, routing, etc.).
+            The Application tool already handles pipeline creation via
+            client.application() → LangChainAssistant.pipeline() → LangGraphAgentRunnable.
+            We just need to extract the task from messages and call tool.invoke().
             """
             builder = StateGraph(MessagesState)
 
             def execute_pipeline(state: MessagesState, config: RunnableConfig = None):
                 messages = state["messages"]
-                # Extract task from latest human-like content in the message history
                 task = ""
                 for msg in reversed(messages):
                     if isinstance(msg, HumanMessage):
                         task = msg.content if isinstance(msg.content, str) else str(msg.content)
                         break
-                    # Also check AI messages that might contain the delegated task
-                    if isinstance(msg, AIMessage) and msg.content and not getattr(msg, 'tool_calls', None):
-                        task = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        break
                 if not task:
                     task = "Execute the pipeline"
 
-                # Emit start event
-                if config:
-                    try:
-                        dispatch_custom_event(
-                            "swarm_agent_start",
-                            {"agent_name": agent_name, "is_parent": False, "message_count": len(messages)},
-                            config=config
-                        )
-                    except Exception:
-                        pass
-
-                # Execute the pipeline tool directly
                 try:
                     result = pipeline_tool.invoke({"task": task})
-                    if isinstance(result, dict):
-                        result = result.get("output", str(result))
-                    result_str = result if isinstance(result, str) else str(result)
                 except Exception as e:
-                    logger.error(f"[SWARM] Pipeline '{agent_name}' execution failed: {e}", exc_info=True)
-                    result_str = f"Pipeline execution failed: {e}"
-
-                # Emit response event
-                if config:
-                    try:
-                        dispatch_custom_event(
-                            "swarm_agent_response",
-                            {"agent_name": agent_name, "is_parent": False, "content": result_str,
-                             "has_tool_calls": False, "tool_calls": []},
-                            config=config
-                        )
-                    except Exception:
-                        pass
-
-                return {"messages": [AIMessage(content=result_str)]}
+                    logger.error(f"[SWARM] Pipeline '{agent_name}' failed: {e}", exc_info=True)
+                    result = f"Pipeline execution failed: {e}"
+                if isinstance(result, dict):
+                    result = result.get("output", str(result))
+                return {"messages": [AIMessage(content=str(result))]}
 
             builder.add_node("pipeline", execute_pipeline)
             builder.add_edge(START, "pipeline")
