@@ -493,21 +493,23 @@ class StateDefaultNode(Runnable):
         logger.info("Setting default state variables")
         result = {}
         for key, value in self.default_vars.items():
-            if isinstance(value, dict) and 'value' in value:
-                temp_value = value['value']
-                declared_type = value.get('type', '').lower()
-
-                # If the declared type is 'str' or 'string', preserve the string value
-                # Don't auto-convert even if it looks like a valid Python literal
-                if declared_type in ('str', 'string'):
-                    result[key] = temp_value
-                else:
-                    # For other types, try to evaluate as Python literal
-                    try:
-                        result[key] = ast.literal_eval(temp_value)
-                    except:
-                        logger.debug("Unable to evaluate value, using as is")
+            # Sub-graph flow
+            # Only set default if the key is NOT already in state or is empty
+            if key not in state or state[key] in (None, '', [], {}):
+                if isinstance(value, dict) and 'value' in value:
+                    temp_value = value['value']
+                    declared_type = value.get('type', '').lower()
+                    # If the declared type is 'str' or 'string', preserve the string value
+                    # Don't auto-convert even if it looks like a valid Python literal
+                    if declared_type in ('str', 'string'):
                         result[key] = temp_value
+                    else:
+                        # For other types, try to evaluate as Python literal
+                        try:
+                            result[key] = ast.literal_eval(temp_value)
+                        except:
+                            logger.debug("Unable to evaluate value, using as is")
+                            result[key] = temp_value
         return result
 
 class PrinterNode(Runnable):
