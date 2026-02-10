@@ -159,6 +159,53 @@ def _format_wiki_page_response(wiki_page_response, expanded: bool = False, inclu
         return wiki_page_response
 
 
+def _format_wiki_response(wiki_response):
+    """Format wiki response to a serializable dictionary.
+
+    Args:
+        wiki_response: The WikiV2 object from Azure DevOps API
+
+    Returns:
+        Dictionary with wiki information that is msgpack/JSON serializable.
+    """
+    try:
+        result = {
+            'id': wiki_response.id if hasattr(wiki_response, 'id') else None,
+            'name': wiki_response.name if hasattr(wiki_response, 'name') else None,
+            'type': wiki_response.type if hasattr(wiki_response, 'type') else None,
+            'url': wiki_response.url if hasattr(wiki_response, 'url') else None,
+            'project_id': wiki_response.project_id if hasattr(wiki_response, 'project_id') else None,
+            'repository_id': wiki_response.repository_id if hasattr(wiki_response, 'repository_id') else None,
+            'mapped_path': wiki_response.mapped_path if hasattr(wiki_response, 'mapped_path') else None,
+        }
+
+        # Add optional fields if present
+        if hasattr(wiki_response, 'remote_url') and wiki_response.remote_url:
+            result['remote_url'] = wiki_response.remote_url
+
+        # Format versions list - each version is a GitVersionDescriptor object
+        if hasattr(wiki_response, 'versions') and wiki_response.versions:
+            result['versions'] = []
+            for version_descriptor in wiki_response.versions:
+                if hasattr(version_descriptor, 'version'):
+                    # Extract primitive values from GitVersionDescriptor
+                    version_dict = {
+                        'version': version_descriptor.version if hasattr(version_descriptor, 'version') else None,
+                        'version_type': version_descriptor.version_type if hasattr(version_descriptor, 'version_type') else None,
+                        'version_options': version_descriptor.version_options if hasattr(version_descriptor, 'version_options') else None,
+                    }
+                    result['versions'].append(version_dict)
+                else:
+                    # Fallback if it's already a string or dict
+                    result['versions'].append(version_descriptor)
+
+        return result
+    except Exception as e:
+        logger.error(f"Unable to format wiki response: {wiki_response}, error: {str(e)}")
+        # Fallback to string representation
+        return {"error": f"Unable to format wiki response: {str(e)}"}
+
+
 class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
     # TODO use ado_configuration instead of organization_url, project and token
     organization_url: str
@@ -238,7 +285,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         """Extract ADO wiki information."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
-            return self._client.get_wiki(project=self.project, wiki_identifier=wiki_id)
+            wiki_response = self._client.get_wiki(project=self.project, wiki_identifier=wiki_id)
+            return _format_wiki_response(wiki_response)
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki: {str(e)}")
