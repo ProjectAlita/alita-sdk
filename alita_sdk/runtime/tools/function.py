@@ -9,35 +9,10 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from typing import Any, Optional, Union
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import ValidationError
 
-from ..langchain.utils import propagate_the_input_mapping
+from ..langchain.utils import propagate_the_input_mapping, safe_serialize, object_to_dict
 
 logger = logging.getLogger(__name__)
-
-
-def safe_serialize(obj: Any) -> str:
-    """
-    Safely serialize any object to a JSON string.
-    Falls back to str() conversion if json.dumps fails.
-
-    Args:
-        obj: Any object to serialize
-
-    Returns:
-        JSON string representation of the object
-    """
-    try:
-        return json.dumps(obj, ensure_ascii=False)
-    except (TypeError, ValueError) as e:
-        # If json.dumps fails, convert to string
-        logger.debug(f"JSON serialization failed for {type(obj).__name__}: {e}. Falling back to str() conversion.")
-        try:
-            return json.dumps(str(obj), ensure_ascii=False)
-        except Exception:
-            # Ultimate fallback - just return string representation
-            return str(obj)
-
 
 def replace_escaped_newlines(data):
     """
@@ -213,7 +188,7 @@ alita_state = json.loads(state_json)
                                 messages_dict[var] = tool_result
                     return messages_dict
                 else:
-                    return { self.output_variables[0]: tool_result }
+                    return { self.output_variables[0]: object_to_dict(tool_result) }
         # save the whole error message to the tool's output
         except Exception as e:
             return {"messages": [
