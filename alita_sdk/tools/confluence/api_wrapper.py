@@ -225,10 +225,20 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         url = values['base_url']
         if not (values.get('token') or (values.get('api_key') and values.get('username'))):
             raise ValueError("Either 'token' or both 'api_key' and 'username' must be provided for authentication.")
+
+        # Normalize base_url: For Atlassian Cloud, strip /wiki suffix to prevent duplication
+        # The _build_page_url method will add /wiki as needed
+        cloud = values.get('cloud', True)
+        if cloud and url.rstrip('/').endswith('/wiki'):
+            # Remove /wiki suffix for Atlassian Cloud instances
+            # This prevents URL duplication like /wiki/wiki/spaces/...
+            url = url.rstrip('/')[:-5]  # Remove '/wiki'
+            values['base_url'] = url
+            logger.info(f"Normalized Confluence base_url by removing /wiki suffix: {url}")
+
         api_key = values.get('api_key')
         username = values.get('username')
         token = values.get('token')
-        cloud = values.get('cloud')
         if token and is_cookie_token(token):
             session = requests.Session()
             session.cookies.update(parse_cookie_string(token))
@@ -1857,11 +1867,31 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             raise ToolException(f"Failed to upload file from artifact: {str(e)}")
 
     def _build_page_url(self, webui_path: str) -> str:
-        """Build correct page URL for both cloud and self-hosted Confluence instances."""
-        # Add /wiki prefix for Atlassian Cloud URLs
-        if self.cloud and not webui_path.startswith('/wiki/'):
-            webui_path = '/wiki' + webui_path
-        return self.base_url.rstrip('/') + webui_path
+        """Build correct page URL for both cloud and self-hosted Confluence instances.
+
+        Handles cases where base_url may already contain /wiki path to prevent duplication.
+        Examples:
+        - base_url: https://example.atlassian.net, webui_path: /spaces/... -> https://example.atlassian.net/wiki/spaces/...
+        - base_url: https://example.atlassian.net/wiki, webui_path: /spaces/... -> https://example.atlassian.net/wiki/spaces/...
+        - base_url: https://example.com/confluence, webui_path: /spaces/... -> https://example.com/confluence/spaces/...
+        """
+        # Normalize base URL to prevent /wiki duplication
+        normalized_base_url = self.base_url.rstrip('/')
+
+        # For Atlassian Cloud instances, ensure /wiki prefix is present exactly once
+        if self.cloud:
+            # Check if base_url already ends with /wiki
+            if normalized_base_url.endswith('/wiki'):
+                # Base URL already has /wiki, don't add it again
+                # Just ensure webui_path doesn't start with /wiki/ to avoid triple wiki
+                if webui_path.startswith('/wiki/'):
+                    webui_path = webui_path[5:]  # Remove /wiki prefix from path
+            else:
+                # Base URL doesn't have /wiki, add it to the webui_path if not present
+                if not webui_path.startswith('/wiki/'):
+                    webui_path = '/wiki' + webui_path
+
+        return normalized_base_url + webui_path
 
     def _get_confluence_image_markup(self, filename: str) -> str:
         """Generate Confluence storage format for inline image."""
