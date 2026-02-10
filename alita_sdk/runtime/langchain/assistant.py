@@ -723,6 +723,24 @@ class Assistant:
                 system_msg = SystemMessage(content=prompt)
                 response = model_with_tools.invoke([system_msg] + filtered_messages, config)
 
+                # Guard against multiple simultaneous handoff tool calls.
+                # langgraph-swarm can only follow one Command(goto=...) per turn;
+                # extra transfer_to_* calls would leave orphaned tool_calls in the
+                # message history, crashing the next LLM invocation.
+                if hasattr(response, 'tool_calls') and response.tool_calls:
+                    transfer_calls = [tc for tc in response.tool_calls if tc.get('name', '').startswith('transfer_to_')]
+                    if len(transfer_calls) > 1:
+                        from langchain_core.messages import AIMessage
+                        logger.warning(
+                            f"[SWARM] LLM emitted {len(transfer_calls)} simultaneous handoff calls. "
+                            f"Keeping only the first: {transfer_calls[0].get('name')}"
+                        )
+                        non_transfer = [tc for tc in response.tool_calls if not tc.get('name', '').startswith('transfer_to_')]
+                        response = AIMessage(
+                            content=response.content,
+                            tool_calls=non_transfer + [transfer_calls[0]],
+                        )
+
                 # Emit swarm agent response event
                 if config:
                     try:
@@ -913,7 +931,8 @@ class Assistant:
             "## When to Hand Off",
             "",
             "- Hand off when a task requires the specialist's specific capabilities",
-            "- You can hand off multiple times to different specialists as needed",
+            "- **IMPORTANT: Hand off to only ONE specialist at a time.** Do not call multiple transfer tools in the same response.",
+            "- You can hand off to different specialists sequentially as needed — after one completes, you can hand off to another",
             "- After a specialist completes their work, the response will be delivered to the user",
         ])
 
