@@ -879,7 +879,9 @@ class Assistant:
             child_configs.append({
                 'name': agent_name,
                 'tools': child_toolkit_tools,
-                'prompt': child_system_prompt
+                'prompt': child_system_prompt,
+                'is_pipeline': is_pipeline,
+                'pipeline_tool': agent_tool if is_pipeline else None,
             })
 
         # Build swarm instructions for the parent prompt
@@ -889,12 +891,81 @@ class Assistant:
         # Parent tools = regular tools + official handoff tools to children
         parent_tools = regular_tools + parent_handoff_tools
 
+        # --- Helper: build a pipeline subgraph that executes directly (no LLM wrapper) ---
+        def build_pipeline_subgraph(pipeline_tool, agent_name):
+            """Build a subgraph that directly executes a pipeline tool.
+
+            Unlike agent subgraphs which use an LLM react loop, pipeline subgraphs
+            invoke the pipeline Application tool directly — the pipeline has its own
+            internal graph orchestration (Code nodes, LLM nodes, routing, etc.).
+            """
+            builder = StateGraph(MessagesState)
+
+            def execute_pipeline(state: MessagesState, config: RunnableConfig = None):
+                messages = state["messages"]
+                # Extract task from latest human-like content in the message history
+                task = ""
+                for msg in reversed(messages):
+                    if isinstance(msg, HumanMessage):
+                        task = msg.content if isinstance(msg.content, str) else str(msg.content)
+                        break
+                    # Also check AI messages that might contain the delegated task
+                    if isinstance(msg, AIMessage) and msg.content and not getattr(msg, 'tool_calls', None):
+                        task = msg.content if isinstance(msg.content, str) else str(msg.content)
+                        break
+                if not task:
+                    task = "Execute the pipeline"
+
+                # Emit start event
+                if config:
+                    try:
+                        dispatch_custom_event(
+                            "swarm_agent_start",
+                            {"agent_name": agent_name, "is_parent": False, "message_count": len(messages)},
+                            config=config
+                        )
+                    except Exception:
+                        pass
+
+                # Execute the pipeline tool directly
+                try:
+                    result = pipeline_tool.invoke({"task": task})
+                    if isinstance(result, dict):
+                        result = result.get("output", str(result))
+                    result_str = result if isinstance(result, str) else str(result)
+                except Exception as e:
+                    logger.error(f"[SWARM] Pipeline '{agent_name}' execution failed: {e}", exc_info=True)
+                    result_str = f"Pipeline execution failed: {e}"
+
+                # Emit response event
+                if config:
+                    try:
+                        dispatch_custom_event(
+                            "swarm_agent_response",
+                            {"agent_name": agent_name, "is_parent": False, "content": result_str,
+                             "has_tool_calls": False, "tool_calls": []},
+                            config=config
+                        )
+                    except Exception:
+                        pass
+
+                return {"messages": [AIMessage(content=result_str)]}
+
+            builder.add_node("pipeline", execute_pipeline)
+            builder.add_edge(START, "pipeline")
+            builder.add_edge("pipeline", END)
+            return builder.compile(name=agent_name)
+
         # --- Build compiled subgraphs for all agents ---
         parent_graph = build_agent_subgraph(self.client, parent_tools, enhanced_prompt, "parent")
 
         child_graphs = []
         for cfg in child_configs:
-            child_graph = build_agent_subgraph(self.client, cfg['tools'], cfg['prompt'], cfg['name'])
+            if cfg.get('is_pipeline') and cfg.get('pipeline_tool'):
+                child_graph = build_pipeline_subgraph(cfg['pipeline_tool'], cfg['name'])
+                logger.info(f"[SWARM] Built direct pipeline subgraph for '{cfg['name']}'")
+            else:
+                child_graph = build_agent_subgraph(self.client, cfg['tools'], cfg['prompt'], cfg['name'])
             child_graphs.append(child_graph)
 
         # --- Adapter to convert swarm output to {"output": ...} format ---
