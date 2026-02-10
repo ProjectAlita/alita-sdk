@@ -22,6 +22,7 @@ Environment variables (from .env):
 import json
 import logging
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import sys
@@ -52,11 +53,11 @@ from utils_common import (
 # Reuse process_pipeline_result for consistent result processing
 from run_pipeline import process_pipeline_result, PipelineResult
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Note: Do NOT use logging.basicConfig() here as it prevents dynamic log level changes
+# Logging configuration is handled by configure_file_logging() at runtime
+# basicConfig() is a one-time operation that cannot be overridden
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Default level for utils_local
 
 
 def configure_alita_sdk_logging(log_level: str = 'error'):
@@ -100,6 +101,7 @@ def configure_alita_sdk_logging(log_level: str = 'error'):
         'alita_sdk.tools',
         'alita_sdk.configurations',
         'alita_sdk.cli',
+        'alita_sdk.community',
     ]
     
     for logger_name in alita_loggers:
@@ -118,6 +120,105 @@ def configure_alita_sdk_logging(log_level: str = 'error'):
     # Also suppress third-party library warnings
     import warnings
     warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+
+
+def configure_file_logging(log_file: str, sdk_log_level: str = 'error', verbose: bool = False):
+    """
+    Configure file-based logging for detailed execution trace.
+    
+    Sets up a file handler that captures DEBUG-level logs from all components
+    to a file (typically run.log), while keeping console output clean.
+    
+    This is part of the 3-stream logging architecture:
+    - STDOUT (console): INFO (utils_common only) + WARNING (all) + ERROR (all) when verbose=True
+                        WARNING (all) + ERROR (all) when verbose=False
+    - STDERR (console): ERRORS + WARNINGS (always)
+    - run.log (file): DEBUG + all levels (always)
+    
+    Args:
+        log_file: Path to log file (e.g., 'test_results/suite/run.log')
+        sdk_log_level: Log level for alita_sdk loggers ('debug', 'info', 'warning', 'error')
+        verbose: If True, allow INFO logs from utils_common on console
+    
+    Example:
+        configure_file_logging('test_results/artifact/run.log', 'debug', verbose=True)
+        # Now all DEBUG logs go to file, console only shows utils_common INFO
+    """
+    # Create file handler for DEBUG level logs
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    file_handler = logging.FileHandler(log_file, mode='a')  # Append mode
+    file_handler.setLevel(logging.DEBUG)
+    
+    # Detailed format for file logs
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Add to root logger (captures everything)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.DEBUG)  # Allow DEBUG to propagate to file
+    
+    # Configure third-party loggers (suppress urllib3, httpx, requests noise)
+    configure_alita_sdk_logging(sdk_log_level)
+    
+    # Override alita_sdk loggers to DEBUG for file logging
+    # This allows DEBUG logs to be emitted and captured by the file handler
+    # Must happen AFTER configure_alita_sdk_logging() which would reset them
+    # Note: Child loggers inherit from parent, so only need top-level packages
+    alita_loggers = [
+        'alita_sdk',
+        'alita_sdk.runtime',
+        'alita_sdk.runtime.langchain',
+        'alita_sdk.tools',
+        'alita_sdk.configurations',
+        'alita_sdk.cli',
+        'alita_sdk.community',
+    ]
+    for logger_name in alita_loggers:
+        logging.getLogger(logger_name).setLevel(logging.DEBUG)
+    
+    # Log logger configuration for debugging
+    logger.debug(f"alita_sdk loggers set to DEBUG: {', '.join(alita_loggers)}")
+    logger.debug(f"alita_sdk logger level: {logging.getLogger('alita_sdk').level} (should be {logging.DEBUG})")
+    logger.debug(f"Root logger level: {root_logger.level} (should be {logging.DEBUG})")
+    logger.debug(f"File handler level: {file_handler.level} (should be {logging.DEBUG})")
+    
+    # Prevent DEBUG logs from appearing on console
+    # Set all existing console/stream handlers to INFO minimum
+    console_handler_found = False
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            console_handler_found = True
+            # Add same formatter as file handler for consistent output
+            handler.setFormatter(formatter)
+            # Console handlers should never show DEBUG
+            if verbose:
+                # When verbose: show INFO from utils_common/utils_local, WARNING+ from all
+                handler.setLevel(logging.INFO)
+                # Add filter to only show INFO from utils modules
+                handler.addFilter(ConsoleInfoFilter())
+            else:
+                # When not verbose: only WARNING and ERROR
+                handler.setLevel(logging.WARNING)
+    
+    # If no console handler exists, create one (shouldn't happen with basicConfig, but be safe)
+    if not console_handler_found:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)  # Use same format as file handler
+        if verbose:
+            console_handler.setLevel(logging.INFO)
+            console_handler.addFilter(ConsoleInfoFilter())
+        else:
+            console_handler.setLevel(logging.WARNING)
+        root_logger.addHandler(console_handler)
+    
+    # Log the configuration
+    logger.debug(f"File logging configured: {log_file} (SDK level: {sdk_log_level})")
     
     # Suppress paramiko/cryptography deprecation warnings (TripleDES cipher deprecation)
     warnings.filterwarnings('ignore', message='TripleDES has been moved to')
@@ -132,8 +233,25 @@ def configure_alita_sdk_logging(log_level: str = 'error'):
     warnings.filterwarnings('ignore', module='pydantic', category=UserWarning)
 
 
-# Initialize with default error level to suppress SDK logs by default
-configure_alita_sdk_logging('error')
+class ConsoleInfoFilter(logging.Filter):
+    """
+    Filter that allows:
+    - INFO level ONLY from utils_common and utils_local modules
+    - WARNING and ERROR from all modules
+    
+    This prevents console clutter while showing useful progress info.
+    """
+    def filter(self, record):
+        # Always allow WARNING and ERROR
+        if record.levelno >= logging.WARNING:
+            return True
+        
+        # For INFO level, only allow utils_common and utils_local
+        if record.levelno == logging.INFO:
+            return record.name.startswith('utils_local')
+        
+        # Block DEBUG and other levels
+        return False
 
 
 def create_alita_client():
@@ -202,9 +320,10 @@ class IsolatedPipelineTestRunner:
         self.alita_client = alita_client
         self.llm = llm
 
-        # Configure SDK logging based on explicit parameter (local mode)
-        # Note: --verbose controls test framework verbosity, not SDK logging
-        configure_alita_sdk_logging(sdk_log_level)
+        # Note: SDK logging is configured ONCE in run_suite_local() via configure_file_logging()
+        # Do NOT call configure_alita_sdk_logging() here, as it would reset logger levels
+        # that were already configured for file-level DEBUG capture.
+        # The --local flag's log level is already applied upstream.
         
         if verbose:
             logger.setLevel(logging.DEBUG)
@@ -413,16 +532,14 @@ class IsolatedPipelineTestRunner:
             )
 
         logger.info(f"Test: {transformed['name']}")
-        logger.debug(f"Description: {transformed['description']}")
 
-        if self.verbose or dry_run:
+        if dry_run:
             print("\n" + "="*60)
             print("TRANSFORMED YAML:")
             print("="*60)
             print(yaml_schema)
             print("="*60 + "\n")
 
-        if dry_run:
             return PipelineResult(
                 success=True,
                 pipeline_id=0,

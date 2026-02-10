@@ -74,6 +74,7 @@ from logger import TestLogger
 from utils_local import (
     IsolatedPipelineTestRunner,
     find_tests_in_suite,
+    configure_file_logging,
 )
 
 # Import setup utilities for local execution
@@ -785,12 +786,23 @@ def run_suite_local(
         total=len(test_files),
     )
     
+    # Configure file logging for DEBUG-level trace
+    # Log file goes to test_results/suites/<suite_name>/run.log
+    # Strip 'suites/' prefix from suite_name if present to avoid double path
+    log_suite_name = suite_name.replace('suites/', '', 1) if suite_name.startswith('suites/') else suite_name
+    log_file = f"test_results/suites/{log_suite_name}/run.log"
+    verbose_mode = logger.verbose if logger else False
+    configure_file_logging(log_file, sdk_log_level, verbose=verbose_mode)
+    
+    if logger:
+        logger.debug(f"Configured DEBUG-level file logging to: {log_file}")
+    
     # Create local setup strategy
     local_strategy = LocalSetupStrategy()
     
     # Create a minimal SetupContext for local execution
     # No backend auth needed, but we need env_vars for substitution
-    # Pass logger so setup output routes to stderr in JSON mode
+    # Pass logger so setup output appears when verbose=True
     ctx = SetupContext(
         base_url="local://",  # Placeholder, not used in local mode
         project_id=0,         # Placeholder, not used in local mode
@@ -801,7 +813,7 @@ def run_suite_local(
     )
     
     # Execute setup steps using local strategy
-    # Logger automatically routes output to stderr in JSON mode (quiet=True)
+    # Logger will route output based on verbose flag (verbose=True shows progress)
     if logger:
         logger.section("Executing local setup...")
     
@@ -848,11 +860,11 @@ def run_suite_local(
             logger.warning("No toolkit tools were created during setup")
     
     # Create runner with pre-created tools from strategy
-    # In JSON mode (quiet), disable verbose to prevent LangGraph debug output from polluting stdout
+    # Pass verbose flag directly from logger (controlled by -v flag)
     runner = IsolatedPipelineTestRunner(
         tools=tools,  # Pass pre-created tools from strategy
         env_vars=env_vars,  # Pass setup env_vars for substitution
-        verbose=logger.verbose if logger and not logger.quiet else False,
+        verbose=logger.verbose if logger else False,
         sdk_log_level=sdk_log_level,  # Control alita_sdk logging verbosity
     )
     
@@ -912,8 +924,7 @@ def main():
     parser.add_argument("--input", "-i", type=str, default="", help="Input message for pipelines")
     parser.add_argument("--timeout", "-t", type=int, default=None, help="Execution timeout per pipeline (default: from config or 120)")
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel executions")
-    parser.add_argument("--json", "-j", action="store_true", help="Output JSON format")
-    parser.add_argument("--output-json", help="Save JSON results to file (can be used with or without --json)")
+    parser.add_argument("--output-json", help="Save JSON results to file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
     parser.add_argument("--exit-code", "-e", action="store_true",
@@ -963,20 +974,14 @@ def main():
         
         if not folder_path.exists():
             error_msg = f"Suite folder not found: {folder_path}"
-            if args.json:
-                print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
-            else:
-                print(f"Error: {error_msg}")
+            print(f"Error: {error_msg}", file=sys.stderr)
             sys.exit(1)
         
         # Load config
         config = load_config(folder_path, pipeline_file)
         if not config:
             error_msg = f"Config not found in {folder_path}"
-            if args.json:
-                print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
-            else:
-                print(f"Error: {error_msg}")
+            print(f"Error: {error_msg}", file=sys.stderr)
             sys.exit(1)
 
     # ========================================
@@ -998,10 +1003,7 @@ def main():
         headers = get_auth_headers()
 
         if not headers:
-            if args.json:
-                print(json.dumps({"success": False, "error": "No authentication token found"}))
-            else:
-                print("Error: No authentication token found in environment")
+            print("Error: No authentication token found in environment", file=sys.stderr)
             sys.exit(1)
 
         if args.folder:
@@ -1092,10 +1094,7 @@ def main():
     # ========================================
     if not pipelines:
         error_msg = f"No pipelines found matching pattern '{pattern}'" if args.local else "No pipelines found matching criteria"
-        if args.json:
-            print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
-        else:
-            print(f"Error: {error_msg}")
+        print(f"Error: {error_msg}", file=sys.stderr)
         sys.exit(1)
 
     # Determine effective timeout: CLI arg > config value > default 120
@@ -1110,7 +1109,8 @@ def main():
     effective_timeout = args.timeout if args.timeout is not None else config_timeout
     
     # Create logger instance
-    logger = TestLogger(verbose=args.verbose, quiet=args.json) if args.verbose or not args.json else None
+    # Always create logger when verbose is True, otherwise None (no console output)
+    logger = TestLogger(verbose=args.verbose) if args.verbose else None
 
     if logger:
         logger.info(f"Found {len(pipelines)} pipeline(s) to execute")
@@ -1147,18 +1147,17 @@ def main():
         )
 
     # Output results
+    # Save JSON results to file if --output-json specified
     if args.output_json:
         output_path = Path(args.output_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             f.write(result.to_json())
 
-    if args.json:
-        print(result.to_json())
-    else:
-        # Pass absolute path to results file for clearer error messages
-        results_file_abs = str(Path(args.output_json).resolve()) if args.output_json else None
-        print(result.to_summary(results_file=results_file_abs))
+    # Always print summary to console (unless verbose mode already showed details)
+    # Pass absolute path to results file for clearer error messages
+    results_file_abs = str(Path(args.output_json).resolve()) if args.output_json else None
+    print(result.to_summary(results_file=results_file_abs))
 
     # Exit code
     if args.exit_code:
