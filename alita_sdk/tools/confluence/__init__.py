@@ -50,7 +50,22 @@ class ConfluenceToolkit(BaseToolkit):
 
         @check_connection_response
         def check_connection(self):
-            url = self.base_url.rstrip('/') + '/wiki/rest/api/space'
+            # Normalize base URL and construct API endpoint
+            normalized_url = self.base_url.rstrip('/')
+            cloud = getattr(self, 'cloud', True)
+
+            # For cloud instances, ensure /wiki is present in the API path
+            # Self-hosted instances may use different paths (e.g., /confluence)
+            if cloud:
+                # Check if base_url already includes /wiki
+                if normalized_url.endswith('/wiki'):
+                    url = normalized_url + '/rest/api/space'
+                else:
+                    url = normalized_url + '/wiki/rest/api/space'
+            else:
+                # For self-hosted, append /rest/api/space directly
+                url = normalized_url + '/rest/api/space'
+
             headers = {'Accept': 'application/json'}
             auth = None
             confluence_config = self.confluence_configuration or {}
