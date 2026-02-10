@@ -525,6 +525,11 @@ class Assistant:
         #
         return agent
 
+    @staticmethod
+    def _unwrap_tool(tool: BaseTool) -> BaseTool:
+        """Return the original tool if it was wrapped by middleware, otherwise return as-is."""
+        return getattr(tool, '_original_tool', tool)
+
     def _is_agent_tool(self, tool: BaseTool) -> bool:
         """
         Check if a tool is an Application tool (represents a child agent).
@@ -532,12 +537,16 @@ class Assistant:
         Application tools wrap other agents/pipelines and can be identified by:
         - Being an instance of the Application class
         - Having an 'application' attribute (the wrapped runnable)
+
+        If the tool was wrapped by ToolExceptionHandlerMiddleware, checks the
+        original unwrapped tool (via _original_tool) to preserve type identity.
         """
+        original = self._unwrap_tool(tool)
         from ..tools.application import Application
-        if isinstance(tool, Application):
+        if isinstance(original, Application):
             return True
         # Fallback: check for application attribute
-        if hasattr(tool, 'application') and tool.application is not None:
+        if hasattr(original, 'application') and original.application is not None:
             return True
         return False
 
@@ -788,6 +797,10 @@ class Assistant:
         child_configs = []
 
         for agent_tool in agent_tools:
+            # If the tool was wrapped by ToolExceptionHandlerMiddleware, unwrap to
+            # access Application-specific attributes (client, args_runnable, etc.)
+            original_agent_tool = self._unwrap_tool(agent_tool)
+
             agent_name = agent_tool.name
             original_name = agent_tool.metadata.get('original_name', agent_name) if hasattr(agent_tool, 'metadata') else agent_name
 
@@ -809,19 +822,20 @@ class Assistant:
             # Resolve the child agent's actual toolkit tools from its version_details.
             # Without this, the child node only gets the Application wrapper (a meta-tool)
             # and cannot invoke its configured toolkits (Jira, GitHub, etc.).
+            # Use original_agent_tool to access Application-specific attributes.
             child_toolkit_tools = []
             try:
-                version_details = getattr(agent_tool, 'args_runnable', {}).get('version_details')
+                version_details = getattr(original_agent_tool, 'args_runnable', {}).get('version_details')
                 if version_details and 'tools' in version_details:
                     from ..toolkits.tools import get_tools
                     child_toolkit_tools = get_tools(
                         version_details['tools'],
-                        alita_client=agent_tool.client,
-                        llm=agent_tool.args_runnable.get('llm', self.client),
-                        memory_store=agent_tool.args_runnable.get('store', self.store),
-                        mcp_tokens=agent_tool.args_runnable.get('mcp_tokens'),
-                        conversation_id=agent_tool.args_runnable.get('conversation_id'),
-                        ignored_mcp_servers=agent_tool.args_runnable.get('ignored_mcp_servers'),
+                        alita_client=original_agent_tool.client,
+                        llm=getattr(original_agent_tool, 'args_runnable', {}).get('llm', self.client),
+                        memory_store=getattr(original_agent_tool, 'args_runnable', {}).get('store', self.store),
+                        mcp_tokens=getattr(original_agent_tool, 'args_runnable', {}).get('mcp_tokens'),
+                        conversation_id=getattr(original_agent_tool, 'args_runnable', {}).get('conversation_id'),
+                        ignored_mcp_servers=getattr(original_agent_tool, 'args_runnable', {}).get('ignored_mcp_servers'),
                     )
                     logger.info(f"[SWARM] Resolved {len(child_toolkit_tools)} toolkit tools for child agent '{original_name}'")
                 else:
