@@ -111,8 +111,8 @@ class ToolExceptionHandlerMiddleware(Middleware):
         self.strategies = strategies
         self.excluded_tools = set(excluded_tools or [])
 
-        # Wrapped tools cache to avoid double-wrapping
-        self._wrapped_tools_cache: Dict[str, BaseTool] = {}
+        # Wrapped tools cache to avoid double-wrapping (keyed by object id)
+        self._wrapped_tools_cache: Dict[int, BaseTool] = {}
 
         logger.info(
             f"ToolExceptionHandlerMiddleware initialized with {len(strategies)} strategies: "
@@ -207,9 +207,14 @@ When a tool fails with an error:
             return tool
 
         # Check if already wrapped (avoid double-wrapping)
-        if tool.name in self._wrapped_tools_cache:
+        # Use object identity (id) as cache key, not tool.name, because different toolkits
+        # can have tools with the same name (e.g., index_data in both GitHub and Confluence).
+        # Name-based caching would return the same wrapped object for both, breaking
+        # the dedup logic in Assistant.__init__ which relies on distinct objects.
+        cache_key = id(tool)
+        if cache_key in self._wrapped_tools_cache:
             logger.debug(f"Tool '{tool.name}' already wrapped, returning cached version")
-            return self._wrapped_tools_cache[tool.name]
+            return self._wrapped_tools_cache[cache_key]
 
         # Get the original function to wrap
         original_func = self._get_tool_function(tool)
@@ -280,8 +285,8 @@ When a tool fails with an error:
             if hasattr(tool, 'metadata'):
                 wrapped_tool.metadata = tool.metadata
 
-            # Cache the wrapped tool
-            self._wrapped_tools_cache[tool.name] = wrapped_tool
+            # Cache the wrapped tool by object identity
+            self._wrapped_tools_cache[cache_key] = wrapped_tool
 
             logger.debug(f"Successfully wrapped tool '{tool.name}' with error handling")
             return wrapped_tool
