@@ -59,6 +59,82 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def configure_alita_sdk_logging(log_level: str = 'error'):
+    """
+    Configure alita_sdk package logging level.
+    
+    By default, suppress alita_sdk.* loggers to keep test output clean.
+    
+    Why this is needed:
+    - Local test execution instantiates full toolkit stack locally
+    - This triggers alita_sdk initialization logs:
+      * alita_sdk.configurations
+      * alita_sdk.tools
+      * alita_sdk.runtime.langchain.langraph_agent
+      * etc.
+    - Remote mode doesn't show these because platform manages toolkit instantiation
+    - For test-only runs, these logs clutter the output
+    - Use --local=debug/info/warning to see more logs when debugging
+    
+    Args:
+        log_level: Log level for alita_sdk loggers
+                   - 'error': Suppress most SDK logs (default)
+                   - 'warning': Show warnings and errors
+                   - 'info': Show info messages
+                   - 'debug': Show debug messages
+    """
+    # Map string level names to logging constants
+    level_map = {
+        'debug': logging.DEBUG,
+        'info': logging.INFO,
+        'warning': logging.WARNING,
+        'error': logging.ERROR,
+    }
+    
+    log_level_const = level_map.get(log_level.lower(), logging.ERROR)
+    
+    alita_loggers = [
+        'alita_sdk',
+        'alita_sdk.runtime',
+        'alita_sdk.runtime.langchain',
+        'alita_sdk.tools',
+        'alita_sdk.configurations',
+        'alita_sdk.cli',
+    ]
+    
+    for logger_name in alita_loggers:
+        logging.getLogger(logger_name).setLevel(log_level_const)
+    
+    # Suppress third-party HTTP client verbose logs and SSL warnings
+    # These come from external dependencies making API calls:
+    # - urllib3: Low-level HTTP client (used by requests for HTTPS calls)
+    # - httpx: HTTP client used by LangChain/OpenAI SDK
+    # - requests: HTTP library making API calls to backend
+    # Set to WARNING to hide INFO logs about successful HTTP requests
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+    
+    # Also suppress third-party library warnings
+    import warnings
+    warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+    
+    # Suppress paramiko/cryptography deprecation warnings (TripleDES cipher deprecation)
+    warnings.filterwarnings('ignore', message='TripleDES has been moved to')
+    try:
+        from cryptography.utils import CryptographyDeprecationWarning
+        warnings.filterwarnings('ignore', category=CryptographyDeprecationWarning)
+    except ImportError:
+        pass
+    warnings.filterwarnings('ignore', module='paramiko', category=DeprecationWarning)
+    
+    # Suppress pydantic UserWarnings about field shadowing
+    warnings.filterwarnings('ignore', module='pydantic', category=UserWarning)
+
+
+# Initialize with default error level to suppress SDK logs by default
+configure_alita_sdk_logging('error')
+
 
 def create_alita_client():
     """
@@ -106,6 +182,7 @@ class IsolatedPipelineTestRunner:
         verbose: bool = False,
         alita_client = None,
         llm = None,
+        sdk_log_level: str = 'error',
     ):
         """
         Initialize the test runner.
@@ -113,17 +190,22 @@ class IsolatedPipelineTestRunner:
         Args:
             tools: Pre-created toolkit tools (from LocalSetupStrategy)
             env_vars: Environment variables for substitution
-            verbose: Enable verbose logging
+            verbose: Enable verbose logging for test framework (not SDK)
             alita_client: Optional pre-created AlitaClient
             llm: Optional pre-created LLM instance
+            sdk_log_level: Log level for alita_sdk loggers
+                           (debug, info, warning, error - default: error)
         """
         self._tools = tools or []
         self.env_vars = env_vars or {}
         self.verbose = verbose
         self.alita_client = alita_client
-        self.llm = llm  # Use provided LLM or create on demand
+        self.llm = llm
 
-
+        # Configure SDK logging based on explicit parameter (local mode)
+        # Note: --verbose controls test framework verbosity, not SDK logging
+        configure_alita_sdk_logging(sdk_log_level)
+        
         if verbose:
             logger.setLevel(logging.DEBUG)
 
@@ -313,6 +395,9 @@ class IsolatedPipelineTestRunner:
                 error=f"Test file not found: {path}"
             )
 
+        # Visual delimiter before test
+        logger.info("")
+        logger.info("-" * 80)
         logger.info(f"Loading test: {path}")
 
         # Transform YAML (reuse seed_pipelines.py logic)
