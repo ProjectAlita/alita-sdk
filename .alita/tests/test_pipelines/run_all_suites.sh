@@ -84,6 +84,17 @@ while [[ $# -gt 0 ]]; do
             ;;
         --local)
             LOCAL_MODE=true
+            LOCAL_LOG_LEVEL=""
+            shift
+            # Check if next argument is a log level (not a suite name or option)
+            if [[ "$1" =~ ^(debug|info|warning|error)$ ]]; then
+                LOCAL_LOG_LEVEL="=$1"
+                shift
+            fi
+            ;;
+        --local=*)
+            LOCAL_MODE=true
+            LOCAL_LOG_LEVEL="=${1#*=}"
             shift
             ;;
         --skip-initial-cleanup)
