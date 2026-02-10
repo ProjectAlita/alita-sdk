@@ -71,32 +71,32 @@ logger.setLevel(logging.INFO)  # Default level for utils_local
 class MetadataCollectingCallback(BaseCallbackHandler):
     """
     Callback that collects execution metadata for result building.
-    
+
     Collects backend-compatible data (thinking_steps, tool_calls, token counts)
     for local test execution to build results matching production backend format.
-    
+
     Usage:
         callback = MetadataCollectingCallback()
         config = {"callbacks": [callback]}
         result = agent.invoke(input, config=config)
-        
+
         # Access collected metadata
         summary = callback.get_summary()
         thinking_steps = callback.thinking_steps
         tool_calls = callback.tool_calls
         tokens_in = callback.tokens_in
     """
-    
+
     def __init__(self):
         """
         Initialize metadata collecting callback.
         """
         super().__init__()
-        
+
         # Attributes required for compatibility (referenced in callback methods)
         self.current_model: str = 'gpt-4o'  # Default model name
         self.step_counter: int = 0  # Step counter for execution tracking
-        
+
         # Data collection (backend-compatible format)
         self.thinking_steps: List[Dict[str, Any]] = []
         self.tool_calls: Dict[str, Dict[str, Any]] = {}  # tool_run_id -> payload
@@ -104,15 +104,15 @@ class MetadataCollectingCallback(BaseCallbackHandler):
         self.tokens_out: int = 0
         self.pending_llm_requests: Dict[UUID, Dict[str, Any]] = {}
         self.llm_start_timestamp: Optional[str] = None
-    
+
     def _extract_token_usage(self, response: LLMResult) -> Optional[Dict[str, int]]:
         """
         Extract token usage from LLM response.
-        
+
         Tries multiple sources:
         1. response.llm_output.token_usage (OpenAI, most providers)
         2. response.generations[].message.response_metadata.token_usage (Anthropic)
-        
+
         Returns:
             Dict with prompt_tokens and completion_tokens, or None if not found
         """
@@ -125,7 +125,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                         'prompt_tokens': token_usage.get('prompt_tokens', 0),
                         'completion_tokens': token_usage.get('completion_tokens', 0),
                     }
-            
+
             # Source 2: message.response_metadata.token_usage (Anthropic format)
             for generation in response.generations:
                 for gen in generation:
@@ -136,14 +136,14 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                                 'prompt_tokens': metadata['token_usage'].get('input_tokens', 0),
                                 'completion_tokens': metadata['token_usage'].get('output_tokens', 0),
                             }
-            
+
             return None
         except Exception as e:
             logger.warning(f"Failed to extract token usage: {e}")
             return None
-    
+
     # Override LLM callbacks to collect metadata
-    
+
     def on_llm_start(
         self,
         serialized: Dict[str, Any],
@@ -161,7 +161,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
             "timestamp_start": datetime.now(tz=timezone.utc).isoformat(),
             "model": metadata.get("ls_model_name", self.current_model) if metadata else self.current_model,
         }
-    
+
     def on_chat_model_start(
         self,
         serialized: Dict[str, Any],
@@ -179,7 +179,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
             "timestamp_start": datetime.now(tz=timezone.utc).isoformat(),
             "model": metadata.get("ls_model_name", self.current_model) if metadata else self.current_model,
         }
-    
+
     def on_llm_end(
         self,
         response: LLMResult,
@@ -195,15 +195,15 @@ class MetadataCollectingCallback(BaseCallbackHandler):
         if token_usage:
             self.tokens_in += token_usage.get("prompt_tokens", 0)
             self.tokens_out += token_usage.get("completion_tokens", 0)
-        
+
         # Get pending request data
         pending = self.pending_llm_requests.pop(run_id, {})
         llm_timestamp_start = pending.get("timestamp_start")
-        
+
         # Track first LLM call timestamp
         if not self.llm_start_timestamp:
             self.llm_start_timestamp = llm_timestamp_start
-        
+
         # Collect thinking steps from generations
         for generation in response.generations:
             for gen_item in generation:
@@ -211,7 +211,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                 step['timestamp_start'] = llm_timestamp_start
                 step['timestamp_finish'] = datetime.now(tz=timezone.utc).isoformat()
                 step['tool_run_id'] = str(run_id)
-                
+
                 # Extract thinking from message content
                 # Handles Claude extended thinking and GPT-o1/o3 reasoning
                 msg_content = step.get('message', {}).get('content')
@@ -232,14 +232,14 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                         # OpenAI reasoning models - format 2: direct reasoning field
                         elif item_type == 'reasoning' and item.get('reasoning'):
                             thinking_items.append(item.get('reasoning'))
-                    
+
                     if thinking_items:
                         step['thinking'] = '\n'.join(thinking_items)
-                
+
                 self.thinking_steps.append(step)
-    
+
     # Override tool callbacks to collect metadata
-    
+
     def on_tool_start(
         self,
         serialized: Dict[str, Any],
@@ -255,23 +255,23 @@ class MetadataCollectingCallback(BaseCallbackHandler):
         """Called when tool starts - collect metadata and display."""
         tool_name = serialized.get("name", "Unknown Tool")
         tool_run_id = str(run_id)
-        
+
         # Build tool_meta with nested metadata structure (matches backend)
         tool_meta = {
             "name": tool_name,
             "description": serialized.get("description", ""),
         }
-        
+
         # Extract toolkit metadata and create nested metadata object
         toolkit_metadata = {}
-        
+
         # Source 1: metadata parameter (LangGraph checkpoint metadata)
         if metadata and isinstance(metadata, dict):
             if "toolkit_name" in metadata:
                 toolkit_metadata["toolkit_name"] = metadata["toolkit_name"]
             if "toolkit_type" in metadata:
                 toolkit_metadata["toolkit_type"] = metadata["toolkit_type"]
-        
+
         # Source 2: serialized metadata (fallback)
         if not toolkit_metadata and "metadata" in serialized:
             serialized_meta = serialized["metadata"]
@@ -280,11 +280,11 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                     toolkit_metadata["toolkit_name"] = serialized_meta["toolkit_name"]
                 if "toolkit_type" in serialized_meta:
                     toolkit_metadata["toolkit_type"] = serialized_meta["toolkit_type"]
-        
+
         # Add nested metadata object to tool_meta (only if we found toolkit info)
         if toolkit_metadata:
             tool_meta["metadata"] = toolkit_metadata
-        
+
         # Store tool call metadata (matching backend ToolCallPayload structure)
         self.tool_calls[tool_run_id] = {
             'tool_name': tool_name,
@@ -295,7 +295,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
             'timestamp_start': datetime.now(tz=timezone.utc).isoformat(),
             'metadata': metadata or {},
         }
-    
+
     def on_tool_end(
         self,
         output: Any,
@@ -307,14 +307,14 @@ class MetadataCollectingCallback(BaseCallbackHandler):
     ) -> None:
         """Called when tool finishes - collect metadata and display."""
         tool_run_id = str(run_id)
-        
+
         # Convert output to string (matches backend logic)
         tool_output = (
             output
             if isinstance(output, str)
             else json.dumps(output, ensure_ascii=False)
         )
-        
+
         # Update tool call metadata
         if tool_run_id in self.tool_calls:
             self.tool_calls[tool_run_id].update({
@@ -329,7 +329,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
             # Try to get from parent's tool_runs if available
             if hasattr(self, 'tool_runs') and tool_run_id in self.tool_runs:
                 tool_name = self.tool_runs[tool_run_id].get('name', tool_name)
-            
+
             self.tool_calls[tool_run_id] = {
                 'tool_name': tool_name,
                 'tool_run_id': tool_run_id,
@@ -339,7 +339,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                 'finish_reason': 'stop',
                 'timestamp_finish': datetime.now(tz=timezone.utc).isoformat(),
             }
-    
+
     def on_tool_error(
         self,
         error: BaseException,
@@ -352,7 +352,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
         """Called when tool errors - collect metadata and display."""
         tool_run_id = str(run_id)
         error_str = ''.join(traceback.format_exception(type(error), error, error.__traceback__))
-        
+
         # Update tool call metadata with error
         if tool_run_id in self.tool_calls:
             self.tool_calls[tool_run_id].update({
@@ -367,7 +367,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
             tool_name = kwargs.get('name', 'Unknown')
             if hasattr(self, 'tool_runs') and tool_run_id in self.tool_runs:
                 tool_name = self.tool_runs[tool_run_id].get('name', tool_name)
-            
+
             self.tool_calls[tool_run_id] = {
                 'tool_name': tool_name,
                 'tool_run_id': tool_run_id,
@@ -378,11 +378,11 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                 'finish_reason': 'error',
                 'timestamp_finish': datetime.now(tz=timezone.utc).isoformat(),
             }
-    
+
     def get_summary(self) -> Dict[str, Any]:
         """
         Get execution summary with all collected metadata.
-        
+
         Returns:
             Dict containing thinking_steps, tool_calls, token counts, etc.
             Ready to use with build_success_result pattern.
@@ -760,18 +760,18 @@ class IsolatedPipelineTestRunner:
     ) -> Dict[str, Any]:
         """
         Build result structure using callback data (replicates backend's build_success_result).
-        
+
         This mirrors the production backend's response building:
         - Uses callback.thinking_steps for LLM responses
         - Uses callback.tool_calls for tool execution metadata
         - Uses callback tokens for accurate usage tracking
         - Preserves test_results from graph state
-        
+
         Args:
             graph_result: Raw result from graph.invoke()
             user_input: The user input message
             callback: MetadataCollectingCallback with collected execution data
-            
+
         Returns:
             Dict in remote API format matching build_success_result
         """
@@ -779,12 +779,12 @@ class IsolatedPipelineTestRunner:
         chat_history = [
             {'role': 'user', 'content': user_input}
         ]
-        
+
         # Extract response content from graph result
         response_content = self._extract_response_content(graph_result, response_format='output')
         output_message = self._build_output_message(response_content)
         chat_history.append(output_message)
-        
+
         # Build result structure matching build_success_result from backend
         result_data = {
             'chat_history': chat_history,
@@ -798,7 +798,7 @@ class IsolatedPipelineTestRunner:
             'chat_history_tokens_input': callback.tokens_in,  # From callback
             'llm_response_tokens_output': callback.tokens_out,  # From callback
         }
-        
+
         return result_data
 
     def _transform_to_remote_format(self, local_result: Dict[str, Any], user_input: str) -> Dict[str, Any]:
@@ -1005,13 +1005,13 @@ class IsolatedPipelineTestRunner:
             }
 
             logger.info("Executing pipeline...")
-            
+
             # Create callback for metadata collection
             callback = MetadataCollectingCallback()
-            
+
             # Add callback to config
             config['callbacks'] = [callback]
-            
+
             result = graph.invoke(initial_state, config=config)
 
             execution_time = time.time() - start_time
