@@ -847,6 +847,9 @@ class Assistant:
                 # Pipeline: use Application wrapper as-is, but force string output.
                 # The pipeline's graph orchestration runs internally via Application._run().
                 original_agent_tool.is_subgraph = False
+                # Also update args_runnable so _run() recreates the pipeline without is_subgraph
+                if hasattr(original_agent_tool, 'args_runnable') and isinstance(original_agent_tool.args_runnable, dict):
+                    original_agent_tool.args_runnable['is_subgraph'] = False
                 child_toolkit_tools = [agent_tool]
                 logger.info(f"[SWARM] Pipeline child '{original_name}': using Application wrapper (is_subgraph=False)")
             else:

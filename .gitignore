@@ -179,3 +179,4 @@ node_modules/
 .alita/plans/*
 .alita/**/.env.*
 .alita/**/test_results
+alita_sdk/docs/
