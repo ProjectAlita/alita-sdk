@@ -837,31 +837,42 @@ class Assistant:
                 'description': agent_tool.description
             })
 
-            # Resolve the child agent's actual toolkit tools from its version_details.
-            # Without this, the child node only gets the Application wrapper (a meta-tool)
-            # and cannot invoke its configured toolkits (Jira, GitHub, etc.).
-            # Use original_agent_tool to access Application-specific attributes.
-            child_toolkit_tools = []
-            try:
-                version_details = getattr(original_agent_tool, 'args_runnable', {}).get('version_details')
-                if version_details and 'tools' in version_details:
-                    from ..toolkits.tools import get_tools
-                    child_toolkit_tools = get_tools(
-                        version_details['tools'],
-                        alita_client=original_agent_tool.client,
-                        llm=getattr(original_agent_tool, 'args_runnable', {}).get('llm', self.client),
-                        memory_store=getattr(original_agent_tool, 'args_runnable', {}).get('store', self.store),
-                        mcp_tokens=getattr(original_agent_tool, 'args_runnable', {}).get('mcp_tokens'),
-                        conversation_id=getattr(original_agent_tool, 'args_runnable', {}).get('conversation_id'),
-                        ignored_mcp_servers=getattr(original_agent_tool, 'args_runnable', {}).get('ignored_mcp_servers'),
-                    )
-                    logger.info(f"[SWARM] Resolved {len(child_toolkit_tools)} toolkit tools for child agent '{original_name}'")
-                else:
-                    logger.warning(f"[SWARM] No version_details found for child agent '{original_name}', using Application wrapper as fallback")
-                    child_toolkit_tools = [agent_tool]
-            except Exception as e:
-                logger.warning(f"[SWARM] Failed to resolve toolkit tools for child agent '{original_name}': {e}. Falling back to Application wrapper.")
+            # Resolve the child's toolkit tools.
+            # Pipelines must be kept as a single Application wrapper (their graph
+            # orchestration runs internally). Agents have their internal toolkits
+            # resolved so the child LLM can call them directly in a react loop.
+            is_pipeline = getattr(original_agent_tool, 'is_subgraph', False)
+
+            if is_pipeline:
+                # Pipeline: use Application wrapper as-is, but force string output.
+                # The pipeline's graph orchestration runs internally via Application._run().
+                original_agent_tool.is_subgraph = False
                 child_toolkit_tools = [agent_tool]
+                logger.info(f"[SWARM] Pipeline child '{original_name}': using Application wrapper (is_subgraph=False)")
+            else:
+                # Agent: resolve internal toolkit tools (Jira, GitHub, etc.)
+                # so the child LLM can call them directly.
+                child_toolkit_tools = []
+                try:
+                    version_details = getattr(original_agent_tool, 'args_runnable', {}).get('version_details')
+                    if version_details and 'tools' in version_details:
+                        from ..toolkits.tools import get_tools
+                        child_toolkit_tools = get_tools(
+                            version_details['tools'],
+                            alita_client=original_agent_tool.client,
+                            llm=getattr(original_agent_tool, 'args_runnable', {}).get('llm', self.client),
+                            memory_store=getattr(original_agent_tool, 'args_runnable', {}).get('store', self.store),
+                            mcp_tokens=getattr(original_agent_tool, 'args_runnable', {}).get('mcp_tokens'),
+                            conversation_id=getattr(original_agent_tool, 'args_runnable', {}).get('conversation_id'),
+                            ignored_mcp_servers=getattr(original_agent_tool, 'args_runnable', {}).get('ignored_mcp_servers'),
+                        )
+                        logger.info(f"[SWARM] Resolved {len(child_toolkit_tools)} toolkit tools for child agent '{original_name}'")
+                    else:
+                        logger.warning(f"[SWARM] No version_details found for child agent '{original_name}', using Application wrapper as fallback")
+                        child_toolkit_tools = [agent_tool]
+                except Exception as e:
+                    logger.warning(f"[SWARM] Failed to resolve toolkit tools for child agent '{original_name}': {e}. Falling back to Application wrapper.")
+                    child_toolkit_tools = [agent_tool]
 
             # Child prompt: no transfer_to_parent — children end naturally when done
             child_system_prompt = f"You are {original_name}. {agent_tool.description}\n\nComplete your task using the available tools. When you have finished your task, provide your final response directly to the user."
@@ -886,6 +897,33 @@ class Assistant:
             child_graph = build_agent_subgraph(self.client, cfg['tools'], cfg['prompt'], cfg['name'])
             child_graphs.append(child_graph)
 
+        # --- Adapter to convert swarm output to {"output": ...} format ---
+        class SwarmResultAdapter:
+            """Wraps a compiled swarm graph to return {"output": ...} format expected by pylon."""
+            def __init__(self, compiled_graph):
+                self._graph = compiled_graph
+
+            def invoke(self, input, config=None, **kwargs):
+                result = self._graph.invoke(input, config, **kwargs)
+                messages = result.get("messages", [])
+                output = None
+                for msg in reversed(messages):
+                    if hasattr(msg, 'content') and not isinstance(msg, HumanMessage):
+                        content = msg.content
+                        if isinstance(content, list):
+                            content = "\n".join(
+                                block.get("text", "") if isinstance(block, dict) else str(block)
+                                for block in content
+                            )
+                        if isinstance(content, str) and content.strip():
+                            output = content
+                            break
+                return {
+                    "output": output or "",
+                    "thread_id": None,
+                    "execution_finished": True,
+                }
+
         # --- Wire with official create_swarm() ---
         try:
             swarm = create_swarm(
@@ -894,7 +932,7 @@ class Assistant:
             )
             compiled = swarm.compile(checkpointer=checkpointer, store=self.store)
             logger.info(f"[SWARM] Created swarm agent with {len(agent_tools)} child agents: {[t.name for t in agent_tools]}")
-            return compiled
+            return SwarmResultAdapter(compiled)
         except Exception as e:
             logger.error(f"[SWARM] Failed to compile swarm: {type(e).__name__}: {e}", exc_info=True)
             raise
