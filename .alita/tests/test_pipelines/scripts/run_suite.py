@@ -715,6 +715,41 @@ def run_suite(
     return suite
 
 
+def validate_and_get_log_level(local_arg: Any) -> tuple:
+    """
+    Validate --local argument and extract log level.
+    
+    Args:
+        local_arg: Value from args.local (None, True, or string level)
+        
+    Returns:
+        (is_local: bool, log_level: str or None)
+        
+    Examples:
+        None -> (False, None)              # Not local mode
+        True -> (True, 'error')            # Local mode, default log level
+        'warning' -> (True, 'warning')     # Local mode, explicit level
+        'invalid' -> raises ValueError
+    """
+    if local_arg is None:
+        return False, None
+    
+    if local_arg is True:
+        return True, 'error'  # Default to error level
+    
+    # Must be a string log level
+    valid_levels = {'debug', 'info', 'warning', 'error'}
+    level = str(local_arg).lower()
+    
+    if level not in valid_levels:
+        raise ValueError(
+            f"Invalid log level '{local_arg}'. "
+            f"Must be one of: {', '.join(sorted(valid_levels))}"
+        )
+    
+    return True, level
+
+
 def run_suite_local(
     suite_folder: Path,
     config: dict,
@@ -723,6 +758,7 @@ def run_suite_local(
     input_message: str = "",
     timeout: int = 120,
     logger: Optional[TestLogger] = None,
+    sdk_log_level: str = 'error',
 ) -> SuiteResult:
     """
     Run a suite of pipelines locally without backend.
@@ -738,6 +774,7 @@ def run_suite_local(
         input_message: Input message for pipelines
         timeout: Execution timeout per pipeline
         logger: Optional TestLogger instance for logging
+        sdk_log_level: Log level for alita_sdk loggers (debug, info, warning, error)
         
     Returns:
         SuiteResult with aggregated results
@@ -816,6 +853,7 @@ def run_suite_local(
         tools=tools,  # Pass pre-created tools from strategy
         env_vars=env_vars,  # Pass setup env_vars for substitution
         verbose=logger.verbose if logger and not logger.quiet else False,
+        sdk_log_level=sdk_log_level,  # Control alita_sdk logging verbosity
     )
     
     # Run all tests
@@ -881,8 +919,9 @@ def main():
     parser.add_argument("--exit-code", "-e", action="store_true",
                         help="Use exit code to indicate suite result (0=all pass, 1=failures)")
     parser.add_argument("--env-file", help="Load environment variables from file")
-    parser.add_argument("--local", action="store_true",
-                        help="Local mode: run pipelines on local source code without backend")
+    parser.add_argument("--local", nargs='?', const=True, default=None,
+                        help="Local mode: run pipelines without backend. "
+                             "Optional: set alita_sdk log level (debug|info|warning|error, default: error)")
 
     args = parser.parse_args()
 
@@ -943,7 +982,10 @@ def main():
     # ========================================
     # PIPELINE DISCOVERY: Local vs Remote
     # ========================================
-    if args.local:
+    # Validate and extract log level from --local argument
+    is_local, sdk_log_level = validate_and_get_log_level(args.local)
+    
+    if is_local:
         # LOCAL: Get test files from folder (stored as pipelines for unified handling)
         if not args.folder:
             parser.error("--local mode requires a folder argument")
@@ -1078,7 +1120,7 @@ def main():
     # ========================================
     # EXECUTION: Local vs Remote
     # ========================================
-    if args.local:
+    if is_local:
         result = run_suite_local(
             suite_folder=folder_path,
             config=config,
@@ -1087,6 +1129,7 @@ def main():
             input_message=args.input,
             timeout=effective_timeout,
             logger=logger,
+            sdk_log_level=sdk_log_level or 'error',  # Pass log level, default to error
         )
     else:
         result = run_suite(
