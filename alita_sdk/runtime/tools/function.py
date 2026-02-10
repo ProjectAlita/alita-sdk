@@ -145,6 +145,14 @@ alita_state = json.loads(state_json)
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
 
+        # For subgraph nodes, also pass through state variables that match child's expected inputs
+        # This ensures shared state variables are available in the child
+        if hasattr(self.tool, 'is_subgraph') and self.tool.is_subgraph:
+            # Merge state variables that aren't already in func_args
+            for key, value in state.items():
+                if key not in func_args and key not in ['messages', 'input']:
+                    func_args[key] = value
+
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
             func_args['code'] = f"{self._prepare_pyodide_input(state, self.input_variables)}\n{func_args['code']}"
