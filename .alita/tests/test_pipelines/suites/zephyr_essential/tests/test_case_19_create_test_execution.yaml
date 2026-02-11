@@ -215,7 +215,6 @@ nodes:
           3. testcase_created: Test case was created successfully
           4. cycle_created: Test cycle was created successfully
           5. execution_created: Test execution was created successfully
-          6. has_execution_key: Execution response contains key
 
           Return JSON test_results:
           {{
@@ -225,7 +224,6 @@ nodes:
             "testcase_created": boolean,
             "cycle_created": boolean,
             "execution_created": boolean,
-            "has_execution_key": boolean,
             "execution_key": "key from response or 'none'",
             "success_indicator_found": "which indicator was found or 'none'",
             "error_indicator_found": "which error indicator was found or 'none'",
