@@ -370,7 +370,7 @@ class SuiteResult:
             f"\n{'=' * 60}",
             f"Suite: {self.suite_name}",
             f"{'=' * 60}",
-            f"Total: {self.total} | Passed: {self.passed} | Failed: {self.failed} | Errors: {self.errors}",
+            f"Total: {self.total} | Passed: {self.passed} | Failed: {self.failed} | Errors: {self.errors} | Skipped: {self.skipped}",
             f"Success Rate: {self.success_rate:.1f}%",
             f"Execution Time: {self.execution_time:.2f}s",
             f"{'=' * 60}",
@@ -899,10 +899,10 @@ def run_suite_local(
             if logger:
                 logger.success("TEST PASSED")
         else:
-            # success=True but test_passed=None means execution succeeded, treat as passed
-            suite.passed += 1
+            # success=True but test_passed=None means result cannot be evaluated, mark as skipped
+            suite.skipped += 1
             if logger:
-                logger.success("TEST PASSED")
+                logger.info("TEST SKIPPED (result indeterminate)")
         
         if logger and result.execution_time > 0:
             logger.info(f"Execution time: {result.execution_time:.2f}s")
