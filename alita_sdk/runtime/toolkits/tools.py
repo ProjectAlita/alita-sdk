@@ -146,7 +146,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 except Exception as app_err:
                     # Gracefully skip application tools that fail to load (e.g., deleted agents)
                     # This is common for conversation participants that reference stale agents
-                    logger.warning(f"Skipping application tool '{tool.get('name', 'unknown')}': {app_err}")
+                    logger.error(f"Skipping application tool '{tool.get('name', 'unknown')}': {app_err}")
                     continue
             elif tool['type'] == 'memory':
                 tool_handled = True
