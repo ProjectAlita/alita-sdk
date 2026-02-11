@@ -1,0 +1,272 @@
+name: "ZE17 - update_test_cycle: Update test cycle successfully"
+description: |
+  Verify the Zephyr Essential 'update_test_cycle' tool updates an existing test cycle.
+
+  Objective: Test test cycle update functionality
+
+  Expected Behavior:
+  - Test cycle is created first
+  - Test cycle is updated without errors
+  - Updated values are reflected in the response
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  cycle_name:
+    type: str
+  updated_name:
+    type: str
+  cycle_json:
+    type: str
+  update_json:
+    type: str
+  cycle_key:
+    type: str
+  get_cycle_before_update:
+    type: str
+  get_cycle_after_update:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["key", "id", "name", "updated"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "not found"]
+  create_result:
+    type: str
+  update_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        import json
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique cycle name
+        cycle_name = f"Test Cycle ZE17 {timestamp}-{random_suffix}"
+        updated_name = f"Updated Cycle ZE17 {timestamp}-{random_suffix}"
+        
+        # Create JSON payload for cycle creation
+        cycle_data = {
+            "name": cycle_name,
+            "projectKey": "${ZEPHYR_PROJECT_KEY:ASDKSUP}",
+            "status": "Not Started"
+        }
+        cycle_json = json.dumps(cycle_data)
+
+        {"cycle_name": cycle_name, "updated_name": updated_name, "cycle_json": cycle_json}
+    output:
+      - cycle_name
+      - updated_name
+      - cycle_json
+    structured_output: true
+    transition: create_test_cycle
+
+  - id: create_test_cycle
+    type: toolkit
+    input:
+      - cycle_json
+    input_mapping:
+      json:
+        type: variable
+        value: cycle_json
+    output:
+      - create_result
+    structured_output: false
+    tool: create_test_cycle
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: extract_cycle_key
+  - id: extract_cycle_key
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        data = alita_state.get("create_result", {})
+        key_value = data['key']
+
+        {"cycle_key": key_value}
+    input:
+      - create_result
+    output:
+      - cycle_key
+    structured_output: true
+    transition: get_test_cycle_before_update
+  - id: get_test_cycle_before_update
+    type: toolkit
+    input:
+      - cycle_key
+    input_mapping:
+      test_cycle_id_or_key:
+        type: variable
+        value: cycle_key
+    output:
+      - get_cycle_before_update
+    structured_output: true
+    tool: get_test_cycle
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: prepare_update
+  - id: prepare_update
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        # Get state variables
+        updated_name = alita_state.get("updated_name", "")
+        cycle_data = alita_state.get("get_cycle_before_update", {})
+        
+        # Parse the existing cycle data if it's a string
+        if isinstance(cycle_data, str):
+            cycle_data = json.loads(cycle_data)
+        
+        # Create a copy with all fields
+        update_data = {**cycle_data}
+        
+        # Remove read-only/system-managed fields that API doesn't accept in updates
+        read_only_fields = ['self', 'createdOn', 'createdBy', 'updatedOn', 'updatedBy', 'links']
+        for field in read_only_fields:
+            update_data.pop(field, None)
+        
+        # Update the fields we want to change
+        update_data["name"] = updated_name
+        
+        # Update status - keep as object if it exists, otherwise create object
+        if "status" in update_data and isinstance(update_data["status"], dict):
+            update_data["status"]["name"] = "In Progress"
+        else:
+            update_data["status"] = {"name": "In Progress"}
+        
+        update_json = json.dumps(update_data)
+        
+        {"update_json": update_json}
+    input:
+      - updated_name
+      - get_cycle_before_update
+    output:
+      - update_json
+    structured_output: true
+    transition: update_test_cycle
+
+  - id: update_test_cycle
+    type: toolkit
+    input:
+      - cycle_key
+      - update_json
+    input_mapping:
+      test_cycle_id_or_key:
+        type: variable
+        value: cycle_key
+      json:
+        type: variable
+        value: update_json
+    output:
+      - update_result
+    structured_output: true
+    tool: update_test_cycle
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: get_test_cycle_after_update
+  - id: get_test_cycle_after_update
+    type: toolkit
+    input:
+      - cycle_key
+    input_mapping:
+      test_cycle_id_or_key:
+        type: variable
+        value: cycle_key
+    output:
+      - get_cycle_after_update
+    structured_output: true
+    tool: get_test_cycle
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - update_result
+      - get_cycle_after_update
+      - cycle_name
+      - updated_name
+      - cycle_key
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_test_cycle', 'update_test_cycle', and 'get_test_cycle' tool executions.
+
+          Original Cycle Name: {cycle_name}
+          Updated Cycle Name: {updated_name}
+          Cycle Key: {cycle_key}
+          Create Result: {create_result}
+          Update Result: {update_result}
+          Get Result After Update: {get_cycle_after_update}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful test cycle update.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: All tools ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. cycle_created: Test cycle was created successfully
+          4. cycle_updated: Test cycle was updated successfully
+          5. cycle_retrieved: Test cycle details were retrieved after update
+          6. name_changed: Test cycle name in get result matches new updated name
+          7. different_from_original: Updated name is different from original name
+          8. correct_key: Test cycle key matches across all operations
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "cycle_created": boolean,
+            "cycle_updated": boolean,
+            "cycle_retrieved": boolean,
+            "name_changed": boolean,
+            "different_from_original": boolean,
+            "correct_key": boolean,
+            "updated_name_found": "name from get result or 'none'",
+            "cycle_key_found": "key from get result or 'none'",
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

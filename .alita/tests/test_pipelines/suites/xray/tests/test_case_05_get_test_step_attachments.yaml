@@ -1,0 +1,179 @@
+name: "XR05 - get_test_step_attachments: Retrieve test step attachments"
+description: |
+  Verify the Xray 'get_test_step_attachments' tool retrieves attachments from test steps.
+
+  Objective: Test retrieval of attachment metadata for test steps
+
+  Expected Behavior:
+  - Query executes without errors
+  - Returns attachment information if attachments exist
+  - Response contains attachment metadata (id, filename, downloadLink)
+  - Handles tests without attachments gracefully
+  - No error indicators in output
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${XRAY_PROJECT_KEY:EL}
+  test_issue_id:
+    type: str
+  get_tests_result:
+    type: str
+  attachments_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["attachments", "test", "issue_id"]
+  error_indicators:
+    type: list
+    value: ["Failed to get", "error", "exception", "not found"]
+  test_results:
+    type: dict
+
+entry_point: find_test_with_steps
+nodes:
+  - id: find_test_with_steps
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Prepare JQL to find Manual tests (which have steps) in AI TESTS folder
+        project_key = alita_state.get("project_key", "EL")
+        jql_query = f'project = "{project_key}" AND testType = "Manual" AND labels in (ELITEA_AI_CREATED)'
+        
+        {"jql_query": jql_query}
+    input:
+      - project_key
+    output:
+      - jql_query
+    structured_output: true
+    transition: get_tests
+
+  - id: get_tests
+    type: toolkit
+    input:
+      - jql_query
+    input_mapping:
+      jql:
+        type: variable
+        value: jql_query
+    output:
+      - get_tests_result
+    structured_output: false
+    tool: get_tests
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    transition: extract_test_id
+
+  - id: extract_test_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+        
+        # Extract first test issueId from results
+        result_str = alita_state.get("get_tests_result", "")
+        test_issue_id = "not_found"
+        
+        try:
+            # Look for issueId in the result
+            issue_id_match = re.search(r"'issueId':\s*'?(\d+)'?", result_str)
+            if not issue_id_match:
+                issue_id_match = re.search(r'"issueId":\s*"?(\d+)"?', result_str)
+            if issue_id_match:
+                test_issue_id = issue_id_match.group(1)
+            
+            # If not found, look for jira key and we'll use that
+            if test_issue_id == "not_found":
+                key_match = re.search(r"'key':\s*'([A-Z]+-\d+)'", result_str)
+                if not key_match:
+                    key_match = re.search(r'"key":\s*"([A-Z]+-\d+)"', result_str)
+                if key_match:
+                    test_issue_id = key_match.group(1)
+        except Exception:
+            pass
+        
+        {"test_issue_id": test_issue_id}
+    input:
+      - get_tests_result
+    output:
+      - test_issue_id
+    structured_output: true
+    transition: get_attachments
+
+  - id: get_attachments
+    type: toolkit
+    input:
+      - test_issue_id
+    input_mapping:
+      issue_id:
+        type: variable
+        value: test_issue_id
+    output:
+      - attachments_result
+    structured_output: false
+    tool: get_test_step_attachments
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - attachments_result
+      - test_issue_id
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_test_step_attachments' tool execution.
+
+          Test Issue ID: {test_issue_id}
+          Attachments Result: {attachments_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful attachment retrieval.
+          
+          IMPORTANT: If the result indicates "No attachments found", this is still a PASS
+          as long as there are no errors. The tool should handle tests without attachments gracefully.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran without throwing an exception
+          2. no_errors: Output does NOT contain error indicators (except "No attachments found" which is OK)
+          3. valid_response: Response contains expected structure (test, issue_id, attachments or "No attachments")
+          4. test_id_valid: Test ID was found and used successfully
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "valid_response": boolean,
+            "test_id_valid": boolean,
+            "has_attachments": boolean,
+            "attachments_count": integer (0 if none),
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

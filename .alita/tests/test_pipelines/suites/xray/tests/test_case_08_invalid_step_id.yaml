@@ -1,0 +1,121 @@
+name: "XR08 - add_attachment_to_test_step: Handle invalid step_id (Negative Test)"
+description: |
+  Verify the Xray 'add_attachment_to_test_step' tool properly handles invalid step_id formats.
+
+  Objective: Test error handling for invalid step_id parameter
+
+  Expected Behavior (NEGATIVE TEST):
+  - Tool returns error for invalid step_id
+  - Error message mentions step_id validation
+  - Error message suggests using get_tests to retrieve step IDs
+  - No test modification occurs
+  - Proper error handling without crashing
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${XRAY_PROJECT_KEY:EL}
+  invalid_step_id:
+    type: str
+    value: "INVALID-123"
+  attachment_content:
+    type: str
+    value: "Test attachment content"
+  attachment_filename:
+    type: str
+    value: "test_file.txt"
+  add_attachment_result:
+    type: str
+  expected_error_indicators:
+    type: list
+    value: ["Invalid step_id", "must be a UUID", "not a test issue key", "get_tests"]
+  unexpected_success_indicators:
+    type: list
+    value: ["Successfully added attachment", "File size"]
+  test_results:
+    type: dict
+
+entry_point: add_attachment_with_invalid_step_id
+nodes:
+  - id: add_attachment_with_invalid_step_id
+    type: toolkit
+    input:
+      - invalid_step_id
+      - attachment_content
+      - attachment_filename
+    input_mapping:
+      step_id:
+        type: variable
+        value: invalid_step_id
+      filedata:
+        type: variable
+        value: attachment_content
+      filename:
+        type: variable
+        value: attachment_filename
+    output:
+      - add_attachment_result
+    structured_output: false
+    tool: add_attachment_to_test_step
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    continue_on_error: true
+    transition: validate_error_handling
+
+  - id: validate_error_handling
+    type: llm
+    input:
+      - add_attachment_result
+      - invalid_step_id
+      - unexpected_success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the result from executing 'add_attachment_to_test_step' with an invalid step_id.
+          
+          CONTEXT - How continue_on_error works:
+          - The Xray tool raises a ToolException for invalid step_id format
+          - With continue_on_error=true, the exception is caught and execution continues
+          - The output variable receives NO VALUE (empty/None) when exception occurs
+          - For this NEGATIVE test, empty output = CORRECT error handling
+          
+          Add Attachment Result: {add_attachment_result}
+          Invalid Step ID Used: {invalid_step_id}
+          Unexpected Success Indicators: {unexpected_success_indicators}
+
+          VALIDATION LOGIC:
+          This negative test PASSES if the tool correctly rejected the invalid step_id.
+          Evidence of correct rejection: Output is empty/None/minimal (no attachment was added).
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Always true (we reached this validation node)
+          2. error_handled: Result is empty, None, or very short (< 20 characters)
+          3. no_attachment_added: Result does NOT contain "Successfully added attachment", "File size"
+          4. no_success_indicators: Result does NOT contain any success field indicators from the list
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": true,
+            "error_handled": boolean (true if result is empty/None/short),
+            "no_attachment_added": boolean (true if no success messages found),
+            "no_success_indicators": boolean (true if no success indicators found),
+            "result_length": number (character count of result),
+            "result_preview": "first 100 chars of result or 'empty'"
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    transition: END

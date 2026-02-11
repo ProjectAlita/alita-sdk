@@ -300,6 +300,8 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
             
             # Delete the branch
             self._bitbucket.delete_branch(branch_name)
+
+            return f"Branch '{branch_name}' has been deleted successfully."
             
         except ToolException:
             raise

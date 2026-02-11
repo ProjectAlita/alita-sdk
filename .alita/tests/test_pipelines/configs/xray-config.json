@@ -1,0 +1,22 @@
+{
+  "type": "xray_cloud",
+  "toolkit_name": "xray",
+  "id": 1,
+  "xray_configuration": {
+    "alita_title": "xray_cloud",
+    "private": true
+  },
+  "base_url": "${XRAY_BASE_URL}",
+  "client_id": "${XRAY_CLIENT_ID}",
+  "client_secret": "${XRAY_CLIENT_SECRET}",
+  "elected_tools": [
+    "get_tests",
+    "create_test",
+    "create_tests",
+    "execute_graphql",
+    "add_attachment_to_test_step",
+    "get_test_step_attachments"
+  ],
+  "limit": 100,
+  "verify_ssl": true
+}

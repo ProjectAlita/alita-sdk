@@ -1,0 +1,225 @@
+name: "XR03 - create_test: Create Manual test with steps"
+description: |
+  Verify the Xray 'create_test' tool creates a Manual test with steps in the AI TESTS folder.
+
+  Objective: Test creation of a Manual test type with multiple steps in AI TESTS folder
+
+  Expected Behavior:
+  - Test is created in AI TESTS folder without errors
+  - Returns test details with issueId and key
+  - Test type is Manual
+  - Test steps are created correctly
+  - No error indicators in output
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${XRAY_PROJECT_KEY:EL}
+  test_summary:
+    type: str
+  graphql_mutation:
+    type: str
+  create_result:
+    type: str
+  test_key:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["Created test case", "issueId", "key", "Manual", "ELITEA_AI_CREATED"]
+  error_indicators:
+    type: list
+    value: ["Unable to create", "error", "failed", "exception", "GraphQL errors"]
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        
+        # Generate unique test summary
+        test_summary = f"XR03 Manual Test {timestamp}-{random_suffix}"
+        project_key = alita_state.get("project_key", "EL")
+        
+        # AI TESTS folder ID: 698cb958abcc3edb91a6c42d
+        # Create GraphQL mutation for Manual test with steps
+        graphql_mutation = f'''mutation {{
+          createTest(
+            testType: {{ name: "Manual" }},
+            steps: [
+              {{
+                action: "Open the calculator application",
+                result: "Calculator application opens successfully"
+              }},
+              {{
+                action: "Enter first number: 5",
+                data: "5",
+                result: "Number 5 is displayed"
+              }},
+              {{
+                action: "Click + button",
+                result: "Plus operator is selected"
+              }},
+              {{
+                action: "Enter second number: 3",
+                data: "3",
+                result: "Number 3 is displayed"
+              }},
+              {{
+                action: "Click = button",
+                result: "Result displays 8"
+              }}
+            ],
+            jira: {{
+              fields: {{
+                summary: "{test_summary}",
+                project: {{ key: "{project_key}" }},
+                description: "Automated test created by XR03 test case",
+                labels: ["ELITEA_AI_CREATED"]
+              }}
+            }}
+          ) {{
+            test {{
+              issueId
+              testType {{ name }}
+              steps {{
+                id
+                action
+                data
+                result
+              }}
+              jira(fields: ["key", "summary", "labels"])
+            }}
+            warnings
+          }}
+        }}'''
+        
+        {"test_summary": test_summary, "graphql_mutation": graphql_mutation}
+    input:
+      - project_key
+    output:
+      - test_summary
+      - graphql_mutation
+    structured_output: true
+    transition: create_test
+
+  - id: create_test
+    type: toolkit
+    input:
+      - graphql_mutation
+    input_mapping:
+      graphql_mutation:
+        type: variable
+        value: graphql_mutation
+    output:
+      - create_result
+    structured_output: false
+    tool: create_test
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    transition: extract_test_key
+
+  - id: extract_test_key
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+        
+        # Extract test key from create result
+        result_str = alita_state.get("create_result", "")
+        test_key = "not_found"
+        
+        # Try to parse as JSON first
+        try:
+            # Look for the key in the result string
+            key_match = re.search(r"'key':\s*'([A-Z]+-\d+)'", result_str)
+            if not key_match:
+                key_match = re.search(r'"key":\s*"([A-Z]+-\d+)"', result_str)
+            if key_match:
+                test_key = key_match.group(1)
+        except Exception:
+            pass
+        
+        {"test_key": test_key}
+    input:
+      - create_result
+    output:
+      - test_key
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - test_summary
+      - test_key
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_test' tool execution.
+
+          Test Summary: {test_summary}
+          Test Key: {test_key}
+          Create Result: {create_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful test creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran without throwing an exception
+          2. no_errors: Output does NOT contain any error indicators
+          3. test_created: Test was created successfully
+          4. has_issue_id: Response contains issueId
+          5. has_test_key: Response contains test key (format: PROJECT-###)
+          6. correct_type: Test type is "Manual"
+          7. has_steps: Test contains the created steps
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "test_created": boolean,
+            "has_issue_id": boolean,
+            "has_test_key": boolean,
+            "correct_type": boolean,
+            "has_steps": boolean,
+            "test_key_found": "extracted test key or 'none'",
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
