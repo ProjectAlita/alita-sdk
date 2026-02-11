@@ -78,6 +78,17 @@ class Application(BaseTool):
         all_kwargs = {**kwargs, **extras, **schema_values}
         if config is None:
             config = {}
+
+        # Inject tool metadata into config so it's passed to callbacks
+        # This ensures agent_type and other metadata are available in callback handlers
+        if self.metadata:
+            if 'metadata' not in config:
+                config['metadata'] = {}
+            # Merge tool metadata into config metadata (config takes precedence)
+            for key, value in self.metadata.items():
+                if key not in config['metadata']:
+                    config['metadata'][key] = value
+
         return self._run(*config, **all_kwargs)
 
     def _run(self, *args, **kwargs):
