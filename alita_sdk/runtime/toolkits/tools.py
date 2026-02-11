@@ -121,10 +121,13 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 is_pipeline_subgraph = tool.get('agent_type', '') == 'pipeline'
                 # Get project_id from settings (needed for public project agents)
                 app_project_id = tool.get('settings', {}).get('project_id')
+                # Get agent_type for metadata
+                agent_type = tool.get('agent_type', 'agent')
                 logger.info(f"[APP_TOOL] Processing application tool '{tool.get('name')}': "
                            f"app_id={tool['settings'].get('application_id')}, "
                            f"version_id={tool['settings'].get('application_version_id')}, "
                            f"project_id={app_project_id}, "
+                           f"agent_type={agent_type}, "
                            f"raw_settings={tool.get('settings')}")
 
                 try:
@@ -137,7 +140,8 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         is_subgraph=is_pipeline_subgraph,  # Pass is_subgraph for pipelines
                         mcp_tokens=mcp_tokens,
                         project_id=app_project_id,  # Use agent's project, not conversation's
-                        conversation_id=conversation_id
+                        conversation_id=conversation_id,
+                        agent_type=agent_type  # Pass agent_type for metadata
                     ).get_tools())
                 except Exception as app_err:
                     # Gracefully skip application tools that fail to load (e.g., deleted agents)
