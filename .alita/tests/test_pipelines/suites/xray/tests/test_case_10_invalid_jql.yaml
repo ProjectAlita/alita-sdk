@@ -1,0 +1,122 @@
+name: "XR10 - get_tests: Handle invalid JQL syntax (Negative Test)"
+description: |
+  Verify the Xray 'get_tests' tool properly handles malformed JQL queries.
+
+  Objective: Test error handling for invalid JQL syntax
+
+  Expected Behavior (NEGATIVE TEST):
+  - Tool returns error for malformed JQL
+  - Error message indicates JQL parsing problem
+  - Proper error handling without crashing
+  - No test data is returned
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${XRAY_PROJECT_KEY:EL}
+  invalid_jql_query:
+    type: str
+    value: "project = AND testType INVALID SYNTAX ((("
+  get_tests_result:
+    type: str
+  expected_error_indicators:
+    type: list
+    value: ["Unable to get tests", "error", "failed", "exception", "syntax", "parse"]
+  unexpected_success_indicators:
+    type: list
+    value: ["Extracted tests", "issueId", "jira"]
+  test_results:
+    type: dict
+
+entry_point: get_tests_with_invalid_jql
+nodes:
+  - id: get_tests_with_invalid_jql
+    type: toolkit
+    input:
+      - invalid_jql_query
+    input_mapping:
+      jql:
+        type: variable
+        value: invalid_jql_query
+    output:
+      - get_tests_result
+    structured_output: false
+    tool: get_tests
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    continue_on_error: true
+    transition: validate_error_handling
+
+  - id: validate_error_handling
+    type: llm
+    input:
+      - get_tests_result
+      - invalid_jql_query
+      - expected_error_indicators
+      - unexpected_success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the result from executing 'get_tests' with invalid JQL syntax.
+          
+          CONTEXT:
+          - The Xray tool handles JQL errors by returning error information
+          - For this NEGATIVE test, we expect the tool to reject malformed JQL
+          - Evidence: Either error message present OR no successful test data returned
+          
+          Get Tests Result: {get_tests_result}
+          Invalid JQL Query Used: {invalid_jql_query}
+          Expected Error Indicators: {expected_error_indicators}
+          Unexpected Success Indicators: {unexpected_success_indicators}
+
+          VALIDATION LOGIC:
+          
+          STEP 1 - CHECK FOR EMPTY/NULL RESULT (CRITICAL):
+          If the Get Tests Result is empty, null, or has length 0:
+            → This means the tool CRASHED or ERRORED (caught by continue_on_error)
+            → For this negative test, a crash/error = CORRECT behavior (test PASSES)
+            → IMMEDIATELY return: error_detected=true, no_test_data=true, no_success_message=true, test_passed=true
+            → Set error_indicator_found="empty_result"
+            → Skip to Step 3
+          
+          STEP 2 - ANALYZE NON-EMPTY RESULT:
+          This negative test PASSES if the tool correctly rejected the invalid JQL.
+          Evidence of correct rejection:
+          - Output contains error indicators ("Unable to get tests", "error", "failed", etc.)
+          OR
+          - Output does NOT contain success indicators ("Extracted tests", test data)
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Always true (we reached this validation node)
+          2. error_detected: Output contains error keywords OR is empty/short (< 30 chars)
+          3. no_test_data: Output does NOT contain test data structures (issueId, jira fields)
+          4. no_success_message: Output does NOT contain "Extracted tests" success message
+
+          STEP 3 - RETURN RESULTS:
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": true,
+            "error_detected": boolean (true if error indicators found or output is minimal),
+            "no_test_data": boolean (true if no issueId/jira fields found),
+            "no_success_message": boolean (true if no 'Extracted tests' message),
+            "error_indicator_found": "which error indicator was found or 'none' or 'empty_result'",
+            "result_length": number (character count of result),
+            "result_preview": "first 150 chars of result"
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    transition: END

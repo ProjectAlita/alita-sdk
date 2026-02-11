@@ -1,0 +1,100 @@
+name: "ZE14 - list_test_cycles: List all test cycles"
+description: |
+  Verify the Zephyr Essential 'list_test_cycles' tool retrieves available test cycles.
+
+  Objective: Test test cycle listing functionality
+
+  Expected Behavior:
+  - Test cycles are listed without errors
+  - Returns array of test cycles (may be empty)
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  expected_success_indicators:
+    type: list
+    value: ["values", "cycle", "key", "id"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "unauthorized", "forbidden"]
+  cycles_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: list_test_cycles
+nodes:
+  - id: list_test_cycles
+    type: toolkit
+    input:
+      - project_key
+    input_mapping:
+      project_key:
+        type: variable
+        value: project_key
+      max_results:
+        type: fixed
+        value: 20
+    output:
+      - cycles_result
+    structured_output: true
+    tool: list_test_cycles
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - cycles_result
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_test_cycles' tool execution.
+
+          Test Cycles Result: {cycles_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful test cycle listing.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. has_cycles: Response contains test cycle data (may be empty array)
+          4. valid_structure: Response has expected structure (values/array)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_cycles": boolean,
+            "valid_structure": boolean,
+            "cycle_count": number (count of test cycles found, 0 if none),
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

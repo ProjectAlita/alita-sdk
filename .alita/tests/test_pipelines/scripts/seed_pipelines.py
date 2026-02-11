@@ -373,6 +373,19 @@ def parse_pipeline_yaml(yaml_path: Path, env_substitutions: dict = None) -> dict
         instructions_data = {k: v for k, v in data.items() if k not in ("name", "description")}
         instructions_yaml = yaml.dump(instructions_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
+    # Strip out continue_on_error from nodes (test framework metadata, not platform config)
+    if 'nodes' in data:
+        nodes = data['nodes']
+        if isinstance(nodes, list):
+            for node in nodes:
+                if isinstance(node, dict) and 'continue_on_error' in node:
+                    # Remove from data dict so it doesn't get serialized
+                    node.pop('continue_on_error', None)
+            
+            # Re-serialize nodes without continue_on_error
+            instructions_data = {k: v for k, v in data.items() if k not in ("name", "description")}
+            instructions_yaml = yaml.dump(instructions_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
     # Apply environment variable substitutions using resolve_env_value
     # This automatically resolves ${VAR} references from:
     # 1. env_substitutions dict (from execution.substitutions in pipeline.yaml)

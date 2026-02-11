@@ -1,0 +1,114 @@
+name: "ZE07 - find_folder_by_name: Find folder by name"
+description: |
+  Verify the Zephyr Essential 'find_folder_by_name' tool finds an existing folder by name.
+
+  Objective: Test folder search by name for "ZephyrEssential" folder
+
+  Expected Behavior:
+  - Folder "ZephyrEssential" is found without errors
+  - Returns folder with matching name and ID
+  - No error indicators in output
+  
+  Note: This test assumes "ZephyrEssential" folder exists in the project.
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  folder_name:
+    type: str
+    value: "ZephyrEssential"
+  expected_success_indicators:
+    type: list
+    value: ["id", "name"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "not found"]
+  find_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: find_folder
+nodes:
+
+  - id: find_folder
+    type: toolkit
+    input:
+      - folder_name
+      - project_key
+    input_mapping:
+      name:
+        type: variable
+        value: folder_name
+      project_key:
+        type: variable
+        value: project_key
+      folder_type:
+        type: fixed
+        value: "TEST_CASE"
+    output:
+      - find_result
+    structured_output: true
+    tool: find_folder_by_name
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - find_result
+      - folder_name
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'find_folder_by_name' tool execution.
+
+          Folder Name: {folder_name}
+          Find Result: {find_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful folder search for an existing folder named "ZephyrEssential".
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran and returned a result
+          2. no_errors: Output does NOT contain any error indicators
+          3. folder_found: Folder was found by name
+          4. correct_name: Folder name in find result matches "ZephyrEssential" (case-insensitive)
+          5. has_id: Result contains folder ID
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "folder_found": boolean,
+            "correct_name": boolean,
+            "has_id": boolean,
+            "folder_name_found": "name from find result or 'none'",
+            "folder_id_found": "id from find result or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

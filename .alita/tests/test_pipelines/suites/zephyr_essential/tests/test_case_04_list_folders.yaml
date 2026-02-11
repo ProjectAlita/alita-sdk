@@ -1,0 +1,100 @@
+name: "ZE04 - list_folders: List all folders in Zephyr Essential"
+description: |
+  Verify the Zephyr Essential 'list_folders' tool retrieves available folders.
+
+  Objective: Test folder listing functionality
+
+  Expected Behavior:
+  - Folders are listed without errors
+  - Returns array of folders
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  expected_success_indicators:
+    type: list
+    value: ["values", "folder", "id", "name"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "unauthorized", "forbidden"]
+  folders_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: list_folders
+nodes:
+  - id: list_folders
+    type: toolkit
+    input:
+      - project_key
+    input_mapping:
+      project_key:
+        type: variable
+        value: project_key
+      max_results:
+        type: fixed
+        value: 20
+    output:
+      - folders_result
+    structured_output: true
+    tool: list_folders
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - folders_result
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_folders' tool execution.
+
+          Folders Result: {folders_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful folder listing.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. has_folders: Response contains folder data (may be empty array)
+          4. valid_structure: Response has expected structure (values/array)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_folders": boolean,
+            "valid_structure": boolean,
+            "folder_count": number (count of folders found, 0 if none),
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

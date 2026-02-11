@@ -281,7 +281,16 @@ def process_pipeline_result(
                 # Check if this tool call failed
                 finish_reason = tool_call.get("finish_reason")
                 if finish_reason == "error":
-                    # Tool execution failed - extract error details
+                    # Tool execution failed - check if from continue_on_error node first
+                    node_name = tool_call.get("metadata", {}).get("langgraph_node", "unknown")
+                    
+                    # Check if error is from a node with continue_on_error: true
+                    if node_name in nodes_with_continue_on_error:
+                        if logger:
+                            logger.debug(f"Error from node '{node_name}' with continue_on_error: true - not treating as failure")
+                        continue  # Skip this error, don't mark test as failed
+                    
+                    # Error is NOT from continue_on_error node - treat as failure
                     tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
                     tool_error = tool_call.get("error", "Unknown error")
                     
