@@ -202,7 +202,7 @@ class Artifact:
             
             # Check if file exists to determine operation type
             head_result = self.client.head_artifact_s3(bucket_name, artifact_name)
-            file_exists = 'error' not in head_result
+            file_exists = head_result.get('exists', False)
             operation_type = "modify" if file_exists else "create"
 
             result = self.client.upload_artifact_s3(bucket_name, artifact_name, new_data)
