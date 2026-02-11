@@ -1,0 +1,222 @@
+name: "GL06 - List Files Recursive"
+priority: High
+description: |
+  Verify list_files with recursive option returns nested files.
+  
+  Objective: Confirm recursive=false excludes nested files, recursive=true includes them with self-contained test data
+  
+  Expected Behavior:
+  - Creates unique test branch
+  - Creates a test file in a subdirectory
+  - list_files with recursive=false should NOT return the nested file
+  - list_files with recursive=true SHOULD return the nested file
+  - Cleanup removes test branch and files
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+  nested_file_path:
+    type: str
+  file_content:
+    type: str
+    value: "Test content for recursive listing validation"
+  create_branch_result:
+    type: dict
+  create_result:
+    type: dict
+  list_result_nonrecursive:
+    type: dict
+  list_result_recursive:
+    type: dict
+  cleanup_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch and nested file path"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Generate unique names
+        test_branch_name = f"gl06-recursive-{timestamp}-{random_suffix}"
+        nested_file_path = f"qa-test/nested-{random_suffix}/recursive-test.txt"
+        
+        {"test_branch_name": test_branch_name, "nested_file_path": nested_file_path}
+    output:
+      - test_branch_name
+      - nested_file_path
+    structured_output: true
+    transition: create_test_branch
+  
+  - id: create_test_branch
+    type: toolkit
+    description: "Create test branch"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_branch_result
+    structured_output: true
+    transition: create_nested_file
+  
+  - id: create_nested_file
+    type: toolkit
+    description: "Create nested file"
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - nested_file_path
+      - file_content
+      - test_branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: nested_file_path
+      file_contents:
+        type: variable
+        value: file_content
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_result
+    structured_output: true
+    transition: list_files_nonrecursive
+
+  - id: list_files_nonrecursive
+    type: toolkit
+    description: "List files non-recursively"
+    tool: list_files
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      path:
+        type: fixed
+        value: "qa-test"
+      recursive:
+        type: fixed
+        value: false
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - list_result_nonrecursive
+    structured_output: true
+    transition: list_files_recursive
+
+  - id: list_files_recursive
+    type: toolkit
+    description: "List files recursively"
+    tool: list_files
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      path:
+        type: fixed
+        value: "qa-test"
+      recursive:
+        type: fixed
+        value: true
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - list_result_recursive
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    description: "Validate recursive behavior"
+    model: gpt-4o-2024-11-20
+    input:
+      - nested_file_path
+      - list_result_nonrecursive
+      - list_result_recursive
+      - test_branch_name
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the recursive vs non-recursive file listing results.
+
+          Created Nested File: {nested_file_path}
+          Non-Recursive Result (recursive=false): {list_result_nonrecursive}
+          Recursive Result (recursive=true): {list_result_recursive}
+          Test Branch: {test_branch_name}
+
+          This is a POSITIVE test - we expect proper recursive behavior.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. both_executed: Both list_files calls executed successfully
+          2. nonrecursive_excludes: Non-recursive listing does NOT include the nested file
+          3. recursive_includes: Recursive listing DOES include the nested file
+          4. path_preserved: Nested file path includes subdirectory structure in recursive result
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "both_executed": boolean,
+            "nonrecursive_excludes": boolean,
+            "recursive_includes": boolean,
+            "path_preserved": boolean,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    description: "Clean up test branch"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+     - test_branch_name
+    input_mapping:
+     force:
+       type: fixed
+       value: true
+     branch_name:
+       type: variable
+       value: test_branch_name
+    output:
+     - cleanup_result
+    structured_output: true
+    transition: END

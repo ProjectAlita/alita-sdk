@@ -1,0 +1,169 @@
+# GitLab Toolkit Test Suite Configuration
+# This file defines setup, execution, and cleanup for the test suite
+
+name: gitlab_toolkit
+description: GitLab toolkit integration tests
+
+# Environment variable mappings
+env_mapping:
+  toolkit_config: ${GITLAB_CONFIG_PATH:../../../tool_configs/gitlab-config.json}
+  private_token: ${GITLAB_PRIVATE_TOKEN}
+  repository: ${GITLAB_TEST_REPO:Aliaksei_Breilian/alita-automation}
+  base_branch: ${GITLAB_BASE_BRANCH:main}
+  url: ${GITLAB_URL:https://githyd.epam.com}
+
+# Setup steps executed before running tests
+setup:
+  # Step 1: Ensure GitLab credentials configuration exists
+  - name: Setup GitLab Configuration
+    type: configuration
+    config:
+      config_type: gitlab
+      alita_title: ${GITLAB_SECRET_NAME:gitlab}
+      data:
+        private_token: ${GITLAB_PRIVATE_TOKEN}
+        url: ${GITLAB_URL:https://githyd.epam.com}
+
+  # Step 2: Create or update the GitLab toolkit on the platform
+  - name: Create GitLab Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/gitlab-config.json
+      toolkit_type: gitlab
+      overrides:
+        gitlab_configuration:
+          private: true
+          alita_title: ${GITLAB_SECRET_NAME:gitlab}
+        repository: ${GITLAB_TEST_REPO:Aliaksei_Breilian/alita-automation}
+        branch: ${GITLAB_BASE_BRANCH:main}
+      toolkit_name: ${GITLAB_TOOLKIT_NAME:testing-gitlab}
+    save_to_env:
+      - key: GITLAB_TOOLKIT_ID
+        value: $.id
+      - key: GITLAB_TOOLKIT_NAME
+        value: $.name
+
+  # Step 3: Create SDK analysis toolkit for RCA pipeline
+  - name: Create SDK Analysis Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/gitlab-config.json
+      toolkit_type: gitlab
+      overrides:
+        gitlab_configuration:
+          private: true
+          alita_title: ${GITLAB_SECRET_NAME:gitlab}
+        repository: ${SDK_REPO:ProjectAlita/alita-sdk}
+        branch: ${SDK_BRANCH:main}
+      toolkit_name: sdk-analysis
+    save_to_env:
+      - key: SDK_TOOLKIT_ID
+        value: $.id
+      - key: SDK_TOOLKIT_NAME
+        value: $.name
+
+# Composable pipelines
+composable_pipelines:
+  - file: ../../composable/rca_on_failure.yaml
+    env:
+      SUITE_NAME: gitlab_toolkit
+      RCA_MODEL: ${RCA_MODEL:gpt-4o-mini}
+      SDK_TOOLKIT_ID: ${SDK_TOOLKIT_ID}
+      SDK_TOOLKIT_NAME: ${SDK_TOOLKIT_NAME:sdk-analysis}
+    save_to_env:
+      - key: RCA_PIPELINE_ID
+        value: $.id
+      - key: RCA_PIPELINE_VERSION_ID
+        value: $.versions.0.id
+
+# Test execution configuration
+execution:
+  # Test categories:
+  # [R] = Read-only (uses existing repo data, minimal conflicts)
+  # [W] = Write-heavy (creates branches/files, self-contained with cleanup)
+  # [RW] = Read-Write (both operations, full test lifecycle)
+  
+  test_directory: tests
+  order:
+    - test_case_01_*.yaml  # [R] GL01 - List Branches
+    - test_case_02_*.yaml  # [R] GL02 - List Branches with Filter
+    - test_case_03_*.yaml  # [RW] GL03 - Read File
+    - test_case_04_*.yaml  # [RW] GL04 - Read File from Branch
+    - test_case_05_*.yaml  # [RW] GL05 - List Files
+    - test_case_06_*.yaml  # [RW] GL06 - List Files Recursive
+    - test_case_07_*.yaml  # [RW] GL07 - Get Issue
+    - test_case_08_*.yaml  # [R] GL08 - Get Issue Nonexistent
+    - test_case_09_*.yaml  # [W] GL09 - Create File (self-contained)
+    - test_case_10_*.yaml  # [W] GL10 - Append File (self-contained)
+    - test_case_11_*.yaml  # [W] GL11 - Update File (self-contained)
+    - test_case_12_*.yaml  # [W] GL12 - Delete File (self-contained)
+    - test_case_13_*.yaml  # [W] GL13 - Create Branch (self-contained)
+    - test_case_14_*.yaml  # [W] GL14 - Set Active Branch (self-contained)
+    - test_case_15_*.yaml  # [W] GL15 - Comment on Issue (self-contained)
+    - test_case_16_*.yaml  # [RW] GL16 - Get PR Changes
+    - test_case_17_*.yaml  # [W] GL17 - Merge Request Workflow (self-contained)
+    - test_case_18_*.yaml  # [W] GL18 - Create PR Change Comment (self-contained)
+    - test_case_19_*.yaml  # [RW] GL19 - Get Commits
+    - test_case_20_*.yaml  # [RW] GL20 - Read File Chunk
+    - test_case_21_*.yaml  # [RW] GL21 - List Folders
+    - test_case_22_*.yaml  # [RW] GL22 - Search File
+    - test_case_23_*.yaml  # [W] GL23 - Edit File (self-contained)
+
+  substitutions:
+    GITLAB_TOOLKIT_ID: ${GITLAB_TOOLKIT_ID}
+    GITLAB_TOOLKIT_NAME: ${GITLAB_TOOLKIT_NAME}
+    GITLAB_BASE_BRANCH: main
+    GITLAB_TEST_ISSUE_NUMBER: 1
+    GITLAB_TEST_MR_NUMBER: 3
+
+  settings:
+    timeout: 300
+    parallel: 1
+    stop_on_failure: false
+
+# Cleanup steps
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "GL*"
+    continue_on_error: true
+
+  - name: Delete Test Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${GITLAB_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  - name: Delete SDK Analysis Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${SDK_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+# Hooks
+hooks:
+  post_test:
+    - name: rca_on_failure
+      pipeline_id: ${RCA_PIPELINE_ID}
+      condition: "result.get('test_passed') is False"
+      input_mapping:
+        failure_details: |
+          f"""**Test Name:** {result.get('pipeline_name', 'Unknown')}
+          **Toolkit:** gitlab
+          **Status:** Test Failed
+
+          **Error Message:**
+          {result.get('error') or result.get('output', {}).get('result', {}).get('error', 'No error message')}
+
+          **Pipeline ID:** {result.get('pipeline_id', 'N/A')}
+          **Version ID:** {result.get('version_id', 'N/A')}
+          **Execution Time:** {result.get('execution_time', 'N/A')}s
+          """
+      output_mapping:
+        "result['rca']": "rca_result"
+        "result['rca_summary']": "rca_summary"

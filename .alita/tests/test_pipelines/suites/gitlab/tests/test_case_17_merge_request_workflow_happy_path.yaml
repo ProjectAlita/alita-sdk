@@ -1,0 +1,276 @@
+name: "GL17 - MR Workflow"
+priority: Critical
+description: |
+  Verify create_pull_request tool creates merge request and comment_on_pr adds comment.
+  
+  Objective: Confirm merge request workflow (create MR + add comment) with self-contained test data
+  
+  Expected Behavior:
+  - Creates unique test branch
+  - Creates test file in branch
+  - Create MR executes successfully
+  - Returns MR number and details
+  - Comment on MR executes successfully
+  - Returns comment confirmation
+  - Cleanup removes test branch
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+  test_file_path:
+    type: str
+  test_file_content:
+    type: str
+    value: |
+      # Test File for GL17 MR Workflow
+      
+      This file demonstrates changes for the merge request.
+      Created for automated testing.
+  pr_title:
+    type: str
+  pr_body:
+    type: str
+    value: "This is an automated test merge request. Do not merge."
+  create_branch_result:
+    type: dict
+  create_file_result:
+    type: dict
+  create_pr_result:
+    type: dict
+  pr_number:
+    type: int
+  comment:
+    type: str
+    value: "This is a test comment on the merge request."
+  comment_result:
+    type: dict
+  cleanup_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch and file names"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Generate unique branch and file names
+        test_branch_name = f"gl17-mr-test-{timestamp}-{random_suffix}"
+        test_file_path = f"test-data/gl17-{timestamp}-{random_suffix}.md"
+        pr_title = f"Test MR: GL17-{timestamp}-{random_suffix}"
+        
+        {"test_branch_name": test_branch_name, "test_file_path": test_file_path, "pr_title": pr_title}
+    output:
+      - test_branch_name
+      - test_file_path
+      - pr_title
+    structured_output: true
+    transition: create_test_branch
+
+  - id: create_test_branch
+    type: toolkit
+    description: "Create test branch for MR"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_branch_result
+    structured_output: true
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    description: "Create test file to demonstrate changes"
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_file_path
+      - test_file_content
+      - test_branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: variable
+        value: test_file_content
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_file_result
+    structured_output: true
+    transition: invoke_create_pr
+
+  - id: invoke_create_pr
+    type: toolkit
+    description: "Create merge request"
+    tool: create_pull_request
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_title
+      - pr_body
+      - test_branch_name
+    input_mapping:
+      pr_title:
+        type: variable
+        value: pr_title
+      pr_body:
+        type: variable
+        value: pr_body
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_pr_result
+    structured_output: true
+    transition: extract_pr_number
+
+  - id: extract_pr_number
+    type: code
+    description: "Extract MR number from create result"
+    code:
+      type: fixed
+      value: |
+        # Extract MR number from create result string
+        create_result = alita_state.get('create_pr_result', '')
+        result_str = str(create_result).strip()
+        
+        # Parse the output to get PR number
+        pr_number = 1
+        if 'PR number' in result_str or 'iid' in result_str:
+            parts = result_str.split('PR number') if 'PR number' in result_str else result_str.split('iid')
+            if len(parts) > 1:
+                try:
+                    num_str = parts[1].strip().split()[0].strip(':').strip()
+                    pr_number = int(num_str)
+                except (ValueError, IndexError):
+                    pass
+        
+        pr_number
+    input: []
+    output:
+      - pr_number
+    transition: invoke_comment_on_pr
+
+  - id: invoke_comment_on_pr
+    type: toolkit
+    description: "Add comment to merge request"
+    tool: comment_on_pr
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_number
+      - comment
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+      comment:
+        type: variable
+        value: comment
+    output:
+      - comment_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    description: "Validate MR workflow"
+    model: gpt-4o-2024-11-20
+    input:
+      - create_branch_result
+      - create_file_result
+      - create_pr_result
+      - comment_result
+      - test_branch_name
+      - pr_title
+      - pr_number
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the merge request workflow results.
+
+          Branch Creation: {create_branch_result}
+          File Creation: {create_file_result}
+          Create Merge Request: {create_pr_result}
+          Comment on MR: {comment_result}
+          Test Branch: {test_branch_name}
+          PR Title: {pr_title}
+          PR Number: {pr_number}
+
+          This is a POSITIVE test - we expect successful MR creation and commenting.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branch_created: Test branch was created successfully
+          2. file_created: Test file was created successfully
+          3. pr_created: create_pull_request executed successfully and returned MR details
+          4. comment_added: comment_on_pr executed successfully and added comment to the MR
+          5. no_errors: No error indicators in any operation
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branch_created": boolean,
+            "file_created": boolean,
+            "pr_created": boolean,
+            "comment_added": boolean,
+            "no_errors": boolean,
+            "pr_number": {pr_number},
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    description: "Clean up test branch"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+     - test_branch_name
+    input_mapping:
+     force:
+       type: fixed
+       value: true
+     branch_name:
+       type: variable
+       value: test_branch_name
+    output:
+     - cleanup_result
+    structured_output: true
+    transition: END
