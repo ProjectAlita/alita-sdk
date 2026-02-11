@@ -7,11 +7,11 @@ Generated on: 2026-02-11
 | Metric | Value |
 |--------|-------|
 | **Total Toolkits in SDK** | 51 |
-| **Toolkits with Test Coverage** | 12 |
-| **Toolkits WITHOUT Tests** | 39 |
-| **Overall Toolkit Coverage** | **23.5%** |
-| **Tools Tested** | ~185 out of ~400+ |
-| **Total Test Cases** | 235 |
+| **Toolkits with Test Coverage** | 13 |
+| **Toolkits WITHOUT Tests** | 38 |
+| **Overall Toolkit Coverage** | **25.5%** |
+| **Tools Tested** | ~203 out of ~400+ |
+| **Total Test Cases** | 258 |
 
 ## Test Coverage by Toolkit (With Tests)
 
@@ -23,6 +23,7 @@ Generated on: 2026-02-11
 | **Confluence** | 19 | 18 | **95%** | 24 | 🟢 Excellent |
 | **Figma** | 9 | 9 | **100%** | 18 | 🟢 Complete |
 | **GitHub** | 36 | 21 | **58%** | 11 | 🟡 Needs Work |
+| **GitLab** | 19 | 18 | **95%** | 23 | 🟢 Excellent |
 | **Jira** | 17 | 14 | **82%** | 28 | 🟢 Good |
 | **QTest** | 16 | 15 | **94%** | 15 | 🟢 Excellent |
 | **Xray** | 6 | 6 | **100%** | 10 | 🟢 Complete |
@@ -34,7 +35,6 @@ Generated on: 2026-02-11
 
 | Toolkit | Location | Total Tools | Priority |
 |---------|----------|-------------|----------|
-| **GitLab** | `tools/gitlab/` | 18 | 🚨 Critical |
 | **GitLab Org** | `tools/gitlab_org/` | 17 | 🚨 Critical |
 | **Slack** | `tools/slack/` | 7 | 🔶 High |
 | **ServiceNow** | `tools/servicenow/` | 4 | 🔶 High |
@@ -214,6 +214,38 @@ Generated on: 2026-02-11
 | `link_defect` | ❌ | - |
 
 **Notes**: Excellent coverage for test management operations.
+
+---
+
+#### GitLab Toolkit (95% - 18/19 tools)
+**Location**: `alita_sdk/tools/gitlab/api_wrapper.py`
+
+| Tool Name | Tested | Test Case(s) |
+|-----------|--------|--------------|
+| `list_branches_in_repo` | ✅ | test_case_01, test_case_02 |
+| `read_file` | ✅ | test_case_03, test_case_04 |
+| `list_files` | ✅ | test_case_05, test_case_06 |
+| `get_issue` | ✅ | test_case_07, test_case_08 |
+| `create_file` | ✅ | test_case_09 |
+| `append_file` | ✅ | test_case_10 |
+| `update_file` | ✅ | test_case_11 |
+| `delete_file` | ✅ | test_case_12 |
+| `create_branch` | ✅ | test_case_13 |
+| `set_active_branch` | ✅ | test_case_14 |
+| `comment_on_issue` | ✅ | test_case_15 |
+| `get_pr_changes` | ✅ | test_case_16 |
+| `create_pull_request` | ✅ | test_case_17 |
+| `create_pr_change_comment` | ✅ | test_case_18 |
+| `get_commits` | ✅ | test_case_19 |
+| `read_file_chunk` | ✅ | test_case_20 |
+| `list_folders` | ✅ | test_case_21 |
+| `search_file` | ✅ | test_case_22 |
+| `edit_file` | ✅ | test_case_23 |
+| `delete_branch` | ✅ | (via test workflows) |
+| `comment_on_pr` | ✅ | (via test workflows) |
+| `get_issues` | ❌ | - |
+
+**Notes**: Near-complete coverage with both positive and workflow test scenarios. Only missing get_issues tool.
 
 ---
 
@@ -430,16 +462,17 @@ Framework structure for negative test cases:
 - **Xray** - 100% coverage (6/6 tools, 10 tests) ✅
 - **QTest** - 94% coverage (15/16 tools, 15 tests) ✅
 - **Zephyr Essential** - 47% coverage (24/51 tools, 24 tests) 🟡
+- **GitLab** - 95% coverage (18/19 tools, 23 tests) ✅
 - **Bitbucket** - Updated to 24 test cases (+1)
 
-Test cases increased by **40.7%** (167 → 235) since last report.
+Test cases increased by **54.5%** (167 → 258) since last report.
 
 ### 🚨 Priority 1: Critical - New Toolkit Coverage
 
-1. **GitLab Toolkit** (0% coverage, 18 tools)
-   - Direct equivalent to GitHub/Bitbucket
-   - High business value for GitLab users
-   - Recommended: Create test suite mirroring GitHub tests
+1. **GitLab Org Toolkit** (0% coverage, 17 tools)
+   - Organization-level GitLab functionality
+   - Similar priority to base GitLab toolkit
+   - Recommended: Create test suite for org-level operations
 
 2. **Remaining Testing Toolkits** (0% coverage each)
    - Zephyr (base), Zephyr Squad, Zephyr Scale, Zephyr Enterprise, TestRail
@@ -480,10 +513,10 @@ Test cases increased by **40.7%** (167 → 235) since last report.
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Toolkits with tests | 23.5% | 50%+ |
-| Average tools tested per toolkit | ~75% | 80%+ |
+| Toolkits with tests | 25.5% | 50%+ |
+| Average tools tested per toolkit | ~77% | 80%+ |
 | Test cases with negative scenarios | ~40% | 50% |
-| Integration tests | ~8% | 15% |
+| Integration tests | ~10% | 15% |
 
 ## Coverage Trend
 
@@ -492,6 +525,7 @@ Test cases increased by **40.7%** (167 → 235) since last report.
 | 2026-02-04 | 5 | 76 | 153 |
 | 2026-02-08 | 7 | 98 | 167 |
 | 2026-02-11 | 12 | ~185 | 235 |
+| 2026-02-11 (updated) | 13 | ~203 | 258 |
 
 ---
 
