@@ -162,15 +162,7 @@ class Artifact:
         if isinstance(raw_data, dict) and raw_data.get('error'):
             # Check if we should create the file if it doesn't exist
             if create_if_missing:
-                result = self.client.upload_artifact_s3(bucket_name, artifact_name, additional_data)
-                if 'error' in result:
-                    return {"error": result['error']}
-                return {
-                    "message": "File created with initial data",
-                    "filepath": result['filepath'],
-                    "sanitized_name": result['sanitized_name'],
-                    "was_sanitized": result['was_sanitized']
-                }
+                return self.create(artifact_name, additional_data, bucket_name)
             else:
                 return {"error": f"Cannot append to file '{artifact_name}'. {raw_data['error']}"}
 
