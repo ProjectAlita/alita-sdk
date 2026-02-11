@@ -550,76 +550,20 @@ class Assistant:
             return True
         return False
 
-    def _build_swarm_compatible_agent(self, model, tools: list, prompt: str, agent_name: str):
-        """
-        Build a react agent compatible with langgraph-swarm.
-
-        This is a workaround for langgraph version incompatibility where
-        create_react_agent uses 'input_schema' parameter but StateGraph.add_node
-        only accepts 'input'. We build the agent manually using StateGraph API.
-
-        Args:
-            model: The LLM client
-            tools: List of tools for this agent
-            prompt: System prompt for the agent
-            agent_name: Name for the compiled agent
-
-        Returns:
-            CompiledStateGraph with proper name for swarm integration
-        """
-        from typing import Annotated, TypedDict
-        from langchain_core.messages import AIMessage
-        from langgraph.graph import StateGraph, END, MessagesState
-        from langgraph.prebuilt import ToolNode
-
-        # Bind tools to model
-        if tools:
-            model_with_tools = model.bind_tools(tools)
-        else:
-            model_with_tools = model
-
-        # Define agent node that calls the model
-        def call_model(state: MessagesState):
-            messages = state["messages"]
-            # Prepend system message with prompt
-            system_msg = SystemMessage(content=prompt)
-            response = model_with_tools.invoke([system_msg] + list(messages))
-            return {"messages": [response]}
-
-        # Define routing logic
-        def should_continue(state: MessagesState):
-            messages = state["messages"]
-            last_message = messages[-1]
-            if isinstance(last_message, AIMessage) and last_message.tool_calls:
-                return "tools"
-            return END
-
-        # Build the graph using MessagesState (compatible with swarm)
-        workflow = StateGraph(MessagesState)
-        workflow.add_node("agent", call_model)
-        if tools:
-            workflow.add_node("tools", ToolNode(tools))
-
-        workflow.set_entry_point("agent")
-        workflow.add_conditional_edges("agent", should_continue)
-        if tools:
-            workflow.add_edge("tools", "agent")
-
-        # Compile with name - this is what swarm uses to identify agents
-        return workflow.compile(name=agent_name)
 
     def _create_swarm_agent(self, all_tools: list, agent_tools: list):
         """
         Create a swarm-style multi-agent system using the official langgraph-swarm library.
 
         Uses create_swarm() with compiled subgraphs per agent and Command-based handoffs.
-        Each agent is a self-contained subgraph with its own model→tools loop.
-        When an agent finishes (no tool calls), the graph ends naturally with the
-        agent's last text response as output — no redundant parent re-summarization.
+        Follows the official peer-to-peer pattern: every agent has handoff tools to every
+        other agent. There is no parent/child hierarchy — all agents are peers.
 
         Architecture:
-        - Parent agent is the default entry point (compiled subgraph)
-        - Child agents are compiled subgraphs accessible via handoff tools
+        - All agents are peers in a flat swarm graph
+        - The main agent is just the default_active_agent entry point
+        - Each agent has create_handoff_tool for every other peer
+        - Pipelines are wrapped as tools inside virtual LLM-equipped peer agents
         - Handoffs use Command(goto=X, graph=Command.PARENT) from official create_handoff_tool()
         - All agents share message history via SwarmState
 
@@ -647,6 +591,10 @@ class Assistant:
 
         # Resolve prompt
         prompt_instructions = self._resolve_jinja2_variables(self.prompt)
+
+        # Stable internal name for the main agent (the default_active_agent).
+        # Not "parent" or "coordinator" — just another peer in the swarm.
+        main_agent_name = "main_agent"
 
         # --- Helper: filter orphaned tool_use blocks from message history ---
         def filter_orphaned_tool_calls(messages: list) -> list:
@@ -712,7 +660,7 @@ class Assistant:
                             "swarm_agent_start",
                             {
                                 "agent_name": agent_name,
-                                "is_parent": agent_name == "parent",
+                                "is_default_agent": agent_name == main_agent_name,
                                 "message_count": len(filtered_messages),
                             },
                             config=config
@@ -751,7 +699,7 @@ class Assistant:
                             "swarm_agent_response",
                             {
                                 "agent_name": agent_name,
-                                "is_parent": agent_name == "parent",
+                                "is_default_agent": agent_name == main_agent_name,
                                 "content": content,
                                 "has_tool_calls": has_tool_calls,
                                 "tool_calls": tool_call_names,
@@ -809,10 +757,10 @@ class Assistant:
 
             return builder.compile(name=agent_name)
 
-        # --- Build child agent configurations ---
-        parent_handoff_tools = []
-        child_agent_descriptions = []
-        child_configs = []
+        # === PASS 1: Collect all peer agent metadata ===
+        # In the official langgraph-swarm pattern, all agents are peers.
+        # Each peer will get handoff tools to every other peer.
+        peer_configs = []
 
         for agent_tool in agent_tools:
             # If the tool was wrapped by ToolExceptionHandlerMiddleware, unwrap to
@@ -822,45 +770,26 @@ class Assistant:
             agent_name = agent_tool.name
             original_name = agent_tool.metadata.get('original_name', agent_name) if hasattr(agent_tool, 'metadata') else agent_name
 
-            # Create official Command-based handoff tool for parent → child
-            handoff_tool_name = f"transfer_to_{agent_name}"
-            handoff_to_child = create_handoff_tool(
-                agent_name=agent_name,
-                description=f"Hand off to {original_name}: {agent_tool.description}"
-            )
-            parent_handoff_tools.append(handoff_to_child)
-
-            # Track child agent info for prompt addon
-            child_agent_descriptions.append({
-                'name': original_name,
-                'handoff_tool': handoff_tool_name,
-                'description': agent_tool.description
-            })
-
-            # Resolve the child's toolkit tools.
-            # Pipelines must be kept as a single Application wrapper (their graph
-            # orchestration runs internally). Agents have their internal toolkits
-            # resolved so the child LLM can call them directly in a react loop.
+            # Detect pipeline vs agent
             is_pipeline = getattr(original_agent_tool, 'is_subgraph', False)
 
             if is_pipeline:
-                # Pipeline: use Application wrapper as-is, but force string output.
-                # The pipeline's graph orchestration runs internally via Application._run().
+                # Pipeline: will become a tool inside a virtual LLM-equipped peer agent.
+                # Force string output (is_subgraph=False) so the LLM gets text back.
                 original_agent_tool.is_subgraph = False
-                # Also update args_runnable so _run() recreates the pipeline without is_subgraph
                 if hasattr(original_agent_tool, 'args_runnable') and isinstance(original_agent_tool.args_runnable, dict):
                     original_agent_tool.args_runnable['is_subgraph'] = False
-                child_toolkit_tools = [agent_tool]
-                logger.info(f"[SWARM] Pipeline child '{original_name}': using Application wrapper (is_subgraph=False)")
+                toolkit_tools = [agent_tool]
+                logger.info(f"[SWARM] Pipeline peer '{original_name}': will be wrapped in virtual LLM agent")
             else:
                 # Agent: resolve internal toolkit tools (Jira, GitHub, etc.)
-                # so the child LLM can call them directly.
-                child_toolkit_tools = []
+                # so the peer LLM can call them directly in a react loop.
+                toolkit_tools = []
                 try:
                     version_details = getattr(original_agent_tool, 'args_runnable', {}).get('version_details')
                     if version_details and 'tools' in version_details:
                         from ..toolkits.tools import get_tools
-                        child_toolkit_tools = get_tools(
+                        toolkit_tools = get_tools(
                             version_details['tools'],
                             alita_client=original_agent_tool.client,
                             llm=getattr(original_agent_tool, 'args_runnable', {}).get('llm', self.client),
@@ -869,76 +798,117 @@ class Assistant:
                             conversation_id=getattr(original_agent_tool, 'args_runnable', {}).get('conversation_id'),
                             ignored_mcp_servers=getattr(original_agent_tool, 'args_runnable', {}).get('ignored_mcp_servers'),
                         )
-                        logger.info(f"[SWARM] Resolved {len(child_toolkit_tools)} toolkit tools for child agent '{original_name}'")
+                        logger.info(f"[SWARM] Resolved {len(toolkit_tools)} toolkit tools for peer agent '{original_name}'")
                     else:
-                        logger.warning(f"[SWARM] No version_details found for child agent '{original_name}', using Application wrapper as fallback")
-                        child_toolkit_tools = [agent_tool]
+                        logger.warning(f"[SWARM] No version_details found for peer agent '{original_name}', using Application wrapper as fallback")
+                        toolkit_tools = [agent_tool]
                 except Exception as e:
-                    logger.warning(f"[SWARM] Failed to resolve toolkit tools for child agent '{original_name}': {e}. Falling back to Application wrapper.")
-                    child_toolkit_tools = [agent_tool]
+                    logger.warning(f"[SWARM] Failed to resolve toolkit tools for peer agent '{original_name}': {e}. Falling back to Application wrapper.")
+                    toolkit_tools = [agent_tool]
 
-            # Child prompt: no transfer_to_parent — children end naturally when done
-            child_system_prompt = f"You are {original_name}. {agent_tool.description}\n\nComplete your task using the available tools. When you have finished your task, provide your final response directly to the user."
-            child_configs.append({
+            # Extract peer agent's own instructions from version_details if available
+            peer_instructions = None
+            vd = getattr(original_agent_tool, 'args_runnable', {}).get('version_details')
+            if vd and vd.get('instructions'):
+                peer_instructions = vd['instructions']
+
+            peer_configs.append({
                 'name': agent_name,
-                'tools': child_toolkit_tools,
-                'prompt': child_system_prompt,
+                'original_name': original_name,
+                'description': agent_tool.description,
+                'toolkit_tools': toolkit_tools,
                 'is_pipeline': is_pipeline,
-                'pipeline_tool': agent_tool if is_pipeline else None,
+                'instructions': peer_instructions,
             })
 
-        # Build swarm instructions for the parent prompt
-        swarm_prompt_addon = self._build_swarm_prompt_addon(child_agent_descriptions)
+        # === PASS 2: Create handoff tools for every agent ===
+        # Official langgraph-swarm pattern: each agent gets create_handoff_tool
+        # for every OTHER agent in the swarm (peer-to-peer, bidirectional).
+        all_agent_names = [main_agent_name] + [cfg['name'] for cfg in peer_configs]
+
+        def create_handoffs_for(agent_name_self):
+            """Create handoff tools for all agents EXCEPT agent_name_self."""
+            handoffs = []
+            for target_name in all_agent_names:
+                if target_name == agent_name_self:
+                    continue
+                if target_name == main_agent_name:
+                    desc = "Hand off to the main coordinating agent"
+                else:
+                    target_cfg = next((c for c in peer_configs if c['name'] == target_name), None)
+                    desc = (f"Hand off to {target_cfg['original_name']}: {target_cfg['description']}"
+                            if target_cfg else f"Hand off to {target_name}")
+                handoffs.append(create_handoff_tool(
+                    agent_name=target_name,
+                    description=desc,
+                ))
+            return handoffs
+
+        # --- Main agent setup ---
+        main_handoff_tools = create_handoffs_for(main_agent_name)
+        peer_agent_descriptions = []
+        for cfg in peer_configs:
+            peer_agent_descriptions.append({
+                'name': cfg['original_name'],
+                'handoff_tool': f"transfer_to_{cfg['name']}",
+                'description': cfg['description'],
+            })
+        swarm_prompt_addon = self._build_swarm_prompt_addon(peer_agent_descriptions, agent_role="main")
         enhanced_prompt = f"{prompt_instructions}\n\n{swarm_prompt_addon}"
+        main_tools = regular_tools + main_handoff_tools
 
-        # Parent tools = regular tools + official handoff tools to children
-        parent_tools = regular_tools + parent_handoff_tools
+        # --- Peer agent setup (each gets handoff tools to all others) ---
+        compiled_peer_configs = []
+        for cfg in peer_configs:
+            peer_handoff_tools = create_handoffs_for(cfg['name'])
 
-        # --- Helper: build a pipeline subgraph that executes directly (no LLM wrapper) ---
-        def build_pipeline_subgraph(pipeline_tool, agent_name):
-            """Build a subgraph that invokes the pipeline Application tool directly.
+            # Build peer descriptions for this agent's prompt (excluding itself)
+            other_agents = []
+            other_agents.append({
+                'name': main_agent_name,
+                'handoff_tool': f"transfer_to_{main_agent_name}",
+                'description': "The main coordinating agent",
+            })
+            for other_cfg in peer_configs:
+                if other_cfg['name'] != cfg['name']:
+                    other_agents.append({
+                        'name': other_cfg['original_name'],
+                        'handoff_tool': f"transfer_to_{other_cfg['name']}",
+                        'description': other_cfg['description'],
+                    })
 
-            The Application tool already handles pipeline creation via
-            client.application() → LangChainAssistant.pipeline() → LangGraphAgentRunnable.
-            We just need to extract the task from messages and call tool.invoke().
-            """
-            builder = StateGraph(MessagesState)
+            peer_prompt_addon = self._build_swarm_prompt_addon(other_agents, agent_role="peer")
 
-            def execute_pipeline(state: MessagesState, config: RunnableConfig = None):
-                messages = state["messages"]
-                task = ""
-                for msg in reversed(messages):
-                    if isinstance(msg, HumanMessage):
-                        task = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        break
-                if not task:
-                    task = "Execute the pipeline"
+            if cfg['instructions']:
+                base_prompt = self._resolve_jinja2_variables(cfg['instructions'])
+            else:
+                base_prompt = f"You are {cfg['original_name']}. {cfg['description']}"
 
-                try:
-                    result = pipeline_tool.invoke({"task": task})
-                except Exception as e:
-                    logger.error(f"[SWARM] Pipeline '{agent_name}' failed: {e}", exc_info=True)
-                    result = f"Pipeline execution failed: {e}"
-                if isinstance(result, dict):
-                    result = result.get("output", str(result))
-                return {"messages": [AIMessage(content=str(result))]}
+            peer_system_prompt = f"{base_prompt}\n\n{peer_prompt_addon}"
 
-            builder.add_node("pipeline", execute_pipeline)
-            builder.add_edge(START, "pipeline")
-            builder.add_edge("pipeline", END)
-            return builder.compile(name=agent_name)
+            # Combine toolkit tools + handoff tools
+            all_peer_tools = cfg['toolkit_tools'] + peer_handoff_tools
+
+            compiled_peer_configs.append({
+                'name': cfg['name'],
+                'tools': all_peer_tools,
+                'prompt': peer_system_prompt,
+                'is_pipeline': cfg['is_pipeline'],
+            })
 
         # --- Build compiled subgraphs for all agents ---
-        parent_graph = build_agent_subgraph(self.client, parent_tools, enhanced_prompt, "parent")
+        # ALL agents use build_agent_subgraph (including pipeline peers, which are now
+        # virtual LLM-equipped agents with the pipeline Application tool + handoff tools).
+        main_graph = build_agent_subgraph(self.client, main_tools, enhanced_prompt, main_agent_name)
 
-        child_graphs = []
-        for cfg in child_configs:
-            if cfg.get('is_pipeline') and cfg.get('pipeline_tool'):
-                child_graph = build_pipeline_subgraph(cfg['pipeline_tool'], cfg['name'])
-                logger.info(f"[SWARM] Built direct pipeline subgraph for '{cfg['name']}'")
+        peer_graphs = []
+        for cfg in compiled_peer_configs:
+            peer_graph = build_agent_subgraph(self.client, cfg['tools'], cfg['prompt'], cfg['name'])
+            if cfg['is_pipeline']:
+                logger.info(f"[SWARM] Built virtual LLM agent for pipeline peer '{cfg['name']}'")
             else:
-                child_graph = build_agent_subgraph(self.client, cfg['tools'], cfg['prompt'], cfg['name'])
-            child_graphs.append(child_graph)
+                logger.info(f"[SWARM] Built agent subgraph for peer '{cfg['name']}'")
+            peer_graphs.append(peer_graph)
 
         # --- Adapter to convert swarm output to {"output": ...} format ---
         class SwarmResultAdapter:
@@ -970,39 +940,55 @@ class Assistant:
         # --- Wire with official create_swarm() ---
         try:
             swarm = create_swarm(
-                [parent_graph] + child_graphs,
-                default_active_agent="parent"
+                [main_graph] + peer_graphs,
+                default_active_agent=main_agent_name
             )
             compiled = swarm.compile(checkpointer=checkpointer, store=self.store)
-            logger.info(f"[SWARM] Created swarm agent with {len(agent_tools)} child agents: {[t.name for t in agent_tools]}")
+            logger.info(
+                f"[SWARM] Created peer-to-peer swarm with {len(peer_configs)} peers: "
+                f"{[cfg['name'] for cfg in peer_configs]}, "
+                f"default_active_agent='{main_agent_name}'"
+            )
             return SwarmResultAdapter(compiled)
         except Exception as e:
             logger.error(f"[SWARM] Failed to compile swarm: {type(e).__name__}: {e}", exc_info=True)
             raise
 
-    def _build_swarm_prompt_addon(self, child_agents: list) -> str:
+    def _build_swarm_prompt_addon(self, peer_agents: list, agent_role: str = "main") -> str:
         """
-        Build prompt instructions explaining available child agents for handoff.
+        Build prompt instructions explaining available peer agents for handoff.
 
         Args:
-            child_agents: List of dicts with 'name', 'handoff_tool', 'description'
+            peer_agents: List of dicts with 'name', 'handoff_tool', 'description'
+            agent_role: Either "main" (the default entry agent) or "peer" (a peer agent)
 
         Returns:
-            Formatted string to append to the parent agent's prompt
+            Formatted string to append to the agent's prompt
         """
-        if not child_agents:
+        if not peer_agents:
             return ""
 
         lines = [
-            "## Available Specialist Agents",
+            "## Available Peer Agents",
             "",
-            "You can delegate tasks to the following specialist agents by using their handoff tools.",
-            "When you hand off to a specialist, they will have access to the full conversation history.",
-            "The specialist will complete the task and respond directly to the user.",
-            ""
         ]
 
-        for agent in child_agents:
+        if agent_role == "main":
+            lines.extend([
+                "You can delegate tasks to the following peer agents by using their handoff tools.",
+                "When you hand off to a peer, they will have access to the full conversation history.",
+                "",
+            ])
+        else:
+            lines.extend([
+                "You are part of a multi-agent swarm. You can hand off to the following peer agents.",
+                "When you have completed your task, you MUST hand off to another agent "
+                "(typically the main agent) so the conversation can continue.",
+                "If you simply respond with text and no tool calls, the entire swarm will stop.",
+                "",
+            ])
+
+        for agent in peer_agents:
             lines.append(f"### {agent['name']}")
             lines.append(f"- **Handoff tool**: `{agent['handoff_tool']}`")
             lines.append(f"- **Specialization**: {agent['description']}")
@@ -1011,11 +997,23 @@ class Assistant:
         lines.extend([
             "## When to Hand Off",
             "",
-            "- Hand off when a task requires the specialist's specific capabilities",
-            "- **IMPORTANT: Hand off to only ONE specialist at a time.** Do not call multiple transfer tools in the same response.",
-            "- You can hand off to different specialists sequentially as needed — after one completes, you can hand off to another",
-            "- After a specialist completes their work, the response will be delivered to the user",
+            "- Hand off when a task requires another agent's specific capabilities",
+            "- **IMPORTANT: Hand off to only ONE agent at a time.** Do not call multiple transfer tools in the same response.",
+            "- You can hand off to different agents sequentially as needed",
         ])
+
+        if agent_role == "peer":
+            lines.extend([
+                "- **When you finish your assigned task**, hand off back to the "
+                "main agent or to the next relevant peer so the conversation continues.",
+                "- Only respond with final text (no tool calls) if you are certain "
+                "the entire user request is fully complete.",
+            ])
+        else:
+            lines.extend([
+                "- After a peer completes their work, they will hand control "
+                "back to you or to another relevant peer.",
+            ])
 
         return "\n".join(lines)
 
