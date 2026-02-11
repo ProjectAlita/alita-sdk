@@ -34,9 +34,6 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
     max_single_read_size: int = DEFAULT_MAX_SINGLE_READ_SIZE
     artifact: Optional[Any] = None
 
-    # Override file operation methods to support bucket_name parameter
-    # (instead of importing from BaseCodeToolApiWrapper which uses 'branch')
-
     def read_multiple_files(
         self,
         file_paths: List[str],
@@ -48,7 +45,7 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         Read multiple files in batch from an artifact bucket.
 
         Args:
-            file_paths: List of file paths to read
+            file_paths: List of file paths to read (can be full paths like /bucket/file.txt or relative like folder/file.txt)
             bucket_name: Bucket name. If not provided, uses toolkit-configured default bucket.
             offset: Starting line number for all files (1-indexed)
             limit: Number of lines to read from offset for all files
@@ -60,7 +57,16 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         
         for path in file_paths:
             try:
-                content = self._read_file(path, branch=None, bucket_name=bucket_name, offset=offset, limit=limit)
+                # Detect if path is a full filepath (starts with /) or just a filename
+                # filepath: always starts with "/" (e.g., /attachments/1469/file.txt)
+                # filename: never starts with "/" (e.g., file.txt or 1469/file.txt)
+                if path.startswith('/'):
+                    # Full path - use filepath parameter which extracts bucket and filename
+                    content = self.read_file(filepath=path, bucket_name=bucket_name)
+                else:
+                    # Relative filename - use directly
+                    content = self.read_file(filename=path, bucket_name=bucket_name)
+                
                 sliced_content = apply_line_slice(content, offset=offset, limit=limit)
                 
                 # Check content size limit per file
@@ -248,23 +254,51 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         values["artifact"] = values['alita'].artifact(values['bucket'])
         return super().validate_toolkit(values)
 
-    def list_files(self, bucket_name = None, return_as_string = True):
-        """List all files in the artifact bucket with API download links."""
-        result = self.artifact.list(bucket_name, return_as_string=False)
+    def list_files(self, bucket_name = None, folder: str = None, recursive: bool = False, return_as_string = True):
+        """List files in the artifact bucket with S3 download links.
         
-        # Add API download link to each file
-        if isinstance(result, dict) and 'rows' in result:
-            bucket = bucket_name or self.bucket
-            
-            # Get base_url and project_id from alita client
-            base_url = getattr(self.alita, 'base_url', '').rstrip('/')
-            project_id = getattr(self.alita, 'project_id', '')
-            
-            for file_info in result['rows']:
-                if 'name' in file_info:
-                    # Generate API download link
-                    file_name = file_info['name']
-                    file_info['link'] = f"{base_url}/api/v2/artifacts/artifact/default/{project_id}/{bucket}/{file_name}"
+        Args:
+            bucket_name: Bucket name (uses default if None)
+            folder: Folder/prefix to scope the listing (e.g., conversation_id for attachments)
+            recursive: If True, returns all files under prefix recursively.
+                      If False (default), lists only immediate children (files and subfolders).
+            return_as_string: If True, returns str(result), else returns dict
+        
+        Returns:
+            Dict with 'total' and 'rows', or empty list if folder doesn't exist.
+        """
+        from urllib.parse import quote
+        
+        bucket = bucket_name or self.bucket
+        base_url = getattr(self.alita, 'base_url', '').rstrip('/')
+        project_id = getattr(self.alita, 'project_id', '')
+        
+        # Build prefix for folder scoping
+        prefix = ''
+        if folder:
+            prefix = folder.strip('/') + '/'
+        
+        # delimiter='/' for folder listing, None for recursive listing
+        delimiter = None if recursive else '/'
+        result = self.artifact.list(bucket_name=bucket, prefix=prefix, delimiter=delimiter)
+        
+        if 'error' in result:
+            # Return empty list for non-existent folder/bucket
+            return "[]" if return_as_string else {"total": 0, "rows": []}
+        
+        # Add S3 download links to files (not folders)
+        for file_info in result.get('rows', []):
+            if file_info.get('type') == 'file':
+                # Use full key for S3 download link
+                full_key = file_info.get('key', prefix + file_info['name'])
+                # S3 GET URL format: /s3/{bucket}/{key}?project_id={project_id}
+                encoded_key = quote(full_key, safe='/')
+                file_info['link'] = f"{base_url}/s3/{bucket}/{encoded_key}?project_id={project_id}"
+            elif file_info.get('type') == 'folder':
+                # Folders don't have download links
+                pass
+            # Remove internal 'key' field from response (keep it clean)
+            file_info.pop('key', None)
         
         return str(result) if return_as_string else result
 
@@ -293,10 +327,10 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 "or 'filedata' to create new content from text/data."
             )
 
-        # Sanitize filename to prevent regex errors during indexing
-        sanitized_filename, was_modified = self._sanitize_filename(filename)
-        if was_modified:
-            logging.warning(f"Filename sanitized: '{filename}' -> '{sanitized_filename}'")
+        target_bucket = bucket_name or self.bucket
+
+        # Normalize filename path
+        full_key = filename.lstrip('/')
 
         # Determine operation type and get file content
         if filepath:
@@ -304,31 +338,29 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             operation_type = "copy"
             try:
                 file_bytes, _ = self.artifact.get_raw_content_by_filepath(filepath)
-                # Use the tuple but only need the bytes, filename comes from method parameter
                 filedata = file_bytes
             except Exception as e:
                 raise ToolException(f"Failed to retrieve file '{filepath}': {str(e)}")
-
-            file_size = len(filedata) if isinstance(filedata, bytes) else 0
             source_filepath = filepath
         else:
             # Create mode: use provided content
             operation_type = "create"
-            if sanitized_filename.endswith(".xlsx"):
+            if filename.endswith(".xlsx"):
                 data = json.loads(filedata)
                 filedata = self.create_xlsx_filedata(data)
-
-            file_size = len(filedata) if isinstance(filedata, (str, bytes)) else 0
             source_filepath = None
 
-        create_response = self.artifact.create(sanitized_filename, filedata, bucket_name)
-        
-        response_data = json.loads(create_response)
-        if "error" in response_data:
-            raise ToolException(f"Failed to create file '{sanitized_filename}': {response_data['error']}")
-
-        new_filepath = response_data['filepath']
         target_bucket = bucket_name or self.bucket
+
+        result = self.artifact.create(full_key, filedata, target_bucket)
+        if 'error' in result:
+            raise ToolException(f"Failed to create file '{filename}': {result['error']}")
+        
+        # Get sanitized info from client response
+        new_filepath = result['filepath']
+        sanitized_filename = result.get('sanitized_name', filename)
+
+        file_size = len(filedata) if isinstance(filedata, (str, bytes)) else 0
 
         # Build event metadata
         event_meta = {
@@ -353,36 +385,8 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             "filepath": new_filepath,
             "filename": sanitized_filename,
             "bucket": target_bucket,
-            "message": response_data.get('message',
-                f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully")
+            "message": f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully"
         })
-    
-    @staticmethod
-    def _sanitize_filename(filename: str) -> tuple:
-        """Sanitize filename for safe storage and regex pattern matching."""
-        from pathlib import Path
-        
-        if not filename or not filename.strip():
-            return "unnamed_file", True
-        
-        original = filename
-        path_obj = Path(filename)
-        name = path_obj.stem
-        extension = path_obj.suffix
-        
-        # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
-        sanitized_name = re.sub(r'[^\w\s-]', '', name, flags=re.UNICODE)
-        sanitized_name = re.sub(r'[-\s]+', '-', sanitized_name)
-        sanitized_name = sanitized_name.strip('-').strip()
-        
-        if not sanitized_name:
-            sanitized_name = "file"
-        
-        if extension:
-            extension = re.sub(r'[^\w.-]', '', extension, flags=re.UNICODE)
-        
-        sanitized = sanitized_name + extension
-        return sanitized, (sanitized != original)
 
     def create_xlsx_filedata(self, data: dict[str, list[list]]) -> bytes:
         try:
@@ -451,19 +455,32 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 extracted_bucket, extracted_filename = parse_filepath(filepath)
                 bucket_name = extracted_bucket
                 filename = extracted_filename
+                # filepath already contains full path, don't apply folder prefix
+                full_key = filename
             except ValueError as e:
                 raise ToolException(f"Invalid filepath format: {e}")
+        else:
+            if not filename:
+                raise ToolException("Must provide either 'filename' or 'filepath' parameter")
+            # Normalize filename path
+            full_key = filename.lstrip('/')
         
         if not filename:
             raise ToolException("Must provide either 'filename' or 'filepath' parameter")
         
-        content = self.artifact.get(artifact_name=filename,
-                                 bucket_name=bucket_name,
-                                  is_capture_image=is_capture_image,
-                                  page_number=page_number,
-                                  sheet_name=sheet_name,
-                                  excel_by_sheets=excel_by_sheets,
-                                  llm=self.llm)
+        # Determine bucket to use
+        target_bucket = bucket_name or self.bucket
+        
+        # Use Artifact client's get() method (now uses S3 API internally)
+        content = self.artifact.get(
+            artifact_name=full_key,
+            bucket_name=target_bucket,
+            is_capture_image=is_capture_image,
+            page_number=page_number,
+            sheet_name=sheet_name,
+            excel_by_sheets=excel_by_sheets,
+            llm=self.llm
+        )
 
         # Apply line range slicing if requested (for text content only)
         if isinstance(content, str) and (start_line is not None or end_line is not None):
@@ -510,41 +527,24 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         commit_message: str = None,
         bucket_name: str = None
     ) -> str:
-        """
-        Write content to a file (create or overwrite).
-        
-        Parameters:
-            file_path: Name of the file in the bucket
-            content: New file content
-            branch: Not used for artifacts (kept for API consistency)
-            commit_message: Not used for artifacts (kept for API consistency)
-            bucket_name: Name of the bucket (uses default if None)
-            
-        Returns:
-            Success message
-        """
+        """Write content to a file (create or overwrite)."""
         try:
-            sanitized_filename, was_modified = self._sanitize_filename(file_path)
-            if was_modified:
-                logging.warning(f"Filename sanitized: '{file_path}' -> '{sanitized_filename}'")
+            target_bucket = bucket_name or self.bucket
             
-            operation_type = "modify"
-            try:
-                self.artifact.get(artifact_name=sanitized_filename, bucket_name=bucket_name, llm=self.llm)
-                result = self.artifact.overwrite(sanitized_filename, content, bucket_name)
-                message = f"File '{sanitized_filename}' updated successfully"
-                return_msg = f"Updated file {sanitized_filename}"
-            except:
-                result = self.artifact.create(sanitized_filename, content, bucket_name)
-                operation_type = "create"
-                message = f"File '{sanitized_filename}' created successfully"
-                return_msg = f"Created file {sanitized_filename}"
-
-            response_data = json.loads(result)
-            if "error" in response_data:
-                raise ToolException(f"Failed to write file '{sanitized_filename}': {response_data['error']}")
-
-            new_filepath = response_data['filepath']
+            # Normalize filename path
+            full_key = file_path.lstrip('/')
+            
+            result = self.artifact.overwrite(full_key, content, target_bucket)
+            if 'error' in result:
+                raise ToolException(f"Failed to write file '{file_path}': {result['error']}")
+            
+            new_filepath = result['filepath']
+            sanitized_filename = result.get('sanitized_name', file_path)
+            operation_type = result.get('operation_type', 'modify')
+            file_exists = result.get('file_existed', True)
+            
+            message = f"File '{sanitized_filename}' {'updated' if file_exists else 'created'} successfully"
+            return_msg = f"{'Updated' if file_exists else 'Created'} file {sanitized_filename}"
 
             dispatch_custom_event("file_modified", {
                 "message": message,
@@ -553,7 +553,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 "toolkit": "artifact",
                 "operation_type": operation_type,
                 "meta": {
-                    "bucket": bucket_name or self.bucket,
+                    "bucket": target_bucket,
                     "file_size": len(content),
                     "source": "generated"
                 }
@@ -564,31 +564,33 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             raise ToolException(f"Unable to write file {file_path}: {str(e)}")
 
     def delete_file(self, filename: str, bucket_name = None):
-        # Check if file exists before attempting deletion
-        # S3/MinIO delete is idempotent and won't fail for non-existing files
-        try:
-            files = self.list_files(bucket_name, return_as_string=False)
-            file_names = [f['name'] for f in files.get('rows', [])]
-            if filename not in file_names:
-                raise ToolException(f'Error (deleteFile): ENOENT: no such file or directory: \'{filename}\'')
-        except ToolException:
-            raise
-        except Exception as e:
-            raise ToolException(f'Error (deleteFile): Unable to verify file existence for \'{filename}\': {str(e)}')
-
-        result = self.artifact.delete(filename, bucket_name)
-        if result and isinstance(result, dict) and result.get('error'):
-            raise ToolException(f'Error (deleteFile): {result.get("error")} for file \'{filename}\'')
+        """Delete a file from the artifact bucket."""
+        target_bucket = bucket_name or self.bucket
+        
+        # Normalize filename path
+        full_key = filename.lstrip('/')
+        
+        result = self.artifact.delete(full_key, target_bucket)
+        if 'error' in result:
+            raise ToolException(f'Error (deleteFile): {result["error"]}')
+        
         return f'File "{filename}" deleted successfully.'
 
     def append_data(self, filename: str, filedata: str, bucket_name=None, create_if_missing: bool = True):
-        result = self.artifact.append(filename, filedata, bucket_name, create_if_missing)
-        response_data = json.loads(result)
-        if 'error' in response_data:
-            raise ToolException(f"Failed to append to file '{filename}': {response_data['error']}")
+        """Append data to an existing file or create new if missing."""
+        target_bucket = bucket_name or self.bucket
+        
+        # Normalize filename path
+        full_key = filename.lstrip('/')
+        
+        result = self.artifact.append(full_key, filedata, target_bucket, create_if_missing)
+        if 'error' in result:
+            raise ToolException(f"Failed to append to file '{filename}': {result['error']}")
+        
+        new_filepath = result['filepath']
+        sanitized_filename = result.get('sanitized_name', filename)
 
-        # Only dispatch custom event if append succeeded (not an error message)
-        new_filepath = response_data['filepath']
+        # Dispatch custom event
         dispatch_custom_event("file_modified", {
             "message": f"Data appended to file successfully at {new_filepath}",
             "filepath": new_filepath,
@@ -596,36 +598,42 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             "toolkit": "artifact",
             "operation_type": "modify",
             "meta": {
-                "bucket": bucket_name or self.bucket,
-                "file_size": response_data.get('size', 0),
+                "bucket": target_bucket,
+                "file_size": len(filedata),
                 "source": "generated"
             }
         })
 
         return json.dumps({
             "filepath": new_filepath,
-            "filename": filename,
-            "bucket": bucket_name or self.bucket,
-            "message": response_data.get('message', "Data appended successfully")
+            "filename": sanitized_filename,
+            "bucket": target_bucket,
+            "message": "Data appended successfully"
         })
 
     def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
-        result = self.artifact.overwrite(filename, filedata, bucket_name)
+        """Overwrite file content completely."""
+        target_bucket = bucket_name or self.bucket
         
-        response_data = json.loads(result)
-        if "error" in response_data:
-            raise ToolException(f"Failed to overwrite file '{filename}': {response_data['error']}")
-
-        new_filepath = response_data['filepath']
+        # Normalize filename path
+        full_key = filename.lstrip('/')
+        
+        result = self.artifact.overwrite(full_key, filedata, target_bucket)
+        if 'error' in result:
+            raise ToolException(f"Failed to overwrite file '{filename}': {result['error']}")
+        
+        new_filepath = result['filepath']
+        sanitized_filename = result.get('sanitized_name', filename)
+        operation_type = result.get('operation_type', 'modify')
 
         dispatch_custom_event("file_modified", {
             "message": f"File overwritten successfully at {new_filepath}",
             "filepath": new_filepath,
             "tool_name": "overwriteData",
             "toolkit": "artifact",
-            "operation_type": "modify",
+            "operation_type": operation_type,
             "meta": {
-                "bucket": bucket_name or self.bucket,
+                "bucket": target_bucket,
                 "file_size": len(filedata) if isinstance(filedata, (str, bytes)) else 0,
                 "source": "generated"
             }
@@ -633,9 +641,9 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         
         return json.dumps({
             "filepath": new_filepath,
-            "filename": filename,
-            "bucket": bucket_name or self.bucket,
-            "message": response_data.get('message', f"File '{filename}' overwritten successfully")
+            "filename": sanitized_filename,
+            "bucket": target_bucket,
+            "message": f"File '{sanitized_filename}' overwritten successfully"
         })
 
     def get_file_type(self, filepath: str) -> str:
@@ -823,8 +831,19 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             {
                 "ref": self.list_files,
                 "name": "listFiles",
-                "description": "List all files in the artifact",
-                "args_schema": create_model("listBucket", bucket_name=bucket_name)
+                "description": "List files in the artifact bucket. By default lists immediate children (files and subfolders). Use folder parameter to scope listing to a specific prefix/path. Use recursive=True to get all files under the path.",
+                "args_schema": create_model(
+                    "listBucket",
+                    bucket_name=bucket_name,
+                    folder=(Optional[str], Field(
+                        description="Folder/prefix to scope the listing to a specific path within the bucket.",
+                        default=None
+                    )),
+                    recursive=(Optional[bool], Field(
+                        description="If True, returns all files recursively under the path. If False (default), returns only immediate children (files and subfolders).",
+                        default=False
+                    ))
+                )
             },
             {
                 "ref": self.create_file,

@@ -50,6 +50,131 @@ def parse_filepath(filepath: str) -> Tuple[str, str]:
     return parts[0], parts[1]
 
 
+def sanitize_folder_path(folder_path: str, raise_on_traversal: bool = False) -> str:
+    """Sanitize folder path components for safe storage.
+    
+    SECURITY: Blocks path traversal attempts and sanitizes each folder component.
+    Used by both filename sanitization and folder config validation.
+    
+    Sanitization rules:
+    - Blocks all '..' sequences (path traversal protection)
+    - Removes special chars from each folder, keeps only alphanumeric/underscore/hyphen
+    - Removes leading/trailing slashes
+    - Skips empty folder components
+    
+    Args:
+        folder_path: Folder path to sanitize (e.g., 'folder/subfolder')
+        raise_on_traversal: If True, raises ValueError on '..' instead of silently removing
+        
+    Returns:
+        Sanitized folder path (e.g., 'folder/subfolder')
+        
+    Raises:
+        ValueError: If raise_on_traversal=True and path contains '..'
+        
+    Examples:
+        >>> sanitize_folder_path('my folder!/sub (2)')
+        'myfolder/sub2'
+        >>> sanitize_folder_path('../../secret', raise_on_traversal=True)
+        ValueError: Path traversal ('..') not allowed
+        >>> sanitize_folder_path('//extra///slashes//')
+        'extra/slashes'
+    """
+    if not folder_path:
+        return ''
+    
+    # Block path traversal attempts (CRITICAL SECURITY)
+    if '..' in folder_path:
+        if raise_on_traversal:
+            raise ValueError("Path traversal ('..') not allowed in folder configuration")
+        # Remove all .. components for security
+        folder_path = folder_path.replace('..', '')
+    
+    # Split and sanitize each folder component
+    parts = folder_path.strip('/').split('/')
+    sanitized_parts = []
+    for part in parts:
+        # Remove special characters (spaces not allowed in folder names)
+        sanitized = re.sub(r'[^\w-]', '', part, flags=re.UNICODE)
+        sanitized = sanitized.strip('-')
+        if sanitized:  # Skip empty parts
+            sanitized_parts.append(sanitized)
+    
+    return '/'.join(sanitized_parts)
+
+
+def sanitize_filename(filename: str) -> Tuple[str, bool]:
+    """Sanitize filename AND all folder path components for safe storage.
+    
+    SECURITY: Blocks path traversal attempts and sanitizes each path component.
+    Used by both AlitaClient and ArtifactWrapper to ensure consistent sanitization.
+    
+    Sanitization rules:
+    - Blocks all '..' sequences (path traversal protection)
+    - Folder components: Removes special chars, keeps only alphanumeric/underscore/hyphen
+    - Leaf filename: Allows spaces (converted to hyphens), Unicode letters/digits
+    - Empty filename returns 'unnamed_file'
+    
+    Args:
+        filename: Filename with optional folder path (e.g., 'folder/subfolder/file.txt')
+        
+    Returns:
+        Tuple of (sanitized_filename, was_modified)
+        
+    Examples:
+        >>> sanitize_filename('my folder!/../../file (1).txt')
+        ('myfolder/file-1.txt', True)
+        >>> sanitize_filename('normal-file.pdf')
+        ('normal-file.pdf', False)
+        >>> sanitize_filename('data/reports/Q4 Summary.xlsx')
+        ('data/reports/Q4-Summary.xlsx', True)
+    """
+    from pathlib import Path
+    
+    if not filename or not filename.strip():
+        return "unnamed_file", True
+    
+    original = filename
+    
+    # Split into folder path and leaf filename
+    if '/' in filename:
+        parts = filename.split('/')
+        folder_path = '/'.join(parts[:-1])
+        leaf_name = parts[-1]
+    else:
+        folder_path = ''
+        leaf_name = filename
+    
+    # Sanitize folder path using shared utility
+    sanitized_folder = sanitize_folder_path(folder_path, raise_on_traversal=False) if folder_path else ''
+    
+    # Sanitize leaf filename (spaces allowed here)
+    path_obj = Path(leaf_name)
+    name = path_obj.stem
+    extension = path_obj.suffix
+    
+    # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
+    sanitized_name = re.sub(r'[^\w\s-]', '', name, flags=re.UNICODE)
+    sanitized_name = re.sub(r'[-\s]+', '-', sanitized_name)
+    sanitized_name = sanitized_name.strip('-').strip()
+    
+    if not sanitized_name:
+        sanitized_name = "file"
+    
+    if extension:
+        extension = re.sub(r'[^\w.-]', '', extension, flags=re.UNICODE)
+    
+    sanitized_leaf = sanitized_name + extension
+    
+    # Reconstruct full path with sanitized components
+    if sanitized_folder:
+        sanitized = f'{sanitized_folder}/{sanitized_leaf}'
+    else:
+        sanitized = sanitized_leaf
+    
+    return sanitized, (sanitized != original)
+
+
 def parse_old_new_markers(file_query: str) -> List[Tuple[str, str]]:
     """
     Parse OLD/NEW marker-based edit instructions.

@@ -25,7 +25,14 @@ class SandboxArtifact:
         try:
             if not bucket_name:
                 bucket_name = self.bucket_name
-            return dumps(self.client.create_artifact(bucket_name, artifact_name, artifact_data))
+            # Use S3 API for upload
+            result = self.client.upload_artifact_s3(bucket_name, artifact_name, artifact_data)
+            if 'error' in result:
+                return dumps({'error': result['error']})
+            return dumps({
+                'message': f'File "{artifact_name}" created successfully',
+                'filepath': f'/{bucket_name}/{artifact_name}'
+            })
         except Exception as e:
             logger.error(f'Error: {e}')
             return f'Error: {e}'
@@ -40,43 +47,57 @@ class SandboxArtifact:
             llm=None):
         if not bucket_name:
             bucket_name = self.bucket_name
-        data = self.client.download_artifact(bucket_name, artifact_name)
+        # Use S3 API for downloading
+        data = self.client.download_artifact_s3(bucket_name, artifact_name)
+        if isinstance(data, dict) and 'error' in data:
+            return f"{data['error']}. {data.get('content', '')}"
         if len(data) == 0:
             # empty file might be created
             return ''
-        if isinstance(data, dict) and data['error']:
-            return f'{data['error']}. {data['content'] if data['content'] else ''}'
         detected = chardet.detect(data)
         return data
 
     def delete(self, artifact_name: str, bucket_name=None):
         if not bucket_name:
             bucket_name = self.bucket_name
-        self.client.delete_artifact(bucket_name, artifact_name)
+        # Use S3 API for delete
+        result = self.client.delete_artifact_s3(bucket_name, artifact_name)
+        if 'error' in result:
+            return dumps({'error': result['error']})
+        return dumps({'message': f'File "{artifact_name}" deleted successfully'})
 
-    def list(self, bucket_name: str = None, return_as_string=True) -> str | dict:
+    def list(self, bucket_name: str = None, prefix: str = '', delimiter: str = '/', return_as_string=True) -> str | dict:
         if not bucket_name:
             bucket_name = self.bucket_name
-        artifacts = self.client.list_artifacts(bucket_name)
+        # Use S3 API for listing
+        result = self.client.list_artifacts_s3(bucket_name, prefix=prefix, delimiter=delimiter)
+        if 'error' in result:
+            return str({'error': result['error']}) if return_as_string else {'error': result['error']}
+        # Convert S3 format to V2-compatible format
+        files = [{'name': item['key'], 'size': item.get('size', 0), 'modified': item.get('lastModified', '')} 
+                 for item in result.get('contents', [])]
+        artifacts = {'total': len(files), 'rows': files}
         return str(artifacts) if return_as_string else artifacts
 
     def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None, create_if_missing: bool = True):
         if not bucket_name:
             bucket_name = self.bucket_name
 
-        # First check if file exists by getting raw response
-        raw_data = self.client.download_artifact(bucket_name, artifact_name)
+        # Use S3 API to check if file exists and get content
+        raw_data = self.client.download_artifact_s3(bucket_name, artifact_name)
 
         # If download returns an error dict, the file doesn't exist or there's an access issue
         if isinstance(raw_data, dict) and raw_data.get('error'):
             # Check if we should create the file if it doesn't exist
             if create_if_missing:
-                # Create empty file and append data (no leading newline for first content)
-                self.client.create_artifact(bucket_name, artifact_name, additional_data)
+                # Create file with initial data
+                result = self.client.upload_artifact_s3(bucket_name, artifact_name, additional_data)
+                if 'error' in result:
+                    return f"Error: {result['error']}"
                 return 'Data appended successfully'
             else:
                 # Return error as before
-                return f"Error: Cannot append to file '{artifact_name}'. {raw_data["error"]}"
+                return f"Error: Cannot append to file '{artifact_name}'. {raw_data['error']}"
 
         # Get the parsed content
         data = self.get(artifact_name, bucket_name)
@@ -85,7 +106,9 @@ class SandboxArtifact:
 
         # Append the new data
         data += f'\n{additional_data}' if len(data) > 0 else additional_data
-        self.client.create_artifact(bucket_name, artifact_name, data)
+        result = self.client.upload_artifact_s3(bucket_name, artifact_name, data)
+        if 'error' in result:
+            return f"Error: {result['error']}"
         return 'Data appended successfully'
 
     def overwrite(self, artifact_name: str, new_data: Any, bucket_name: str = None):
@@ -98,7 +121,8 @@ class SandboxArtifact:
                           bucket_name: str = None):
         if not bucket_name:
             bucket_name = self.bucket_name
-        return self.client.download_artifact(bucket_name, artifact_name)
+        # Use S3 API for download
+        return self.client.download_artifact_s3(bucket_name, artifact_name)
 
 
 class SandboxClient:
@@ -134,6 +158,7 @@ class SandboxClient:
         self.artifacts_url = f'{self.base_url}{self.api_path}/artifacts/artifacts/default/{self.project_id}'
         self.artifact_url = f'{self.base_url}{self.api_path}/artifacts/artifact/default/{self.project_id}'
         self.bucket_url = f'{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}'
+        self.s3_url = f'{self.base_url}/s3'  # S3 API endpoint
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.auth_user_url = f'{self.base_url}{self.api_path}/auth/user'
@@ -302,6 +327,52 @@ class SandboxClient:
         url = f'{self.artifact_url}/{bucket_name}'
         data = requests.delete(url, headers=self.headers, verify=False, params={'filename': quote(artifact_name)})
         return self._process_requst(data)
+
+    # S3 API Methods
+    def list_artifacts_s3(self, bucket_name: str, prefix: str = '', delimiter: str = '/') -> dict:
+        """List artifacts via S3 API."""
+        url = f'{self.s3_url}/{bucket_name.lower()}'
+        params = {'list-type': '2'}
+        if prefix:
+            params['prefix'] = prefix
+        if delimiter:
+            params['delimiter'] = delimiter
+        
+        response = requests.get(url, headers=self.headers, params=params, verify=False)
+        if response.status_code >= 400:
+            return {'error': f'Failed to list artifacts: {response.status_code}'}
+        try:
+            return response.json()
+        except (ValueError, TypeError):
+            return {'error': 'Invalid response from S3 API'}
+    
+    def upload_artifact_s3(self, bucket_name: str, key: str, data: bytes) -> dict:
+        """Upload artifact via S3 API."""
+        url = f'{self.s3_url}/{bucket_name.lower()}/{quote(key, safe="/")}'
+        response = requests.put(url, headers=self.headers, data=data, verify=False)
+        if response.status_code >= 400:
+            return {'error': f'Failed to upload artifact: {response.status_code}'}
+        return {
+            'filepath': f'/{bucket_name}/{key}',
+            'bucket': bucket_name,
+            'filename': key
+        }
+    
+    def download_artifact_s3(self, bucket_name: str, key: str) -> bytes | dict:
+        """Download artifact via S3 API."""
+        url = f'{self.s3_url}/{bucket_name.lower()}/{quote(key, safe="/")}'
+        response = requests.get(url, headers=self.headers, verify=False)
+        if response.status_code >= 400:
+            return {'error': f'Failed to download artifact: {response.status_code}'}
+        return response.content
+    
+    def delete_artifact_s3(self, bucket_name: str, key: str) -> dict:
+        """Delete artifact via S3 API."""
+        url = f'{self.s3_url}/{bucket_name.lower()}/{quote(key, safe="/")}'
+        response = requests.delete(url, headers=self.headers, verify=False)
+        if response.status_code >= 400:
+            return {'error': f'Failed to delete artifact: {response.status_code}'}
+        return {'success': True, 'message': f'File "{key}" deleted successfully'}
 
     def get_user_data(self) -> Dict[str, Any]:
         resp = requests.get(self.auth_user_url, headers=self.headers, verify=False)
