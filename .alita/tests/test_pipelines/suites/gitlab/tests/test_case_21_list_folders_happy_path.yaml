@@ -1,0 +1,184 @@
+name: "GL21 - List Folders"
+priority: Critical
+description: |
+  Verify list_folders tool returns directory listing from repository.
+  
+  Objective: Confirm directory-only listing functionality (GitLab-specific) with self-contained test data
+  
+  Expected Behavior:
+  - Creates unique test branch
+  - Creates nested folders via file creation
+  - Tool executes successfully without errors
+  - Returns list of folders/directories only (no files)
+  - Output includes directory paths
+  - Cleanup removes test branch
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+  nested_file_path:
+    type: str
+  file_content:
+    type: str
+    value: "Test file for folder listing"
+  create_branch_result:
+    type: dict
+  create_result:
+    type: dict
+  path:
+    type: str
+    value: ""
+  recursive:
+    type: bool
+    value: false
+  branch:
+    type: str
+    value: ""
+  tool_result:
+    type: list
+  folder_result:
+    type: dict
+  cleanup_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch and nested path"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Generate unique names
+        test_branch_name = f"gl21-folders-{timestamp}-{random_suffix}"
+        nested_file_path = f"test-folders-{random_suffix}/subfolder1/file.txt"
+        
+        {"test_branch_name": test_branch_name, "nested_file_path": nested_file_path}
+    output:
+      - test_branch_name
+      - nested_file_path
+    structured_output: true
+    transition: create_test_branch
+  
+  - id: create_test_branch
+    type: toolkit
+    description: "Create test branch"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_branch_result
+    structured_output: true
+    transition: create_nested_folders
+  
+  - id: create_nested_folders
+    type: toolkit
+    description: "Create folders via file creation"
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - nested_file_path
+      - file_content
+      - test_branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: nested_file_path
+      file_contents:
+        type: variable
+        value: file_content
+      branch:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_result
+    structured_output: true
+    transition: invoke_list_folders
+
+  - id: invoke_list_folders
+    type: toolkit
+    tool: list_folders
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - path
+      - recursive
+      - branch
+    input_mapping:
+      path:
+        type: variable
+        value: path
+      recursive:
+        type: variable
+        value: recursive
+      branch:
+        type: variable
+        value: branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'list_folders' tool.
+
+          tool executed: list_folders
+          results: {tool_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns list of directories/folders only (no files)
+          - output includes 'test-folders' directory created earlier
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain a list of directories?
+          4. are directory paths properly formatted?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
