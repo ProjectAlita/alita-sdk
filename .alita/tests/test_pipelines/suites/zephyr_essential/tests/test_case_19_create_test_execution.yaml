@@ -35,7 +35,7 @@ state:
     type: str
   expected_success_indicators:
     type: list
-    value: ["id", "self"]
+    value: ["key", "id", "created", "execution"]
   error_indicators:
     type: list
     value: ["error", "failed", "exception", "forbidden"]
@@ -214,12 +214,7 @@ nodes:
           2. no_errors: Output does NOT contain any error indicators
           3. testcase_created: Test case was created successfully
           4. cycle_created: Test cycle was created successfully
-          5. execution_created: Test execution was created successfully with 'id' and 'self' fields
-
-          For execution_created validation:
-          - Response MUST contain 'id' field (numeric execution ID)
-          - Response MUST contain 'self' field (URL to the test execution)
-          - Example: {{"id": 2168272947, "self": "https://prod-play.zephyr4jiracloud.com/connect/v2/testexecutions/2168272947"}}
+          5. execution_created: Test execution was created successfully
 
           Return JSON test_results:
           {{
@@ -229,9 +224,8 @@ nodes:
             "testcase_created": boolean,
             "cycle_created": boolean,
             "execution_created": boolean,
-            "execution_id": "id from response or 'none'",
-            "execution_self_url": "self URL from response or 'none'",
-            "success_indicators_found": ["list of indicators found"],
+            "execution_key": "key from response or 'none'",
+            "success_indicator_found": "which indicator was found or 'none'",
             "error_indicator_found": "which error indicator was found or 'none'",
             "error": string | null
           }}

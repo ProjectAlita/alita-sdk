@@ -147,9 +147,7 @@ nodes:
         
         timestamp = time.strftime('%Y%m%d-%H%M%S')
         attachment_filename = f"test-attachment-{timestamp}.txt"
-        attachment_content = f"""Test attachment content
-        Created: {timestamp}
-        This validates XR06 attachment functionality."""
+        attachment_content = f"Test attachment content\\nCreated: {timestamp}\\nThis validates XR06 attachment functionality."
         
         {"attachment_filename": attachment_filename, "attachment_content": attachment_content}
     output:

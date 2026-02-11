@@ -186,9 +186,6 @@ nodes:
       value: |
         import json
         
-        # Extract input variable from state
-        execution_create_result = alita_state.get('execution_create_result', '')
-        
         # Parse create result to extract execution key with robust fallback
         try:
             result_data = json.loads(execution_create_result) if isinstance(execution_create_result, str) else execution_create_result

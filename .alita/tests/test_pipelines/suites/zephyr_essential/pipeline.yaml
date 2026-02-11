@@ -93,7 +93,7 @@ execution:
 
   settings:
     timeout: 180
-    parallel: 5
+    parallel: 1
     stop_on_failure: false
 
 exclude_tests: []

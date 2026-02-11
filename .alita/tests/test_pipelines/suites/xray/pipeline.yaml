@@ -8,11 +8,11 @@ description: |
   - Attachment Operations (XR05-XR06): Test attachment management for test steps
 
 env_mapping:
-  XRAY_CONFIG_PATH: ${XRAY_CONFIG_PATH:../../configs/xray-config.json}
-  XRAY_BASE_URL: ${XRAY_BASE_URL:https://eu.xray.cloud.getxray.app}
-  XRAY_CLIENT_ID: ${XRAY_CLIENT_ID}
-  XRAY_CLIENT_SECRET: ${XRAY_CLIENT_SECRET}
-  XRAY_PROJECT_KEY: ${XRAY_PROJECT_KEY:EL}
+  toolkit_config: ${XRAY_CONFIG_PATH:../../configs/xray-config.json}
+  base_url: ${XRAY_BASE_URL:https://eu.xray.cloud.getxray.app}
+  client_id: ${XRAY_CLIENT_ID}
+  client_secret: ${XRAY_CLIENT_SECRET}
+  project_key: ${XRAY_PROJECT_KEY:EL}
 
 setup:
   - name: Setup Xray Configuration
@@ -31,10 +31,6 @@ setup:
     config:
       config_file: ${XRAY_CONFIG_PATH:../../configs/xray-config.json}
       toolkit_type: xray_cloud
-      overrides:
-        xray_configuration:
-          private: true
-          alita_title: ${XRAY_SECRET_NAME:xray_cloud}
       toolkit_name: ${XRAY_TOOLKIT_NAME:xray-testing}
     save_to_env:
       - key: XRAY_TOOLKIT_ID
