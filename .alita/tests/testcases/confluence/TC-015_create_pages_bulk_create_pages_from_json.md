@@ -16,7 +16,7 @@ Validate that create_pages creates multiple pages from JSON `pages_info` under r
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `create_pages` | Exact Python tool name |
-| **Primary Input(s)** | `{{SPACE}}=AT`, `{{PAGES_INFO_JSON}}`, `{{STATUS}}=current` | Inputs derived from args_schema: space, pages_info, status, parent_id |
+| **Primary Input(s)** | `SPACE=AT`, `PAGES_INFO_JSON`, `STATUS=current` | Inputs derived from args_schema: space, pages_info, status, parent_id |
 
 ## Config
 

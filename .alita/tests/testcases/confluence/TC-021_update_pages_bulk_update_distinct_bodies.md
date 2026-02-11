@@ -16,7 +16,7 @@ Ensure bulk update with multiple page IDs and distinct contents returns aggregat
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `update_pages` | Exact Python tool name |
-| **Primary Input(s)** | `{{TC_021_PAGE_IDS_TO_UPDATE}}, {{TC_021_NEW_CONTENTS_TO_INSERT}}` | Inputs derived from args_schema |
+| **Primary Input(s)** | `TC_021_PAGE_IDS_TO_UPDATE`, `TC_021_NEW_CONTENTS_TO_INSERT` | Inputs derived from args_schema |
 
 ## Config
 

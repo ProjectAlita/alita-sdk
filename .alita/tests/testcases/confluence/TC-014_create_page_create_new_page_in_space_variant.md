@@ -16,7 +16,7 @@ Validate that create_page succeeds when representation is `wiki` (markdown). The
 |-----------|-------|-------------|
 | **Toolkit** | `confluence` | Toolkit under `alita_sdk/tools` |
 | **Tool** | `create_page` | Exact Python tool name |
-| **Primary Input(s)** | `{{SPACE}}=AT`, `{{TC_14_PAGE_TITLE}}=TC_14 page {{RANDOM_STRING}}`, `{{TC_14_PAGE_BODY_MD}}`, `{{STATUS}}=current`, `{{REPRESENTATION}}=wiki`, `{{LABEL}}=automation` | Inputs derived from args_schema: space, title, body, status, parent_id, representation, label |
+| **Primary Input(s)** | `SPACE=AT`, `TC_14_PAGE_TITLE=TC_14 page {{RANDOM_STRING}}`, `TC_14_PAGE_BODY_MD`, `STATUS=current`, `REPRESENTATION=wiki`, `LABEL=automation` | Inputs derived from args_schema: space, title, body, status, parent_id, representation, label |
 
 ## Config
 
@@ -28,6 +28,7 @@ generateTestData: true
 - Valid toolkit config for `confluence`
 - Space `{{SPACE}}` exists and is accessible
 - Title `{{TC_14_PAGE_TITLE}}` does not already exist in the space and not need to create one if does not exist
+- `{{TC_14_PAGE_BODY_MD}}` must be filled with markdown content for the page body, e.g. `# Heading\n\nThis is a sample page created for TC-14 using markdown body.\n\n- Item 1\n- Item 2\n\n**Bold Text** and _Italic Text_.\n\n[Link to Alita](https://www.alita.ai)`
 
 ## Test Steps & Expectations
 
