@@ -21,7 +21,11 @@ services:
       - ENV_NAME=${ENV_NAME:-local}
       - FIGMA_API_TOKEN=${FIGMA_API_TOKEN}
       - BITBUCKET_TOKEN=${BITBUCKET_TOKEN}
+      - XRAY_CLIENT_SECRET=${XRAY_CLIENT_SECRET}
+      - XRAY_CLIENT_ID=${XRAY_CLIENT_ID}
+      - ZEPHYR_ESENTIALS_KEY=${ZEPHYR_ESENTIALS_KEY}
       - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
+      - DEFAULT_LLM_MODEL=gpt-4o-2024-11-20
       - SANDBOX_BASE=/app/
       - DENO_DIR=/app/
       - PYTHONPATH=/app

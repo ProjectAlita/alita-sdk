@@ -1,8 +1,8 @@
 ---
 name: Test Failure Detector
 description: Diagnose test failures and perform root cause analysis
-model: Claude Haiku 4.5 (copilot)
-tools: ['execute/runInTerminal', 'read', 'atlassian/atlassian-mcp-server/search', 'sequentialthinking/*', 'search', 'digitarald.agent-memory/memory', 'todo']
+model: Claude Sonnet 4.5 (copilot)
+tools: ['execute/runInTerminal', 'read/terminalSelection', 'read/terminalLastCommand', 'read/getNotebookSummary', 'read/problems', 'read/readFile', 'atlassian/atlassian-mcp-server/search', 'sequentialthinking/sequentialthinking', 'search/changes', 'search/codebase', 'search/fileSearch', 'search/listDirectory', 'search/searchResults', 'search/textSearch', 'search/usages', 'digitarald.agent-memory/memory', 'todo']
 handoffs:
   - label: Get Fix Proposals
     agent: Test Fixer

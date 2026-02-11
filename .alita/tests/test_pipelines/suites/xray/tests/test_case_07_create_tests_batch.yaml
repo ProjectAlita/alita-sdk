@@ -1,0 +1,206 @@
+name: "XR07 - create_test: Create multiple tests in single mutation"
+description: |
+  Verify the Xray 'create_test' tool can create multiple tests using a single GraphQL mutation with aliases.
+
+  Objective: Test batch creation of mixed test types (Manual + Generic) in one mutation
+
+  Expected Behavior:
+  - All tests are created without errors in a single mutation
+  - Returns combined test details with aliased results
+  - Mixed test types (Manual and Generic) are handled correctly  
+  - All tests have unique keys and issueIds
+  - No error indicators in output
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  create_result:
+    type: str
+  error_indicators:
+    type: list
+    value:
+      - Unable to create
+      - error
+      - failed
+      - exception
+      - GraphQL errors
+  expected_success_indicators:
+    type: list
+    value:
+      - issueId
+      - key
+      - Manual
+      - Generic
+      - ELITEA_AI_CREATED
+  graphql_mutation:
+    type: str
+  project_key:
+    type: str
+    value: EL
+  test_results:
+    type: dict
+  test_summary_generic:
+    type: str
+  test_summary_manual:
+    type: str
+entry_point: prepare_batch_mutations
+nodes:
+  - id: prepare_batch_mutations
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique test summaries
+        test_summary_manual = f"XR07 Manual Batch Test {timestamp}-{random_suffix}"
+        test_summary_generic = f"XR07 Generic Batch Test {timestamp}-{random_suffix}"
+        project_key = alita_state.get("project_key", "EL")
+
+        # Create single GraphQL mutation with BOTH tests using aliases
+        graphql_mutation = f'''mutation {{
+          manualTest: createTest(
+            testType: {{ name: "Manual" }},
+            steps: [
+              {{
+                action: "Navigate to login page",
+                result: "Login page is displayed"
+              }},
+              {{
+                action: "Enter valid credentials",
+                data: "user: test@example.com, pass: ******",
+                result: "Credentials are accepted"
+              }},
+              {{
+                action: "Click Login button",
+                result: "User is logged in successfully"
+              }}
+            ],
+            jira: {{
+              fields: {{
+                summary: "{test_summary_manual}",
+                project: {{ key: "{project_key}" }},
+                description: "Manual test created by XR07 batch creation test",
+                labels: ["ELITEA_AI_CREATED", "BATCH_TEST"]
+              }}
+            }}
+          ) {{
+            test {{
+              issueId
+              testType {{ name }}
+              jira(fields: ["key", "summary", "labels"])
+            }}
+            warnings
+          }}
+          genericTest: createTest(
+            testType: {{ name: "Generic" }},
+            unstructured: "Perform exploratory testing on the security features. Focus on:\\n1. SQL injection tests\\n2. XSS vulnerability scan\\n3. Authentication bypass attempts\\n4. Session management verification\\n5. Error handling",
+            jira: {{
+              fields: {{
+                summary: "{test_summary_generic}",
+                project: {{ key: "{project_key}" }},
+                description: "Generic test created by XR07 batch creation test",
+                labels: ["ELITEA_AI_CREATED", "BATCH_TEST"]
+              }}
+            }}
+          ) {{
+            test {{
+              issueId
+              testType {{ name kind }}
+              unstructured
+              jira(fields: ["key", "summary", "labels"])
+            }}
+            warnings
+          }}
+        }}'''
+
+        {"test_summary_manual": test_summary_manual, "test_summary_generic": test_summary_generic, "graphql_mutation": graphql_mutation}
+    input:
+      - project_key
+    output:
+      - test_summary_manual
+      - test_summary_generic
+      - graphql_mutation
+    structured_output: true
+    transition: create_tests_batch
+  - id: create_tests_batch
+    type: toolkit
+    input:
+      - graphql_mutation
+    input_mapping:
+      graphql_mutation:
+        type: variable
+        value: graphql_mutation
+    output:
+      - create_result
+    structured_output: false
+    tool: create_test
+    toolkit_name: xray-testing
+    transition: validate_results
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - test_summary_manual
+      - test_summary_generic
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_test' batch operation (single mutation with aliases).
+
+          Create Result: {create_result}
+          Expected Manual Test Summary: {test_summary_manual}
+          Expected Generic Test Summary: {test_summary_generic}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful batch creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran without throwing an exception
+          2. no_errors: Output does NOT contain error indicators
+          3. has_manual_test: Response contains Manual test creation
+          4. has_generic_test: Response contains Generic test creation
+          5. has_issue_ids: Both tests have issueIds assigned
+          6. has_keys: Both tests have Jira keys assigned
+          7. all_tests_created: Result is a list with 2 test creation confirmations
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_manual_test": boolean,
+            "has_generic_test": boolean,
+            "has_issue_ids": boolean,
+            "has_keys": boolean,
+            "all_tests_created": boolean (checks if 2 tests were created),
+            "tests_created_count": integer (number of tests created, should be 2),
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object do not summarize.
+    model: gpt-4o-2024-11-20
+    output:
+      - test_results
+    structured_output: false
+    transition: END

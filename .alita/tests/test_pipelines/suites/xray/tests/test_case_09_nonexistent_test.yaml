@@ -1,0 +1,106 @@
+name: "XR09 - get_test_step_attachments: Handle non-existent test (Negative Test)"
+description: |
+  Verify the Xray 'get_test_step_attachments' tool properly handles requests for non-existent tests.
+
+  Objective: Test error handling when querying attachments for a test that doesn't exist
+
+  Expected Behavior (NEGATIVE TEST):
+  - Tool returns error for non-existent test ID
+  - Error message mentions test not found
+  - Proper error handling without crashing
+  - No attachment data is returned
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${XRAY_PROJECT_KEY:EL}
+  nonexistent_issue_id:
+    type: str
+    value: "999999999"
+  get_attachments_result:
+    type: str
+  expected_error_indicators:
+    type: list
+    value: ["Test not found", "not found", "Failed to get", "does not exist"]
+  unexpected_success_indicators:
+    type: list
+    value: ["total_attachments:", "downloadLink", "attachment_id", "filename"]
+  test_results:
+    type: dict
+
+entry_point: get_attachments_for_nonexistent_test
+nodes:
+  - id: get_attachments_for_nonexistent_test
+    type: toolkit
+    input:
+      - nonexistent_issue_id
+    input_mapping:
+      issue_id:
+        type: variable
+        value: nonexistent_issue_id
+    output:
+      - get_attachments_result
+    structured_output: false
+    tool: get_test_step_attachments
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    continue_on_error: true
+    transition: validate_error_handling
+
+  - id: validate_error_handling
+    type: llm
+    input:
+      - get_attachments_result
+      - nonexistent_issue_id
+      - unexpected_success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the result from executing 'get_test_step_attachments' with a non-existent test ID.
+          
+          CONTEXT - How continue_on_error works:
+          - The Xray tool raises a ToolException for non-existent tests
+          - With continue_on_error=true, the exception is caught and execution continues
+          - The output variable receives NO VALUE (empty/None) when exception occurs
+          - For this NEGATIVE test, empty output = CORRECT error handling
+          
+          Get Attachments Result: {get_attachments_result}
+          Non-existent Issue ID Used: {nonexistent_issue_id}
+          Unexpected Success Indicators: {unexpected_success_indicators}
+
+          VALIDATION LOGIC:
+          This negative test PASSES if the tool correctly rejected the non-existent test ID.
+          Evidence of correct rejection: Output is empty/None/minimal (no attachment data returned).
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Always true (we reached this validation node)
+          2. error_handled: Result is empty, None, or very short (< 20 characters)
+          3. no_attachment_data: Result does NOT contain words "attachments", "downloadLink", "filename", "attachment_id"
+          4. no_success_indicators: Result does NOT contain any success field indicators from the list
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": true,
+            "error_handled": boolean (true if result is empty/None/short),
+            "no_attachment_data": boolean (true if no attachment-related words found),
+            "no_success_indicators": boolean (true if no success indicators found),
+            "result_length": number (character count of result),
+            "result_preview": "first 100 chars of result or 'empty'" 
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    transition: END

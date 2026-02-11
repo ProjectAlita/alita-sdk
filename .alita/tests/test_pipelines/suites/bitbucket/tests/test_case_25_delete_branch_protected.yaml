@@ -133,8 +133,7 @@ nodes:
             "no_unhandled_exception": boolean,
             "main_error_indicator_found": "which error indicator was found or 'none'",
             "master_error_indicator_found": "which error indicator was found or 'none'",
-            "branches_count": number,
-            "error": string | null
+            "branches_count": number
           }}
 
           Return ONLY the JSON object.

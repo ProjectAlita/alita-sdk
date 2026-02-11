@@ -1,0 +1,102 @@
+name: "ZE03 - get_project: Retrieve specific project details"
+description: |
+  Verify the Zephyr Essential 'get_project' tool retrieves specific project information.
+
+  Objective: Test project retrieval by key
+
+  Expected Behavior:
+  - Project details are retrieved without errors
+  - Returns project with matching key
+  - Contains expected project fields (id, key, name)
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:EL}
+  expected_success_indicators:
+    type: list
+    value: ["id", "key"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "not found", "unauthorized"]
+  project_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: get_project
+nodes:
+  - id: get_project
+    type: toolkit
+    input:
+      - project_key
+    input_mapping:
+      project_id_or_key:
+        type: variable
+        value: project_key
+    output:
+      - project_result
+    structured_output: true
+    tool: get_project
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - project_result
+      - project_key
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_project' tool execution.
+
+          Project Key Requested: {project_key}
+          Project Result: {project_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful project retrieval.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. has_project_data: Response contains project information
+          4. correct_project: Project key in response matches requested key
+          5. has_required_fields: Response contains id and key fields
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_project_data": boolean,
+            "correct_project": boolean,
+            "has_required_fields": boolean,
+            "project_key_found": "key found in response or 'none'",
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
