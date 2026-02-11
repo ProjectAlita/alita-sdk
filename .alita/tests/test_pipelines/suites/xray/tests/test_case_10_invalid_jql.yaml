@@ -47,6 +47,7 @@ nodes:
     structured_output: false
     tool: get_tests
     toolkit_name: ${XRAY_TOOLKIT_NAME}
+    continue_on_error: true
     transition: validate_error_handling
 
   - id: validate_error_handling
@@ -107,5 +108,4 @@ nodes:
     model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
-    structured_output: true
     transition: END

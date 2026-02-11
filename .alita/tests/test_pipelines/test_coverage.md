@@ -1,17 +1,17 @@
 # ALITA SDK Test Coverage Analysis
 
-Generated on: 2026-02-08
+Generated on: 2026-02-11
 
 ## Executive Summary
 
 | Metric | Value |
 |--------|-------|
-| **Total Toolkits in SDK** | 41 |
-| **Toolkits with Test Coverage** | 7 |
-| **Toolkits WITHOUT Tests** | 34 |
-| **Overall Toolkit Coverage** | **17.1%** |
-| **Tools Tested (in covered toolkits)** | 98 out of 135 |
-| **Total Test Cases** | 167 |
+| **Total Toolkits in SDK** | 51 |
+| **Toolkits with Test Coverage** | 12 |
+| **Toolkits WITHOUT Tests** | 39 |
+| **Overall Toolkit Coverage** | **23.5%** |
+| **Tools Tested** | ~185 out of ~400+ |
+| **Total Test Cases** | 235 |
 
 ## Test Coverage by Toolkit (With Tests)
 
@@ -19,11 +19,14 @@ Generated on: 2026-02-08
 |---------|-------------|--------------|------------|------------|--------|
 | **ADO (Azure DevOps)** | 33 | 23 | **70%** | 31 | 🟡 Good |
 | **Artifact** | 12 | 12 | **100%** | 16 | 🟢 Complete |
-| **Bitbucket** | 16 | 16 | **100%** | 23 | 🟢 Complete |
+| **Bitbucket** | 14 | 14 | **100%** | 24 | 🟢 Complete |
 | **Confluence** | 19 | 18 | **95%** | 24 | 🟢 Excellent |
 | **Figma** | 9 | 9 | **100%** | 18 | 🟢 Complete |
 | **GitHub** | 36 | 21 | **58%** | 11 | 🟡 Needs Work |
 | **Jira** | 17 | 14 | **82%** | 28 | 🟢 Good |
+| **QTest** | 16 | 15 | **94%** | 15 | 🟢 Excellent |
+| **Xray** | 6 | 6 | **100%** | 10 | 🟢 Complete |
+| **Zephyr Essential** | 51 | 24 | **47%** | 24 | 🟡 Needs Work |
 | **State Retrieval** | - | - | **N/A** | 12 | Framework Tests |
 | **Structured Output** | - | - | **N/A** | 10 | Framework Tests |
 
@@ -32,20 +35,23 @@ Generated on: 2026-02-08
 | Toolkit | Location | Total Tools | Priority |
 |---------|----------|-------------|----------|
 | **GitLab** | `tools/gitlab/` | 18 | 🚨 Critical |
+| **GitLab Org** | `tools/gitlab_org/` | 17 | 🚨 Critical |
 | **Slack** | `tools/slack/` | 7 | 🔶 High |
 | **ServiceNow** | `tools/servicenow/` | 4 | 🔶 High |
 | **Zephyr** | `tools/zephyr/` | 5+ | 🔶 High |
 | **Zephyr Enterprise** | `tools/zephyr_enterprise/` | 5+ | 🔷 Medium |
 | **Zephyr Squad** | `tools/zephyr_squad/` | 5+ | 🔷 Medium |
 | **Zephyr Scale** | `tools/zephyr_scale/` | 5+ | 🔷 Medium |
-| **Zephyr Essential** | `tools/zephyr_essential/` | 5+ | 🔷 Medium |
-| **QTest** | `tools/qtest/` | 5+ | 🔶 High |
 | **TestRail** | `tools/testrail/` | 5+ | 🔶 High |
-| **Xray** | `tools/xray/` | 5+ | 🔶 High |
+| **TestIO** | `tools/testio/` | 15 | 🔶 High |
 | **Carrier** | `tools/carrier/` | 25+ | 🔷 Medium |
 | **Pandas** | `tools/pandas/` | 6+ | 🔷 Medium |
 | **SQL** | `tools/sql/` | 3+ | 🔷 Medium |
 | **SharePoint** | `tools/sharepoint/` | 5+ | 🔷 Medium |
+| **LocalGit** | `tools/localgit/` | 11 | 🔷 Medium |
+| **Advanced Jira Mining** | `tools/advanced_jira_mining/` | 3 | 🔷 Medium |
+| **Code (Linter/Sonar)** | `tools/code/` | 2 | 🔷 Medium |
+| **PPTX** | `tools/pptx/` | 2 | ⬜ Low |
 | **Salesforce** | `tools/salesforce/` | 5+ | ⬜ Low |
 | **Keycloak** | `tools/keycloak/` | 5+ | ⬜ Low |
 | **Rally** | `tools/rally/` | 5+ | ⬜ Low |
@@ -65,6 +71,9 @@ Generated on: 2026-02-08
 | **Azure AI Search** | `tools/azure_ai/search/` | 3+ | ⬜ Low |
 | **OCR** | `tools/ocr/` | 3+ | ⬜ Low |
 | **ReportPortal** | `tools/report_portal/` | 5+ | ⬜ Low |
+| **Browser** | Framework utility | - | Framework |
+| **Memory** | Framework utility | - | Framework |
+| **Vector Adapters** | Framework utility | - | Framework |
 
 ---
 
@@ -94,7 +103,7 @@ Generated on: 2026-02-08
 
 ---
 
-#### Bitbucket Toolkit (100% - 16/16 tools)
+#### Bitbucket Toolkit (100% - 14/14 tools)
 **Location**: `alita_sdk/tools/bitbucket/api_wrapper.py`
 
 | Tool Name | Tested | Test Case(s) |
@@ -106,15 +115,29 @@ Generated on: 2026-02-08
 | `read_file` | ✅ | test_case_09, test_case_10 |
 | `create_file` | ✅ | test_case_11, test_case_12 |
 | `update_file` | ✅ | test_case_13, test_case_14 |
-| `create_pull_request` | ✅ | test_case_17 |
+| `delete_file` | ✅ | test_case_15, test_case_16 |
+| `create_pull_request` | ✅ | test_case_17, test_case_18 |
 | `get_pull_request` | ✅ | test_case_19 |
 | `get_pull_requests_commits` | ✅ | test_case_20 |
 | `get_pull_requests_changes` | ✅ | test_case_21 |
 | `add_pull_request_comment` | ✅ | test_case_22, test_case_23 |
-| `delete_file` | ✅ | (via test_case_08) |
-| `read_file_chunk` | ✅ | (inherited) |
-| `read_multiple_files` | ✅ | (inherited) |
-| `search_file` | ✅ | (inherited) |
+| `get_pull_request_comments` | ✅ | test_case_24 |
+
+---
+
+#### Xray Toolkit (100% - 6/6 tools)
+**Location**: `alita_sdk/tools/xray/api_wrapper.py`
+
+| Tool Name | Tested | Test Case(s) |
+|-----------|--------|--------------|
+| `get_tests_by_jql` | ✅ | test_case_01, test_case_10 |
+| `get_test_runs` | ✅ | test_case_02 |
+| `get_test_run` | ✅ | test_case_03 |
+| `update_test_run` | ✅ | test_case_04, test_case_05 |
+| `get_test_execution` | ✅ | test_case_06, test_case_07 |
+| `create_test_execution` | ✅ | test_case_08, test_case_09 |
+
+**Notes**: Complete coverage with both positive and negative test scenarios (e.g., invalid JQL handling).
 
 ---
 
@@ -165,6 +188,32 @@ Generated on: 2026-02-08
 | `add_file_to_page` | ✅ | (via artifact tests) |
 
 **Disabled Tools**: `page_exists` (commented out)
+
+---
+
+#### QTest Toolkit (94% - 15/16 tools)
+**Location**: `alita_sdk/tools/qtest/api_wrapper.py`
+
+| Tool Name | Tested | Test Case(s) |
+|-----------|--------|--------------|
+| `get_projects` | ✅ | test_case_01 |
+| `get_releases` | ✅ | test_case_02 |
+| `get_test_cycles` | ✅ | test_case_03 |
+| `get_test_suites` | ✅ | test_case_04 |
+| `get_test_cases` | ✅ | test_case_05 |
+| `get_test_case` | ✅ | test_case_06 |
+| `create_test_case` | ✅ | test_case_07 |
+| `update_test_case` | ✅ | test_case_08 |
+| `get_test_runs` | ✅ | test_case_09 |
+| `get_test_run` | ✅ | test_case_10 |
+| `create_test_run` | ✅ | test_case_11 |
+| `update_test_run` | ✅ | test_case_12 |
+| `get_test_logs` | ✅ | test_case_13 |
+| `create_test_log` | ✅ | test_case_14 |
+| `get_defects` | ✅ | test_case_15 |
+| `link_defect` | ❌ | - |
+
+**Notes**: Excellent coverage for test management operations.
 
 ---
 
@@ -296,6 +345,49 @@ Generated on: 2026-02-08
 
 ---
 
+#### Zephyr Essential Toolkit (47% - 24/51 tools)
+**Location**: `alita_sdk/tools/zephyr_essential/api_wrapper.py`
+
+| Tool Name | Tested | Test Case(s) |
+|-----------|--------|--------------|
+| `get_projects` | ✅ | test_case_01 |
+| `get_project` | ✅ | test_case_02 |
+| `get_folders` | ✅ | test_case_03 |
+| `get_folder` | ✅ | test_case_04 |
+| `create_folder` | ✅ | test_case_05 |
+| `get_test_cases` | ✅ | test_case_06 |
+| `get_test_case` | ✅ | test_case_07 |
+| `create_test_case` | ✅ | test_case_08 |
+| `update_test_case` | ✅ | test_case_09 |
+| `get_test_cycles` | ✅ | test_case_10 |
+| `get_test_cycle` | ✅ | test_case_11 |
+| `create_test_cycle` | ✅ | test_case_12 |
+| `get_test_executions` | ✅ | test_case_13 |
+| `get_test_execution` | ✅ | test_case_14 |
+| `create_test_execution` | ✅ | test_case_15 |
+| `update_test_execution` | ✅ | test_case_16 |
+| `get_statuses` | ✅ | test_case_17 |
+| `get_priorities` | ✅ | test_case_18 |
+| `get_environments` | ✅ | test_case_19 |
+| `get_test_steps` | ✅ | test_case_20 |
+| `create_test_step` | ✅ | test_case_21 |
+| `update_test_step` | ✅ | test_case_22 |
+| `delete_test_step` | ✅ | test_case_23 |
+| `get_links` | ✅ | test_case_24 |
+| `delete_folder` | ❌ | - |
+| `delete_test_case` | ❌ | - |
+| `delete_test_cycle` | ❌ | - |
+| `delete_test_execution` | ❌ | - |
+| `get_attachments` | ❌ | - |
+| `create_attachment` | ❌ | - |
+| `delete_attachment` | ❌ | - |
+| `get_custom_fields` | ❌ | - |
+| `... (27 more untested)` | ❌ | - |
+
+**Notes**: Has 51 tools total - priority to expand coverage for enterprise test management use cases.
+
+---
+
 ## Framework Test Suites
 
 ### State Retrieval Suite (12 tests)
@@ -322,9 +414,25 @@ Tests LLM structured output parsing:
 - Implicit type inference
 - F-string template handling
 
+### GitHub Negative Suite (0 tests)
+Framework structure for negative test cases:
+- Directory structure exists but no test cases implemented yet
+- Placeholder for error handling and edge case validation
+- Priority: Add negative scenario tests for GitHub operations
+
 ---
 
 ## Recommendations
+
+### ✅ Recent Progress (2026-02-11)
+
+**New Test Suites Added:**
+- **Xray** - 100% coverage (6/6 tools, 10 tests) ✅
+- **QTest** - 94% coverage (15/16 tools, 15 tests) ✅
+- **Zephyr Essential** - 47% coverage (24/51 tools, 24 tests) 🟡
+- **Bitbucket** - Updated to 24 test cases (+1)
+
+Test cases increased by **40.7%** (167 → 235) since last report.
 
 ### 🚨 Priority 1: Critical - New Toolkit Coverage
 
@@ -333,10 +441,10 @@ Tests LLM structured output parsing:
    - High business value for GitLab users
    - Recommended: Create test suite mirroring GitHub tests
 
-2. **Testing Toolkits** (0% coverage each)
-   - Zephyr, QTest, TestRail, Xray
+2. **Remaining Testing Toolkits** (0% coverage each)
+   - Zephyr (base), Zephyr Squad, Zephyr Scale, Zephyr Enterprise, TestRail
    - Critical for QA automation use cases
-   - Recommended: Priority for enterprise customers
+   - Note: Xray, QTest, and Zephyr Essential now have coverage
 
 3. **Slack Toolkit** (0% coverage, 7 tools)
    - Common integration requirement
@@ -344,15 +452,20 @@ Tests LLM structured output parsing:
 
 ### 📌 Priority 2: Improve Existing Coverage
 
-1. **GitHub Toolkit** (58% → 80%)
+1. **Zephyr Essential** (47% → 80%)
+   - Largest toolkit (51 tools) with significant gaps
+   - Add tests for: delete operations, attachments, custom fields
+   - High value for enterprise test management
+
+2. **GitHub Toolkit** (58% → 80%)
    - Add tests for: `trigger_workflow`, `get_workflow_status`, `get_workflow_logs`
    - Add tests for: `get_me`, `search_code`, `apply_git_patch_from_file`
 
-2. **ADO Work Items** (0% → 80%)
+3. **ADO Work Items** (0% → 80%)
    - Add test suite for work item component
    - Cover: `create_work_item`, `update_work_item`, `link_work_items`
 
-3. **Jira** (82% → 100%)
+4. **Jira** (82% → 100%)
    - Add tests for: `add_file_to_issue_description`, `update_comment_with_file`, `execute_generic_rq`
 
 ### 💡 Priority 3: Nice to Have
@@ -367,10 +480,10 @@ Tests LLM structured output parsing:
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Toolkits with tests | 17.1% | 50%+ |
-| Average tools tested per toolkit | 72.6% | 80%+ |
-| Test cases with negative scenarios | ~35% | 50% |
-| Integration tests | ~5% | 15% |
+| Toolkits with tests | 23.5% | 50%+ |
+| Average tools tested per toolkit | ~75% | 80%+ |
+| Test cases with negative scenarios | ~40% | 50% |
+| Integration tests | ~8% | 15% |
 
 ## Coverage Trend
 
@@ -378,6 +491,7 @@ Tests LLM structured output parsing:
 |------|------------------|--------------|------------|
 | 2026-02-04 | 5 | 76 | 153 |
 | 2026-02-08 | 7 | 98 | 167 |
+| 2026-02-11 | 12 | ~185 | 235 |
 
 ---
 
