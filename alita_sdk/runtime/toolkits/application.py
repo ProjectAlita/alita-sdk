@@ -87,7 +87,7 @@ class ApplicationToolkit(BaseToolkit):
                     selected_tools: list[str] = [], store: Optional[BaseStore] = None,
                     ignored_mcp_servers: Optional[list] = None, is_subgraph: bool = False,
                     mcp_tokens: Optional[dict] = None, project_id: int = None,
-                    conversation_id: Optional[str] = None):
+                    conversation_id: Optional[str] = None, agent_type: str = 'agent'):
         """
         Get toolkit for an application.
 
@@ -95,6 +95,7 @@ class ApplicationToolkit(BaseToolkit):
             project_id: Optional project ID where the application lives.
                        If not specified, uses the client's default project.
                        This is needed for public project agents added as participants.
+            agent_type: Type of agent ('agent', 'pipeline', 'predict') for metadata
         """
         logger.debug(f"[APP_TOOLKIT] get_toolkit called: app_id={application_id}, version_id={application_version_id}, "
                    f"project_id={project_id}, client.project_id={client.project_id}")
@@ -143,13 +144,22 @@ class ApplicationToolkit(BaseToolkit):
                 if default_val is not None and default_val != '':
                     variable_defaults[var['name']] = default_val
 
+        # Build metadata with toolkit_type and agent_type for nested agent/pipeline identification
+        # Note: application tools should not have toolkit_name
+        metadata = {
+            'toolkit_type': 'application',
+            'agent_type': agent_type,
+        }
+        if icon_meta:
+            metadata['icon_meta'] = icon_meta
+
         return cls(tools=[Application(name=app_name,
                                       description=app_details.get("description"),
                                       application=app,
                                       args_schema=dynamic_schema,
                                       return_type='str',
                                       client=client,
-                                      metadata={'icon_meta': icon_meta} if icon_meta else {},
+                                      metadata=metadata,
                                       is_subgraph=is_subgraph,
                                       variable_defaults=variable_defaults,  # Store defaults for _run()
                                       args_runnable={
