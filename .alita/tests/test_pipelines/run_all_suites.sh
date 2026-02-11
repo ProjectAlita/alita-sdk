@@ -264,12 +264,12 @@ run_suite() {
     # Note: run_suite.py will use config value automatically, no need to pass --timeout
     # unless we want to override it
 
-    # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
-    # Now verbose output goes to stderr, so we can use both --json and $VERBOSE together
+    # Run tests with JSON output to file via --output-json, verbose to stderr (run.log)
+    # Verbose output controlled by $VERBOSE flag (-v)
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -279,7 +279,7 @@ run_suite() {
         fi
     else
         # Capture verbose output to log file only
-        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE > "$results_file" 2> "$suite_output_dir/run.log"; then
+        if python scripts/run_suite.py "$suite_spec" $VERBOSE --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -386,13 +386,13 @@ run_suite_local() {
     print_step "Step 1/2: Running tests for $suite_spec (local)"
     local results_file="$suite_output_dir/results.json"
 
-    # Run tests with JSON output to stdout (results_file) and verbose to stderr (run.log)
+    # Save JSON results to file with --output-json, stderr goes to run.log
     # run_suite.py --local executes setup internally and then runs tests
-    # Logger routes setup output to stderr so it doesn't pollute JSON on stdout
+    # Verbose output controlled by $VERBOSE flag (-v)
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE --local --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -402,7 +402,7 @@ run_suite_local() {
         fi
     else
         # Capture verbose output to log file only
-        if python scripts/run_suite.py "$suite_spec" --json $VERBOSE --local > "$results_file" 2> "$suite_output_dir/run.log"; then
+        if python scripts/run_suite.py "$suite_spec" $VERBOSE --local --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"

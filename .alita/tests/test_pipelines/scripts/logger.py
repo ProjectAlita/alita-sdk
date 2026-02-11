@@ -21,15 +21,14 @@ class TestLogger:
     all scripts (run_pipeline, run_suite, seed_pipelines, setup, cleanup).
     
     Args:
-        verbose: Enable verbose debug output
-        quiet: Suppress non-essential output (for JSON mode)
+        verbose: Enable verbose debug output (INFO, DEBUG, progress messages)
         use_colors: Force color output on/off. If None, auto-detect TTY.
         max_truncate_length: Maximum message length before truncation (default: 500)
         
     Output routing:
-        - quiet=False (normal mode): All output to stdout
-        - quiet=True (JSON mode): Essential output to stdout, verbose to stderr
-        - Error messages: Always to stderr
+        - verbose=True: INFO, DEBUG, progress to stdout; errors/warnings to stderr
+        - verbose=False: Only errors/warnings to stderr
+        - All DEBUG output goes to stderr (for file logging)
     """
     
     # ANSI color codes
@@ -56,8 +55,8 @@ class TestLogger:
         # Auto-detect CI environment for verbose mode
         ci_detected = self._is_ci_environment()
         self.verbose = verbose or ci_detected or os.getenv('TEST_VERBOSE', '').lower() in ('1', 'true', 'yes')
-        self.quiet = quiet
         self.max_truncate_length = max_truncate_length
+        # Note: quiet parameter deprecated, kept for backward compatibility only
         
         # Auto-detect TTY if not specified, with FORCE_COLOR override
         if use_colors is None:
@@ -153,9 +152,8 @@ class TestLogger:
         
         formatted = self._colorize(f"[DEBUG] {message}", 'gray')
         
-        # Route verbose output to stderr in quiet mode (JSON mode)
-        stream = sys.stderr if self.quiet else sys.stdout
-        self._write(formatted, stream)
+        # Debug output always goes to stderr (will be captured to run.log)
+        self._write(formatted, sys.stderr)
     
     def info(self, message: str, truncate: bool = False):
         """
@@ -165,7 +163,8 @@ class TestLogger:
             message: Info message
             truncate: Apply smart truncation (default: False)
         """
-        if self.quiet:
+        # Only show INFO when verbose mode is enabled
+        if not self.verbose:
             return
         
         if truncate:
@@ -182,7 +181,8 @@ class TestLogger:
             message: Success message
             truncate: Apply smart truncation (default: False)
         """
-        if self.quiet:
+        # Only show SUCCESS when verbose mode is enabled
+        if not self.verbose:
             return
         
         if truncate:
@@ -199,9 +199,7 @@ class TestLogger:
             message: Warning message
             truncate: Apply smart truncation (default: True)
         """
-        if self.quiet:
-            return
-        
+        # WARNING always shown (critical information)
         if truncate:
             message = self._truncate(message)
         
@@ -243,7 +241,8 @@ class TestLogger:
             char: Character to use for separator
             length: Length of separator line
         """
-        if self.quiet:
+        # Only show separators in verbose mode
+        if not self.verbose:
             return
         
         line = char * length
@@ -256,7 +255,8 @@ class TestLogger:
         Args:
             title: Section title
         """
-        if self.quiet:
+        # Only show sections in verbose mode
+        if not self.verbose:
             return
         
         formatted = self._colorize(f"\n{'=' * 60}\n{title}\n{'=' * 60}", 'bold')
@@ -296,7 +296,8 @@ class TestLogger:
             current: Current item number
             total: Total item count
         """
-        if self.quiet:
+        # Only show progress in verbose mode
+        if not self.verbose:
             return
         
         formatted = self._colorize(f"[{current}/{total}] {message}", 'cyan')
@@ -313,11 +314,11 @@ def create_logger(
     Create a TestLogger instance with standard configuration.
     
     Args:
-        verbose: Enable verbose debug output
-        quiet: Suppress non-essential output (for JSON mode)
+        verbose: Enable verbose output (INFO, DEBUG, progress messages)
+        quiet: Deprecated parameter, kept for backward compatibility
         use_colors: Force color output on/off. If None, auto-detect TTY.
         
     Returns:
         Configured TestLogger instance
     """
-    return TestLogger(verbose=verbose, quiet=quiet, use_colors=use_colors)
+    return TestLogger(verbose=verbose, use_colors=use_colors)
