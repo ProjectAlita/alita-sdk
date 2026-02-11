@@ -706,7 +706,6 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
     def set_issue_status(self, issue_key: str, status_name: str, mandatory_fields_json: str):
         """Set new status for the issue in Jira. Used to move ticket through the defined workflow."""
         try:
-            print(f"Fields to be updated during the status change: {mandatory_fields_json}")
             self.set_issue_status_validate(issue_key, status_name)
             fields = json.loads(mandatory_fields_json)
             # prepare field block

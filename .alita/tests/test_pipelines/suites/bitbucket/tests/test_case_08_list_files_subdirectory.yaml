@@ -1,0 +1,120 @@
+name: "BB08 - list_files: List files in subdirectory with path"
+description: |
+  Verify the Bitbucket 'list_files' tool correctly lists files in a subdirectory.
+
+  Objective: Test subdirectory listing with path parameter using known stable files
+
+  Expected Behavior:
+  - Path parameter correctly navigates to subdirectory
+  - Recursive listing shows nested files
+  - Non-recursive shows only direct children
+  - File paths are correctly prefixed
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  test_dir:
+    type: str
+    value: "test-files"
+  error_indicators:
+    type: list
+    value: ["error", "failed", "not found", "permission denied"]
+  subdir_files:
+    type: str
+  non_recursive_files:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: list_subdirectory_files
+nodes:
+
+  - id: list_subdirectory_files
+    type: toolkit
+    input:
+      - test_dir
+    input_mapping:
+      path:
+        type: variable
+        value: test_dir
+      recursive:
+        type: fixed
+        value: true
+    output:
+      - subdir_files
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: list_subdirectory_non_recursive
+
+  - id: list_subdirectory_non_recursive
+    type: toolkit
+    input:
+      - test_dir
+    input_mapping:
+      path:
+        type: variable
+        value: test_dir
+      recursive:
+        type: fixed
+        value: false
+    output:
+      - non_recursive_files
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - subdir_files
+      - non_recursive_files
+      - test_dir
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from subdirectory file listing test.
+
+          Test Directory: {test_dir}
+          Recursive Listing: {subdir_files}
+          Non-Recursive Listing: {non_recursive_files}
+          Error Indicators: {error_indicators}
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. no_errors: No error indicators in any output
+          2. recursive_has_files: Recursive listing returns files
+          3. non_recursive_has_items: Non-recursive listing returns items
+          4. listing_successful: Both listing operations completed successfully
+          5. directory_navigation_works: Path parameter successfully navigates to subdirectory
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "no_errors": boolean,
+            "recursive_has_files": boolean,
+            "non_recursive_has_items": boolean,
+            "listing_successful": boolean,
+            "directory_navigation_works": boolean,
+            "recursive_file_count": number,
+            "non_recursive_item_count": number,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

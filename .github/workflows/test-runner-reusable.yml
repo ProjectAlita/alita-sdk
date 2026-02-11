@@ -1,5 +1,5 @@
 name: Test Runner Reusable
-run-name: Executing test for ${{ inputs.test_cases_dir }}
+run-name: Executing test for ${{ inputs.test_cases_dir }} on ${{ inputs.environment }} 
 
 on:
   workflow_call:
@@ -8,12 +8,28 @@ on:
         description: 'Test cases directory (e.g., github, ado, confluence)'
         required: true
         type: string
+      environment:
+        description: 'Environment to run tests in (local or other)'
+        required: false
+        type: string
+        default: 'local'
+       
   workflow_dispatch:
     inputs:
       test_cases_dir:
-        description: 'Test cases directory (e.g., github, ado, confluence)'
+        description: 'Test cases directory (e.g., github, ado, confluence) or anything from .alita/tests/test_pipelines/suites'
         required: true
         type: string
+      environment:
+        description: 'Environment to run tests in'
+        required: true
+        type: choice
+        default: 'local'
+        options:
+          - local
+          - dev
+          - stage
+          - prod
 
 env:
   REGISTRY: ghcr.io
@@ -47,14 +63,34 @@ jobs:
       - name: Pull Docker image
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          docker pull ${{ env.REGISTRY }}/$IMAGE_NAME:latest
+          docker pull ${{ env.REGISTRY }}/$IMAGE_NAME:pyodide
+
+      - name: Calculate and run test command
+        run: |
+          ENV_FLAG=$([ "${{ inputs.environment }}" = "local" ] && echo "--local" || echo "")
+          TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG -v suites/${{ inputs.test_cases_dir }}"
+          
+          echo "DOCKER_COMMAND_COMPOSED=$TEST_COMMAND" >> $GITHUB_ENV  
+          echo "Running test command: $TEST_COMMAND"         
+
+      - name: Uppercase the environment
+        id: set-api-key
+        run: |
+          if [ "${{ inputs.environment }}" = "local" ]; then
+            ENV_UPPER="DEV"
+          else
+            ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+          fi
+          echo "ENV_UPPER=${ENV_UPPER}" >> $GITHUB_ENV
 
       - name: Run docker-compose
         run: |
+          echo "::notice::Starting docker-compose with command: ${{ env.DOCKER_COMMAND_COMPOSED }}"
+          echo "::notice::On environment: ${{ env.ENV_UPPER }}"
+          export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
+          export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
+          export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
           export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
-          export DEPLOYMENT_URL="${{ secrets.DEPLOYMENT_URL }}"
-          export ALITA_API_KEY="${{ secrets.ALITA_API_KEY }}"
-          export PROJECT_ID="${{ secrets.PROJECT_ID }}"
           export CONFLUENCE_API_KEY="${{ secrets.CONFLUENCE_API_KEY }}"
           export CONFLUENCE_BASE_URL="${{ secrets.CONFLUENCE_BASE_URL }}"
           export CONFLUENCE_USERNAME="${{ secrets.CONFLUENCE_USERNAME }}"
@@ -62,23 +98,33 @@ jobs:
           export ADO_REPOSITORY_ID="${{ secrets.ADO_REPOSITORY_ID }}"
           export ADO_ORGANIZATION_URL="${{ secrets.ADO_ORGANIZATION_URL }}"
           export ADO_PROJECT="${{ secrets.ADO_PROJECT }}"
+          export JIRA_API_KEY="${{ secrets.JIRA_API_KEY }}"
+          export JIRA_USERNAME="${{ secrets.JIRA_USERNAME }}"
+          export JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}"
+          export FIGMA_API_TOKEN="${{ secrets.FIGMA_API_TOKEN }}"
+          export BITBUCKET_TOKEN="${{ secrets.BITBUCKET_TOKEN }}"
+          export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
+          export ENVIRONMENT="${{ inputs.environment }}"
+          export DOCKER_COMMAND="${{ env.DOCKER_COMMAND_COMPOSED }}"
+          export ENV_NAME="${{ inputs.environment }}"
           docker-compose up -d
-          
+
       - name: Wait for tests to complete
         run: |
           echo "Waiting for test execution to complete..."
           
-       
           TIMEOUT=10000
           ELAPSED=0
           INTERVAL=20
+          CONTAINER_EXIT_CODE=0
           
           while [ $ELAPSED -lt $TIMEOUT ]; do
             STATUS=$(docker inspect alita-sdk-dev --format='{{.State.Status}}' 2>/dev/null || echo "not-found")
             
             if [ "$STATUS" = "exited" ]; then
               EXIT_CODE=$(docker inspect alita-sdk-dev --format='{{.State.ExitCode}}')
+              CONTAINER_EXIT_CODE=$EXIT_CODE
               echo "Container exited with code: $EXIT_CODE"
               
               if [ "$EXIT_CODE" -eq 0 ]; then
@@ -106,12 +152,73 @@ jobs:
           if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "⚠️ Timeout reached after $TIMEOUT seconds"
             docker-compose logs alita-sdk
+            exit 1
           fi
           
+          if [ $CONTAINER_EXIT_CODE -ne 0 ]; then
+            echo "::error::Tests failed with exit code $CONTAINER_EXIT_CODE"
+            exit $CONTAINER_EXIT_CODE
+          fi
+
       - name: Copy test results
+        if: always()
         run: |
-          docker cp alita-sdk-dev:/app/.alita/tests/results/test_execution_summary.json ./test_execution_summary.json || echo "{}" > ./test_execution_summary.json
-      
+          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json ./results.json || echo "{}" > ./results.json
+          
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "Generating test report..."
+          python .alita/tests/test_pipelines/scripts/generate_report.py ./results.json
+
+      - name: Print execution summary
+        if: always()
+        run: |
+          if [ ! -f ./results.json ]; then
+            echo "❌ No results.json found - tests may not have completed"
+            if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "## ❌ Test Results" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "❌ No results.json found - tests may not have completed" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 1
+          fi
+          
+          # Parse JSON with jq
+          SUITE=$(jq -r '.suite_name // "unknown"' ./results.json)
+          PASSED=$(jq -r '.passed // 0' ./results.json)
+          FAILED=$(jq -r '.failed // 0' ./results.json)
+          ERRORS=$(jq -r '.errors // 0' ./results.json)
+          SKIPPED=$(jq -r '.skipped // 0' ./results.json)
+          
+          # Determine status based on failures and errors
+          if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
+            STATUS_DISPLAY="❌ TESTS_FAILED"
+          else
+            STATUS_DISPLAY="✅ TESTS_PASSED"
+          fi
+                    
+          # Write to GitHub Step Summary
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            {
+              echo ""
+              echo "## 📊 Test Execution Summary"
+              echo ""
+              echo '```'
+              echo "═══════════════════════════════════════════════════════════════"
+              echo "  Execution Summary"
+              echo "═══════════════════════════════════════════════════════════════"
+              echo ""
+              echo "Suite Results:"
+              echo ""
+              printf "%-20s %-23s %-8s %-8s %-8s %-8s\n" "SUITE" "STATUS" "PASSED" "FAILED" "ERRORS" "SKIPPED"
+              echo "───────────────────────────────────────────────────────────────────────────────────"
+              printf "%-20s %-23s %-8s %-8s %-8s %-8s\n" "$SUITE" "$STATUS_DISPLAY" "$PASSED" "$FAILED" "$ERRORS" "$SKIPPED"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Save Docker logs
         if: always()
         run: |
@@ -119,61 +226,7 @@ jobs:
           
       - name: Stop docker-compose
         if: always()
-        run: docker-compose down
-
-      - name: Generate Test Summary
-        if: always()
-        run: |
-          if [ -f ./test_execution_summary.json ]; then
-            echo "# Test Execution Summary" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            # Overall Results
-            OVERALL=$(jq -r '.overall_result' ./test_execution_summary.json)
-            TOTAL=$(jq -r '.summary.total_tests' ./test_execution_summary.json)
-            PASSED=$(jq -r '.summary.passed' ./test_execution_summary.json)
-            FAILED=$(jq -r '.summary.failed' ./test_execution_summary.json)
-            PASS_RATE=$(jq -r '.summary.pass_rate' ./test_execution_summary.json)
-            
-            if [ "$OVERALL" = "pass" ]; then
-              echo "## ✅ Overall Result: PASS" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "## ❌ Overall Result: FAIL" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Total Tests:** $TOTAL | **Passed:** $PASSED | **Failed:** $FAILED | **Pass Rate:** $PASS_RATE" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            # Test Cases Table
-            echo "## Test Cases" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Test Case | Status | Steps |" >> $GITHUB_STEP_SUMMARY
-            echo "|-----------|--------|-------|" >> $GITHUB_STEP_SUMMARY
-            
-            jq -r '.test_cases[] | 
-              "| " + .title + " | " + 
-              (if .passed then "✅ PASS" else "❌ FAIL" end) + " | " + 
-              (.steps | length | tostring) + " |"
-            ' ./test_execution_summary.json >> $GITHUB_STEP_SUMMARY
-            
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            # Detailed Steps
-            echo "## Detailed Steps" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            jq -r '.test_cases[] | 
-              "### " + (if .passed then "✅" else "❌" end) + " " + .title + "\n\n" +
-              (.steps[] | 
-                "**Step " + (.step_number | tostring) + ":** " + .title + "\n" +
-                "- " + (if .passed then "✅ PASSED" else "❌ FAILED" end) + ": " + .details + "\n"
-              ) + "\n"
-            ' ./test_execution_summary.json >> $GITHUB_STEP_SUMMARY
-          else
-            echo "# ⚠️ Test Summary Not Found" >> $GITHUB_STEP_SUMMARY
-            echo "Test execution summary file was not generated." >> $GITHUB_STEP_SUMMARY
-          fi
+        run: docker-compose down --remove-orphans
 
       - name: Upload test results as artifact
         if: always()
@@ -181,21 +234,11 @@ jobs:
         with:
           name: test-results-${{ inputs.test_cases_dir }}
           path: |
-            ./test_execution_summary.json
+            ./results.html
             ./docker-logs.txt
-            .github/ai_native/results/
-          retention-days: 30
+          retention-days: 1
 
-      - name: Fail workflow if tests failed
+      - name: CLEAN UP WORKSPACE AFTER RUN
         if: always()
         run: |
-          if [ -f ./test_execution_summary.json ]; then
-            RESULT=$(jq -r '.overall_result' ./test_execution_summary.json)
-            if [ "$RESULT" != "pass" ]; then
-              echo "Tests failed with result: $RESULT"
-              exit 1
-            fi
-          else
-            echo "Test summary file not found"
-            exit 1
-          fi
+          sudo rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*

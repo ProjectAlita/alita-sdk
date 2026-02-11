@@ -8,7 +8,6 @@ from alita_sdk.tools import get_toolkits as alita_toolkits
 from alita_sdk.tools import get_tools as alita_tools
 from .application import ApplicationToolkit
 from .artifact import ArtifactToolkit
-from .subgraph import SubgraphToolkit
 from .vectorstore import VectorStoreToolkit
 from .mcp import McpToolkit
 from .mcp_config import McpConfigToolkit, get_mcp_config_toolkit_schemas
@@ -22,6 +21,7 @@ from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
 from ...tools.utils import clean_string
 from alita_sdk.tools import _inject_toolkit_id
 from .security import is_toolkit_blocked, is_tool_blocked, get_blocked_tools_for_toolkit
+
 
 logger = logging.getLogger(__name__)
 
@@ -136,27 +136,14 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         ignored_mcp_servers=ignored_mcp_servers,
                         is_subgraph=is_pipeline_subgraph,  # Pass is_subgraph for pipelines
                         mcp_tokens=mcp_tokens,
-                        project_id=app_project_id  # Use agent's project, not conversation's
+                        project_id=app_project_id,  # Use agent's project, not conversation's
+                        conversation_id=conversation_id
                     ).get_tools())
                 except Exception as app_err:
                     # Gracefully skip application tools that fail to load (e.g., deleted agents)
                     # This is common for conversation participants that reference stale agents
                     logger.warning(f"Skipping application tool '{tool.get('name', 'unknown')}': {app_err}")
                     continue
-                # TODO: deprecate next release (1/15/2026)
-                # if is_pipeline_subgraph:
-                #     # static get_toolkit returns a list of CompiledStateGraph stubs
-                #     # Pass is_subgraph=True to enable PrinterNode filtering
-                #     logger.info(f"Processing pipeline as subgraph, will filter PrinterNodes")
-                #     tools.extend(SubgraphToolkit.get_toolkit(
-                #         alita_client,
-                #         application_id=int(tool['settings']['application_id']),
-                #         application_version_id=int(tool['settings']['application_version_id']),
-                #         app_api_key=alita_client.auth_token,
-                #         selected_tools=[],
-                #         llm=llm,
-                #         is_subgraph=True  # Enable PrinterNode filtering for pipelines used as subgraphs
-                #     ))
             elif tool['type'] == 'memory':
                 tool_handled = True
                 tools += MemoryToolkit.get_toolkit(

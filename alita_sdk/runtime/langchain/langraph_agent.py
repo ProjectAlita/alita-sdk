@@ -73,6 +73,233 @@ def normalize_message_content(content: Any) -> str:
 SUBGRAPH_REGISTRY: Dict[str, Dict[str, Any]] = {}
 
 
+def _resolve_bypass_chain(target: str, bypass_mapping: dict, all_printer_related: set, max_depth: int = 100) -> str:
+    """
+    Recursively follow bypass mapping chain to find the first non-printer target.
+
+    Args:
+        target: Starting target node ID
+        bypass_mapping: Mapping of printer_id -> successor_id
+        all_printer_related: Set of all printer and reset node IDs
+        max_depth: Maximum chain depth to prevent infinite loops
+
+    Returns:
+        Final non-printer target node ID
+    """
+    visited = set()
+    depth = 0
+
+    while target in all_printer_related or target in bypass_mapping:
+        if depth >= max_depth:
+            logger.error(f"Maximum bypass chain depth ({max_depth}) exceeded for target '{target}'")
+            break
+
+        if target in visited:
+            logger.error(f"Circular reference detected in bypass chain starting from '{target}'")
+            break
+
+        visited.add(target)
+
+        if target in bypass_mapping:
+            target = bypass_mapping[target]
+            depth += 1
+            logger.debug(f"Following bypass chain: depth={depth}, target={target}")
+        else:
+            # Target is in all_printer_related but not in bypass mapping
+            logger.warning(f"Target '{target}' is a printer node without bypass mapping")
+            break
+
+    return target
+
+
+def _filter_printer_nodes_from_yaml(yaml_schema: str) -> str:
+    """
+    Filter out PrinterNodes and their reset nodes from a YAML schema.
+
+    This function removes:
+    1. Nodes with type='printer'
+    2. Reset nodes (pattern: {node_id}_reset)
+    3. Rewires transitions to bypass removed printer nodes
+    4. Removes printer nodes from interrupt configurations
+
+    Args:
+        yaml_schema: Original YAML schema string
+
+    Returns:
+        Filtered YAML schema string without PrinterNodes
+    """
+    try:
+        schema_dict = yaml.safe_load(yaml_schema)
+
+        if not schema_dict or 'nodes' not in schema_dict:
+            return yaml_schema
+
+        nodes = schema_dict.get('nodes', [])
+
+        # Step 1: Identify printer nodes and build bypass mapping
+        printer_nodes = set()
+        printer_reset_nodes = set()
+        printer_bypass_mapping = {}  # printer_node_id -> actual_successor_id
+
+        # First pass: Identify all printer nodes and reset nodes
+        for node in nodes:
+            node_id = node.get('id')
+            node_type = node.get('type')
+
+            if not node_id:
+                continue
+
+            # Identify reset nodes by naming pattern
+            if node_id.endswith('_reset'):
+                printer_reset_nodes.add(node_id)
+                continue
+
+            # Identify main printer nodes
+            if node_type == 'printer':
+                printer_nodes.add(node_id)
+
+        # Second pass: Build bypass mapping for printer nodes
+        for node in nodes:
+            node_id = node.get('id')
+            node_type = node.get('type')
+
+            if not node_id or node_type != 'printer':
+                continue
+
+            # Try standard pattern first: Printer -> Printer_reset -> NextNode
+            reset_node_id = f"{node_id}_reset"
+            reset_node = next((n for n in nodes if n.get('id') == reset_node_id), None)
+
+            if reset_node:
+                # Standard pattern with reset node
+                actual_successor = reset_node.get('transition')
+                if actual_successor:
+                    printer_bypass_mapping[node_id] = actual_successor
+                    logger.debug(f"Printer bypass mapping (standard): {node_id} -> {actual_successor}")
+            else:
+                # Direct transition pattern: Printer -> NextNode (no reset node)
+                # Get the direct transition from the printer node
+                direct_transition = node.get('transition')
+                if direct_transition:
+                    printer_bypass_mapping[node_id] = direct_transition
+                    logger.debug(f"Printer bypass mapping (direct): {node_id} -> {direct_transition}")
+
+        # Create the set of all printer-related nodes early so it can be used in rewiring
+        all_printer_related = printer_nodes | printer_reset_nodes
+
+        # Step 2: Filter out printer nodes and reset nodes
+        filtered_nodes = []
+        for node in nodes:
+            node_id = node.get('id')
+            node_type = node.get('type')
+
+            # Skip printer nodes
+            if node_type == 'printer':
+                logger.debug(f"Filtering out printer node: {node_id}")
+                continue
+
+            # Skip reset nodes
+            if node_id in printer_reset_nodes:
+                logger.debug(f"Filtering out printer reset node: {node_id}")
+                continue
+
+            # Step 3: Rewire transitions in remaining nodes to bypass printer nodes
+            # Use recursive resolution to handle chains of printers
+            if 'transition' in node:
+                transition = node['transition']
+                if transition in printer_bypass_mapping or transition in all_printer_related:
+                    new_transition = _resolve_bypass_chain(transition, printer_bypass_mapping, all_printer_related)
+                    if new_transition != transition:
+                        node['transition'] = new_transition
+                        logger.debug(f"Rewired transition in node '{node_id}': {transition} -> {new_transition}")
+
+            # Handle conditional outputs
+            if 'condition' in node:
+                condition = node['condition']
+                if 'conditional_outputs' in condition:
+                    new_outputs = []
+                    for output in condition['conditional_outputs']:
+                        if output in printer_bypass_mapping or output in all_printer_related:
+                            resolved_output = _resolve_bypass_chain(output, printer_bypass_mapping, all_printer_related)
+                            new_outputs.append(resolved_output)
+                        else:
+                            new_outputs.append(output)
+                    condition['conditional_outputs'] = new_outputs
+
+                if 'default_output' in condition:
+                    default = condition['default_output']
+                    if default in printer_bypass_mapping or default in all_printer_related:
+                        condition['default_output'] = _resolve_bypass_chain(default, printer_bypass_mapping, all_printer_related)
+
+            # Handle decision nodes
+            if 'decision' in node:
+                decision = node['decision']
+                if 'nodes' in decision:
+                    new_nodes = []
+                    for decision_node in decision['nodes']:
+                        if decision_node in printer_bypass_mapping or decision_node in all_printer_related:
+                            resolved_node = _resolve_bypass_chain(decision_node, printer_bypass_mapping, all_printer_related)
+                            new_nodes.append(resolved_node)
+                        else:
+                            new_nodes.append(decision_node)
+                    decision['nodes'] = new_nodes
+
+            # Handle routes (for router nodes)
+            if 'routes' in node:
+                routes = node['routes']
+                if isinstance(routes, list):
+                    new_routes = []
+                    for route in routes:
+                        if isinstance(route, dict) and 'target' in route:
+                            target = route['target']
+                            if target in printer_bypass_mapping or target in all_printer_related:
+                                route['target'] = _resolve_bypass_chain(target, printer_bypass_mapping, all_printer_related)
+                        new_routes.append(route)
+                    node['routes'] = new_routes
+
+            filtered_nodes.append(node)
+
+        # Update the nodes in schema
+        schema_dict['nodes'] = filtered_nodes
+
+        # Step 4: Filter printer nodes from interrupt configurations
+        if 'interrupt_before' in schema_dict:
+            schema_dict['interrupt_before'] = [
+                i for i in schema_dict['interrupt_before']
+                if i not in all_printer_related
+            ]
+
+        if 'interrupt_after' in schema_dict:
+            schema_dict['interrupt_after'] = [
+                i for i in schema_dict['interrupt_after']
+                if i not in all_printer_related
+            ]
+
+        # Update entry point if it points to a printer node
+        # Use helper function to recursively resolve the chain
+        if 'entry_point' in schema_dict:
+            entry_point = schema_dict['entry_point']
+            original_entry = entry_point
+
+            # Check if entry point is a printer node (directly or in bypass mapping)
+            if entry_point in all_printer_related or entry_point in printer_bypass_mapping:
+                # Use helper function to resolve the chain
+                resolved_entry = _resolve_bypass_chain(entry_point, printer_bypass_mapping, all_printer_related)
+
+                if resolved_entry != original_entry:
+                    schema_dict['entry_point'] = resolved_entry
+                    logger.info(f"Updated entry point: {original_entry} -> {resolved_entry}")
+
+        # Convert back to YAML
+        filtered_yaml = yaml.dump(schema_dict, default_flow_style=False, sort_keys=False)
+        return filtered_yaml
+
+    except Exception as e:
+        logger.error(f"Error filtering PrinterNodes from YAML: {e}", exc_info=True)
+        # Return original YAML if filtering fails
+        return yaml_schema
+
+
 # Wrapper for injecting a compiled subgraph into a parent StateGraph
 class SubgraphRunnable(CompiledStateGraph):
     def __init__(
@@ -639,23 +866,8 @@ def create_graph(
     # Update lazy_tools_mode to effective value for use in LLMNode creation
     lazy_tools_mode = effective_lazy_mode
 
-    # TODO: deprecate next release (1/15/2026)
-    # For top-level graphs (not subgraphs), detect and flatten any subgraphs
-    # if not for_subgraph:
-    #     flattened_yaml, additional_tools = detect_and_flatten_subgraphs(yaml_schema)
-    #     # Add collected tools from subgraphs to the tools list
-    #     tools = list(tools) + additional_tools
-    #     # Use the flattened YAML for building the graph
-    #     yaml_schema = flattened_yaml
-    # else:
-    #     # For subgraphs, filter out PrinterNodes from YAML
-    #     from ..toolkits.subgraph import _filter_printer_nodes_from_yaml
-    #     yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
-    #     logger.info("Filtered PrinterNodes from subgraph YAML in create_graph")
-
     if for_subgraph:
         # Sanitization for sub-graphs
-        from ..toolkits.subgraph import _filter_printer_nodes_from_yaml
         yaml_schema = _filter_printer_nodes_from_yaml(yaml_schema)
         logger.info("Filtered PrinterNodes from subgraph YAML in create_graph")
 
@@ -721,22 +933,8 @@ def create_graph(
                                 input_mapping= input_mapping
                             ))
                         elif node_type == 'subgraph' or node_type == 'pipeline':
-                            # assign parent memory/store
-                            # matching_tool.checkpointer = memory
-                            # matching_tool.store = store
-                            # wrap with mappings
-                            pipeline_name = node.get('tool', None)
-                            if not pipeline_name:
-                                raise ValueError(
-                                    "Subgraph must have a 'tool' node: add required tool to the subgraph node")
-                            node_fn = SubgraphRunnable(
-                                inner=matching_tool.graph,
-                                name=pipeline_name,
-                                input_mapping=node.get('input_mapping', {}),
-                                output_mapping=node.get('output_mapping', {}),
-                            )
-                            lg_builder.add_node(node_id, node_fn)
-                            break  # skip legacy handling
+                            # unreachable code
+                            raise ToolException(f"Nodes with types: subgraph and pipeline are not supported yet. Use node type agent instead.")
                         elif node_type == 'tool':
                             lg_builder.add_node(node_id, ToolNode(
                                 client=client, tool=matching_tool,
@@ -863,8 +1061,12 @@ def create_graph(
                     # Lazy tools mode parameters
                     lazy_tools_mode=use_lazy_for_node,
                     tool_registry=tool_registry if use_lazy_for_node else None,
-                    # Always-bind tools (e.g., middleware/planning tools)
-                    always_bind_tools=always_bind_tools if use_lazy_for_node else None,
+                    # Always-bind tools (e.g., agent/pipeline tools, planning tools)
+                    # These should ALWAYS be passed regardless of lazy mode - they need direct LLM access
+                    # Fix for #3382: When lazy mode auto-disabled (tool_count < 20), agent tools were lost
+                    # Fix for #3290: Always pass as list (or empty list), never None, to ensure
+                    # always_bind_tools are included with dynamically selected tools
+                    always_bind_tools=always_bind_tools or [],
                 ))
             elif node_type in ['router', 'decision']:
                 if node_type == 'router':
@@ -1260,18 +1462,19 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Don't use invoke(None) as that just returns current state without running
                     logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
 
-                    # FIX: When input contains 'messages' (e.g., regeneration scenario),
-                    # clear old checkpoint messages first to prevent duplication.
+                    # FIX: Clear old checkpoint messages to prevent duplication.
                     # The add_messages reducer would otherwise APPEND new messages to existing ones.
-                    if input.get('messages'):
-                        existing_messages = checkpoint_state.values.get('messages', [])
-                        if existing_messages:
-                            logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
-                            # Create RemoveMessage objects for all existing messages
-                            remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if hasattr(msg, 'id') and msg.id]
-                            if remove_msgs:
-                                # Update state to remove old messages before invoking
-                                self.update_state(config, {'messages': remove_msgs})
+                    # Use 'in' check instead of truthiness - empty list [] is falsy but means
+                    # "messages key exists with no history" (e.g., after chat clear), which still
+                    # requires clearing the old checkpoint to avoid stale SystemMessages.
+                    existing_messages = checkpoint_state.values.get('messages', [])
+                    if existing_messages:
+                        logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
+                        # Create RemoveMessage objects for all existing messages
+                        remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if hasattr(msg, 'id') and msg.id]
+                        if remove_msgs:
+                            # Update state to remove old messages before invoking
+                            self.update_state(config, {'messages': remove_msgs})
 
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:

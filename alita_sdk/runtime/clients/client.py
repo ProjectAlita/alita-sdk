@@ -17,10 +17,11 @@ from langchain_anthropic import ChatAnthropic
 
 from ..langchain.assistant import Assistant as LangChainAssistant
 from .artifact import Artifact
-from ..langchain.chat_message_template import Jinja2TemplatedChatMessagesTemplate
+from ..middleware import TransformErrorStrategy, LoggingStrategy
 from ..utils.mcp_oauth import McpAuthorizationRequired
 from ...tools import get_available_toolkit_models, instantiate_toolkit
 from ...tools.base_indexer_toolkit import IndexTools
+from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,148 @@ class AlitaClient:
             return data.get('items', [])
         return []
 
+    def get_filtered_models(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        Get filtered list of available models based on flexible criteria.
+
+        Args:
+            filters: Dictionary where keys are model field names and values define filter criteria.
+                    Supports multiple filter types:
+
+                    String fields (name, display_name, etc.):
+                    - Simple string: exact match (case-insensitive)
+                    - String with '*': wildcard match (e.g., '*claude*')
+                    - Regex pattern object: regex match
+
+                    Boolean fields (low_tier, high_tier, supports_vision, supports_reasoning, default, shared):
+                    - True/False: exact match
+
+                    Numeric fields (context_window, max_output_tokens, project_id):
+                    - Number: exact match
+                    - Dict with '<', '>', '<=', '>=': comparison
+                      e.g., {'context_window': {'>=': 200000}}
+
+                    Special filters:
+                    - name_contains: partial match in name (case-insensitive)
+                    - display_name_contains: partial match in display_name (case-insensitive)
+
+        Returns:
+            List of model dictionaries matching all filter criteria.
+
+        Example:
+            >>> # Boolean filters
+            >>> models = client.get_filtered_models({'low_tier': True})
+            >>> models = client.get_filtered_models({'low_tier': True, 'project_id': 1})
+            >>>
+            >>> # String filters
+            >>> models = client.get_filtered_models({'name': 'claude-sonnet-4-5'})
+            >>> models = client.get_filtered_models({'name': '*claude*'})
+            >>> models = client.get_filtered_models({'display_name': '*Sonnet*'})
+            >>>
+            >>> # Numeric comparisons
+            >>> models = client.get_filtered_models({
+            ...     'context_window': {'>=': 200000},
+            ...     'max_output_tokens': {'>': 50000}
+            ... })
+            >>>
+            >>> # Mixed filters
+            >>> models = client.get_filtered_models({
+            ...     'low_tier': True,
+            ...     'name': '*claude*',
+            ...     'context_window': {'>=': 200000}
+            ... })
+        """
+        import re
+
+        if filters is None:
+            filters = {}
+
+        all_models = self.get_available_models()
+        if not all_models:
+            return []
+
+        filtered = all_models
+
+        for key, value in filters.items():
+            if value is None:
+                continue
+
+            # Handle special string contains filters
+            if key == 'name_contains':
+                search_term = value.lower()
+                filtered = [m for m in filtered if search_term in m.get('name', '').lower()]
+                continue
+
+            if key == 'display_name_contains':
+                search_term = value.lower()
+                filtered = [m for m in filtered if search_term in m.get('display_name', '').lower()]
+                continue
+
+            # Filter models based on field type
+            new_filtered = []
+            for model in filtered:
+                field_value = model.get(key)
+
+                # Handle missing fields
+                if field_value is None:
+                    continue
+
+                # Boolean fields - exact match
+                if isinstance(value, bool):
+                    if field_value == value:
+                        new_filtered.append(model)
+
+                # Numeric fields with comparison operators
+                elif isinstance(value, dict) and any(op in value for op in ['<', '>', '<=', '>=']):
+                    if not isinstance(field_value, (int, float)):
+                        continue
+
+                    match = True
+                    for op, threshold in value.items():
+                        if op == '<' and not (field_value < threshold):
+                            match = False
+                            break
+                        elif op == '>' and not (field_value > threshold):
+                            match = False
+                            break
+                        elif op == '<=' and not (field_value <= threshold):
+                            match = False
+                            break
+                        elif op == '>=' and not (field_value >= threshold):
+                            match = False
+                            break
+
+                    if match:
+                        new_filtered.append(model)
+
+                # String fields
+                elif isinstance(value, str):
+                    if not isinstance(field_value, str):
+                        continue
+
+                    # Wildcard pattern matching
+                    if '*' in value:
+                        pattern = re.escape(value).replace(r'\*', '.*')
+                        if re.search(pattern, field_value, re.IGNORECASE):
+                            new_filtered.append(model)
+                    # Exact match (case-insensitive for strings)
+                    elif field_value.lower() == value.lower():
+                        new_filtered.append(model)
+
+                # Regex pattern matching
+                elif hasattr(value, 'match'):  # regex pattern object
+                    if isinstance(field_value, str) and value.search(field_value):
+                        new_filtered.append(model)
+
+                # Numeric fields - exact match
+                elif isinstance(value, (int, float)):
+                    if field_value == value:
+                        new_filtered.append(model)
+
+            filtered = new_filtered
+
+        return filtered
+
     def get_embeddings(self, embedding_model: str) -> OpenAIEmbeddings:
         """
         Get an instance of OpenAIEmbeddings configured with the project ID and auth token.
@@ -365,7 +508,71 @@ class AlitaClient:
 
             llm = ChatOpenAI(**target_kwargs)
         return llm
-        
+
+    def get_low_tier_llm(self, max_tokens: int = 1024, temperature: float = 0.7,
+                         top_p: Optional[float] = None, additional_filters: Optional[Dict[str, Any]] = None):
+        """
+        Get a low-tier LLM instance automatically selected from available models.
+
+        Args:
+            max_tokens: Maximum number of tokens to generate (default: 1024)
+            temperature: Temperature for generation (default: 0.7)
+            top_p: Top-p sampling parameter (optional)
+            additional_filters: Additional filters to apply when selecting the model (optional)
+                              e.g., {'supports_vision': True, 'name': '*claude*'}
+
+        Returns:
+            An instance of ChatOpenAI or ChatAnthropic configured as a low-tier model or None if no suitable model is available.
+
+        Example:
+            >>> # Get a basic low-tier model
+            >>> llm = client.get_low_tier_llm()
+            >>>
+            >>> # Get a low-tier model with custom tokens
+            >>> llm = client.get_low_tier_llm(max_tokens=2048)
+            >>>
+            >>> # Get a low-tier Claude model with vision support
+            >>> llm = client.get_low_tier_llm(
+            ...     max_tokens=2048,
+            ...     additional_filters={'name': '*claude*', 'supports_vision': True}
+            ... )
+        """
+        # Build filters starting with low_tier requirement
+        filters = {'low_tier': True}
+
+        # Add any additional filters
+        if additional_filters:
+            filters.update(additional_filters)
+
+        # Get filtered models
+        low_tier_models = self.get_filtered_models(filters)
+
+        if not low_tier_models:
+            logger.warning("No low-tier models available matching the specified criteria")
+            return None
+
+        # Select the first available low-tier model
+        selected_model = low_tier_models[0]
+        model_name = selected_model['name']
+
+        logger.info(f"Selected low-tier model: {model_name} (display_name: {selected_model.get('display_name', 'N/A')})")
+
+        # Build model configuration
+        model_config = {
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        # Add top_p if provided
+        if top_p is not None:
+            model_config["top_p"] = top_p
+
+        # Return the LLM instance
+        try:
+            return self.get_llm(model_name, model_config)
+        except Exception:
+            return None
+
     def generate_image(self,
                        prompt: str,
                        n: int = 1,
@@ -453,7 +660,8 @@ class AlitaClient:
                     version_details: Optional[dict] = None, store: Optional[BaseStore] = None,
                     llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
                     conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None,
-                    is_subgraph: bool = False, middleware: Optional[list] = None):
+                    is_subgraph: bool = False, middleware: Optional[list] = None,
+                    exception_handling_enabled: bool = False):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -504,6 +712,21 @@ class AlitaClient:
             )
             middleware_list.append(planning_middleware)
             logger.info(f"Auto-created PlanningMiddleware for conversation_id={conversation_id}")
+
+        # add ToolExceptionHandlerMiddleware to handle tool errors with LLM messages
+        # Can be disabled by setting exception_handling_enabled=False
+        if exception_handling_enabled:
+            error_handler = ToolExceptionHandlerMiddleware(
+                strategies=[
+                    TransformErrorStrategy(
+                        llm=self.get_low_tier_llm() or llm,
+                        return_detailed_errors=True
+                    ),
+                    LoggingStrategy(callbacks=[])
+                ],
+                conversation_id=conversation_id
+            )
+            middleware_list.append(error_handler)
 
         # Extract lazy_tools_mode from internal_tools (it's a mode flag, not an actual tool)
         # UI stores it in meta.internal_tools array, not as meta.lazy_tools_mode boolean
@@ -930,7 +1153,8 @@ class AlitaClient:
                       store: Optional[BaseStore] = None, debug_mode: Optional[bool] = False,
                       mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None,
                       ignored_mcp_servers: Optional[list] = None, persona: Optional[str] = "generic",
-                      lazy_tools_mode: Optional[bool] = False, internal_tools: Optional[list] = None):
+                      lazy_tools_mode: Optional[bool] = False, internal_tools: Optional[list] = None,
+                      exception_handling_enabled: bool = False):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -951,6 +1175,7 @@ class AlitaClient:
             lazy_tools_mode: Enable lazy tools mode to reduce token usage with many toolkits (default: False)
             internal_tools: Optional list of internal tool names (e.g., ['swarm', 'planner']).
                            Enables special modes like swarm for multi-agent collaboration.
+            exception_handling_enabled: Enable automatic exception handling with ToolExceptionHandlerMiddleware (default: False)
 
         Returns:
             Runnable agent ready for execution
@@ -975,13 +1200,10 @@ class AlitaClient:
             'internal_tools': internal_tools  # Mode flags like 'swarm' for multi-agent collaboration
         }
 
-        # Auto-create middleware based on internal_tools in the tools list
-        # Check if any tool config is an internal_tool with name='planner'
+        # Auto-create middleware based on internal_tools parameter
+        # This matches the behavior in application() method
         middleware_list = []
-        has_planner = any(
-            t.get('type') == 'internal_tool' and t.get('name') == 'planner'
-            for t in tools
-        )
+        has_planner = 'planner' in internal_tools
         if has_planner:
             from ..middleware.planning import PlanningMiddleware
             planning_middleware = PlanningMiddleware(
@@ -990,6 +1212,21 @@ class AlitaClient:
             )
             middleware_list.append(planning_middleware)
             logger.info(f"Auto-created PlanningMiddleware for predict agent (conversation_id={conversation_id})")
+
+        # Add ToolExceptionHandlerMiddleware to handle tool errors with LLM messages
+        # Can be disabled by setting exception_handling_enabled=False
+        if exception_handling_enabled:
+            error_handler = ToolExceptionHandlerMiddleware(
+                strategies=[
+                    TransformErrorStrategy(
+                        llm=self.get_low_tier_llm() or llm,
+                        return_detailed_errors=True
+                    ),
+                    LoggingStrategy(callbacks=[])
+                ],
+                conversation_id=conversation_id
+            )
+            middleware_list.append(error_handler)
 
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler

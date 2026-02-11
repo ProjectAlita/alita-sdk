@@ -1,0 +1,29 @@
+{
+  "type": "bitbucket",
+  "toolkit_name": "bitbucket-cloud",
+  "id": 1,
+  "bitbucket_configuration": {
+    "alita_title": "bitbucket",
+    "private": true
+  },
+  "project": "${BITBUCKET_PROJECT:alita-automation}",
+  "repository": "${BITBUCKET_REPOSITORY:automation}",
+  "branch": "main",
+  "cloud": true,
+  "selected_tools": [
+    "create_branch",
+    "set_active_branch",
+    "list_branches_in_repo",
+    "list_files",
+    "read_file",
+    "create_file",
+    "update_file",
+    "create_pull_request",
+    "get_pull_request",
+    "get_pull_requests_commits",
+    "get_pull_requests_changes",
+    "add_pull_request_comment",
+    "delete_branch",
+    "close_pull_request"
+  ]
+}

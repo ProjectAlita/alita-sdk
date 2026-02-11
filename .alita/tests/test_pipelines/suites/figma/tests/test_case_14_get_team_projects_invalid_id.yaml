@@ -1,0 +1,81 @@
+name: "FIG14 - Get Team Projects: Invalid ID"
+description: "Test get_team_projects error handling with invalid team ID"
+
+toolkits:
+  - id: ${FIGMA_TOOLKIT_ID}
+    name: ${FIGMA_TOOLKIT_NAME}
+
+state:
+  invalid_team_id:
+    type: str
+    value: "INVALID_TEAM_ID_99999"
+  test_results:
+    type: dict
+  tool_result:
+    type: dict
+
+entry_point: invoke_get_team_projects_invalid
+
+nodes:
+  - id: invoke_get_team_projects_invalid
+    type: toolkit
+    input:
+      - invalid_team_id
+    input_mapping:
+      team_id:
+        type: variable
+        value: invalid_team_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_team_projects
+    toolkit_name: ${FIGMA_TOOLKIT_NAME}
+    transition: validate_error_response
+
+  - id: validate_error_response
+    type: llm
+    input:
+      - tool_result
+      - invalid_team_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator for Figma API error handling testing.
+      task:
+        type: fstring
+        value: |-
+          Analyze the output from 'get_team_projects' with an invalid team ID.
+
+          Tool Output: {tool_result}
+          Invalid Team ID Used: {invalid_team_id}
+
+          Validation Criteria:
+          1. Tool Execution: Confirm the tool completed without crashing
+          2. Error Handling: Check for appropriate error response:
+             - Should return an error message
+             - Error should indicate team not found or unauthorized
+             - HTTP status should reflect the error (403/404)
+          3. Graceful Failure: Tool should handle invalid input gracefully
+          4. No Sensitive Data: Error should not expose internal details
+
+          Return a JSON object named test_results with this EXACT structure:
+          {
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "operation_succeeded": false,
+            "error_handled_gracefully": boolean,
+            "appropriate_error_message": boolean,
+            "error": string or null,
+            "message_snippet": "Brief summary of error handling"
+          }
+
+          IMPORTANT: Return ONLY the test_results JSON object, no additional text.
+    model: ${DEFAULT_LLM_MODEL:gpt-4o}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

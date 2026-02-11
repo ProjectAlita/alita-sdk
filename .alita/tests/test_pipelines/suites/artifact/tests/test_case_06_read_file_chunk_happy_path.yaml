@@ -1,0 +1,163 @@
+name: "ART06 - Read File Chunk: Partial Read by Line Range"
+priority: High
+description: |
+  Verify that read_file_chunk correctly reads specific line ranges from files.
+  
+  Objective: Test partial file reading with start_line and end_line parameters
+  
+  Expected Behavior:
+  - Specified line range is returned
+  - Lines outside range are not included
+  - Line numbering is 1-indexed and inclusive
+  - Content within range is accurate
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "chunk-test-${TIMESTAMP}.txt"
+  content:
+    type: str
+    value: |
+      Line 1: First
+      Line 2: Second
+      Line 3: Third
+      Line 4: Fourth
+      Line 5: Fifth
+  start_line:
+    type: int
+    value: 2
+  end_line:
+    type: int
+    value: 4
+  create_result:
+    type: str
+    value: ''
+  chunk_result:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  file_path:
+    type: str
+    value: ''
+  test_results:
+    type: str
+    value: ''
+
+entry_point: create_file
+
+nodes:
+  - id: create_file
+    name: create_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: content
+    output:
+      - create_result
+    structured_output: true
+    transition: read_chunk
+
+  - id: read_chunk
+    name: read_chunk
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: read_file_chunk
+    input:
+      - file_path
+      - bucket_name
+      - start_line
+      - end_line
+    input_mapping:
+      file_path:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      start_line:
+        type: fixed
+        value: 2
+      end_line:
+        type: fixed
+        value: 4
+    output:
+      - chunk_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - chunk_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact partial read operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the partial file read result (line 2-4 from 5-line file).
+          
+          Tool executed: read_file_chunk
+          Filename: chunk-test-${TIMESTAMP}.txt
+          Requested range: lines 2-4 (inclusive)
+          Expected content: Lines containing "Second", "Third", "Fourth"
+          Result: {chunk_result}
+          
+          Expected behavior:
+          - Only lines 2-4 are returned
+          - Line 1 and Line 5 are NOT included
+          - Content is accurate for requested range
+          - Line breaks are preserved
+          - No error messages
+          
+          Evaluate:
+          1. Does result contain lines 2-4?
+          2. Does result exclude lines 1 and 5?
+          3. Are the line contents correct (Second, Third, Fourth)?
+          4. Are line breaks preserved?
+          5. Is there any error?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of chunk read result",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

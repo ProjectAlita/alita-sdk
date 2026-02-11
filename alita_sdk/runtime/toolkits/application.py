@@ -86,7 +86,8 @@ class ApplicationToolkit(BaseToolkit):
     def get_toolkit(cls, client: 'AlitaClient', application_id: int, application_version_id: int,
                     selected_tools: list[str] = [], store: Optional[BaseStore] = None,
                     ignored_mcp_servers: Optional[list] = None, is_subgraph: bool = False,
-                    mcp_tokens: Optional[dict] = None, project_id: int = None):
+                    mcp_tokens: Optional[dict] = None, project_id: int = None,
+                    conversation_id: Optional[str] = None):
         """
         Get toolkit for an application.
 
@@ -121,6 +122,7 @@ class ApplicationToolkit(BaseToolkit):
                                                     model_settings),
                                  ignored_mcp_servers=ignored_mcp_servers,
                                  mcp_tokens=mcp_tokens,
+                                 conversation_id=conversation_id,
                                  version_details=version_details)  # Pass version_details to avoid re-fetching
 
         # Extract icon_meta from version_details meta field
@@ -158,6 +160,7 @@ class ApplicationToolkit(BaseToolkit):
                                           "ignored_mcp_servers": ignored_mcp_servers,
                                           "is_subgraph": is_subgraph,  # Pass is_subgraph flag
                                           "mcp_tokens": mcp_tokens,
+                                          "conversation_id": conversation_id,
                                           "version_details": version_details,  # Include to avoid re-fetching (critical for public project apps)
                                       })])
             

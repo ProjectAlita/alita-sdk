@@ -1,0 +1,139 @@
+name: "ART04 - List Files: Verify Bucket Contents"
+priority: Critical
+description: |
+  Verify that listFiles returns all files in bucket with correct metadata.
+  
+  Objective: Test file listing with proper metadata (name, link, modified timestamp, size)
+  
+  Expected Behavior:
+  - List returns array of file objects
+  - Each file has required metadata fields
+  - Download links are properly formatted
+  - File count matches created files
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  test_filename:
+    type: str
+    value: "list-test-${TIMESTAMP}.txt"
+  test_content:
+    type: str
+    value: "Test content for listing verification"
+  create_result:
+    type: str
+    value: ''
+  list_result:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  filename:
+    type: str
+    value: ''
+  test_result:
+    type: str
+    value: ''
+
+entry_point: create_test_file
+
+nodes:
+  - id: create_test_file
+    name: create_test_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: test_filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: test_content
+    output:
+      - create_result
+    structured_output: true
+    transition: list_files
+
+  - id: list_files
+    name: list_files
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: listFiles
+    input:
+      - bucket_name
+    input_mapping:
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - list_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - list_result
+      - test_filename
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact listing operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the file listing result to verify correct metadata and formatting.
+          
+          Tool executed: listFiles
+          Expected test file: {test_filename}
+          Result: {list_result}
+          
+          Expected behavior:
+          - Result contains array of file objects
+          - Each file object has: name, link (download URL), modified (timestamp), size
+          - Test file appears in the listing
+          - Download link is properly formatted: {bucket}/filename
+          - No errors in the response
+          
+          Evaluate:
+          1. Is the result a valid file list (contains rows/files array)?
+          2. Does the test file appear in the listing?
+          3. Does each file have required metadata fields (name, link, modified, size)?
+          4. Are download links properly formatted?
+          5. Are there any errors or null values in critical fields?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of listing result",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,193 @@
+name: "ART11 - Delete File: Remove from Bucket"
+priority: High
+description: |
+  Verify that deleteFile correctly removes files from bucket.
+  
+  Objective: Test file deletion and verification of removal
+  
+  Expected Behavior:
+  - File is deleted successfully
+  - File no longer appears in file listing
+  - Attempting to read deleted file returns error
+  - Deletion operation completes without errors
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "delete-test-${TIMESTAMP}.txt"
+  content:
+    type: str
+    value: "Content to be deleted"
+  create_result:
+    type: str
+    value: ''
+  delete_result:
+    type: str
+    value: ''
+  list_result:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  test_results:
+    type: str
+    value: ''
+entry_point: create_file
+
+nodes:
+  - id: create_file
+    name: create_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: content
+    output:
+      - create_result
+    structured_output: true
+    transition: read_before_delete
+
+  # Verify file exists before deletion by reading it
+  - id: read_before_delete
+    name: read_before_delete
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: readFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_before_result
+    structured_output: true
+    transition: delete_file
+
+  - id: delete_file
+    name: delete_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: deleteFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - delete_result
+    structured_output: true
+    transition: read_after_delete
+
+  # Attempt to read deleted file - should fail with error
+  - id: read_after_delete
+    name: read_after_delete
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: readFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_after_result
+    structured_output: true
+    transition: validate_result
+
+  # Verification using readFile instead of listFiles for more robust deletion check.
+  # Why readFile verification is superior:
+  # 1. Direct verification - Tests actual behavior (file cannot be accessed after deletion)
+  # 2. No JSON parsing complexity - Simple string checks for success/error indicators
+  # 3. No scaling issues - Works with 1 file or 10,000 files in bucket
+  # 4. Stronger guarantee - File is truly inaccessible, not just "missing from a list"
+  # 5. Simpler context - LLM only sees 3 small strings, not 185-file listings
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - read_before_result
+      - delete_result
+      - read_after_result
+      - filename
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact deletion operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the deletion workflow results to verify the file was properly deleted.
+          
+          Tool execution: readFile (before) → deleteFile → readFile (after)
+          File being tested: {filename}
+          
+          Read before delete: {read_before_result}
+          Delete operation: {delete_result}
+          Read after delete: {read_after_result}
+          
+          Expected behavior:
+          - File must be readable before deletion (read_before_result should NOT contain errors)
+          - Delete operation must succeed (delete_result should indicate success)
+          - File must NOT be readable after deletion (read_after_result MUST contain error/not found)
+          
+          Evaluate:
+          1. Was the file accessible before deletion?
+          2. Did the delete operation succeed?
+          3. Is the file inaccessible after deletion (read returns error)?
+          4. Are there any unexpected errors?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of deletion operation",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

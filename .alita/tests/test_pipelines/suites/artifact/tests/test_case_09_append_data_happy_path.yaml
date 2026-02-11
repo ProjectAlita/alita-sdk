@@ -1,0 +1,175 @@
+name: "ART09 - Append Data: Add Content to Existing File"
+priority: High
+description: |
+  Verify that appendData correctly adds content to the end of existing files.
+  
+  Objective: Test file appending with content preservation and order
+  
+  Expected Behavior:
+  - Original content is preserved
+  - New content is added at end
+  - Line breaks are handled correctly
+  - File can be read back with appended content
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  toolkit_id:
+    type: str
+    value: ${ARTIFACT_TOOLKIT_ID}
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  filename:
+    type: str
+    value: "append-test-${TIMESTAMP}.txt"
+  initial_content:
+    type: str
+    value: "Initial line 1\nInitial line 2"
+  append_content:
+    type: str
+    value: "\nAppended line 3\nAppended line 4"
+  create_result:
+    type: str
+    value: ''
+  append_result:
+    type: str
+    value: ''
+  read_result:
+    type: str
+    value: ''
+  filedata:
+    type: str
+    value: ''
+  test_results:
+    type: str
+    value: ''
+
+entry_point: create_file
+
+nodes:
+  - id: create_file
+    name: create_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: createFile
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: initial_content
+    output:
+      - create_result
+    structured_output: true
+    transition: append_data
+
+  - id: append_data
+    name: append_data
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: appendData
+    input:
+      - filename
+      - bucket_name
+      - filedata
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+      filedata:
+        type: variable
+        value: append_content
+    output:
+      - append_result
+    structured_output: true
+    transition: read_file
+
+  - id: read_file
+    name: read_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: readFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    name: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - append_result
+      - read_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for artifact append operations."
+      task:
+        type: fstring
+        value: |
+          Analyze the append and read results to verify content concatenation.
+          
+          Tool executed: appendData → readFile
+          Initial content: "Initial line 1\nInitial line 2"
+          Appended content: "\nAppended line 3\nAppended line 4"
+          
+          Append result: {append_result}
+          Read result: {read_result}
+          
+          Expected behavior:
+          - Append operation succeeds
+          - All initial lines are preserved
+          - Appended content is at the end
+          - File contains both initial and appended content
+          - No truncation or data loss
+          
+          Evaluate:
+          1. Did the append operation succeed?
+          2. Does the read result contain "Initial line 1"?
+          3. Does the read result contain "Initial line 2"?
+          4. Does the read result contain "Appended line 3"?
+          5. Does the read result contain "Appended line 4"?
+          6. Is the order correct (initial before appended)?
+          7. Is there any error?
+          
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of append operation",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

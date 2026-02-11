@@ -1,0 +1,170 @@
+name: "ADO31 - Delete Wiki Page by ID"
+description: "Verify the ADO 'delete_page_by_id' tool deletes a wiki page using its ID"
+
+toolkits:
+  - id: ${ADO_WIKI_TOOLKIT_ID}
+    name: ${ADO_WIKI_TOOLKIT_NAME}
+
+state:
+  create_result:
+    type: str
+    value: ''
+  page_content:
+    type: str
+  page_id:
+    type: int
+  page_name:
+    type: str
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+  version_identifier:
+    type: str
+    value: wikiMaster
+  wiki_identifier:
+    type: str
+    value: TestProject.wiki
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Wiki page to be deleted by ID
+        page_name = f"/TestPageToDeleteByID-{timestamp}-{random_suffix}"
+        nl = chr(10)
+        page_content = f"# Page for Delete by ID Test{nl}{nl}Created by ADO31 at {timestamp}-{random_suffix}{nl}This page will be deleted by ID."
+
+        {"page_name": page_name, "page_content": page_content}
+    input:
+      - wiki_identifier
+    output:
+      - page_name
+      - page_content
+    structured_output: true
+    transition: create_page_to_delete
+  - id: create_page_to_delete
+    type: toolkit
+    input:
+      - wiki_identifier
+      - page_name
+      - page_content
+      - version_identifier
+    input_mapping:
+      expanded:
+        type: fixed
+        value: true
+      page_content:
+        type: variable
+        value: page_content
+      page_name:
+        type: variable
+        value: page_name
+      version_identifier:
+        type: variable
+        value: version_identifier
+      version_type:
+        type: fixed
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+    output:
+      - create_result
+    structured_output: true
+    tool: modify_wiki_page
+    toolkit_name: ado-wiki-testing
+    transition: extract_page_id
+  - id: extract_page_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Extract page ID from create result
+        import json
+        result_str = alita_state.get('create_result', '{}')
+        if isinstance(result_str, str):
+            result = json.loads(result_str) if result_str.startswith('{') else {}
+        else:
+            result = result_str
+
+        # Try multiple paths to find page ID
+        page_id = result.get('id') or result.get('page', {}).get('id')
+
+        # Validate page_id is a positive integer
+        if not page_id or not isinstance(page_id, int) or page_id <= 0:
+            raise Exception(f"Failed to extract valid page ID from create result. Got: {page_id}, Result: {result}")
+
+        {"page_id": int(page_id)}
+    input:
+      - create_result
+    output:
+      - page_id
+    structured_output: true
+    transition: invoke_delete_page_by_id
+  - id: invoke_delete_page_by_id
+    type: toolkit
+    input:
+      - wiki_identifier
+      - page_id
+    input_mapping:
+      page_id:
+        type: variable
+        value: page_id
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+    output:
+      - tool_result
+    structured_output: true
+    tool: delete_page_by_id
+    toolkit_name: ado-wiki-testing
+    transition: validate_deletion
+  - id: validate_deletion
+    type: llm
+    input:
+      - tool_result
+      - page_id
+      - wiki_identifier
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate that the wiki page was deleted successfully by ID.
+
+          Tool Result: {tool_result}
+          Page ID: {page_id}
+          Wiki: {wiki_identifier}
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "deletion_confirmed": boolean,
+            "correct_id_referenced": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

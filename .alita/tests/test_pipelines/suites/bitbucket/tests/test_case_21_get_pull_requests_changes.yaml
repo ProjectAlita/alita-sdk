@@ -1,0 +1,122 @@
+name: "BB21 - get_pull_requests_changes: List changed files in PR"
+description: |
+  Verify the Bitbucket 'get_pull_requests_changes' tool retrieves PR file changes.
+
+  Objective: Test PR file changes retrieval functionality
+
+  Expected Behavior:
+  - Tool executes without crashing
+  - Returns file change list when PR exists
+  - Returns appropriate error when PR doesn't exist
+  - Changes show file paths and modification types
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  pr_id:
+    type: str
+    value: "1"
+  expected_change_fields:
+    type: list
+    value: ["raw_response"]
+  git_diff_markers:
+    type: list
+    value: ["diff --git", "@@", "+++", "---", "index"]
+  acceptable_error_indicators:
+    type: list
+    value: ["not found", "does not exist", "404", "no pull request", "no changes"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "unauthorized"]
+  changes_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: get_pr_changes
+nodes:
+  - id: get_pr_changes
+    type: toolkit
+    input:
+      - pr_id
+    input_mapping:
+      pr_id:
+        type: variable
+        value: pr_id
+    output:
+      - changes_result
+    structured_output: true
+    tool: get_pull_requests_changes
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - changes_result
+      - pr_id
+      - expected_change_fields
+      - git_diff_markers
+      - acceptable_error_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'get_pull_requests_changes' tool execution.
+
+          PR ID Requested: {pr_id}
+          Changes Result: {changes_result}
+          Expected Change Fields: {expected_change_fields}
+          Git Diff Markers: {git_diff_markers}
+          Acceptable Error Indicators: {acceptable_error_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful changes retrieval OR graceful "not found" error.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool executed without crashing or unhandled exception
+          2. result_structured: Result contains 'raw_response' field OR clear error message
+          3. changes_found_or_acceptable_error: Either git diff found OR error indicates PR not found
+          4. no_unexpected_errors: No unexpected error indicators in output
+          5. changes_have_expected_fields: If changes found, result has 'raw_response' field
+          6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          7. changes_identifiable: If found, git diff contains file paths and diff markers
+
+          For git diff validation:
+          - Check if raw_response contains git diff markers (diff --git, @@, +++, ---, index)
+          - Verify file paths are present in the diff
+          - Confirm diff content is not empty (unless "no changes" or PR not found)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "result_structured": boolean,
+            "changes_found_or_acceptable_error": boolean,
+            "no_unexpected_errors": boolean,
+            "changes_have_expected_fields": boolean,
+            "no_unhandled_exception": boolean,
+            "changes_identifiable": boolean,
+            "changes_were_found": boolean,
+            "file_count": number or 0 (count files in diff),
+            "fields_found": [list of expected fields found] or [],
+            "git_diff_valid": boolean (true if valid git diff format),
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

@@ -332,7 +332,7 @@ class LLMNode(BaseTool):
                     content = initial_completion.content
                     fallback_content = content if isinstance(content, str) else str(content)
 
-            result['messages'] = messages + [AIMessage(content=fallback_content)]
+            result['messages'] = self._strip_system_messages(messages + [AIMessage(content=fallback_content)])
 
         return result
 
@@ -363,10 +363,11 @@ class LLMNode(BaseTool):
             selected_tools = configurable.get('selected_tools')
             if selected_tools:
                 logger.info(f"[DynamicToolSelection] Using {len(selected_tools)} pre-selected tools")
-                # Include always_bind_tools with dynamically selected tools
-                if self.always_bind_tools:
-                    return list(selected_tools) + list(self.always_bind_tools)
-                return selected_tools
+                # Fix for #3290: Always include always_bind_tools (e.g., Planner tools) with
+                # dynamically selected tools. Use `or []` to handle None/falsy gracefully.
+                # This ensures Planner tools are available even on first message when
+                # Smart Tools Selection finds matching toolkits.
+                return list(selected_tools) + list(self.always_bind_tools or [])
 
         # Check if lazy tools mode is enabled and we have a registry
         if self.lazy_tools_mode and self.tool_registry is not None:
@@ -383,25 +384,38 @@ class LLMNode(BaseTool):
             return meta_tools
 
         # Traditional mode - bind actual tools
-        if not self.available_tools:
-            return []
+        # Fix for #3382: Include always_bind_tools even when lazy mode is disabled
+        # This ensures agent/pipeline tools are always available to the LLM
+        base_tools = []
 
-        if not self.tool_names:
-            # If no specific tool names provided, return all available tools
-            return self.available_tools
-
-        # Filter tools by name
-        filtered_tools = []
-        available_tool_names = {tool.name: tool for tool in self.available_tools}
-
-        for tool_name in self.tool_names:
-            if tool_name in available_tool_names:
-                filtered_tools.append(available_tool_names[tool_name])
-                logger.debug(f"Added tool '{tool_name}' to LLM node")
+        if self.available_tools:
+            if not self.tool_names:
+                # If no specific tool names provided, use all available tools
+                base_tools = list(self.available_tools)
             else:
-                logger.warning(f"Tool '{tool_name}' not found in available tools: {list(available_tool_names.keys())}")
+                # Filter tools by name
+                available_tool_names = {tool.name: tool for tool in self.available_tools}
+                for tool_name in self.tool_names:
+                    if tool_name in available_tool_names:
+                        base_tools.append(available_tool_names[tool_name])
+                        logger.debug(f"Added tool '{tool_name}' to LLM node")
+                    else:
+                        logger.warning(f"Tool '{tool_name}' not found in available tools: {list(available_tool_names.keys())}")
 
-        return filtered_tools
+        # Always include always_bind_tools (agent/pipeline tools, planning tools)
+        # These need direct LLM access regardless of lazy mode status
+        if self.always_bind_tools:
+            # Avoid duplicates - only add tools not already in base_tools
+            existing_names = {t.name for t in base_tools}
+            additional_tools = [t for t in self.always_bind_tools if t.name not in existing_names]
+            if additional_tools:
+                logger.info(
+                    f"[DirectBinding] Including {len(additional_tools)} always-bind tools: "
+                    f"{[t.name for t in additional_tools]}"
+                )
+                base_tools.extend(additional_tools)
+
+        return base_tools
 
     def _get_meta_tools(self) -> List[BaseTool]:
         """
@@ -603,10 +617,12 @@ class LLMNode(BaseTool):
 
         # Bind tools when:
         # 1. Traditional mode: specific tool_names are provided, OR
-        # 2. Lazy mode: tool_registry exists (meta-tools will be bound)
+        # 2. Lazy mode: tool_registry exists (meta-tools will be bound), OR
+        # 3. available_tools exist (covers lazy mode auto-disabled case)
         should_bind_tools = (
             len(self.tool_names or []) > 0 or
-            (self.lazy_tools_mode and self.tool_registry is not None)
+            (self.lazy_tools_mode and self.tool_registry is not None) or
+            bool(self.available_tools)  # Bind available tools even when lazy mode auto-disabled
         )
 
         if should_bind_tools:
@@ -650,7 +666,7 @@ class LLMNode(BaseTool):
                         self.__perform_tool_calling(completion, messages, llm_client, config)
                     )
 
-                    output_msgs = {"messages": new_messages}
+                    output_msgs = {"messages": self._strip_system_messages(new_messages)}
                     if self.output_variables:
                         if self.output_variables[0] == 'messages':
                             return output_msgs
@@ -732,12 +748,12 @@ class LLMNode(BaseTool):
                         # set response to be the first output variable for non-structured output
                         response_data = {json_output_vars[0]: text_content}
                         new_messages = messages + [ai_message]
-                        response_data['messages'] = new_messages
+                        response_data['messages'] = self._strip_system_messages(new_messages)
                         return response_data
 
                     # Simple text response (either no output variables or JSON parsing failed)
                     new_messages = messages + [ai_message]
-                    return {"messages": new_messages}
+                    return {"messages": self._strip_system_messages(new_messages)}
 
         except Exception as e:
             # Enhanced error logging with model diagnostics
@@ -748,7 +764,18 @@ class LLMNode(BaseTool):
             
             error_msg = f"Error: {e}"
             new_messages = messages + [AIMessage(content=error_msg)]
-            return {"messages": new_messages}
+            return {"messages": self._strip_system_messages(new_messages)}
+
+    @staticmethod
+    def _strip_system_messages(messages: list) -> list:
+        """Strip SystemMessage objects from a message list before returning to graph state.
+
+        The LLMNode constructs SystemMessage on-the-fly from its input_mapping['system']
+        for each invocation. Storing SystemMessages in the graph state would cause them
+        to accumulate in checkpoints, leading to "multiple non-consecutive system messages"
+        errors on subsequent turns (especially with Anthropic models).
+        """
+        return [m for m in messages if not isinstance(m, SystemMessage)]
 
     def _run(self, *args, **kwargs):
         # Legacy support for old interface

@@ -1,0 +1,108 @@
+name: bitbucket_toolkit
+description: |
+  Bitbucket toolkit integration tests
+
+  Test Structure:
+  - Branch Operations (BB01-BB06): Test branch management operations
+  - File Operations (BB07-BB16): Test file CRUD operations
+  - Pull Request Operations (BB17-BB27): Test PR management operations
+  - Branch Deletion Operations (BB24-BB25): Test branch deletion operations
+
+env_mapping:
+  toolkit_config: ${BITBUCKET_CONFIG_PATH:../../configs/bitbucket-cloud-config.json}
+  url: ${BITBUCKET_URL:https://api.bitbucket.org}
+  username: ${BITBUCKET_USERNAME:vvaryushkin@gmail.com}
+  password: ${BITBUCKET_TOKEN}
+  project: ${BITBUCKET_PROJECT:alita-automation}
+  repository: ${BITBUCKET_REPOSITORY:automation}
+  cloud: ${BITBUCKET_CLOUD:true}
+
+setup:
+  - name: Setup Bitbucket Configuration
+    type: configuration
+    config:
+      config_type: bitbucket
+      alita_title: ${BITBUCKET_SECRET_NAME:bitbucket}
+      data:
+        url: ${BITBUCKET_URL:https://api.bitbucket.org}
+        username: ${BITBUCKET_USERNAME:vvaryushkin@gmail.com}
+        password: ${BITBUCKET_TOKEN}
+
+  - name: Create Bitbucket Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ${BITBUCKET_CONFIG_PATH:../../configs/bitbucket-cloud-config.json}
+      toolkit_type: bitbucket
+      toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    save_to_env:
+      - key: BITBUCKET_TOOLKIT_ID
+        value: $.id
+      - key: BITBUCKET_TOOLKIT_NAME
+        value: $.name
+
+composable_pipelines: []
+
+execution:
+  test_directory: .
+  order:
+    # Branch Operations (BB01-BB06)
+    - test_case_01_*.yaml  # create_branch (Critical)
+    - test_case_02_*.yaml  # create_branch edge case (High)
+    - test_case_03_*.yaml  # set_active_branch (Critical)
+    - test_case_04_*.yaml  # set_active_branch error (High)
+    - test_case_05_*.yaml  # list_branches_in_repo (Critical)
+    - test_case_06_*.yaml  # list_branches_in_repo wildcard (High)
+
+    # File Operations (BB07-BB16)
+    - test_case_07_*.yaml  # list_files root (Critical)
+    - test_case_08_*.yaml  # list_files subdirectory (High)
+    - test_case_09_*.yaml  # read_file (Critical)
+    - test_case_10_*.yaml  # read_file error (High)
+    - test_case_11_*.yaml  # create_file (Critical)
+    - test_case_12_*.yaml  # create_file duplicate (High)
+    - test_case_13_*.yaml  # update_file (Critical)
+    - test_case_14_*.yaml  # update_file invalid (High)
+    - test_case_15_*.yaml  # delete_file (Critical)
+    - test_case_16_*.yaml  # append_file (High)
+
+    # Pull Request Operations (BB17-BB27)
+    - test_case_17_*.yaml  # create_pull_request cloud (Critical)
+    - test_case_18_*.yaml  # create_pull_request server (High)
+    - test_case_19_*.yaml  # get_pull_request (Critical)
+    - test_case_20_*.yaml  # get_pull_requests_commits (High)
+    - test_case_21_*.yaml  # get_pull_requests_changes (High)
+    - test_case_22_*.yaml  # add_pull_request_comment (Critical)
+    - test_case_23_*.yaml  # add_pull_request_comment inline (High)
+    - test_case_26_*.yaml  # close_pull_request cloud (Critical)
+    - test_case_27_*.yaml  # close_pull_request invalid (High)
+
+    # Branch Deletion Operations (BB24-BB25)
+    - test_case_24_*.yaml  # delete_branch (Critical)
+    - test_case_25_*.yaml  # delete_branch protected branches (Critical)
+
+  substitutions:
+    BITBUCKET_TOOLKIT_ID: ${BITBUCKET_TOOLKIT_ID}
+    BITBUCKET_TOOLKIT_NAME: ${BITBUCKET_TOOLKIT_NAME}
+    ACTIVE_BRANCH: ${ACTIVE_BRANCH:main}
+    TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
+
+  settings:
+    timeout: 180
+    parallel: 1
+    stop_on_failure: false
+
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "BB*"
+    continue_on_error: true
+
+  - name: Delete Bitbucket Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${BITBUCKET_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true

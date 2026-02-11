@@ -172,9 +172,7 @@ alita_state = json.loads(state_json)
 
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
-            # replace new lines in strings in code block
-            code = func_args['code'].replace('\\n', '\\\\n')
-            func_args['code'] = f"{self._prepare_pyodide_input(state, self.input_variables)}\n{code}"
+            func_args['code'] = f"{self._prepare_pyodide_input(state, self.input_variables)}\n{func_args['code']}"
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
             dispatch_custom_event(
@@ -216,11 +214,11 @@ alita_state = json.loads(state_json)
                     return messages_dict
                 else:
                     return { self.output_variables[0]: tool_result }
-        except ValidationError:
+        # save the whole error message to the tool's output
+        except Exception as e:
             return {"messages": [
-                {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised ValidationError. 
-        \n\nTool schema is {safe_serialize(params)} \n\nand the input to LLM was 
-        {func_args}"""}]}
+                {"role": "assistant", "content": f"""Tool input to the {self.tool.name} with value {func_args} raised Exception. 
+                        \n\nTool schema is {safe_serialize(params)}. \n\n Details: {e}"""}]}
 
     def _run(self, *args, **kwargs):
         return self.invoke(**kwargs)

@@ -1,0 +1,79 @@
+name: "JR05 - Update Issue (Happy Path)"
+priority: Critical
+description: |
+  Verify `update_issue` tool updates an existing JIRA issue successfully.
+
+  Objective: Ensure tool can update issue fields and returns success confirmation.
+
+  Expected Behavior:
+  - Tool executes successfully without errors.
+  - Returns confirmation of update operation.
+
+toolkits:
+  - id: ${JIRA_TOOLKIT_ID}
+    name: ${JIRA_TOOLKIT_NAME}
+
+state:
+  issue_json:
+    type: str
+    value: '{"key": "${JIRA_TEST_ISSUE}", "fields": {"summary": "Updated Summary ${TIMESTAMP}"}}'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_issue
+
+nodes:
+  - id: invoke_update_issue
+    type: toolkit
+    tool: update_issue
+    toolkit_name: ${JIRA_TOOLKIT_NAME}
+    input:
+      - issue_json
+    input_mapping:
+      issue_json:
+        type: variable
+        value: issue_json
+    output:
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_issue' tool.
+
+          Tool Result: {tool_result}
+
+          Perform the following checks:
+          1. Confirm the tool executed successfully (result is not empty or null).
+          2. Verify result indicates successful update operation.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean,
+            "summary": "Brief description of outcome",
+            "error": "Error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

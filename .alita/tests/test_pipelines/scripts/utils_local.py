@@ -22,6 +22,7 @@ Environment variables (from .env):
 import json
 import logging
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import sys
@@ -52,12 +53,205 @@ from utils_common import (
 # Reuse process_pipeline_result for consistent result processing
 from run_pipeline import process_pipeline_result, PipelineResult
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Note: Do NOT use logging.basicConfig() here as it prevents dynamic log level changes
+# Logging configuration is handled by configure_file_logging() at runtime
+# basicConfig() is a one-time operation that cannot be overridden
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Default level for utils_local
 
+
+def configure_alita_sdk_logging(log_level: str = 'error'):
+    """
+    Configure alita_sdk package logging level.
+    
+    By default, suppress alita_sdk.* loggers to keep test output clean.
+    
+    Why this is needed:
+    - Local test execution instantiates full toolkit stack locally
+    - This triggers alita_sdk initialization logs:
+      * alita_sdk.configurations
+      * alita_sdk.tools
+      * alita_sdk.runtime.langchain.langraph_agent
+      * etc.
+    - Remote mode doesn't show these because platform manages toolkit instantiation
+    - For test-only runs, these logs clutter the output
+    - Use --local=debug/info/warning to see more logs when debugging
+    
+    Args:
+        log_level: Log level for alita_sdk loggers
+                   - 'error': Suppress most SDK logs (default)
+                   - 'warning': Show warnings and errors
+                   - 'info': Show info messages
+                   - 'debug': Show debug messages
+    """
+    # Map string level names to logging constants
+    level_map = {
+        'debug': logging.DEBUG,
+        'info': logging.INFO,
+        'warning': logging.WARNING,
+        'error': logging.ERROR,
+    }
+    
+    log_level_const = level_map.get(log_level.lower(), logging.ERROR)
+    
+    alita_loggers = [
+        'alita_sdk',
+        'alita_sdk.runtime',
+        'alita_sdk.runtime.langchain',
+        'alita_sdk.tools',
+        'alita_sdk.configurations',
+        'alita_sdk.cli',
+        'alita_sdk.community',
+    ]
+    
+    for logger_name in alita_loggers:
+        logging.getLogger(logger_name).setLevel(log_level_const)
+    
+    # Suppress third-party HTTP client verbose logs and SSL warnings
+    # These come from external dependencies making API calls:
+    # - urllib3: Low-level HTTP client (used by requests for HTTPS calls)
+    # - httpx: HTTP client used by LangChain/OpenAI SDK
+    # - requests: HTTP library making API calls to backend
+    # Set to WARNING to hide INFO logs about successful HTTP requests
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+    
+    # Also suppress third-party library warnings
+    import warnings
+    warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+
+
+def configure_file_logging(log_file: str, sdk_log_level: str = 'error', verbose: bool = False):
+    """
+    Configure file-based logging for detailed execution trace.
+    
+    Sets up a file handler that captures DEBUG-level logs from all components
+    to a file (typically run.log), while keeping console output clean.
+    
+    This is part of the 3-stream logging architecture:
+    - STDOUT (console): INFO (utils_common only) + WARNING (all) + ERROR (all) when verbose=True
+                        WARNING (all) + ERROR (all) when verbose=False
+    - STDERR (console): ERRORS + WARNINGS (always)
+    - run.log (file): DEBUG + all levels (always)
+    
+    Args:
+        log_file: Path to log file (e.g., 'test_results/suite/run.log')
+        sdk_log_level: Log level for alita_sdk loggers ('debug', 'info', 'warning', 'error')
+        verbose: If True, allow INFO logs from utils_common on console
+    
+    Example:
+        configure_file_logging('test_results/artifact/run.log', 'debug', verbose=True)
+        # Now all DEBUG logs go to file, console only shows utils_common INFO
+    """
+    # Create file handler for DEBUG level logs
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    file_handler = logging.FileHandler(log_file, mode='a')  # Append mode
+    file_handler.setLevel(logging.DEBUG)
+    
+    # Detailed format for file logs
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Add to root logger (captures everything)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.DEBUG)  # Allow DEBUG to propagate to file
+    
+    # Configure third-party loggers (suppress urllib3, httpx, requests noise)
+    configure_alita_sdk_logging(sdk_log_level)
+    
+    # Override alita_sdk loggers to DEBUG for file logging
+    # This allows DEBUG logs to be emitted and captured by the file handler
+    # Must happen AFTER configure_alita_sdk_logging() which would reset them
+    # Note: Child loggers inherit from parent, so only need top-level packages
+    alita_loggers = [
+        'alita_sdk',
+        'alita_sdk.runtime',
+        'alita_sdk.runtime.langchain',
+        'alita_sdk.tools',
+        'alita_sdk.configurations',
+        'alita_sdk.cli',
+        'alita_sdk.community',
+    ]
+    for logger_name in alita_loggers:
+        logging.getLogger(logger_name).setLevel(logging.DEBUG)
+    
+    # Log logger configuration for debugging
+    logger.debug(f"alita_sdk loggers set to DEBUG: {', '.join(alita_loggers)}")
+    logger.debug(f"alita_sdk logger level: {logging.getLogger('alita_sdk').level} (should be {logging.DEBUG})")
+    logger.debug(f"Root logger level: {root_logger.level} (should be {logging.DEBUG})")
+    logger.debug(f"File handler level: {file_handler.level} (should be {logging.DEBUG})")
+    
+    # Prevent DEBUG logs from appearing on console
+    # Set all existing console/stream handlers to INFO minimum
+    console_handler_found = False
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            console_handler_found = True
+            # Add same formatter as file handler for consistent output
+            handler.setFormatter(formatter)
+            # Console handlers should never show DEBUG
+            if verbose:
+                # When verbose: show INFO from utils_common/utils_local, WARNING+ from all
+                handler.setLevel(logging.INFO)
+                # Add filter to only show INFO from utils modules
+                handler.addFilter(ConsoleInfoFilter())
+            else:
+                # When not verbose: only WARNING and ERROR
+                handler.setLevel(logging.WARNING)
+    
+    # If no console handler exists, create one (shouldn't happen with basicConfig, but be safe)
+    if not console_handler_found:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)  # Use same format as file handler
+        if verbose:
+            console_handler.setLevel(logging.INFO)
+            console_handler.addFilter(ConsoleInfoFilter())
+        else:
+            console_handler.setLevel(logging.WARNING)
+        root_logger.addHandler(console_handler)
+    
+    # Log the configuration
+    logger.debug(f"File logging configured: {log_file} (SDK level: {sdk_log_level})")
+    
+    # Suppress paramiko/cryptography deprecation warnings (TripleDES cipher deprecation)
+    warnings.filterwarnings('ignore', message='TripleDES has been moved to')
+    try:
+        from cryptography.utils import CryptographyDeprecationWarning
+        warnings.filterwarnings('ignore', category=CryptographyDeprecationWarning)
+    except ImportError:
+        pass
+    warnings.filterwarnings('ignore', module='paramiko', category=DeprecationWarning)
+    
+    # Suppress pydantic UserWarnings about field shadowing
+    warnings.filterwarnings('ignore', module='pydantic', category=UserWarning)
+
+
+class ConsoleInfoFilter(logging.Filter):
+    """
+    Filter that allows:
+    - INFO level ONLY from utils_common and utils_local modules
+    - WARNING and ERROR from all modules
+    
+    This prevents console clutter while showing useful progress info.
+    """
+    def filter(self, record):
+        # Always allow WARNING and ERROR
+        if record.levelno >= logging.WARNING:
+            return True
+        
+        # For INFO level, only allow utils_common and utils_local
+        if record.levelno == logging.INFO:
+            return record.name.startswith('utils_local')
+        
+        # Block DEBUG and other levels
+        return False
 
 
 def create_alita_client():
@@ -105,6 +299,8 @@ class IsolatedPipelineTestRunner:
         env_vars: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
         alita_client = None,
+        llm = None,
+        sdk_log_level: str = 'error',
     ):
         """
         Initialize the test runner.
@@ -112,16 +308,23 @@ class IsolatedPipelineTestRunner:
         Args:
             tools: Pre-created toolkit tools (from LocalSetupStrategy)
             env_vars: Environment variables for substitution
-            verbose: Enable verbose logging
+            verbose: Enable verbose logging for test framework (not SDK)
             alita_client: Optional pre-created AlitaClient
+            llm: Optional pre-created LLM instance
+            sdk_log_level: Log level for alita_sdk loggers
+                           (debug, info, warning, error - default: error)
         """
         self._tools = tools or []
         self.env_vars = env_vars or {}
         self.verbose = verbose
         self.alita_client = alita_client
-        self.llm = None
+        self.llm = llm
 
-
+        # Note: SDK logging is configured ONCE in run_suite_local() via configure_file_logging()
+        # Do NOT call configure_alita_sdk_logging() here, as it would reset logger levels
+        # that were already configured for file-level DEBUG capture.
+        # The --local flag's log level is already applied upstream.
+        
         if verbose:
             logger.setLevel(logging.DEBUG)
 
@@ -131,10 +334,12 @@ class IsolatedPipelineTestRunner:
             self.alita_client = create_alita_client()
         return self.alita_client
 
-    def _get_llm(self, model: str = 'gpt-4o-mini', temperature: float = 0.0, max_tokens: int = 4096):
+    def _get_llm(self, model: str = 'gpt-4o-2024-11-20', temperature: float = 0.0, max_tokens: int = 4096):
         """
-        Get LLM from AlitaClient.
+        Get LLM from AlitaClient or return pre-created instance.
 
+        If LLM was passed during initialization, returns that.
+        Otherwise, creates one using AlitaClient.
         Same pattern as streamlit.py and client.application().
         """
         if self.llm is not None:
@@ -152,6 +357,131 @@ class IsolatedPipelineTestRunner:
         logger.info(f"Created LLM: {model}")
         return self.llm
 
+    def _extract_response_content(self, response: Dict[str, Any], response_format: str = 'output') -> str:
+        """
+        Extract and normalize content from agent response.
+        
+        Mirrors backend's extract_response_content function.
+
+        Args:
+            response: The raw response from agent invocation
+            response_format: Either 'messages' (for predict_agent) or 'output' (for application agent)
+
+        Returns:
+            Normalized string content
+        """
+        if response_format == 'messages':
+            # Predict agent format: {"messages": [...]}
+            messages = response.get("messages", [])
+            if isinstance(messages, list) and len(messages) > 0:
+                last_message = messages[-1]
+                # Handle both dict and message object
+                if hasattr(last_message, 'content'):
+                    content = last_message.content
+                elif isinstance(last_message, dict):
+                    content = last_message.get('content', '')
+                else:
+                    content = str(last_message)
+            else:
+                content = str(response)
+        else:
+            # Application agent format: {"output": ...}
+            content = response.get("output", "")
+
+        return content
+
+    def _build_output_message(self, content: str) -> Dict[str, Any]:
+        """
+        Build a standardized output message dict.
+        
+        Mirrors backend's build_output_message function.
+
+        Args:
+            content: The normalized response content
+
+        Returns:
+            Dict with content and role='assistant'
+        """
+        return {
+            'content': content,
+            'role': 'assistant',
+            'type': 'ai',
+            'additional_kwargs': {},
+            'response_metadata': {},
+            'id': None,
+            'name': None,
+            'tool_calls': [],
+            'invalid_tool_calls': [],
+            'usage_metadata': None
+        }
+
+    def _transform_to_remote_format(self, local_result: Dict[str, Any], user_input: str) -> Dict[str, Any]:
+        """
+        Transform local graph.invoke() result to match remote /predict API format.
+        
+        This enables process_pipeline_result to work consistently across local and remote modes.
+        
+        Args:
+            local_result: Raw result from graph.invoke()
+            user_input: The user input message
+            
+        Returns:
+            Dict in remote API format with chat_history, result, tool_calls_dict
+        """
+        # Build chat_history in remote format
+        chat_history = [
+            {'role': 'user', 'content': user_input}
+        ]
+        
+        # Extract response content using backend logic
+        response_content = self._extract_response_content(local_result, response_format='output')
+        
+        # Add assistant message to chat history
+        output_message = self._build_output_message(response_content)
+        chat_history.append(output_message)
+        
+        # Extract test results from state
+        # Check common locations where test results might be stored
+        result_field = None
+        
+        # Priority 1: test_results field (most specific)
+        if 'test_results' in local_result:
+            test_results = local_result['test_results']
+            # Parse if it's a JSON string
+            if isinstance(test_results, str) and test_results.strip().startswith('{'):
+                try:
+                    result_field = json.loads(test_results)
+                except json.JSONDecodeError:
+                    result_field = {'raw_output': test_results}
+            else:
+                result_field = test_results
+        
+        # Priority 2: output field (fallback)
+        if result_field is None and 'output' in local_result:
+            output = local_result['output']
+            # Parse if it's a JSON string
+            if isinstance(output, str) and output.strip().startswith('{'):
+                try:
+                    result_field = json.loads(output)
+                except json.JSONDecodeError:
+                    result_field = {'raw_output': output}
+            elif isinstance(output, dict):
+                result_field = output
+        
+        # Build remote-like structure
+        remote_format = {
+            'chat_history': chat_history,
+            'error': None,
+            'tool_calls_dict': {},  # Local doesn't have detailed tool call tracking
+            'tool_calls': [],
+            'thinking_steps': [],
+        }
+        
+        # Add result field if available (should be a dict now, not a string)
+        if result_field is not None:
+            remote_format['result'] = result_field
+        
+        return remote_format
 
     def run_test(
         self,
@@ -184,6 +514,9 @@ class IsolatedPipelineTestRunner:
                 error=f"Test file not found: {path}"
             )
 
+        # Visual delimiter before test
+        logger.info("")
+        logger.info("-" * 80)
         logger.info(f"Loading test: {path}")
 
         # Transform YAML (reuse seed_pipelines.py logic)
@@ -199,16 +532,14 @@ class IsolatedPipelineTestRunner:
             )
 
         logger.info(f"Test: {transformed['name']}")
-        logger.debug(f"Description: {transformed['description']}")
 
-        if self.verbose or dry_run:
+        if dry_run:
             print("\n" + "="*60)
             print("TRANSFORMED YAML:")
             print("="*60)
             print(yaml_schema)
             print("="*60 + "\n")
 
-        if dry_run:
             return PipelineResult(
                 success=True,
                 pipeline_id=0,
@@ -226,9 +557,25 @@ class IsolatedPipelineTestRunner:
             )
         logger.info(f"Using {len(self._tools)} toolkit tools")
 
+        # Extract model from YAML if specified in nodes
+        model_name = 'gpt-4o-2024-11-20'  # default
+        # try:
+        #     yaml_dict = yaml.safe_load(yaml_schema)
+        #     if isinstance(yaml_dict, dict) and 'nodes' in yaml_dict:
+        #         nodes = yaml_dict['nodes']
+        #         if isinstance(nodes, list):
+        #             for node in nodes:
+        #                 if isinstance(node, dict) and node.get('type') == 'llm':
+        #                     if 'model' in node:
+        #                         model_name = node['model']
+        #                         logger.info(f"Found LLM model in YAML: {model_name}")
+        #                         break
+        # except Exception as e:
+        #     logger.debug(f"Could not extract model from YAML: {e}")
+
         # Get LLM from AlitaClient
         try:
-            llm = self._get_llm()
+            llm = self._get_llm(model=model_name)
         except Exception as e:
             return PipelineResult(
                 success=False,
@@ -283,26 +630,25 @@ class IsolatedPipelineTestRunner:
                 print(json.dumps(result, indent=2, default=str))
                 print("="*60 + "\n")
 
+            # Transform local result to match remote structure (backend format)
+            # This mirrors the backend's extract_response_content + build_output_message
+            result_data = self._transform_to_remote_format(result, input_message or 'execute')
+            
             # Use shared process_pipeline_result for consistent result extraction
-            # Convert Pydantic message models to dicts
-            messages = result.get("messages", [])
-            messages_as_dicts = [
-                msg.dict() if hasattr(msg, 'dict') else (msg.model_dump() if hasattr(msg, 'model_dump') else msg)
-                for msg in messages
-            ]
             pipeline_result = process_pipeline_result(
-                result_data={"chat_history": messages_as_dicts},
+                result_data=result_data,
                 pipeline_id=0,  # Local execution has no backend ID
                 pipeline_name=path.stem,
                 execution_time=execution_time,
-                verbose=self.verbose,
+                logger=None,  # Use None - function handles it gracefully
             )
 
             logger.info(f"Execution completed in {execution_time:.2f}s")
             logger.info(f"Test passed: {pipeline_result.test_passed}")
 
-            # Return PipelineResult with output set to full result
-            pipeline_result.output = result
+            # Return PipelineResult with output set to remote-formatted result
+            # This ensures consistency with remote execution format
+            pipeline_result.output = result_data
             return pipeline_result
 
         except Exception as e:

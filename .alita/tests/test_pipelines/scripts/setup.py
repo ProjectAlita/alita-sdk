@@ -56,6 +56,8 @@ from utils_common import (
     load_project_id_from_env,
 )
 
+from logger import TestLogger
+
 
 class SetupContext:
     """Context for setup execution, holds state and environment."""
@@ -67,6 +69,7 @@ class SetupContext:
         bearer_token: str,
         verbose: bool = False,
         dry_run: bool = False,
+        logger: TestLogger = None,
     ):
         self.base_url = base_url
         self.project_id = project_id
@@ -75,6 +78,7 @@ class SetupContext:
         self.dry_run = dry_run
         self.env_vars: dict[str, Any] = {}
         self.created_resources: list[dict] = []
+        self.logger = logger
 
         # Add timestamp for unique naming
         self.env_vars["TIMESTAMP"] = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -87,8 +91,17 @@ class SetupContext:
         return headers
 
     def log(self, message: str, level: str = "info"):
-        """Log a message if verbose mode is enabled."""
-        if self.verbose or level in ("error", "warning"):
+        """Log a message using the unified logger or fallback to print."""
+        if self.logger:
+            if level == "success":
+                self.logger.success(message)
+            elif level == "error":
+                self.logger.error(message)
+            elif level == "warning":
+                self.logger.warning(message)
+            else:  # info
+                self.logger.info(message)
+        elif self.verbose:
             prefix = {"info": "  ", "success": "  ✓", "error": "  ✗", "warning": "  ⚠"}
             print(f"{prefix.get(level, '  ')} {message}")
 
@@ -99,20 +112,112 @@ class SetupContext:
 
 
 def extract_json_path(data: Any, path: str) -> Any:
-    """Extract a value from data using a simple JSON path ($.field.subfield)."""
+    """
+    Extract a value from data using a simple JSON path ($.field.subfield or $.array[0].field).
+    
+    Supports:
+    - $.field.subfield - nested dict access
+    - $.array[0] - array indexing
+    - $.array[0].field - combined array and dict access
+    """
+    import re
+    
     if not path.startswith("$."):
         return path
 
-    parts = path[2:].split(".")
+    # Remove leading $. 
+    path = path[2:]
+    
+    # Parse path handling both dot notation and bracket notation
+    # Split on dots but preserve bracketed indices
+    parts = []
+    current = ""
+    for char in path:
+        if char == '.':
+            if current:
+                parts.append(current)
+                current = ""
+        else:
+            current += char
+    if current:
+        parts.append(current)
+    
     result = data
     for part in parts:
-        if isinstance(result, dict):
+        if result is None:
+            return None
+            
+        # Check for bracket notation (e.g., "issues[0]")
+        bracket_match = re.match(r'^([^\[]+)\[(\d+)\]$', part)
+        if bracket_match:
+            field_name = bracket_match.group(1)
+            index = int(bracket_match.group(2))
+            
+            # First access the field
+            if isinstance(result, dict):
+                result = result.get(field_name)
+            else:
+                return None
+            
+            # Then index into the array
+            if isinstance(result, list) and 0 <= index < len(result):
+                result = result[index]
+            else:
+                return None
+        elif isinstance(result, dict):
             result = result.get(part)
         elif isinstance(result, list) and part.isdigit():
-            result = result[int(part)]
+            index = int(part)
+            if 0 <= index < len(result):
+                result = result[index]
+            else:
+                return None
         else:
             return None
+            
     return result
+
+
+def extract_regex_match(data: str, pattern: str, match_index: int = 0, group_index: int = 1) -> Any:
+    """
+    Extract a value from string data using regex pattern matching.
+    
+    Supports extracting the N-th match and specific capture groups.
+    
+    Args:
+        data: String data to search in
+        pattern: Regex pattern with capture groups
+        match_index: Which match to extract (0 = first match, 1 = second match, etc.)
+        group_index: Which capture group to extract from the match (1 = first group, etc.)
+    
+    Returns:
+        The extracted value or None if not found
+        
+    Examples:
+        # Extract first issue key: 'key': 'EL-455'
+        extract_regex_match(data, r"'key': '([A-Z]+-\\d+)'", match_index=0, group_index=1)
+        
+        # Extract second issue key
+        extract_regex_match(data, r"'key': '([A-Z]+-\\d+)'", match_index=1, group_index=1)
+    """
+    if not isinstance(data, str):
+        return None
+    
+    try:
+        matches = re.findall(pattern, data)
+        if match_index < len(matches):
+            match_result = matches[match_index]
+            # If regex has groups, match_result is a tuple
+            if isinstance(match_result, tuple):
+                if group_index - 1 < len(match_result):
+                    return match_result[group_index - 1]
+            else:
+                # Single group returns string directly
+                if group_index == 1:
+                    return match_result
+        return None
+    except Exception as e:
+        return None
 
 
 # =============================================================================
@@ -138,7 +243,12 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
     # Load base config from file if specified
     file_config = {}
     if "config_file" in config:
-        file_config = load_toolkit_config(config["config_file"], base_path)
+        file_config = load_toolkit_config(
+            config["config_file"],
+            base_path,
+            env_substitutions=ctx.env_vars,
+            env_loader=load_from_env
+        )
 
     # Apply overrides to file config
     overrides = config.get("overrides", {})
@@ -505,7 +615,7 @@ def invoke_toolkit_tool(ctx: SetupContext, toolkit_id: int, tool_name: str, para
             return {"success": True, "result": tool_result}
         return {"success": True, "result": result}
     else:
-        return {"success": False, "error": response.text[:500]}
+        return {"success": False, "error": response.text}
 
 
 # =============================================================================
@@ -546,9 +656,10 @@ def execute_setup(
     setup_steps = config.get("setup", [])
     results = {"success": True, "steps": [], "env_vars": {}}
 
-    if not ctx.verbose and not ctx.dry_run: # If quiet mode essentially
-         pass
-    else:
+    if ctx.logger:
+        ctx.logger.section(f"Executing setup for: {config.get('name', 'unknown')}")
+        ctx.logger.info(f"Steps: {len(setup_steps)}")
+    elif ctx.verbose or ctx.dry_run:
         print(f"\nExecuting setup for: {config.get('name', 'unknown')}")
         print(f"Steps: {len(setup_steps)}")
         print("-" * 60)
@@ -558,8 +669,11 @@ def execute_setup(
         step_type = step.get("type")
         action = step.get("action", "")
 
-        if ctx.verbose:
-             print(f"\n[{i}/{len(setup_steps)}] {step_name}")
+        # Log step progress - use logger if available, else fallback to print
+        if ctx.logger:
+            ctx.logger.info(f"[{i}/{len(setup_steps)}] {step_name}")
+        elif ctx.verbose:
+            print(f"\n[{i}/{len(setup_steps)}] {step_name}")
 
         # Check if step is enabled
         if not step.get("enabled", True):
@@ -591,15 +705,70 @@ def execute_setup(
         # Save environment variables from step result
         if step_result.get("success") and "save_to_env" in step:
             for save_config in step["save_to_env"]:
+                import json
                 key = save_config["key"]
                 value_path = save_config["value"]
+                default_value = save_config.get("default")
+                
+                # Debug: Show what we're working with
+                ctx.log(f"[DEBUG] save_to_env for key '{key}':", "info")
+                ctx.log(f"  Path: {value_path}", "info")
+                ctx.log(f"  Default: {default_value}", "info")
+                ctx.log(f"  step_result keys: {list(step_result.keys())}", "info")
+                ctx.log(f"  step_result type: {type(step_result)}", "info")
+                
+                # Show relevant portion of step_result
+                if "result" in step_result:
+                    result_preview = json.dumps(step_result["result"], indent=2)[:500]
+                    ctx.log(f"  step_result['result']: {result_preview}...", "info")
+                else:
+                    ctx.log(f"  step_result (no 'result' key): {json.dumps(step_result, indent=2)[:500]}...", "info")
+                
+                # Extract value using JSONPath
                 value = extract_json_path(step_result, value_path)
+                ctx.log(f"  Extracted value: {value} (type: {type(value).__name__})", "info")
+                
+                # If JSONPath failed and result is a string, try regex extraction
+                if value is None and "result" in step_result:
+                    result_data = step_result["result"]
+                    # Check if result is nested dict with 'result' field (toolkit response format)
+                    if isinstance(result_data, dict) and "result" in result_data:
+                        result_data = result_data["result"]
+                    
+                    if isinstance(result_data, str):
+                        # Try to extract issue keys from formatted string output
+                        # Pattern matches: 'key': 'EL-455' or "key": "EL-455"
+                        # Determine which match index to use based on JSONPath
+                        match_index = 0
+                        if "[1]" in value_path:
+                            match_index = 1
+                        elif "[2]" in value_path:
+                            match_index = 2
+                        
+                        # Try single-quoted format first
+                        value = extract_regex_match(result_data, r"'key': '([A-Z]+-\d+)'", match_index=match_index)
+                        if value is None:
+                            # Try double-quoted format
+                            value = extract_regex_match(result_data, r'"key": "([A-Z]+-\d+)"', match_index=match_index)
+                        
+                        if value is not None:
+                            ctx.log(f"  Extracted via regex (match #{match_index}): {value}", "info")
+                
+                # Use default if extraction failed
+                if value is None and default_value is not None:
+                    # Resolve any environment variable references in the default value
+                    value = resolve_env_value(default_value, ctx.env_vars, env_loader=load_from_env)
+                    ctx.log(f"  Using default value: {value}", "info")
+                
                 if value is not None:
                     # In dry_run mode, don't overwrite existing env values with dummy data
                     if step_result.get("dry_run") and key in ctx.env_vars:
                         ctx.log(f"Keeping existing {key}={ctx.env_vars[key]}", "info")
                     else:
+                        ctx.log(f"Saved {key}={value}", "info")
                         ctx.save_env(key, value)
+                else:
+                    ctx.log(f"[WARNING] Not saving {key} - value is None and no default provided", "warning")
 
         results["steps"].append({
             "name": step_name,
@@ -641,6 +810,7 @@ def run(
     verbose: bool = False,
     quiet: bool = False,
     local: bool = False,
+    logger: TestLogger = None,
 ) -> dict:
     """Run set up programmatically.
     
@@ -655,13 +825,15 @@ def run(
         verbose: Enable verbose output
         quiet: Suppress non-error output
         local: Local mode - prepare environment without backend calls
+        logger: TestLogger instance for unified logging
     """
-    # In local mode, we prepare environment but skip backend calls
-    # This essentially acts like dry_run but still writes env file
+    # Create logger if not provided
+    if logger is None:
+        logger = TestLogger(verbose=verbose, quiet=quiet)
+    
+    # In local mode, we prepare environment using local toolkits
     if local:
-        dry_run = True  # Skip backend calls
-        if verbose:
-            print("[LOCAL MODE] Skipping backend calls, preparing local environment")
+        logger.info("[LOCAL MODE] Using local toolkit creation (no backend)")
     
     # Load environment file if provided
     if env_file:
@@ -699,23 +871,13 @@ def run(
         bearer_token=bearer_token or "",
         verbose=verbose,
         dry_run=dry_run,
+        logger=logger,
     )
     
-    # Mute logging if quiet
-    if quiet: 
-        # Hack to silence logging unless it's error
-        original_log = ctx.log
-        def quiet_log(message, level="info"):
-            if level in ("error"):
-                 original_log(message, level)
-        ctx.log = quiet_log
-
-    if not quiet:
-        print(f"Setup: {config.get('name', folder)}")
-        print(f"Target: {base_url} (Project: {project_id})")
-        if dry_run:
-            print("[DRY RUN MODE]")
-        print("=" * 60)
+    logger.section(f"Setup: {config.get('name', folder)}")
+    logger.info(f"Target: {base_url} (Project: {project_id})")
+    if dry_run:
+        logger.info("[DRY RUN MODE]")
 
     # Execute setup
     results = execute_setup(config, ctx, suite_folder)
@@ -752,6 +914,9 @@ def main():
 
     args = parser.parse_args()
 
+    # Create logger
+    logger = TestLogger(verbose=args.verbose, quiet=args.json)
+    
     try:
         results = run(
             folder=args.folder,
@@ -764,6 +929,7 @@ def main():
             verbose=args.verbose,
             quiet=args.json,
             local=args.local,
+            logger=logger,
         )
     except Exception as e:
         if args.json:
@@ -773,28 +939,24 @@ def main():
         sys.exit(1)
 
     # Output results
-    if not args.json:
-        print("\n" + "=" * 60)
-        print("Setup Results")
-        print("=" * 60)
-
     if args.json:
         print(json.dumps(results, indent=2, default=str))
     else:
+        logger.section("Setup Results")
         for step in results["steps"]:
             status = "✓" if step.get("success") else ("⊘" if step.get("skipped") else "✗")
-            print(f"  {status} {step['name']}")
+            logger.info(f"{status} {step['name']}")
             if step.get("error"):
-                print(f"      Error: {step['error'][:100]}")
+                logger.error(f"  Error: {step['error'][:100]}")
 
-        print(f"\nEnvironment Variables:")
+        logger.info("\nEnvironment Variables:")
         for key, value in results["env_vars"].items():
             # Mask sensitive values
             display_value = value if "TOKEN" not in key.upper() else f"{str(value)[:4]}***"
-            print(f"  {key}={display_value}")
+            logger.info(f"{key}={display_value}")
         
         if args.output_env:
-             print(f"\nEnvironment written to: {args.output_env}")
+             logger.success(f"Environment written to: {args.output_env}")
 
     # Exit with appropriate code
     if not results["success"]:

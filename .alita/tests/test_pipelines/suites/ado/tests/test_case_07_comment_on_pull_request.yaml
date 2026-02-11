@@ -1,0 +1,135 @@
+name: "ADO07 - Comment on Pull Request (simple)"
+description: "Verify the ADO 'comment_on_pull_request' tool can add a general comment using comment_query format"
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  generated_comment:
+    type: str
+    value: ''
+  pr_details:
+    type: dict
+  pull_request_id:
+    type: str
+    value: '11'
+  test_results:
+    type: dict
+  tool_result:
+    type: str
+entry_point: LLM 1
+interrupt_before: []
+nodes:
+  - id: invoke_comment_on_pr
+    type: toolkit
+    input:
+      - pull_request_id
+      - generated_comment
+    input_mapping:
+      comment_query:
+        type: variable
+        value: generated_comment
+      inline_comments:
+        type: fixed
+        value: null
+      pull_request_id:
+        type: variable
+        value: pull_request_id
+    output:
+      - tool_result
+    structured_output: true
+    tool: comment_on_pull_request
+    toolkit_name: ado-repos-testing
+    transition: get_pr_details
+  - id: get_pr_details
+    type: toolkit
+    input:
+      - pull_request_id
+    input_mapping:
+      pull_request_id:
+        type: variable
+        value: pull_request_id
+    output:
+      - pr_details
+    structured_output: true
+    tool: get_pull_request
+    toolkit_name: ado-repos-testing
+    transition: validate_comment
+  - id: validate_comment
+    type: llm
+    input:
+      - tool_result
+      - pr_details
+      - generated_comment
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |-
+          Validate the output from 'comment_on_pull_request' and verify the comment appears in the PR details.
+
+          Expected Comment: {generated_comment}
+          Comment Query (full): {comment_query}
+          Comment Tool Result: {tool_result}
+          PR Details: {pr_details}
+
+          Validation rules:
+           - tool_executed: True ONLY if tool_result contains exactly "Commented on pull request 11" (success message format)
+           - comment_matched: True ONLY if the generated_comment text is found in pr_details (check in comments/threads section)
+           - test_passed: True if BOTH tool_executed AND comment_matched are True
+           - message_snippet: short string summarizing validation result
+           - error: detailed error message if any validation fails, null otherwise
+
+          Check carefully:
+          1. Tool result must be: "Commented on pull request 11"
+          2.  pr_details contain generated_comment , no need to compare exact match and formating
+
+          Return ONLY JSON and tags test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "comment_matched": boolean,
+            "message_snippet": string | null,
+            "error": string | null
+          }}
+          IMPORTANT do not add any markup tags. Eg json etc
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output: false
+    structured_output_dict:
+      test_results: dict
+    transition: END
+  - id: LLM 1
+    type: llm
+    input: []
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fstring
+        value: You are data generator
+      task:
+        type: fstring
+        value: |-
+          Create a test data string
+
+          11 
+
+          Test comment ${current_date}${current_time}
+
+          You have to replace the variables yourself
+
+
+          Return result as test_string only, do not do any summarization, and do not wrapp it with any kind of markup
+    output:
+      - generated_comment
+    structured_output: false
+    transition: invoke_comment_on_pr

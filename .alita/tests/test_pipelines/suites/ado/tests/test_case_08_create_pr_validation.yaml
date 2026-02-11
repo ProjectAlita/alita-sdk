@@ -1,0 +1,89 @@
+name: "ADO08 - Create Pull Request Validation (non-destructive)"
+description: "Verify the ADO 'create_pr' tool returns an informative error when source and target branches are identical (non-destructive check)"
+
+toolkits:
+  - id: ${ADO_REPOS_TOOLKIT_ID}
+    name: ${ADO_REPOS_TOOLKIT_NAME}
+
+state:
+  repository_id:
+    type: str
+    value: ${ADO_REPOSITORY_ID}
+  branch_name:
+    type: str
+    value: ${ADO_BASE_BRANCH}
+  pull_request_title:
+    type: str
+    value: "Test PR - identical branches"
+  pull_request_body:
+    type: str
+    value: "This test validates that create_pr returns an error when source == target"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_create_pr
+nodes:
+  - id: invoke_create_pr
+    type: toolkit
+    input:
+      - pull_request_title
+      - pull_request_body
+      - branch_name
+      - branch_name
+    input_mapping:
+      pull_request_title:
+        type: variable
+        value: pull_request_title
+      pull_request_body:
+        type: variable
+        value: pull_request_body
+      target_branch:
+        type: variable
+        value: branch_name
+      source_branch:
+        type: variable
+        value: branch_name
+    output:
+      - tool_result
+    structured_output: true
+    tool: create_pull_request
+    toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
+    transition: validate_pr
+
+  - id: validate_pr
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'create_pr' when source and target branches are the same.
+
+          Tool Result: {tool_result}
+
+          Expected: A clear error message indicating source and target branches are identical and that PR cannot be created.
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "error_detected": boolean,
+            "error_message": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

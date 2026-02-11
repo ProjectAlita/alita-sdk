@@ -1,0 +1,160 @@
+name: "BB01 - create_branch: Create new branch successfully"
+description: |
+  Verify the Bitbucket 'create_branch' tool creates a new branch from the current active branch.
+
+  Objective: Test successful branch creation
+
+  Expected Behavior:
+  - Branch is created without errors
+  - Branch appears in repository branch list
+  - Branch name matches exactly
+  - No error indicators in output
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  branch_name:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["created", "success", "branch", "refs/heads/test-branch-bb01"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "already exists", "permission denied"]
+  create_result:
+    type: str
+  branch_list:
+    type: str
+  delete_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique branch name
+        branch_name = f"test-branch-bb01-{timestamp}-{random_suffix}"
+
+        {"branch_name": branch_name}
+    output:
+      - branch_name
+    structured_output: true
+    transition: create_test_branch
+
+  - id: create_test_branch
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - create_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_branch_exists
+
+  - id: verify_branch_exists
+    type: toolkit
+    input:
+      - branch_name
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_name
+    output:
+      - branch_list
+    structured_output: true
+    tool: list_branches_in_repo
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - branch_list
+      - branch_name
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_branch' tool execution.
+
+          Branch Name: {branch_name}
+          Create Result: {create_result}
+          Branch List After Creation: {branch_list}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful branch creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Both tools ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. branch_created: Create result indicates success (contains success indicator)
+          4. branch_in_list: Branch name appears in the branch list
+          5. exact_match: Branch name in list matches exactly (case-sensitive)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "branch_created": boolean,
+            "branch_in_list": boolean,
+            "exact_match": boolean,
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "branches_found": [list of branch names from branch_list],
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: END
