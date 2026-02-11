@@ -72,7 +72,8 @@ class FunctionTool(BaseTool):
             logger.debug(f"Code node: injecting ONLY specified variables into alita_state: {list(filtered_state.keys())}")
 
         # Use safe_serialize to handle Pydantic models, datetime, and other non-JSON types
-        state_json = safe_serialize(filtered_state)
+        filtered_state_dict = object_to_dict(filtered_state)
+        state_json = safe_serialize(filtered_state_dict)
 
         # Use base64 encoding to avoid all string escaping issues
         # This is more robust than repr() when the code passes through multiple parsers
