@@ -13,23 +13,6 @@ on:
         required: false
         type: string
         default: 'local'
-       
-  workflow_dispatch:
-    inputs:
-      test_cases_dir:
-        description: 'Test cases directory (e.g., github, ado, confluence) or anything from .alita/tests/test_pipelines/suites'
-        required: true
-        type: string
-      environment:
-        description: 'Environment to run tests in'
-        required: true
-        type: choice
-        default: 'local'
-        options:
-          - local
-          - dev
-          - stage
-          - prod
 
 env:
   REGISTRY: ghcr.io
