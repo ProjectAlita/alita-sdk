@@ -1,0 +1,129 @@
+name: "QT01 - search_by_dql: Search test cases using DQL"
+description: |
+  Verify the QTest 'search_by_dql' tool searches for test cases using Data Query Language (DQL).
+
+  Objective: Test DQL-based search for retrieving test cases
+
+  Expected Behavior:
+  - DQL query executes without errors
+  - Returns test case results
+  - Response contains test case fields (Id, Name, Description)
+  - No error indicators in output
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  dql_query:
+    type: str
+  search_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["TC-", "Id", "Name"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "Invalid DQL", "syntax error"]
+  test_results:
+    type: dict
+
+entry_point: prepare_dql_query
+nodes:
+  - id: prepare_dql_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Prepare a simple DQL query to search for test cases
+        # Search for test cases with Status = 'New' or 'Active'
+        dql_query = "Status = 'New' or Status = 'Active'"
+        
+        {"dql_query": dql_query}
+    input:
+      - project_id
+    output:
+      - dql_query
+    structured_output: true
+    transition: execute_search
+
+  - id: execute_search
+    type: toolkit
+    input:
+      - dql_query
+    input_mapping:
+      dql:
+        type: variable
+        value: dql_query
+    output:
+      - search_result
+    structured_output: false
+    tool: search_by_dql
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - search_result
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'search_by_dql' tool execution.
+
+          Search Result: {search_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          TASK: Determine if the search was successful.
+
+          SUCCESS CRITERIA:
+          1. At least ONE expected_success_indicator is present in search_result
+          2. NONE of the error_indicators are present in search_result
+          3. The search executed without raising exceptions
+          4. Test case data is present (even if empty results, should show structure)
+
+          Return ONLY a JSON object:
+          {{
+            "test_passed": true/false,
+            "success_indicators_found": ["list", "of", "found", "indicators"],
+            "error_indicators_found": ["list", "of", "found", "error", "indicators"],
+            "reason": "Brief explanation of pass/fail decision"
+          }}
+    output:
+      - test_results
+    structured_output: true
+    model: ${DEFAULT_LLM_MODEL}
+    transition: check_test_status
+
+  - id: check_test_status
+    type: code
+    code:
+      type: fixed
+      value: |
+        test_results = alita_state.get("test_results", {})
+        test_passed = test_results.get("test_passed", False)
+        
+        if not test_passed:
+            reason = test_results.get("reason", "Unknown failure")
+            raise Exception(f"Test QT01 FAILED: {reason}")
+        
+        {"status": "Test QT01 PASSED", "details": test_results}
+    input:
+      - test_results
+    output:
+      - status
+    structured_output: true
+    transition: END

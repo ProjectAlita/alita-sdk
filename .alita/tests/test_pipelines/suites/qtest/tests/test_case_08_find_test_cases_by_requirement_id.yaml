@@ -1,0 +1,189 @@
+name: "QT08 - find_test_cases_by_requirement_id: Find linked test cases"
+description: |
+  Verify the QTest 'find_test_cases_by_requirement_id' tool finds test cases linked to a requirement.
+
+  Objective: Test retrieval of test cases associated with a specific requirement
+
+  Expected Behavior:
+  - Tool executes without errors
+  - Returns linked test cases (may be empty if no links exist)
+  - Response structure is valid
+  - No error indicators in output
+
+  Note: This test searches for a requirement first, then finds its linked test cases
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  requirement_search_result:
+    type: str
+  requirement_id:
+    type: str
+  find_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["test case", "linked", "requirement"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "Invalid requirement"]
+  test_results:
+    type: dict
+
+entry_point: search_for_requirement
+nodes:
+  - id: search_for_requirement
+    type: toolkit
+    input:
+      - project_id
+    input_mapping:
+      object_type:
+        type: fixed
+        value: "requirements"
+      dql:
+        type: fixed
+        value: "Status = 'New' or Status = 'Active'"
+    output:
+      - requirement_search_result
+    structured_output: false
+    tool: search_entities_by_dql
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    on_error: use_default_requirement
+    transition: extract_requirement_id
+
+  - id: use_default_requirement
+    type: code
+    code:
+      type: fixed
+      value: |
+        # If search fails or no search tool, use a default requirement ID for testing
+        # In a real test, you'd ensure a requirement exists in the test project
+        requirement_search_result = "Using default requirement: RQ-1"
+        
+        {"requirement_search_result": requirement_search_result}
+    input: []
+    output:
+      - requirement_search_result
+    structured_output: true
+    transition: extract_requirement_id
+
+  - id: extract_requirement_id
+    type: llm
+    input:
+      - requirement_search_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a data extraction specialist. Extract the requirement ID and return valid JSON only.
+      task:
+        type: fstring
+        value: |
+          Extract a requirement ID from this result:
+
+          {requirement_search_result}
+
+          Find any requirement ID in format RQ-xxx
+          If no requirement found, return "RQ-1" as default for testing
+
+          Return ONLY a JSON object:
+          {{
+            "requirement_id": "RQ-xxx"
+          }}
+    output:
+      - requirement_id
+    structured_output: true
+    model: ${DEFAULT_LLM_MODEL}
+    transition: find_test_cases
+
+  - id: find_test_cases
+    type: toolkit
+    input:
+      - requirement_id
+    input_mapping:
+      requirement_id:
+        type: variable
+        value: requirement_id
+      include_details:
+        type: fixed
+        value: false
+    output:
+      - find_result
+    structured_output: false
+    tool: find_test_cases_by_requirement_id
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - find_result
+      - expected_success_indicators
+      - error_indicators
+      - requirement_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'find_test_cases_by_requirement_id' tool execution.
+
+          Find Result: {find_result}
+          Requirement ID: {requirement_id}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          TASK: Determine if the test case search was successful.
+
+          SUCCESS CRITERIA:
+          1. Tool executed without raising critical exceptions
+          2. NONE of the error_indicators are present in find_result
+          3. Result shows valid structure (even if empty list - no links is a valid result)
+          4. If test cases found, they should have proper format
+
+          Note: Empty results are ACCEPTABLE - not all requirements have linked test cases.
+
+          Return ONLY a JSON object:
+          {{
+            "test_passed": true/false,
+            "success_indicators_found": ["list", "of", "found", "indicators"],
+            "error_indicators_found": ["list", "of", "found", "error", "indicators"],
+            "reason": "Brief explanation of pass/fail decision"
+          }}
+    output:
+      - test_results
+    structured_output: true
+    model: ${DEFAULT_LLM_MODEL}
+    transition: check_test_status
+
+  - id: check_test_status
+    type: code
+    code:
+      type: fixed
+      value: |
+        test_results = alita_state.get("test_results", {})
+        test_passed = test_results.get("test_passed", False)
+        
+        if not test_passed:
+            reason = test_results.get("reason", "Unknown failure")
+            raise Exception(f"Test QT08 FAILED: {reason}")
+        
+        {"status": "Test QT08 PASSED", "details": test_results}
+    input:
+      - test_results
+    output:
+      - status
+    structured_output: true
+    transition: END

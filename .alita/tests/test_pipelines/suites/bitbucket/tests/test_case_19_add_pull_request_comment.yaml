@@ -1,4 +1,4 @@
-name: "BB22 - add_pull_request_comment: Add regular comment to PR"
+name: "BB19 - add_pull_request_comment: Add regular comment to PR"
 description: |
   Verify the Bitbucket 'add_pull_request_comment' tool adds a regular comment.
 
@@ -21,13 +21,13 @@ state:
   comment_content:
     type: str
     value: |
-      ## Test Comment from BB22
+      ## Test Comment from BB19
 
       This is a test comment added by the Bitbucket test suite.
 
       **Purpose**: Verify that regular PR comments can be added successfully.
 
-      - Test case: BB22
+      - Test case: BB19
       - Comment type: Regular (non-inline)
   expected_success_indicators:
     type: list

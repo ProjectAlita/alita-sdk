@@ -1,0 +1,170 @@
+name: "QT11 - find_requirements_by_test_case_id: Find linked requirements"
+description: |
+  Verify the QTest 'find_requirements_by_test_case_id' tool finds requirements linked to a test case.
+
+  Objective: Test retrieval of requirements that a test case covers (reverse relationship lookup)
+
+  Expected Behavior:
+  - Query executes without errors
+  - Returns list of linked requirements (if any exist)
+  - Response contains requirement fields (Id, Name, Description)
+  - Handles test cases with no requirements gracefully
+  - No error indicators in output
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  test_case_id:
+    type: str
+  dql_query:
+    type: str
+  search_result:
+    type: str
+  find_requirements_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["requirements", "Id", "Name"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "not found"]
+  test_results:
+    type: dict
+
+entry_point: find_existing_test_case
+nodes:
+  - id: find_existing_test_case
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Search for any existing test case to use for the relationship query
+        dql_query = "Status is 'not empty'"
+        {"dql_query": dql_query}
+    input:
+      - project_id
+    output:
+      - dql_query
+    structured_output: true
+    transition: search_test_cases
+
+  - id: search_test_cases
+    type: toolkit
+    input:
+      - dql_query
+    input_mapping:
+      dql:
+        type: variable
+        value: dql_query
+    output:
+      - search_result
+    structured_output: false
+    tool: search_by_dql
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: extract_test_case_id
+
+  - id: extract_test_case_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+        
+        # Extract first test case ID from search results
+        result_str = alita_state.get("search_result", "")
+        test_case_id = "TC-1"  # fallback
+        
+        try:
+            # Look for TC-xxx pattern
+            match = re.search(r"(TC-\d+)", result_str)
+            if match:
+                test_case_id = match.group(1)
+        except Exception:
+            pass
+        
+        {"test_case_id": test_case_id}
+    input:
+      - search_result
+    output:
+      - test_case_id
+    structured_output: true
+    transition: find_requirements
+
+  - id: find_requirements
+    type: toolkit
+    input:
+      - test_case_id
+    input_mapping:
+      test_case_id:
+        type: variable
+        value: test_case_id
+    output:
+      - find_requirements_result
+    structured_output: false
+    tool: find_requirements_by_test_case_id
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - find_requirements_result
+      - test_case_id
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'find_requirements_by_test_case_id' tool execution.
+
+          Find Requirements Result: {find_requirements_result}
+          Test Case ID: {test_case_id}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful execution.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran without throwing an exception
+          2. no_errors: Output does NOT contain error indicators
+          3. has_valid_response: Response structure is valid (list or JSON)
+          4. graceful_handling: Empty results are handled gracefully (not an error)
+
+          NOTE: Empty results (no linked requirements) are still considered SUCCESS
+          as long as the query executed properly.
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_valid_response": boolean,
+            "graceful_handling": boolean,
+            "has_requirements": boolean (true if requirements found, false if empty),
+            "requirements_count": integer (0 if none found),
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output: true
+    transition: end
+
+  - id: end
+    type: end

@@ -1,0 +1,128 @@
+name: "BB20 - add_pull_request_comment: Add inline comment to PR"
+description: |
+  Verify the Bitbucket 'add_pull_request_comment' tool adds an inline comment.
+
+  Objective: Test adding inline comment to specific file/line in PR
+
+  Expected Behavior:
+  - Tool executes without crashing
+  - Inline comment is added when PR and file exist
+  - Returns appropriate error when PR/file doesn't exist
+  - Inline comment format is correctly processed
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  comment_result:
+    type: str
+  inline_comment_text:
+    type: str
+    value: This is an inline comment on a specific line of code. Test case BB20.
+  inline_file_path:
+    type: str
+    value: test-files/bb15-pr-changes.txt
+  inline_json_data:
+    type: str
+  inline_line_number:
+    type: str
+    value: '1'
+  pr_id:
+    type: str
+    value: '1'
+  test_results:
+    type: dict
+entry_point: build_inline_json
+nodes:
+  - id: build_inline_json
+    type: code
+    code:
+      type: fstring
+      value: |-
+        import json
+
+        line = alita_state.get('inline_line_number')
+        path = alita_state.get('inline_file_path')
+
+        inline_data = {
+            "from": int(line),
+            "to": int(line),
+            "path": path
+        }
+
+        inline_data
+    input:
+      - inline_line_number
+      - inline_file_path
+    output:
+      - inline_json_data
+    structured_output: false
+    transition: add_inline_comment
+
+  - id: add_inline_comment
+    type: toolkit
+    input:
+      - pr_id
+      - inline_comment_text
+      - inline_json_data
+    input_mapping:
+      content:
+        type: variable
+        value: inline_comment_text
+      inline:
+        type: variable
+        value: inline_json_data
+      pr_id:
+        type: variable
+        value: pr_id
+    output:
+      - comment_result
+    structured_output: true
+    tool: add_pull_request_comment
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - comment_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Validate that the tool output is a properly formatted Bitbucket comment URL.
+
+          Tool Output: {comment_result}
+
+          Expected Format: https://bitbucket.org/.../pull-requests/{pr_id}/_/diff#comment-{comment_id}
+
+          Validation Criteria:
+          1. Output is a string containing a Bitbucket URL
+          2. URL contains "bitbucket.org"
+          3. URL contains "pull-requests"
+          4. URL ends with "#comment-" followed by a numeric ID
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true if output matches expected URL format),
+            "is_valid_url": boolean (contains https://bitbucket.org),
+            "has_pull_request_path": boolean (contains "pull-requests"),
+            "has_comment_anchor": boolean (ends with "#comment-XXXXXX"),
+            "comment_id": "extracted comment ID or 'not found'",
+            "error": string | null (error message if validation fails)
+          }}
+
+          Return ONLY the JSON object, no markdown.
+    model: gpt-4o-2024-11-20
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

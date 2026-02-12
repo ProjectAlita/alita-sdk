@@ -1,0 +1,97 @@
+name: Execute Toolkit Tests on Demand
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run tests in'
+        required: true
+        type: choice
+        default: 'local'
+        options:
+          - local
+          - dev
+          - stage
+          - prod
+      test_cases_dir:
+        description: 'Toolkit tests to execute (all will execute all tests, custom allows specifying comma-separated list of suites, or choose specific suite)'
+        required: true
+        type: choice
+        options:
+          - all
+          - custom
+          - ado
+          - artifact
+          - github
+          - bitbucket
+          - confluence
+          - figma
+          - github
+          - gitlab
+          - jira
+          - qtest
+          - zephyr-essentials
+          - xray
+          - state_retrieval
+          - structured_output
+      custom_suites:
+        description: 'Comma-separated suite names (used only when test_cases_dir is "custom")'
+        required: false
+        type: string
+        default: ''
+      
+jobs:
+  configure-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has-tests: ${{ steps.set-matrix.outputs.has-tests }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/workflows/execute-toolkit-tests-on-demand.yml
+          sparse-checkout-cone-mode: false
+      
+      - name: Generate test matrix
+        id: set-matrix
+        run: |
+          TEST_CASES_DIR="${{ github.event.inputs.test_cases_dir }}"
+          CUSTOM_SUITES="${{ github.event.inputs.custom_suites }}"
+          
+          if [ "$TEST_CASES_DIR" = "all" ]; then
+            # Parse workflow file to extract all test_cases_dir options (excluding 'all' and 'custom')
+            MATRIX=$(yq eval '.on.workflow_dispatch.inputs.test_cases_dir.options[] | select(. != "all" and . != "custom")' \
+              .github/workflows/execute-toolkit-tests-on-demand.yml | \
+              jq -R -s -c 'split("\n") | map(select(length > 0))')
+          elif [ "$TEST_CASES_DIR" = "custom" ]; then
+            # Parse comma-separated custom suites
+            MATRIX=$(echo "$CUSTOM_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          else
+            # Create matrix with single directory
+            MATRIX=$(jq -n -c --arg dir "$TEST_CASES_DIR" '[$dir]')
+          fi
+          
+          HAS_TESTS=$(echo "$MATRIX" | jq 'length > 0')
+          
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "has-tests=$HAS_TESTS" >> $GITHUB_OUTPUT
+          
+          # Debug output
+          echo "Generated matrix: $MATRIX"
+          echo "Has tests: $HAS_TESTS"
+
+  test-execution:
+    needs: configure-matrix
+    if: needs.configure-matrix.outputs.has-tests == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        test_cases_dir: ${{ fromJson(needs.configure-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/test-runner-reusable.yml
+    with:
+      test_cases_dir: ${{ matrix.test_cases_dir }}
+      environment: ${{ github.event.inputs.environment }}
+    secrets: inherit

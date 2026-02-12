@@ -78,7 +78,7 @@ nodes:
       - test_branch_name
       - source_branch
     input_mapping:
-      branch:
+      branch_name:
         type: variable
         value: test_branch_name
       from_branch:
