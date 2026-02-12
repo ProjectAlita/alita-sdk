@@ -17,7 +17,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID}
+    value: ${QTEST_PROJECT_ID:1}
   invalid_dql_query:
     type: str
     value: "Status = AND Priority INVALID ((("
@@ -99,8 +99,7 @@ nodes:
     model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
-    structured_output_dict:
-      test_results: "dict"
+    structured_output: true
     transition: end
 
   - id: end

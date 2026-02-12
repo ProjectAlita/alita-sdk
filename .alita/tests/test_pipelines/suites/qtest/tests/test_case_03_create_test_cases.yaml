@@ -17,7 +17,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID}
+    value: ${QTEST_PROJECT_ID:1}
   test_case_json:
     type: str
   create_result:
@@ -34,10 +34,6 @@ state:
     value: ["Unable to create", "error", "failed", "exception", "Invalid"]
   test_results:
     type: dict
-  qtest_id_to_delete:
-    type: int
-  cleanup_result:
-    type: str
 
 entry_point: prepare_test_case_data
 nodes:
@@ -184,44 +180,37 @@ nodes:
           }}
     output:
       - test_results
-    structured_output_dict:
-      test_results: "dict"
+    structured_output: true
     model: ${DEFAULT_LLM_MODEL}
-    transition: cleanup_test_case
+    transition: check_test_status
 
-  - id: cleanup_test_case
+  - id: check_test_status
     type: code
     code:
       type: fixed
       value: |
-        import json
+        test_results = alita_state.get("test_results", {})
+        test_passed = test_results.get("test_passed", False)
         
-        # Extract QTest numeric ID for deletion
+        if not test_passed:
+            reason = test_results.get("reason", "Unknown failure")
+            raise Exception(f"Test QT03 FAILED: {reason}")
+        
+        # Store created IDs for potential cleanup
         created_test_id = alita_state.get("created_test_id", "")
         created_test_qt_id = alita_state.get("created_test_qt_id", "")
         
-        # Use QTest numeric ID if available
-        {"qtest_id_to_delete": int(created_test_qt_id) if (created_test_qt_id and created_test_qt_id != "") else 0}
+        {
+            "status": "Test QT03 PASSED", 
+            "details": test_results,
+            "created_test_id": created_test_id,
+            "created_test_qt_id": created_test_qt_id
+        }
     input:
+      - test_results
       - created_test_id
       - created_test_qt_id
     output:
-      - qtest_id_to_delete
+      - status
     structured_output: true
-    transition: delete_test_case
-
-  - id: delete_test_case
-    type: toolkit
-    input:
-      - qtest_id_to_delete
-    input_mapping:
-      qtest_id:
-        type: variable
-        value: qtest_id_to_delete
-    output:
-      - cleanup_result
-    structured_output: false
-    tool: delete_test_case
-    toolkit_name: ${QTEST_TOOLKIT_NAME}
-    continue_on_error: true
     transition: END

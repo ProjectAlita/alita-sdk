@@ -88,10 +88,10 @@ nodes:
             "pr_not_closed": boolean,
             "informative_error": boolean,
             "error_indicator_found": "which error indicator was found or 'none'",
-            "error": null
+            "error_message": "the error message from close_result",
+            "error": string | null
           }}
 
-          IMPORTANT: Do NOT include the full error message in your response. Only return the JSON with the fields above.
           Return ONLY the JSON object.
     model: ${DEFAULT_LLM_MODEL}
     output:

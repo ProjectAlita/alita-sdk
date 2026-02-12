@@ -18,7 +18,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID}
+    value: ${QTEST_PROJECT_ID:1}
   test_case_json:
     type: str
   create_result:
@@ -103,18 +103,17 @@ nodes:
       type: fixed
       value: |
         import json
+        import re
         
         # Extract QTest ID from creation result
         result_str = alita_state.get("create_result", "")
         qtest_id = 0
         
         try:
-            # Parse the create_result JSON
-            result_dict = json.loads(result_str) if isinstance(result_str, str) else result_str
-            
-            # Get qtest_id from the test_cases array
-            if 'test_cases' in result_dict and len(result_dict['test_cases']) > 0:
-                qtest_id = result_dict['test_cases'][0].get('qtest_id', 0)
+            # Look for QTest Id in result (numeric ID)
+            qtest_match = re.search(r"['\"]QTest [Ii]d['\"]:\s*['\"]?(\d+)['\"]?", result_str)
+            if qtest_match:
+                qtest_id = int(qtest_match.group(1))
         except Exception as e:
             pass
         
@@ -193,8 +192,7 @@ nodes:
     model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
-    structured_output_dict:
-      test_results: "dict"
+    structured_output: true
     transition: end
 
   - id: end

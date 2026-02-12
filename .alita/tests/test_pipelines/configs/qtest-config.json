@@ -21,9 +21,7 @@
     "find_defects_by_test_run_id",
     "add_file_to_test_case",
     "search_entities_by_dql",
-    "find_entity_by_id",
-    "link_tests_to_qtest_requirement",
-    "link_tests_to_jira_requirement"
+    "find_entity_by_id"
   ],
   "no_of_tests_shown_in_dql_search": 10
 }

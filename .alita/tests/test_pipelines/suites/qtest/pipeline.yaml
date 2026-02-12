@@ -13,8 +13,7 @@ env_mapping:
   toolkit_config: ${QTEST_CONFIG_PATH:../../configs/qtest-config.json}
   base_url: ${QTEST_BASE_URL:https://alita.qtestnet.com}
   qtest_api_token: ${QTEST_API_TOKEN}
-  qtest_project_id: ${QTEST_PROJECT_ID:154314}
-  qtest_requirement_id: ${QTEST_REQUIREMENT_ID:RQ-1}
+  qtest_project_id: ${QTEST_PROJECT_ID:1}
 
 setup:
   - name: Setup QTest Configuration
@@ -33,9 +32,6 @@ setup:
       config_file: ${QTEST_CONFIG_PATH:../../configs/qtest-config.json}
       toolkit_type: qtest
       toolkit_name: ${QTEST_TOOLKIT_NAME:qtest-testing}
-      overrides:
-        qtest_configuration:
-          qtest_project_id: ${QTEST_PROJECT_ID:154314}
     save_to_env:
       - key: QTEST_TOOLKIT_ID
         value: $.id
@@ -52,14 +48,13 @@ execution:
   substitutions:
     QTEST_TOOLKIT_ID: ${QTEST_TOOLKIT_ID}
     QTEST_TOOLKIT_NAME: ${QTEST_TOOLKIT_NAME}
-    QTEST_PROJECT_ID: ${QTEST_PROJECT_ID:154314}
-    QTEST_REQUIREMENT_ID: ${QTEST_REQUIREMENT_ID:RQ-1}
+    QTEST_PROJECT_ID: ${QTEST_PROJECT_ID:1}
     TIMESTAMP: ${TIMESTAMP}
     DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
 
   settings:
     timeout: 180
-    parallel: 5
+    parallel: 1
     stop_on_failure: false
 
 exclude_tests: []

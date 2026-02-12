@@ -18,7 +18,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID}
+    value: ${QTEST_PROJECT_ID:1}
   fields_result:
     type: str
   expected_success_indicators:
@@ -86,7 +86,26 @@ nodes:
           }}
     output:
       - test_results
-    structured_output_dict:
-      test_results: "dict"
+    structured_output: true
     model: ${DEFAULT_LLM_MODEL}
+    transition: check_test_status
+
+  - id: check_test_status
+    type: code
+    code:
+      type: fixed
+      value: |
+        test_results = alita_state.get("test_results", {})
+        test_passed = test_results.get("test_passed", False)
+        
+        if not test_passed:
+            reason = test_results.get("reason", "Unknown failure")
+            raise Exception(f"Test QT02 FAILED: {reason}")
+        
+        {"status": "Test QT02 PASSED", "details": test_results}
+    input:
+      - test_results
+    output:
+      - status
+    structured_output: true
     transition: END
