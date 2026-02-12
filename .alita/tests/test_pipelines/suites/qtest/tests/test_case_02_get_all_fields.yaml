@@ -1,0 +1,111 @@
+name: "QT02 - get_all_test_cases_fields_for_project: Retrieve field definitions"
+description: |
+  Verify the QTest 'get_all_test_cases_fields_for_project' tool retrieves available fields and their valid values.
+
+  Objective: Test field definition retrieval for test cases
+
+  Expected Behavior:
+  - Tool executes without errors
+  - Returns field definitions
+  - Response contains standard fields (Status, Priority, Type)
+  - Shows valid values for dropdown fields
+  - No error indicators in output
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  fields_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["Status", "Priority", "Type", "field", "allowed"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "Unable to retrieve"]
+  test_results:
+    type: dict
+
+entry_point: get_fields
+nodes:
+  - id: get_fields
+    type: toolkit
+    input:
+      - project_id
+    input_mapping:
+      force_refresh:
+        type: fixed
+        value: false
+    output:
+      - fields_result
+    structured_output: false
+    tool: get_all_test_cases_fields_for_project
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - fields_result
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_all_test_cases_fields_for_project' tool execution.
+
+          Fields Result: {fields_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          TASK: Determine if field retrieval was successful.
+
+          SUCCESS CRITERIA:
+          1. At least TWO expected_success_indicators are present in fields_result
+          2. NONE of the error_indicators are present in fields_result
+          3. The tool executed without raising exceptions
+          4. Field definitions contain standard QTest fields
+
+          Return ONLY a JSON object:
+          {{
+            "test_passed": true/false,
+            "success_indicators_found": ["list", "of", "found", "indicators"],
+            "error_indicators_found": ["list", "of", "found", "error", "indicators"],
+            "reason": "Brief explanation of pass/fail decision"
+          }}
+    output:
+      - test_results
+    structured_output: true
+    model: ${DEFAULT_LLM_MODEL}
+    transition: check_test_status
+
+  - id: check_test_status
+    type: code
+    code:
+      type: fixed
+      value: |
+        test_results = alita_state.get("test_results", {})
+        test_passed = test_results.get("test_passed", False)
+        
+        if not test_passed:
+            reason = test_results.get("reason", "Unknown failure")
+            raise Exception(f"Test QT02 FAILED: {reason}")
+        
+        {"status": "Test QT02 PASSED", "details": test_results}
+    input:
+      - test_results
+    output:
+      - status
+    structured_output: true
+    transition: END

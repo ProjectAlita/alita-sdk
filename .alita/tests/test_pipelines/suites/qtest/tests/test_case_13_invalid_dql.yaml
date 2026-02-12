@@ -1,0 +1,106 @@
+name: "QT13 - search_by_dql: Handle invalid DQL syntax (Negative Test)"
+description: |
+  Verify the QTest 'search_by_dql' tool properly handles malformed DQL queries.
+
+  Objective: Test error handling for invalid DQL syntax
+
+  Expected Behavior (NEGATIVE TEST):
+  - Tool returns error for malformed DQL
+  - Error message indicates syntax problem
+  - Proper error handling without crashing
+  - No test case data is returned
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  invalid_dql_query:
+    type: str
+    value: "Status = AND Priority INVALID ((("
+  search_result:
+    type: str
+  expected_error_indicators:
+    type: list
+    value: ["error", "Invalid DQL", "syntax", "parse", "failed"]
+  unexpected_success_indicators:
+    type: list
+    value: ["TC-", "found", "results"]
+  test_results:
+    type: dict
+
+entry_point: search_with_invalid_dql
+nodes:
+  - id: search_with_invalid_dql
+    type: toolkit
+    input:
+      - invalid_dql_query
+    input_mapping:
+      dql:
+        type: variable
+        value: invalid_dql_query
+    output:
+      - search_result
+    structured_output: false
+    tool: search_by_dql
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_error_handling
+
+  - id: validate_error_handling
+    type: llm
+    input:
+      - search_result
+      - invalid_dql_query
+      - expected_error_indicators
+      - unexpected_success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'search_by_dql' tool execution with invalid DQL.
+          
+          This is a NEGATIVE test - we EXPECT an error for malformed DQL.
+
+          Search Result: {search_result}
+          Invalid DQL Query Used: {invalid_dql_query}
+          Expected Error Indicators: {expected_error_indicators}
+          Unexpected Success Indicators: {unexpected_success_indicators}
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool was called (even if it returned an error)
+          2. returned_error: Output contains error message
+          3. indicates_syntax_problem: Error mentions DQL syntax/parse issue
+          4. no_test_data: Output does NOT contain test case data (TC- prefixes)
+          5. no_success_indicators: Output does NOT contain success indicators
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass - proper error handling),
+            "tool_executed": boolean,
+            "returned_error": boolean,
+            "indicates_syntax_problem": boolean,
+            "no_test_data": boolean,
+            "no_success_indicators": boolean,
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "unexpected_success_found": "which success indicator was found or 'none' (should be 'none')",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output: true
+    transition: end
+
+  - id: end
+    type: end

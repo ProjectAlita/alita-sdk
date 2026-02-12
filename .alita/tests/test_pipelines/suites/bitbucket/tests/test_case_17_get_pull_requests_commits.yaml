@@ -1,4 +1,4 @@
-name: "BB20 - get_pull_requests_commits: List commits in PR"
+name: "BB17 - get_pull_requests_commits: List commits in PR"
 description: |
   Verify the Bitbucket 'get_pull_requests_commits' tool retrieves PR commits.
 

@@ -1,0 +1,261 @@
+name: "QT10 - link_tests_to_qtest_requirement: Link test cases to requirement"
+description: |
+  Verify the QTest 'link_tests_to_qtest_requirement' tool links test cases to a QTest requirement.
+
+  Objective: Test linking multiple test cases to an internal QTest requirement
+
+  Expected Behavior:
+  - Test cases are created successfully
+  - Test cases are linked to the requirement
+  - Returns confirmation of linkage
+  - No error indicators in output
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  requirement_id:
+    type: str
+    value: ${QTEST_REQUIREMENT_ID:RQ-1}
+  test_case_1_json:
+    type: str
+  test_case_2_json:
+    type: str
+  create_result_1:
+    type: str
+  create_result_2:
+    type: str
+  test_case_id_1:
+    type: str
+  test_case_id_2:
+    type: str
+  test_case_ids_json:
+    type: str
+  link_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["linked", "successfully", "added", "associated"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "Unable to link"]
+  test_results:
+    type: dict
+
+entry_point: prepare_test_cases
+nodes:
+  - id: prepare_test_cases
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        import json
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        
+        # Create two test cases for linking
+        test_case_1 = {
+            "Name": f"QT10 Link Test 1 {timestamp}-{random_suffix}",
+            "Description": "First test case to be linked to requirement",
+            "Type": "Manual",
+            "Status": "New",
+            "Priority": "Medium",
+            "Steps": [
+                {
+                    "Test Step Number": 1,
+                    "Test Step Description": "Verify requirement coverage",
+                    "Test Step Expected Result": "Requirement is covered"
+                }
+            ]
+        }
+        
+        test_case_2 = {
+            "Name": f"QT10 Link Test 2 {timestamp}-{random_suffix}",
+            "Description": "Second test case to be linked to requirement",
+            "Type": "Manual",
+            "Status": "New",
+            "Priority": "Medium",
+            "Steps": [
+                {
+                    "Test Step Number": 1,
+                    "Test Step Description": "Additional requirement verification",
+                    "Test Step Expected Result": "Requirement is fully validated"
+                }
+            ]
+        }
+        
+        test_case_1_json = json.dumps(test_case_1)
+        test_case_2_json = json.dumps(test_case_2)
+        
+        {"test_case_1_json": test_case_1_json, "test_case_2_json": test_case_2_json}
+    input:
+      - project_id
+    output:
+      - test_case_1_json
+      - test_case_2_json
+    structured_output: true
+    transition: create_test_case_1
+
+  - id: create_test_case_1
+    type: toolkit
+    input:
+      - test_case_1_json
+    input_mapping:
+      test_case_content:
+        type: variable
+        value: test_case_1_json
+      folder_to_place_test_cases_to:
+        type: fixed
+        value: ""
+    output:
+      - create_result_1
+    structured_output: false
+    tool: create_test_cases
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: create_test_case_2
+
+  - id: create_test_case_2
+    type: toolkit
+    input:
+      - test_case_2_json
+    input_mapping:
+      test_case_content:
+        type: variable
+        value: test_case_2_json
+      folder_to_place_test_cases_to:
+        type: fixed
+        value: ""
+    output:
+      - create_result_2
+    structured_output: false
+    tool: create_test_cases
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: extract_test_case_ids
+
+  - id: extract_test_case_ids
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+        
+        # Extract test case IDs from creation results
+        result_1 = alita_state.get("create_result_1", "")
+        result_2 = alita_state.get("create_result_2", "")
+        
+        def extract_tc_id(result_str):
+            # Look for Id: TC-xxx pattern
+            match = re.search(r"['\"]Id['\"]:\s*['\"]?(TC-\d+)['\"]?", result_str)
+            if match:
+                return match.group(1)
+            return None
+        
+        test_case_id_1 = extract_tc_id(result_1)
+        test_case_id_2 = extract_tc_id(result_2)
+        
+        if not test_case_id_1 or not test_case_id_2:
+            raise Exception(f"Failed to extract test case IDs. TC1: {test_case_id_1}, TC2: {test_case_id_2}")
+        
+        # Create JSON array string for linking
+        test_case_ids = [test_case_id_1, test_case_id_2]
+        test_case_ids_json = json.dumps(test_case_ids)
+        
+        {"test_case_id_1": test_case_id_1, "test_case_id_2": test_case_id_2, "test_case_ids_json": test_case_ids_json}
+    input:
+      - create_result_1
+      - create_result_2
+    output:
+      - test_case_id_1
+      - test_case_id_2
+      - test_case_ids_json
+    structured_output: true
+    transition: link_tests_to_requirement
+
+  - id: link_tests_to_requirement
+    type: toolkit
+    input:
+      - requirement_id
+      - test_case_ids_json
+    input_mapping:
+      requirement_id:
+        type: variable
+        value: requirement_id
+      json_list_of_test_case_ids:
+        type: variable
+        value: test_case_ids_json
+    output:
+      - link_result
+    structured_output: false
+    tool: link_tests_to_qtest_requirement
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - link_result
+      - requirement_id
+      - test_case_id_1
+      - test_case_id_2
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'link_tests_to_qtest_requirement' tool execution.
+
+          Link Result: {link_result}
+          Requirement ID: {requirement_id}
+          Test Case 1: {test_case_id_1}
+          Test Case 2: {test_case_id_2}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful linking.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran without throwing an exception
+          2. no_errors: Output does NOT contain error indicators
+          3. has_success_message: Response indicates successful linking
+          4. confirms_linkage: Output confirms test cases were linked to requirement
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_success_message": boolean,
+            "confirms_linkage": boolean,
+            "requirement_id": "{requirement_id}",
+            "linked_test_cases": ["{test_case_id_1}", "{test_case_id_2}"],
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output: true
+    transition: end
+
+  - id: end
+    type: end

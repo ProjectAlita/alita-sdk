@@ -1,4 +1,4 @@
-name: "BB26 - close_pull_request: Close PR successfully (Cloud only)"
+name: "BB23 - close_pull_request: Close PR successfully (Cloud only)"
 description: |
   Verify the Bitbucket 'close_pull_request' tool closes a PR without merging (Cloud only).
 
@@ -24,14 +24,14 @@ state:
   test_file_content:
     type: str
     value: |
-      Test file for BB26 - Close PR Test
+      Test file for BB23 - Close PR Test
       ===================================
 
       This file is created to test the close_pull_request functionality.
       The PR containing this change will be closed without merging.
   pr_title:
     type: str
-    value: "BB26: Test PR for Closure"
+    value: "BB23: Test PR for Closure"
   pr_description:
     type: str
     value: |
@@ -42,7 +42,7 @@ state:
       - Verify PR can be declined without merging
   close_message:
     type: str
-    value: "This PR is being closed as part of automated testing (BB26)."
+    value: "This PR is being closed as part of automated testing (BB23)."
   expected_success_indicators:
     type: list
     value: ["closed", "declined", "success"]
@@ -86,8 +86,8 @@ nodes:
         random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
 
         # Generate unique branch and file names
-        source_branch = f"feature/bb26-close-pr-{timestamp}-{random_suffix}"
-        test_file_path = f"test-files/bb26-close-pr-test-{timestamp}-{random_suffix}.txt"
+        source_branch = f"feature/bb23-close-pr-{timestamp}-{random_suffix}"
+        test_file_path = f"test-files/bb23-close-pr-test-{timestamp}-{random_suffix}.txt"
 
         {"source_branch": source_branch, "test_file_path": test_file_path}
     output:

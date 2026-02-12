@@ -1,4 +1,4 @@
-name: "BB27 - close_pull_request: Attempt to close non-existent PR (Cloud only)"
+name: "BB24 - close_pull_request: Attempt to close non-existent PR (Cloud only)"
 description: |
   Verify the Bitbucket 'close_pull_request' tool handles non-existent PR gracefully.
 

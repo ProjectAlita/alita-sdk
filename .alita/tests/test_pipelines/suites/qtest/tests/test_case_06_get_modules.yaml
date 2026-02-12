@@ -1,0 +1,113 @@
+name: "QT06 - get_modules: Retrieve module hierarchy"
+description: |
+  Verify the QTest 'get_modules' tool retrieves the module structure for organizing test cases.
+
+  Objective: Test retrieval of module/folder hierarchy
+
+  Expected Behavior:
+  - Tool executes without errors
+  - Returns module list or hierarchy
+  - Response contains module information (id, name, path)
+  - No error indicators in output
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  modules_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["id", "name", "module"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "Unable to retrieve"]
+  test_results:
+    type: dict
+
+entry_point: get_modules
+nodes:
+  - id: get_modules
+    type: toolkit
+    input:
+      - project_id
+    input_mapping:
+      parent_id:
+        type: fixed
+        value: null
+      search:
+        type: fixed
+        value: null
+    output:
+      - modules_result
+    structured_output: false
+    tool: get_modules
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - modules_result
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_modules' tool execution.
+
+          Modules Result: {modules_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          TASK: Determine if module retrieval was successful.
+
+          SUCCESS CRITERIA:
+          1. At least ONE expected_success_indicator is present in modules_result OR result shows empty list (valid result)
+          2. NONE of the error_indicators are present in modules_result
+          3. The tool executed without raising exceptions
+          4. Module data is present (even if empty, should show structure)
+
+          Return ONLY a JSON object:
+          {{
+            "test_passed": true/false,
+            "success_indicators_found": ["list", "of", "found", "indicators"],
+            "error_indicators_found": ["list", "of", "found", "error", "indicators"],
+            "reason": "Brief explanation of pass/fail decision"
+          }}
+    output:
+      - test_results
+    structured_output: true
+    model: ${DEFAULT_LLM_MODEL}
+    transition: check_test_status
+
+  - id: check_test_status
+    type: code
+    code:
+      type: fixed
+      value: |
+        test_results = alita_state.get("test_results", {})
+        test_passed = test_results.get("test_passed", False)
+        
+        if not test_passed:
+            reason = test_results.get("reason", "Unknown failure")
+            raise Exception(f"Test QT06 FAILED: {reason}")
+        
+        {"status": "Test QT06 PASSED", "details": test_results}
+    input:
+      - test_results
+    output:
+      - status
+    structured_output: true
+    transition: END
