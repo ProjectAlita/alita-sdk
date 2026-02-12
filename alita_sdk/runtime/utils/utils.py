@@ -35,3 +35,40 @@ def clean_node_str(s: str) -> str:
     """Cleans a node string by removing all non-alphanumeric characters except underscores and spaces."""
     cleaned_string = re.sub(r'[^\w\s]', '', s)
     return cleaned_string
+
+
+def deduplicate_tool_names(tools: list, context: str = "") -> int:
+    """
+    Deduplicate tool names by appending numeric suffixes (_1, _2, etc.).
+
+    LLM providers (especially Anthropic) require unique tool names in bind_tools().
+    When multiple toolkits share the same tool name (e.g. 'index_data' in both
+    Confluence and GitHub toolkits), this function renames duplicates by appending
+    a counter suffix. The first occurrence keeps its original name.
+
+    The suffixes are stripped at execution time by BaseAction._run() using
+    re.sub(r'_\\d+$', '', name) to route to the correct api_wrapper method.
+
+    Args:
+        tools: List of tool objects with 'name' attribute. Modified in place.
+        context: Optional label for log messages (e.g. "lazy-auto-disable", "swarm").
+
+    Returns:
+        Number of tools that were renamed.
+    """
+    logger = logging.getLogger(__name__)
+    prefix = f"[{context}] " if context else ""
+    renamed_count = 0
+    tool_name_counts = {}
+    for tool in tools:
+        if hasattr(tool, 'name'):
+            base_name = tool.name
+            if base_name in tool_name_counts:
+                tool_name_counts[base_name] += 1
+                new_name = f"{base_name}_{tool_name_counts[base_name]}"
+                tool.name = new_name
+                renamed_count += 1
+                logger.info(f"{prefix}Tool name collision: '{base_name}' -> '{new_name}'")
+            else:
+                tool_name_counts[base_name] = 0
+    return renamed_count
