@@ -16,6 +16,7 @@ from .constants import (
 )
 from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
 from ..middleware.base import Middleware, MiddlewareManager
+from ..utils.utils import deduplicate_tool_names
 
 logger = logging.getLogger(__name__)
 
@@ -212,20 +213,11 @@ class Assistant:
                 self._always_bind_tools = [exception_handler.wrap_tool(t) for t in self._always_bind_tools]
                 logger.info(f"Wrapped {len(self.tools)} tools with ToolExceptionHandlerMiddleware")
 
-        # In lazy tools mode, don't rename tools - ToolRegistry handles namespacing by toolkit
-        # Only add suffixes in non-lazy mode where tools are bound directly to LLM
+        # In lazy tools mode, don't rename tools - ToolRegistry handles namespacing by toolkit.
+        # Only add suffixes in non-lazy mode where tools are bound directly to LLM.
+        # Note: if lazy mode is later auto-disabled (< 20 tools), create_graph() handles dedup.
         if not self.lazy_tools_mode:
-            tool_name_counts = {}
-            for tool in self.tools:
-                if hasattr(tool, 'name'):
-                    base_name = tool.name
-                    if base_name in tool_name_counts:
-                        tool_name_counts[base_name] += 1
-                        new_name = f"{base_name}_{tool_name_counts[base_name]}"
-                        tool.name = new_name
-                        logger.info(f"Tool name collision (non-lazy mode): '{base_name}' -> '{new_name}'")
-                    else:
-                        tool_name_counts[base_name] = 0
+            deduplicate_tool_names(self.tools, context="init")
 
         logger.info(f"Tools initialized: {len(self.tools)} tools (lazy_mode={self.lazy_tools_mode})")
 
@@ -953,6 +945,14 @@ class Assistant:
         swarm_prompt_addon = self._build_swarm_prompt_addon(peer_agent_descriptions, agent_role="main")
         enhanced_prompt = f"{prompt_instructions}\n\n{swarm_prompt_addon}"
         main_tools = regular_tools + main_handoff_tools
+
+        # Deduplicate tool names for swarm main agent.
+        # Swarm uses model.bind_tools() directly (not create_graph/ToolRegistry),
+        # so unique names are required. If lazy_tools_mode was True, __init__
+        # skipped dedup — fix it here before binding.
+        renamed = deduplicate_tool_names(main_tools, context="swarm-main")
+        if renamed:
+            logger.info(f"[SWARM] Deduplicated {renamed} tool names for main agent")
 
         # --- Agent peer setup (LLM peers with Application tool + handoff tools) ---
         compiled_agent_peers = []

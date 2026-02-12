@@ -32,7 +32,7 @@ from ..tools.loop_output import LoopToolNode
 from ..tools.tool import ToolNode
 from ..tools.lazy_tools import ToolRegistry
 from ..utils.evaluate import EvaluateTemplate
-from ..utils.utils import clean_string
+from ..utils.utils import clean_string, deduplicate_tool_names
 from ..tools.router import RouterNode
 
 logger = logging.getLogger(__name__)
@@ -852,6 +852,11 @@ def create_graph(
                 f"[LazyTools] Auto-disabled: only {tool_count} tools "
                 f"(threshold: {LAZY_TOOLS_MIN_THRESHOLD}). Using direct binding."
             )
+            # Dedup tool names: lazy_tools_mode=True caused __init__ to skip dedup,
+            # but direct binding (bind_tools) requires unique names.
+            renamed = deduplicate_tool_names(tools, context="lazy-auto-disable")
+            if renamed:
+                logger.info(f"[LazyTools] Deduplicated {renamed} tool names after auto-disable")
         elif base_tools:
             tool_registry = ToolRegistry.from_tools(base_tools)
             toolkit_count = len(tool_registry.get_toolkit_names())
