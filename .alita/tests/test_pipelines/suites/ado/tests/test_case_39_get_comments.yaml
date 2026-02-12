@@ -1,0 +1,141 @@
+name: "ADO39 - Get Comments"
+description: "Verify the ADO 'get_comments' tool retrieves comments from a work item"
+
+toolkits:
+  - id: ${ADO_BOARDS_TOOLKIT_ID}
+    name: ${ADO_BOARDS_TOOLKIT_NAME}
+
+state:
+  work_item_json:
+    type: str
+    value: '{"fields": {"System.Title": "ADO39 Test Work Item", "System.Description": "Created by test automation", "System.AreaPath": "TestProject", "System.IterationPath": "TestProject"}}'
+  work_item_type:
+    type: str
+    value: "Task"
+  create_result:
+    type: dict
+  work_item_id:
+    type: int
+  tool_result:
+    type: list
+  test_results:
+    type: dict
+  cleanup_result:
+    type: str
+
+entry_point: create_test_work_item
+nodes:
+  - id: create_test_work_item
+    type: toolkit
+    input:
+      - work_item_json
+      - work_item_type
+    input_mapping:
+      work_item_json:
+        type: variable
+        value: work_item_json
+      wi_type:
+        type: variable
+        value: work_item_type
+    output:
+      - create_result
+    structured_output: true
+    tool: create_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: extract_work_item_id
+
+  - id: extract_work_item_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        result_data = alita_state.get("create_result", {})
+        work_item_id = result_data.get('id', 0)
+        {"work_item_id": work_item_id}
+    input:
+      - create_result
+    output:
+      - work_item_id
+    structured_output: true
+    transition: invoke_get_comments
+
+  - id: invoke_get_comments
+    type: toolkit
+    input:
+      - work_item_id
+    input_mapping:
+      work_item_id:
+        type: variable
+        value: work_item_id
+      limit_total:
+        type: fixed
+        value: 10
+      include_deleted:
+        type: fixed
+        value: false
+      expand:
+        type: fixed
+        value: "none"
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_comments
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'get_comments' tool.
+
+          Tool Result: {tool_result}
+
+          Validation rules:
+           - tool_executed: True if result is a list (can be empty)
+           - test_passed: True if tool_executed is True
+           - comment_count: number of comments returned
+           - has_comment_fields: True if comments (if any) have expected fields like 'text', 'id', or standard comment structure
+           - error: string or null
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "comment_count": integer,
+            "has_comment_fields": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_work_item
+
+  - id: cleanup_work_item
+    type: toolkit
+    input:
+      - work_item_id
+    input_mapping:
+      id:
+        type: variable
+        value: work_item_id
+    output:
+      - cleanup_result
+    structured_output: false
+    tool: delete_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: END

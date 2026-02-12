@@ -504,7 +504,8 @@ def get_pipelines_by_pattern(
     base_url: str,
     project_id: int,
     patterns: List[str],
-    headers: dict
+    headers: dict,
+    use_wildcards: bool = False
 ) -> List[dict]:
     """Get pipelines matching name patterns (substring match, case-insensitive, underscore/space agnostic)."""
     url = f"{base_url}/api/v2/elitea_core/applications/prompt_lib/{project_id}?limit=500"
@@ -518,7 +519,7 @@ def get_pipelines_by_pattern(
     for p in all_pipelines:
         name = p.get("name", "")
         # Use shared pattern matching utility
-        if matches_any_pattern(name, patterns):
+        if matches_any_pattern(name, patterns, use_wildcards):
             full = get_pipeline_by_id(base_url, project_id, p["id"], headers)
             if full:
                 matched.append(full)
@@ -933,6 +934,8 @@ def main():
     parser.add_argument("--local", nargs='?', const=True, default=None,
                         help="Local mode: run pipelines without backend. "
                              "Optional: set alita_sdk log level (debug|info|warning|error, default: error)")
+    parser.add_argument("--wildcards", "-w", action="store_true",
+                        help="Use shell-style wildcards in patterns (*, ?)")
 
     args = parser.parse_args()
 
@@ -1051,14 +1054,14 @@ def main():
                 for p in pipelines:
                     name = p.get("name", "")
                     # Use shared pattern matching utility
-                    if matches_any_pattern(name, args.pattern):
+                    if matches_any_pattern(name, args.pattern, args.wildcards):
                         filtered_pipelines.append(p)
                 pipelines = filtered_pipelines
                 suite_name = f"{suite_name} (filtered: {', '.join(args.pattern)})"
             else:
                 # Pattern as standalone filter
                 suite_name = f"Pattern: {', '.join(args.pattern)}"
-                pipelines = get_pipelines_by_pattern(base_url, project_id, args.pattern, headers)
+                pipelines = get_pipelines_by_pattern(base_url, project_id, args.pattern, headers, args.wildcards)
 
         if args.ids:
             suite_name = f"IDs: {', '.join(map(str, args.ids))}"

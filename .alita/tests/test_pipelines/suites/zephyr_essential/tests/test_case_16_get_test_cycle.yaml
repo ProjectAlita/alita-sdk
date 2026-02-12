@@ -91,15 +91,8 @@ nodes:
     code:
       type: fixed
       value: |
-        import json
-        
-        # Parse create result to extract cycle key
-        try:
-            result_data = json.loads(create_result) if isinstance(create_result, str) else create_result
-            cycle_key = result_data.get('key', '')
-        except:
-            cycle_key = ''
-        
+        result_data = alita_state.get("create_result", "")
+        cycle_key = result_data.get('key', '')
         {"cycle_key": cycle_key}
     input:
       - create_result

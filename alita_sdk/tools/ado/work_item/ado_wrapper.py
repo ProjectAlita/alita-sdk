@@ -51,6 +51,11 @@ ADOUpdateWorkItem = create_model(
     work_item_json=(str, Field(description=create_wi_field))
 )
 
+ADODeleteWorkItem = create_model(
+    "AzureDevOpsDeleteWorkItemModel",
+    id=(int, Field(description="ID of work item to be deleted"))
+)
+
 ADOGetWorkItem = create_model(
     "AzureDevOpsGetWorkItemModel",
     id=(int, Field(description="The work item id")),
@@ -244,6 +249,15 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         except Exception as e:
             return ToolException(f"Issues during attempt to parse work_item_json: {str(e)}")
         return f"Work item ({work_item.id}) was updated."
+
+    def delete_work_item(self, id: int):
+        """Delete a work item from Azure DevOps by ID."""
+        try:
+            self._client.delete_work_item(id=id, project=self.project)
+            return f"Work item {id} was successfully deleted."
+        except Exception as e:
+            logger.error(f"Error deleting work item {id}: {e}")
+            return ToolException(f"Error deleting work item {id}: {e}")
 
     def get_relation_types(self) -> dict:
         """Returns dict of possible relation types per syntax: 'relation name': 'relation reference name'.
@@ -789,6 +803,12 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 "description": self.update_work_item.__doc__,
                 "args_schema": ADOUpdateWorkItem,
                 "ref": self.update_work_item,
+            },
+            {
+                "name": "delete_work_item",
+                "description": self.delete_work_item.__doc__,
+                "args_schema": ADODeleteWorkItem,
+                "ref": self.delete_work_item,
             },
             {
                 "name": "get_work_item",
