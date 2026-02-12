@@ -1,0 +1,67 @@
+name: "ADO37 - Get Relation Types"
+description: "Verify the ADO 'get_relation_types' tool retrieves available work item link types"
+
+toolkits:
+  - id: ${ADO_BOARDS_TOOLKIT_ID}
+    name: ${ADO_BOARDS_TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_relation_types
+nodes:
+  - id: invoke_get_relation_types
+    type: toolkit
+    input: []
+    input_mapping: {}
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_relation_types
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'get_relation_types' tool.
+
+          Tool Result: {tool_result}
+
+          Validation rules:
+           - tool_executed: True if result is a dict
+           - test_passed: True if tool_executed is True and dict is not empty
+           - has_relation_types: True if dict contains relation type mappings
+           - relation_count: number of relation types returned
+           - error: string or null
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "has_relation_types": boolean,
+            "relation_count": integer,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

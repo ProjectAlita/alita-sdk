@@ -2,17 +2,24 @@
   "type": "ado_boards",
   "toolkit_name": "ado",
   "id": 1,
+  "ado_configuration": {
+    "alita_title": "ado",
+    "private": true
+  },
   "organization_url": "https://dev.azure.com/${ADO_ORG}",
   "project": "${ADO_PROJECT}",
   "token": "${ADO_TOKEN}",
   "selected_tools": [
-    "list_files_in_main_branch",
-    "list_open_pull_requests",
-    "read_file",
-    "list_branches_in_repo",
-    "get_wiki_page",
-    "create_file",
-    "update_file",
-    "delete_file"
+    "search_work_items",
+    "create_work_item",
+    "update_work_item",
+    "get_work_item",
+    "link_work_items",
+    "get_relation_types",
+    "get_comments",
+    "link_work_items_to_wiki_page",
+    "unlink_work_items_from_wiki_page",
+    "get_work_item_type_fields",
+    "delete_work_item"
   ]
 }

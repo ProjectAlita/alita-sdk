@@ -1,0 +1,262 @@
+name: "ADO41 - Unlink Work Items from Wiki Page"
+description: "Verify the ADO 'unlink_work_items_from_wiki_page' tool removes work item links from a wiki page"
+
+toolkits:
+  - id: ${ADO_BOARDS_TOOLKIT_ID}
+    name: ${ADO_BOARDS_TOOLKIT_NAME}
+  - id: ${ADO_WIKI_TOOLKIT_ID}
+    name: ${ADO_WIKI_TOOLKIT_NAME}
+
+state:
+  work_item_json:
+    type: str
+    value: '{"fields": {"System.Title": "ADO41 Test Work Item", "System.Description": "Created by test automation", "System.AreaPath": "TestProject", "System.IterationPath": "TestProject"}}'
+  work_item_type:
+    type: str
+    value: "Task"
+  work_item_result:
+    type: dict
+  work_item_id:
+    type: int
+  work_item_ids:
+    type: list
+  wiki_identifier:
+    type: str
+    value: "TestProject.wiki"
+  version_identifier:
+    type: str
+    value: "TestProject.wiki"
+  page_name:
+    type: str
+  page_content:
+    type: str
+  create_wiki_result:
+    type: str
+  link_result:
+    type: str
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+  cleanup_work_item_result:
+    type: str
+  cleanup_wiki_result:
+    type: str
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Wiki page for unlink test
+        page_name = f"/TestPageADO41-{timestamp}-{random_suffix}"
+        nl = chr(10)
+        page_content = f"# Page for Unlink Test{nl}{nl}Created by ADO41 at {timestamp}-{random_suffix}{nl}This page will be linked and then unlinked."
+
+        {"page_name": page_name, "page_content": page_content}
+    output:
+      - page_name
+      - page_content
+    structured_output: true
+    transition: create_wiki_page
+
+  - id: create_wiki_page
+    type: toolkit
+    input:
+      - wiki_identifier
+      - page_name
+      - page_content
+      - version_identifier
+    input_mapping:
+      expanded:
+        type: fixed
+        value: true
+      page_content:
+        type: variable
+        value: page_content
+      page_name:
+        type: variable
+        value: page_name
+      version_identifier:
+        type: variable
+        value: version_identifier
+      version_type:
+        type: fixed
+        value: branch
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+    output:
+      - create_wiki_result
+    structured_output: true
+    tool: modify_wiki_page
+    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    transition: create_work_item
+
+  - id: create_work_item
+    type: toolkit
+    input:
+      - work_item_json
+      - work_item_type
+    input_mapping:
+      work_item_json:
+        type: variable
+        value: work_item_json
+      wi_type:
+        type: variable
+        value: work_item_type
+    output:
+      - work_item_result
+    structured_output: true
+    tool: create_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: extract_work_item_id
+
+  - id: extract_work_item_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        result_data = alita_state.get("work_item_result", {})
+        work_item_id = result_data.get('id', 0)
+        work_item_ids = [work_item_id]
+        {"work_item_id": work_item_id, "work_item_ids": work_item_ids}
+    input:
+      - work_item_result
+    output:
+      - work_item_id
+      - work_item_ids
+    structured_output: true
+    transition: link_work_items_first
+
+  - id: link_work_items_first
+    type: toolkit
+    input:
+      - work_item_ids
+      - wiki_identifier
+      - page_name
+    input_mapping:
+      work_item_ids:
+        type: variable
+        value: work_item_ids
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+      page_name:
+        type: variable
+        value: page_name
+    output:
+      - link_result
+    structured_output: true
+    tool: link_work_items_to_wiki_page
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: invoke_unlink_work_items_from_wiki
+
+  - id: invoke_unlink_work_items_from_wiki
+    type: toolkit
+    input:
+      - work_item_ids
+      - wiki_identifier
+      - page_name
+    input_mapping:
+      work_item_ids:
+        type: variable
+        value: work_item_ids
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+      page_name:
+        type: variable
+        value: page_name
+    output:
+      - tool_result
+    structured_output: true
+    tool: unlink_work_items_from_wiki_page
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'unlink_work_items_from_wiki_page' tool.
+
+          Tool Result: {tool_result}
+
+          Validation rules:
+           - tool_executed: True if result is a string
+           - test_passed: True if tool_executed is True and message indicates completion
+           - appropriate_message: True if message contains "Successfully unlinked" or "No link found" (both valid)
+           - mentions_wiki_page: True if message references wiki page
+           - error: string or null (check if result contains "Failed" or unexpected error)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "appropriate_message": boolean,
+            "mentions_wiki_page": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_work_item
+
+  - id: cleanup_work_item
+    type: toolkit
+    input:
+      - work_item_id
+    input_mapping:
+      id:
+        type: variable
+        value: work_item_id
+    output:
+      - cleanup_work_item_result
+    structured_output: false
+    tool: delete_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: cleanup_wiki_page
+
+  - id: cleanup_wiki_page
+    type: toolkit
+    input:
+      - wiki_identifier
+      - page_name
+    input_mapping:
+      page_name:
+        type: variable
+        value: page_name
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+    output:
+      - cleanup_wiki_result
+    structured_output: true
+    tool: delete_page_by_path
+    toolkit_name: ${ADO_WIKI_TOOLKIT_NAME}
+    transition: END

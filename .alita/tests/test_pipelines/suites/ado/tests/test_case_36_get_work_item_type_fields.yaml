@@ -1,0 +1,77 @@
+name: "ADO36 - Get Work Item Type Fields"
+description: "Verify the ADO 'get_work_item_type_fields' tool retrieves field definitions for a work item type"
+
+toolkits:
+  - id: ${ADO_BOARDS_TOOLKIT_ID}
+    name: ${ADO_BOARDS_TOOLKIT_NAME}
+
+state:
+  work_item_type:
+    type: str
+    value: "Task"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_work_item_type_fields
+nodes:
+  - id: invoke_get_work_item_type_fields
+    type: toolkit
+    input:
+      - work_item_type
+    input_mapping:
+      work_item_type:
+        type: variable
+        value: work_item_type
+      force_refresh:
+        type: fixed
+        value: false
+    output:
+      - tool_result
+    structured_output: true
+    tool: get_work_item_type_fields
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'get_work_item_type_fields' tool.
+
+          Tool Result: {tool_result}
+
+          Validation rules:
+           - tool_executed: True if result is a string with field information
+           - test_passed: True if tool_executed is True and result contains "Available Fields" or "REQUIRED FIELDS"
+           - has_system_title: True if result mentions "System.Title" field
+           - has_field_types: True if result includes "Type:" information
+           - error: string or null
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "has_system_title": boolean,
+            "has_field_types": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
