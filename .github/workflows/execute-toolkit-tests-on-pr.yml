@@ -1,4 +1,4 @@
-name: Execute toolkit AI tests
+name: Execute toolkit AI tests on PR
 
 on:
   pull_request:
