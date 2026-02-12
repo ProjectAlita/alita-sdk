@@ -1,13 +1,16 @@
 import logging
-from typing import Dict, Optional
+import re
+from pathlib import Path
+from typing import Dict, Optional, Any, Union
 from urllib.parse import quote
 
 import requests
-from typing import Any
-from json import dumps
 import chardet
 
 logger = logging.getLogger(__name__)
+
+# Use only the first 10 KB for chardet so it doesn't scan the whole file (slow for large files).
+_CHARDET_SAMPLE_SIZE = 10 * 1024
 
 
 class ApiDetailsRequestError(Exception):
@@ -21,21 +24,24 @@ class SandboxArtifact:
         if not self.client.bucket_exists(bucket_name):
             self.client.create_bucket(bucket_name)
 
-    def create(self, artifact_name: str, artifact_data: Any, bucket_name: str = None):
+    def create(self, artifact_name: str, artifact_data: Any, bucket_name: str = None, prompt: str = None) -> dict:
+        """Create a file. Returns dict with filepath or error."""
         try:
             if not bucket_name:
                 bucket_name = self.bucket_name
             # Use S3 API for upload
             result = self.client.upload_artifact_s3(bucket_name, artifact_name, artifact_data)
             if 'error' in result:
-                return dumps({'error': result['error']})
-            return dumps({
-                'message': f'File "{artifact_name}" created successfully',
-                'filepath': f'/{bucket_name}/{artifact_name}'
-            })
+                return {"error": result['error']}
+            return {
+                "message": f"File '{result['sanitized_name']}' created successfully",
+                "filepath": result['filepath'],
+                "sanitized_name": result['sanitized_name'],
+                "was_sanitized": result['was_sanitized']
+            }
         except Exception as e:
             logger.error(f'Error: {e}')
-            return f'Error: {e}'
+            return {"error": str(e)}
 
     def get(self,
             artifact_name: str,
@@ -45,6 +51,7 @@ class SandboxArtifact:
             sheet_name: str = None,
             excel_by_sheets: bool = False,
             llm=None):
+        """Get file content as decoded string."""
         if not bucket_name:
             bucket_name = self.bucket_name
         # Use S3 API for downloading
@@ -54,32 +61,83 @@ class SandboxArtifact:
         if len(data) == 0:
             # empty file might be created
             return ''
-        detected = chardet.detect(data)
-        return data
+        # Use only first 10KB for chardet detection (performance optimization)
+        detected = chardet.detect(data[:_CHARDET_SAMPLE_SIZE])
+        if detected['encoding'] is not None:
+            try:
+                return data.decode(detected['encoding'])
+            except Exception:
+                logger.error("Error while decoding with detected encoding")
+                return data.decode('utf-8', errors='replace')
+        else:
+            # Fallback to utf-8 with error replacement
+            return data.decode('utf-8', errors='replace')
 
-    def delete(self, artifact_name: str, bucket_name=None):
+    def delete(self, artifact_name: str, bucket_name: str = None) -> dict:
+        """Delete a file. Returns dict with message or error."""
         if not bucket_name:
             bucket_name = self.bucket_name
         # Use S3 API for delete
         result = self.client.delete_artifact_s3(bucket_name, artifact_name)
         if 'error' in result:
-            return dumps({'error': result['error']})
-        return dumps({'message': f'File "{artifact_name}" deleted successfully'})
+            return {"error": result['error']}
+        return {"message": f"File '{artifact_name}' deleted successfully"}
 
-    def list(self, bucket_name: str = None, prefix: str = '', delimiter: str = '/', return_as_string=True) -> str | dict:
+    def list(self, bucket_name: str = None, prefix: str = '', delimiter: str = '/', return_as_string: bool = True) -> Union[str, dict]:
+        """List files in bucket with folder/subfolder parsing.
+
+        Returns dict (or str if return_as_string=True) with 'total' and 'rows'. Each row has:
+        - name: display name (relative to prefix)
+        - size: file size in bytes (0 for folders)
+        - modified: last modified timestamp (empty for folders)
+        - type: 'file' or 'folder'
+        - key: full S3 key (only for files)
+        """
         if not bucket_name:
             bucket_name = self.bucket_name
         # Use S3 API for listing
         result = self.client.list_artifacts_s3(bucket_name, prefix=prefix, delimiter=delimiter)
         if 'error' in result:
-            return str({'error': result['error']}) if return_as_string else {'error': result['error']}
-        # Convert S3 format to V2-compatible format
-        files = [{'name': item['key'], 'size': item.get('size', 0), 'modified': item.get('lastModified', '')} 
-                 for item in result.get('contents', [])]
-        artifacts = {'total': len(files), 'rows': files}
+            error_result = {"error": result['error'], "total": 0, "rows": []}
+            return str(error_result) if return_as_string else error_result
+
+        files = []
+
+        # Process files at this level (contents)
+        for item in result.get('contents', []):
+            key = item.get('key', '')
+            # Get display name by stripping the prefix
+            display_name = key[len(prefix):] if prefix and key.startswith(prefix) else key
+            # Skip the folder itself (prefix entry) or empty names
+            if not display_name:
+                continue
+            files.append({
+                'name': display_name,
+                'size': item.get('size', 0),
+                'modified': item.get('lastModified', ''),
+                'type': 'file',
+                'key': key  # Full key for download link generation
+            })
+
+        # Process subfolders (commonPrefixes)
+        for prefix_entry in result.get('commonPrefixes', []):
+            prefix_str = prefix_entry.get('prefix', '') if isinstance(prefix_entry, dict) else prefix_entry
+            # Get display name by stripping the prefix
+            subfolder_full = prefix_str.rstrip('/')
+            subfolder_name = subfolder_full[len(prefix):] if prefix and subfolder_full.startswith(prefix) else subfolder_full
+            if subfolder_name:
+                files.append({
+                    'name': subfolder_name + '/',
+                    'size': 0,
+                    'modified': '',
+                    'type': 'folder'
+                })
+
+        artifacts = {"total": len(files), "rows": files}
         return str(artifacts) if return_as_string else artifacts
 
-    def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None, create_if_missing: bool = True):
+    def append(self, artifact_name: str, additional_data: Any, bucket_name: str = None, create_if_missing: bool = True) -> dict:
+        """Append data to existing file or create new. Returns dict with filepath or error."""
         if not bucket_name:
             bucket_name = self.bucket_name
 
@@ -90,31 +148,56 @@ class SandboxArtifact:
         if isinstance(raw_data, dict) and raw_data.get('error'):
             # Check if we should create the file if it doesn't exist
             if create_if_missing:
-                # Create file with initial data
-                result = self.client.upload_artifact_s3(bucket_name, artifact_name, additional_data)
-                if 'error' in result:
-                    return f"Error: {result['error']}"
-                return 'Data appended successfully'
+                return self.create(artifact_name, additional_data, bucket_name)
             else:
-                # Return error as before
-                return f"Error: Cannot append to file '{artifact_name}'. {raw_data['error']}"
+                return {"error": f"Cannot append to file '{artifact_name}'. {raw_data['error']}"}
 
         # Get the parsed content
         data = self.get(artifact_name, bucket_name)
-        if data == 'Could not detect encoding':
-            return data
+        if data == "Could not detect encoding":
+            return {"error": data}
 
         # Append the new data
         data += f'\n{additional_data}' if len(data) > 0 else additional_data
         result = self.client.upload_artifact_s3(bucket_name, artifact_name, data)
         if 'error' in result:
-            return f"Error: {result['error']}"
-        return 'Data appended successfully'
+            return {"error": result['error']}
+        return {
+            "message": "Data appended successfully",
+            "filepath": result['filepath'],
+            "sanitized_name": result['sanitized_name'],
+            "was_sanitized": result['was_sanitized']
+        }
 
-    def overwrite(self, artifact_name: str, new_data: Any, bucket_name: str = None):
-        if not bucket_name:
-            bucket_name = self.bucket_name
-        return self.create(artifact_name, new_data, bucket_name)
+    def overwrite(self, artifact_name: str, new_data: Any, bucket_name: str = None) -> dict:
+        """Overwrite file content. Returns dict with filepath, operation_type, or error.
+
+        Uses HEAD check to determine if file exists (for operation_type in events).
+        """
+        try:
+            if not bucket_name:
+                bucket_name = self.bucket_name
+
+            # Check if file exists to determine operation type
+            head_result = self.client.head_artifact_s3(bucket_name, artifact_name)
+            file_exists = head_result.get('exists', False)
+            operation_type = "modify" if file_exists else "create"
+
+            result = self.client.upload_artifact_s3(bucket_name, artifact_name, new_data)
+            if 'error' in result:
+                return {"error": result['error']}
+            sanitized_name = result['sanitized_name']
+            return {
+                "message": f"File '{sanitized_name}' {'overwritten' if file_exists else 'created'} successfully",
+                "filepath": result['filepath'],
+                "operation_type": operation_type,
+                "sanitized_name": sanitized_name,
+                "was_sanitized": result['was_sanitized'],
+                "file_existed": file_exists
+            }
+        except Exception as e:
+            logger.error(f"Error: {e}")
+            return {"error": str(e)}
 
     def get_content_bytes(self,
                           artifact_name: str,
@@ -158,7 +241,7 @@ class SandboxClient:
         self.artifacts_url = f'{self.base_url}{self.api_path}/artifacts/artifacts/default/{self.project_id}'
         self.artifact_url = f'{self.base_url}{self.api_path}/artifacts/artifact/default/{self.project_id}'
         self.bucket_url = f'{self.base_url}{self.api_path}/artifacts/buckets/{self.project_id}'
-        self.s3_url = f'{self.base_url}/s3'  # S3 API endpoint
+        self.s3_url = f'{self.base_url}/artifacts/s3'  # S3 API endpoint (same as AlitaClient)
         self.configurations_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=configurations&unsecret=true'
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.auth_user_url = f'{self.base_url}{self.api_path}/auth/user'
@@ -328,51 +411,235 @@ class SandboxClient:
         data = requests.delete(url, headers=self.headers, verify=False, params={'filename': quote(artifact_name)})
         return self._process_requst(data)
 
-    # S3 API Methods
-    def list_artifacts_s3(self, bucket_name: str, prefix: str = '', delimiter: str = '/') -> dict:
-        """List artifacts via S3 API."""
-        url = f'{self.s3_url}/{bucket_name.lower()}'
-        params = {'list-type': '2'}
+    # =========================================================================
+    # S3-Compatible API Methods (aligned with AlitaClient)
+    # =========================================================================
+
+    # S3 error code to user-friendly message mapping
+    S3_ERROR_MESSAGES = {
+        'NoSuchBucket': "Bucket '{bucket}' does not exist",
+        'NoSuchKey': "File '{key}' not found",
+        'AccessDenied': "Permission denied for '{resource}'",
+        'BucketNotEmpty': "Bucket '{bucket}' is not empty",
+        'InvalidBucketName': "Invalid bucket name '{bucket}'",
+        'BucketAlreadyExists': "Bucket '{bucket}' already exists",
+        'InvalidArgument': "Invalid argument provided",
+    }
+
+    def _s3_params(self, **extra) -> dict:
+        """Build common S3 query parameters with project_id and JSON format."""
+        params = {"project_id": self.project_id, "format": "json"}
+        params.update(extra)
+        return params
+
+    def _handle_s3_error(self, response: requests.Response, bucket: str = None, key: str = None) -> dict:
+        """Convert S3 error response to user-friendly error dict."""
+        try:
+            error_data = response.json()
+            error_code = error_data.get('error', {}).get('code', 'Unknown')
+        except (ValueError, TypeError):
+            error_code = f"HTTP_{response.status_code}"
+
+        template = self.S3_ERROR_MESSAGES.get(error_code, f"S3 error: {error_code}")
+        resource = key or bucket or 'unknown'
+        message = template.format(bucket=bucket or 'unknown', key=key or 'unknown', resource=resource)
+        return {"error": message, "code": error_code}
+
+    @staticmethod
+    def _sanitize_artifact_name(filename: str) -> tuple:
+        """Sanitize filename AND all folder path components for safe storage.
+
+        SECURITY: Blocks path traversal attempts and sanitizes each path component.
+        Inline version for Pyodide compatibility (no SDK imports).
+
+        Example: 'my folder!/../../file (1).txt' -> 'myfolder/file-1.txt'
+
+        Returns:
+            tuple: (sanitized_name, was_modified)
+        """
+        if not filename or not filename.strip():
+            return "unnamed_file", True
+
+        original = filename
+
+        # Block path traversal attempts
+        if '..' in filename:
+            # Remove all .. components
+            filename = '/'.join(part for part in filename.split('/') if part != '..')
+
+        path_obj = Path(filename)
+        parts = list(path_obj.parts)
+
+        sanitized_parts = []
+        for i, part in enumerate(parts):
+            is_last = (i == len(parts) - 1)
+
+            if is_last:
+                # Last part: separate name and extension
+                name = Path(part).stem
+                extension = Path(part).suffix
+            else:
+                # Folder part: treat entire part as name
+                name = part
+                extension = ''
+
+            # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
+            sanitized_name = re.sub(r'[^\w\s-]', '', name, flags=re.UNICODE)
+            sanitized_name = re.sub(r'[-\s]+', '-', sanitized_name)
+            sanitized_name = sanitized_name.strip('-').strip()
+
+            if not sanitized_name:
+                sanitized_name = "file" if is_last else "folder"
+
+            if extension:
+                extension = re.sub(r'[^\w.-]', '', extension, flags=re.UNICODE)
+
+            sanitized_parts.append(f"{sanitized_name}{extension}")
+
+        sanitized = '/'.join(sanitized_parts)
+        return sanitized, (sanitized != original)
+
+    def list_artifacts_s3(self, bucket_name: str, prefix: str = None, delimiter: str = '/') -> dict:
+        """List artifacts via S3 API with optional prefix filtering.
+
+        Args:
+            bucket_name: S3 bucket name
+            prefix: Filter by key prefix (folder path). If provided, lists only files
+                   with keys starting with this prefix.
+            delimiter: Character to group common prefixes (default '/' for folder listing).
+                      Set to None for recursive listing of all files.
+
+        Returns:
+            dict: Response with 'contents' (files) and 'commonPrefixes' (subfolders)
+                  or 'error' key if failed.
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}"
+        params = self._s3_params(**{"list-type": "2"})
         if prefix:
-            params['prefix'] = prefix
+            # Ensure prefix ends with / for folder listing
+            params["prefix"] = prefix if prefix.endswith('/') else f"{prefix}/"
         if delimiter:
-            params['delimiter'] = delimiter
-        
+            params["delimiter"] = delimiter
+
         response = requests.get(url, headers=self.headers, params=params, verify=False)
+
         if response.status_code >= 400:
-            return {'error': f'Failed to list artifacts: {response.status_code}'}
+            return self._handle_s3_error(response, bucket=bucket_name)
+
         try:
             return response.json()
         except (ValueError, TypeError):
-            return {'error': 'Invalid response from S3 API'}
-    
-    def upload_artifact_s3(self, bucket_name: str, key: str, data: bytes) -> dict:
-        """Upload artifact via S3 API."""
-        url = f'{self.s3_url}/{bucket_name.lower()}/{quote(key, safe="/")}'
-        response = requests.put(url, headers=self.headers, data=data, verify=False)
+            return {"error": "Invalid response from S3 API", "content": response.text}
+
+    def upload_artifact_s3(self, bucket_name: str, key: str, data: bytes, content_type: str = None) -> dict:
+        """Upload artifact via S3 PUT.
+
+        Sanitizes the key (filename) before upload to prevent regex errors during indexing.
+
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path (e.g., 'folder/subfolder/file.txt')
+            data: File content as bytes
+            content_type: Optional MIME type.
+
+        Returns:
+            dict: Response with 'filepath', 'bucket', 'filename', 'sanitized_name', 'was_sanitized' keys or 'error' key.
+        """
+        # Sanitize filename to prevent regex errors during indexing
+        sanitized_key, was_modified = self._sanitize_artifact_name(key)
+        if was_modified:
+            logger.warning(f"Artifact filename sanitized: '{key}' -> '{sanitized_key}'")
+
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(sanitized_key, safe='/')}"
+        headers = dict(self.headers)
+        if content_type:
+            headers['Content-Type'] = content_type
+
+        response = requests.put(url, headers=headers, data=data,
+                               params=self._s3_params(), verify=False)
+
         if response.status_code >= 400:
-            return {'error': f'Failed to upload artifact: {response.status_code}'}
+            return self._handle_s3_error(response, bucket=bucket_name, key=sanitized_key)
+
         return {
-            'filepath': f'/{bucket_name}/{key}',
-            'bucket': bucket_name,
-            'filename': key
+            "filepath": f"/{bucket_name}/{sanitized_key}",
+            "bucket": bucket_name,
+            "filename": sanitized_key,
+            "size": len(data) if data else 0,
+            "sanitized_name": sanitized_key,
+            "was_sanitized": was_modified
         }
-    
-    def download_artifact_s3(self, bucket_name: str, key: str) -> bytes | dict:
-        """Download artifact via S3 API."""
-        url = f'{self.s3_url}/{bucket_name.lower()}/{quote(key, safe="/")}'
-        response = requests.get(url, headers=self.headers, verify=False)
+
+    def download_artifact_s3(self, bucket_name: str, key: str) -> Union[bytes, dict]:
+        """Download artifact via S3 GET.
+
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path
+
+        Returns:
+            bytes: File content if successful
+            dict: Error dict with 'error' key if failed
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(key, safe='/')}"
+
+        response = requests.get(url, headers=self.headers,
+                               params=self._s3_params(), verify=False)
+
         if response.status_code >= 400:
-            return {'error': f'Failed to download artifact: {response.status_code}'}
+            return self._handle_s3_error(response, bucket=bucket_name, key=key)
+
         return response.content
-    
+
     def delete_artifact_s3(self, bucket_name: str, key: str) -> dict:
-        """Delete artifact via S3 API."""
-        url = f'{self.s3_url}/{bucket_name.lower()}/{quote(key, safe="/")}'
-        response = requests.delete(url, headers=self.headers, verify=False)
+        """Delete artifact via S3 DELETE.
+
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path
+
+        Returns:
+            dict: Response with 'success' True or 'error' key.
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(key, safe='/')}"
+
+        response = requests.delete(url, headers=self.headers,
+                                  params=self._s3_params(), verify=False)
+
         if response.status_code >= 400:
-            return {'error': f'Failed to delete artifact: {response.status_code}'}
-        return {'success': True, 'message': f'File "{key}" deleted successfully'}
+            return self._handle_s3_error(response, bucket=bucket_name, key=key)
+
+        return {"success": True, "message": f"File '{key}' deleted successfully"}
+
+    def head_artifact_s3(self, bucket_name: str, key: str) -> dict:
+        """Check if artifact exists and get metadata via S3 HEAD.
+
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path
+
+        Returns:
+            dict: Response with 'exists', 'size', 'lastModified', 'contentType' keys
+                  or 'error' key if failed.
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(key, safe='/')}"
+
+        response = requests.head(url, headers=self.headers,
+                                params=self._s3_params(), verify=False)
+
+        if response.status_code == 404:
+            return {"exists": False}
+
+        if response.status_code >= 400:
+            return self._handle_s3_error(response, bucket=bucket_name, key=key)
+
+        return {
+            "exists": True,
+            "size": int(response.headers.get('Content-Length', 0)),
+            "lastModified": response.headers.get('Last-Modified', ''),
+            "contentType": response.headers.get('Content-Type', ''),
+            "etag": response.headers.get('ETag', '').strip('"')
+        }
 
     def get_user_data(self) -> Dict[str, Any]:
         resp = requests.get(self.auth_user_url, headers=self.headers, verify=False)
@@ -380,3 +647,12 @@ class SandboxClient:
             return resp.json()
         logger.error(f'Failed to fetch user data: {resp.status_code} - {resp.text}')
         raise ApiDetailsRequestError(f'Failed to fetch user data with status code {resp.status_code}.')
+
+    def _get_real_user_id(self):
+        """Get real user ID from auth API for MCP calls."""
+        try:
+            user_data = self.get_user_data()
+            return user_data.get("id")
+        except Exception as e:
+            logger.debug(f"Error: Could not determine user ID for MCP tool: {e}")
+            return None
