@@ -194,10 +194,22 @@ def format_data_html(data: Any) -> str:
     elif isinstance(data, str):
         # Try parse nested json
         stripped = data.strip()
+        
+        # Remove markdown code blocks (e.g., ```json ... ```)
+        if stripped.startswith("```"):
+            lines = stripped.split("\n")
+            # Remove first line (```json or ```)
+            if len(lines) > 1:
+                lines = lines[1:]
+            # Remove last line if it's just ```
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            stripped = "\n".join(lines).strip()
+        
         if (stripped.startswith("{") and stripped.endswith("}")) or \
            (stripped.startswith("[") and stripped.endswith("]")):
             try:
-                parsed = json.loads(data)
+                parsed = json.loads(stripped)
                 return format_data_html(parsed)
             except:
                 pass

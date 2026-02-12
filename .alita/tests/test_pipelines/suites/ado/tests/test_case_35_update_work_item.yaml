@@ -1,0 +1,81 @@
+name: "ADO35 - Update Work Item"
+description: "Verify the ADO 'update_work_item' tool updates an existing work item"
+
+toolkits:
+  - id: ${ADO_BOARDS_TOOLKIT_ID}
+    name: ${ADO_BOARDS_TOOLKIT_NAME}
+
+state:
+  work_item_id:
+    type: str
+    value: "69"
+  update_json:
+    type: str
+    value: '{"fields": {"System.Title": "Updated Test Task by Automation", "System.State": "Doing"}}'
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_update_work_item
+nodes:
+  - id: invoke_update_work_item
+    type: toolkit
+    input:
+      - work_item_id
+      - update_json
+    input_mapping:
+      id:
+        type: variable
+        value: work_item_id
+      work_item_json:
+        type: variable
+        value: update_json
+    output:
+      - tool_result
+    structured_output: true
+    tool: update_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - work_item_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'update_work_item' tool.
+
+          Tool Result: {tool_result}
+          Expected Work Item ID: {work_item_id}
+
+          Validation rules:
+           - tool_executed: True if result is a string
+           - test_passed: True if tool_executed is True and message contains "was updated"
+           - contains_work_item_id: True if message mentions the work item ID
+           - error: string or null
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "contains_work_item_id": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

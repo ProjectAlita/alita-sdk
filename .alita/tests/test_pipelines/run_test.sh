@@ -19,23 +19,25 @@ cd "$SCRIPT_DIR"
 # Defaults
 SUITE=""
 PATTERN=""
+PATTERNS=()
 VERBOSE=""
 DO_SETUP=false
 DO_SEED=false
 DO_CLEANUP=false
 LOCAL_MODE=false
+USE_WILDCARDS=false
 ENV_FILE=".env"
 TIMEOUT=""
 TIMEOUT_SET=false
 
 print_usage() {
-    echo "Usage: $0 [OPTIONS] <suite> <pattern>"
+    echo "Usage: $0 [OPTIONS] <suite> [pattern]"
     echo ""
     echo "Run individual test(s) within a suite by pattern matching."
     echo ""
     echo "Arguments:"
     echo "  suite              Suite folder name (e.g., github_toolkit)"
-    echo "  pattern            Test name pattern to match (e.g., 'update_file', 'GH14')"
+    echo "  pattern            Test name pattern to match (optional if using --pattern flags)"
     echo ""
     echo "Options:"
     echo "  --setup            Run setup before testing (creates toolkit, etc.)"
@@ -43,6 +45,8 @@ print_usage() {
     echo "  --cleanup          Run cleanup after testing"
     echo "  --all              Equivalent to --setup --seed --cleanup (full workflow)"
     echo "  --local            Run tests locally without backend (isolated mode)"
+    echo "  --wildcards, -w    Use shell-style wildcards in patterns (*, ?)"
+    echo "  --pattern PATTERN  Pattern to match (can be repeated)"
     echo "  --env-file FILE    Environment file to use (default: .env)"
     echo "  --timeout SEC      Execution timeout per pipeline (default: 120)"
     echo "  -v, --verbose      Enable verbose output"
@@ -57,8 +61,8 @@ print_usage() {
     echo "  $0 github_toolkit 'GH14'           # Match by name prefix"
     echo "  $0 github_toolkit 'multiline'      # Partial match"
     echo ""
-    echo "  # Run multiple tests matching pattern"
-    echo "  $0 github_toolkit 'GH1'            # Runs GH1, GH10-GH19"
+    echo "  # Run with multiple patterns (wildcards)"
+    echo "  $0 --all -w github_toolkit --pattern 'GH1[0-9]' --pattern 'GH2*'"
     echo ""
     echo "  # Full workflow for single test"
     echo "  $0 --all github_toolkit update_file"
@@ -102,6 +106,14 @@ while [[ $# -gt 0 ]]; do
             LOCAL_MODE=true
             shift
             ;;
+        --wildcards|-w)
+            USE_WILDCARDS=true
+            shift
+            ;;
+        --pattern)
+            PATTERNS+=("$2")
+            shift 2
+            ;;
         --env-file)
             ENV_FILE="$2"
             shift 2
@@ -134,16 +146,32 @@ done
 # Restore positional parameters
 set -- "${POSITIONAL[@]}"
 
-# Validate arguments
-if [ $# -lt 2 ]; then
-    echo -e "${RED}Error: Missing required arguments${NC}"
-    echo ""
+# Parse suite and optional pattern from positional args
+if [ $# -lt 1 ]; then
+    echo -e "${RED}Error: Suite argument required${NC}"
     print_usage
     exit 1
 fi
 
 SUITE="$1"
-PATTERN="$2"
+if [ $# -gt 1 ]; then
+    PATTERN="$2"
+    # If positional pattern provided but no --pattern flags, use positional
+    if [ ${#PATTERNS[@]} -eq 0 ]; then
+        PATTERNS=("$PATTERN")
+    fi
+elif [ ${#PATTERNS[@]} -eq 0 ]; then
+    echo -e "${RED}Error: Pattern required (either as argument or via --pattern flag)${NC}\n"
+    print_usage
+    exit 1
+fi
+
+# Build display pattern for logging
+if [ ${#PATTERNS[@]} -eq 1 ]; then
+    PATTERN="${PATTERNS[0]}"
+else
+    PATTERN="$(IFS=', '; echo "${PATTERNS[*]}")"
+fi
 
 # Validate suite exists
 if [ ! -d "$SUITE" ]; then
@@ -167,10 +195,15 @@ fi
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo ""
 
-# Build local flag for scripts
+# Build flags for scripts
 LOCAL_FLAG=""
 if [ "$LOCAL_MODE" = true ]; then
     LOCAL_FLAG="--local"
+fi
+
+WILDCARDS_FLAG=""
+if [ "$USE_WILDCARDS" = true ]; then
+    WILDCARDS_FLAG="--wildcards"
 fi
 
 # Step 1: Setup (optional)
@@ -195,7 +228,14 @@ fi
 # Step 2: Seed (optional)
 if [ "$DO_SEED" = true ]; then
     echo -e "${YELLOW}▶ Seeding pipelines matching: '$PATTERN'${NC}"
-    if python scripts/seed_pipelines.py "$SUITE" --env-file "$ENV_FILE" --pattern "$PATTERN" $VERBOSE $LOCAL_FLAG; then
+    
+    # Build pattern arguments
+    PATTERN_ARGS=()
+    for p in "${PATTERNS[@]}"; do
+        PATTERN_ARGS+=("--pattern" "$p")
+    done
+    
+    if python scripts/seed_pipelines.py "$SUITE" --env-file "$ENV_FILE" "${PATTERN_ARGS[@]}" $VERBOSE $LOCAL_FLAG $WILDCARDS_FLAG; then
         echo -e "${GREEN}✓ Pipelines seeded${NC}"
     else
         echo -e "${RED}✗ Seeding failed${NC}"
@@ -220,14 +260,21 @@ if [ "$TIMEOUT_SET" = true ]; then
     TIMEOUT_ARG="--timeout $TIMEOUT"
 fi
 
+# Build pattern arguments (same as for seeding)
+PATTERN_ARGS=()
+for p in "${PATTERNS[@]}"; do
+    PATTERN_ARGS+=("--pattern" "$p")
+done
+
 # Run with pattern filter
 if python scripts/run_suite.py "$SUITE" \
-    --pattern "$PATTERN" \
+    "${PATTERN_ARGS[@]}" \
     $TIMEOUT_ARG \
     --env-file "$ENV_FILE" \
     --output-json "test_results/$SUITE/results.json" \
     $VERBOSE \
-    $LOCAL_FLAG; then
+    $LOCAL_FLAG \
+    $WILDCARDS_FLAG; then
 
     RUN_STATUS=0
     echo ""
