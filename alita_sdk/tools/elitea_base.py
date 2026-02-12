@@ -1086,13 +1086,6 @@ def extend_with_file_operations(method):
 
             file_operation_tools = [
                 {
-                    "name": "read_file_chunk",
-                    "mode": "read_file_chunk",
-                    "ref": self.read_file_chunk,
-                    "description": self.read_file_chunk.__doc__,
-                    "args_schema": custom_schemas.get("read_file_chunk", elitea_base.ReadFileChunkInput)
-                },
-                {
                     "name": "read_multiple_files",
                     "mode": "read_multiple_files",
                     "ref": self.read_multiple_files,

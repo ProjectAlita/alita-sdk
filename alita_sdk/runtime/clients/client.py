@@ -110,6 +110,7 @@ class AlitaClient:
         self.ai_section_url = f'{self.base_url}{self.api_path}/integrations/integrations/default/{self.project_id}?section=ai'
         self.models_url = f'{self.base_url}{self.api_path}/configurations/models/{self.project_id}?include_shared=true'
         self.image_generation_url = f"{self.base_url}{self.llm_path}/images/generations"
+        self.s3_url = f"{self.base_url}/artifacts/s3"
         self.configurations: list = configurations or []
         self.model_timeout = kwargs.get('model_timeout', 120)
         self.model_image_generation = kwargs.get('model_image_generation')
@@ -862,62 +863,15 @@ class AlitaClient:
 
     @staticmethod
     def _sanitize_artifact_name(filename: str) -> tuple:
-        """Sanitize filename for safe storage and regex pattern matching.
+        """Sanitize filename AND all folder path components for safe storage.
         
-        Preserves directory structure (path prefixes) while sanitizing each component.
-        Preserves hyphens, underscores in the file and directory names if passed.
+        SECURITY: Blocks path traversal attempts and sanitizes each path component.
+        Uses shared utility function from tools.utils.text_operations.
+        
+        Example: 'my folder!/../../file (1).txt' -> 'myfolder/file-1.txt'
         """
-        import re
-        from pathlib import Path
-        
-        if not filename or not filename.strip():
-            return "unnamed_file", True
-        
-        original = filename
-        path_obj = Path(filename)
-        
-        # Get parent directory path (may be empty for flat files)
-        parent_parts = path_obj.parent.parts
-        
-        # Sanitize each directory component
-        def sanitize_component(component: str) -> str:
-            """Sanitize a single path component (directory or filename without extension).
-            
-            Preserves internal hyphens (including multiple consecutive dashes),
-            but strips leading and trailing dashes.
-            """
-            # Whitelist: alphanumeric, underscore, hyphen, space, Unicode letters/digits
-            sanitized = re.sub(r'[^\w\s-]', '', component, flags=re.UNICODE)
-            # Collapse multiple spaces into single dash, but preserve consecutive dashes
-            sanitized = re.sub(r'\s+', '-', sanitized)
-            # Remove leading/trailing dashes
-            sanitized = sanitized.strip('-').strip()
-            
-            return sanitized if sanitized else "unnamed"
-        
-        # Sanitize parent directories
-        sanitized_parents = [sanitize_component(part) for part in parent_parts if part and part != '.']
-        
-        # Sanitize filename (stem + extension)
-        name = path_obj.stem
-        extension = path_obj.suffix
-        
-        sanitized_name = sanitize_component(name)
-        if not sanitized_name:
-            sanitized_name = "file"
-        
-        if extension:
-            extension = re.sub(r'[^\w.-]', '', extension, flags=re.UNICODE)
-        
-        sanitized_filename = sanitized_name + extension
-        
-        # Reconstruct full path with sanitized components
-        if sanitized_parents:
-            sanitized = '/'.join(sanitized_parents) + '/' + sanitized_filename
-        else:
-            sanitized = sanitized_filename
-        
-        return sanitized, (sanitized != original)
+        from ...tools.utils.text_operations import sanitize_filename
+        return sanitize_filename(filename)
 
     def download_artifact(self, bucket_name, artifact_name):
         url = f'{self.artifact_url}/{bucket_name.lower()}/{artifact_name}'
@@ -937,6 +891,185 @@ class AlitaClient:
         url = f'{self.artifact_url}/{bucket_name}'
         data = requests.delete(url, headers=self.headers, verify=False, params={'filename': quote(artifact_name)})
         return self._process_requst(data)
+
+    # =========================================================================
+    # S3-Compatible API Methods
+    # =========================================================================
+    
+    # S3 error code to user-friendly message mapping
+    S3_ERROR_MESSAGES = {
+        'NoSuchBucket': "Bucket '{bucket}' does not exist",
+        'NoSuchKey': "File '{key}' not found",
+        'AccessDenied': "Permission denied for '{resource}'",
+        'BucketNotEmpty': "Bucket '{bucket}' is not empty",
+        'InvalidBucketName': "Invalid bucket name '{bucket}'",
+        'BucketAlreadyExists': "Bucket '{bucket}' already exists",
+        'InvalidArgument': "Invalid argument provided",
+    }
+    
+    def _s3_params(self, **extra) -> dict:
+        """Build common S3 query parameters with project_id and JSON format."""
+        params = {"project_id": self.project_id, "format": "json"}
+        params.update(extra)
+        return params
+    
+    def _handle_s3_error(self, response: requests.Response, bucket: str = None, key: str = None) -> dict:
+        """Convert S3 error response to user-friendly error dict."""
+        try:
+            error_data = response.json()
+            error_code = error_data.get('error', {}).get('code', 'Unknown')
+        except (ValueError, TypeError):
+            error_code = f"HTTP_{response.status_code}"
+        
+        template = self.S3_ERROR_MESSAGES.get(error_code, f"S3 error: {error_code}")
+        resource = key or bucket or 'unknown'
+        message = template.format(bucket=bucket or 'unknown', key=key or 'unknown', resource=resource)
+        return {"error": message, "code": error_code}
+    
+    def list_artifacts_s3(self, bucket_name: str, prefix: str = None, delimiter: str = '/') -> dict:
+        """List artifacts via S3 API with optional prefix filtering.
+        
+        Args:
+            bucket_name: S3 bucket name
+            prefix: Filter by key prefix (folder path). If provided, lists only files
+                   with keys starting with this prefix.
+            delimiter: Character to group common prefixes (default '/' for folder listing).
+                      Set to None for recursive listing of all files.
+        
+        Returns:
+            dict: Response with 'contents' (files) and 'commonPrefixes' (subfolders)
+                  or 'error' key if failed.
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}"
+        params = self._s3_params(**{"list-type": "2"})
+        if prefix:
+            # Ensure prefix ends with / for folder listing
+            params["prefix"] = prefix if prefix.endswith('/') else f"{prefix}/"
+        if delimiter:
+            params["delimiter"] = delimiter
+        
+        response = requests.get(url, headers=self.headers, params=params, verify=False)
+        
+        if response.status_code >= 400:
+            return self._handle_s3_error(response, bucket=bucket_name)
+        
+        try:
+            return response.json()
+        except (ValueError, TypeError):
+            return {"error": "Invalid response from S3 API", "content": response.text}
+    
+    def upload_artifact_s3(self, bucket_name: str, key: str, data: bytes, content_type: str = None) -> dict:
+        """Upload artifact via S3 PUT with auto-detected Content-Type.
+        
+        Sanitizes the key (filename) before upload to prevent regex errors during indexing.
+        
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path (e.g., 'folder/subfolder/file.txt')
+            data: File content as bytes
+            content_type: Optional MIME type. If not provided, auto-detected from key.
+        
+        Returns:
+            dict: Response with 'filepath', 'bucket', 'filename', 'sanitized_name', 'was_sanitized' keys or 'error' key.
+        """
+        from ...tools.utils import detect_mime_type
+        
+        # Sanitize filename to prevent regex errors during indexing (single source of truth)
+        sanitized_key, was_modified = self._sanitize_artifact_name(key)
+        if was_modified:
+            logger.warning(f"Artifact filename sanitized: '{key}' -> '{sanitized_key}'")
+        
+        if not content_type:
+            content_type = detect_mime_type(data, sanitized_key)
+        
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(sanitized_key, safe='/')}"
+        headers = {**self.headers, 'Content-Type': content_type}
+        
+        response = requests.put(url, headers=headers, data=data,
+                               params=self._s3_params(), verify=False)
+        
+        if response.status_code >= 400:
+            return self._handle_s3_error(response, bucket=bucket_name, key=sanitized_key)
+        
+        return {
+            "filepath": f"/{bucket_name}/{sanitized_key}",
+            "bucket": bucket_name,
+            "filename": sanitized_key,
+            "size": len(data),
+            "sanitized_name": sanitized_key,
+            "was_sanitized": was_modified
+        }
+    
+    def download_artifact_s3(self, bucket_name: str, key: str) -> bytes | dict:
+        """Download artifact via S3 GET.
+        
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path
+        
+        Returns:
+            bytes: File content if successful
+            dict: Error dict with 'error' key if failed
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(key, safe='/')}"
+        
+        response = requests.get(url, headers=self.headers,
+                               params=self._s3_params(), verify=False)
+        
+        if response.status_code >= 400:
+            return self._handle_s3_error(response, bucket=bucket_name, key=key)
+        
+        return response.content
+    
+    def delete_artifact_s3(self, bucket_name: str, key: str) -> dict:
+        """Delete artifact via S3 DELETE.
+        
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path
+        
+        Returns:
+            dict: Response with 'success' True or 'error' key.
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(key, safe='/')}"
+        
+        response = requests.delete(url, headers=self.headers,
+                                  params=self._s3_params(), verify=False)
+        
+        if response.status_code >= 400:
+            return self._handle_s3_error(response, bucket=bucket_name, key=key)
+        
+        return {"success": True, "message": f"File '{key}' deleted successfully"}
+    
+    def head_artifact_s3(self, bucket_name: str, key: str) -> dict:
+        """Check if artifact exists and get metadata via S3 HEAD.
+        
+        Args:
+            bucket_name: S3 bucket name
+            key: Full object key including folder path
+        
+        Returns:
+            dict: Response with 'exists', 'size', 'lastModified', 'contentType' keys
+                  or 'error' key if failed.
+        """
+        url = f"{self.s3_url}/{bucket_name.lower()}/{quote(key, safe='/')}"
+        
+        response = requests.head(url, headers=self.headers,
+                                params=self._s3_params(), verify=False)
+        
+        if response.status_code == 404:
+            return {"exists": False}
+        
+        if response.status_code >= 400:
+            return self._handle_s3_error(response, bucket=bucket_name, key=key)
+        
+        return {
+            "exists": True,
+            "size": int(response.headers.get('Content-Length', 0)),
+            "lastModified": response.headers.get('Last-Modified', ''),
+            "contentType": response.headers.get('Content-Type', ''),
+            "etag": response.headers.get('ETag', '').strip('"')
+        }
 
     def _prepare_messages(self, messages: list[BaseMessage]):
         chat_history = []
