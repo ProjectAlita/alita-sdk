@@ -19,13 +19,16 @@
     "edit_file",
     "delete_file",
     "grep_file",
+    "create_issue",
     "get_issue",
     "comment_on_issue",
+    "close_issue",
     "create_pull_request",
     "comment_on_pr",
     "create_pr_change_comment",
     "get_pr_changes",
     "get_commits",
-    "set_active_branch"
+    "set_active_branch",
+    "close_pr"
   ]
 }

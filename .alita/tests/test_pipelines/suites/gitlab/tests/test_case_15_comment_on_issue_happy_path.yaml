@@ -5,9 +5,15 @@ description: |
   
   Objective: Confirm issue commenting functionality
   
+  Test Flow:
+  1. Create a test issue with unique title
+  2. Add a comment to the issue
+  3. Validate comment operation
+  4. Clean up: close the test issue
+  
   Expected Behavior:
   - Tool executes successfully without errors
-  - Comment is added to the existing test issue
+  - Comment is added to the test issue
   - Returns confirmation with comment ID
 
 toolkits:
@@ -15,9 +21,14 @@ toolkits:
     name: ${GITLAB_TOOLKIT_NAME}
 
 state:
+  issue_title:
+    type: str
+  issue_description:
+    type: str
+  create_result:
+    type: str
   issue_number:
     type: int
-    value: ${GITLAB_TEST_ISSUE_NUMBER}
   comment_query:
     type: str
   comment_result:
@@ -25,9 +36,79 @@ state:
   test_results:
     type: dict
 
-entry_point: prepare_comment
+entry_point: setup_create_issue
 
 nodes:
+  - id: setup_create_issue
+    type: code
+    description: "Generate unique issue title and description"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Build issue title and description
+        issue_title = f"GL15 Test Issue - {timestamp}-{random_suffix}"
+        issue_description = f"Automated test issue created by GL15 at {timestamp}. This issue will be automatically deleted after the test."
+        
+        # Store in state
+        alita_state['issue_title'] = issue_title
+        alita_state['issue_description'] = issue_description
+    output:
+      - issue_title
+      - issue_description
+    structured_output: false
+    transition: create_issue
+
+  - id: create_issue
+    type: toolkit
+    tool: create_issue
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - issue_title
+      - issue_description
+    input_mapping:
+      title:
+        type: variable
+        value: issue_title
+      description:
+        type: variable
+        value: issue_description
+    output:
+      - create_result
+    structured_output: true
+    transition: extract_issue_number
+
+  - id: extract_issue_number
+    type: code
+    description: "Extract issue number from create_issue result"
+    code:
+      type: fixed
+      value: |
+        import re
+        
+        # Get the result string from create_issue
+        result_str = alita_state.get('create_result', '')
+        
+        # Extract issue number using regex: "issue #123"
+        match = re.search(r'issue #(\d+)', result_str)
+        
+        if match:
+            issue_number = int(match.group(1))
+            alita_state['issue_number'] = issue_number
+        else:
+            raise Exception(f"Failed to extract issue number from result: {result_str}")
+    output:
+      - issue_number
+    structured_output: false
+    transition: prepare_comment
+
   - id: prepare_comment
     type: code
     description: "Generate unique comment text"
@@ -62,7 +143,7 @@ nodes:
   
   - id: invoke_comment_on_issue
     type: toolkit
-    description: "Add comment to existing test issue"
+    description: "Add comment to test issue"
     tool: comment_on_issue
     toolkit_name: ${GITLAB_TOOLKIT_NAME}
     input:
@@ -123,4 +204,20 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: cleanup_close_issue
+
+  - id: cleanup_close_issue
+    type: toolkit
+    tool: close_issue
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    description: "Close the test issue"
+    input:
+      - issue_number
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+    structured_output: true
+    continue_on_error: true
     transition: END
+

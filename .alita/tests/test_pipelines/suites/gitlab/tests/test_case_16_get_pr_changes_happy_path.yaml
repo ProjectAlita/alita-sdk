@@ -5,27 +5,175 @@ description: |
   
   Objective: Test MR diff retrieval functionality (GitLab-specific)
   
+  Test Flow:
+  1. Create a unique test branch
+  2. Create a file on that branch
+  3. Create a merge request from branch to main
+  4. Get MR changes and validate diff
+  5. Close the MR using close_pr tool
+  6. Verify the MR was closed
+  7. Validate both get_pr_changes and close_pr operations
+  8. Clean up: delete branch
+  
   Expected Behavior:
-  - Tool executes successfully without errors
-  - Returns diff in git diff format
-  - Shows file changes with additions/deletions
+  - get_pr_changes: retrieves diff correctly
+  - close_pr: successfully closes the merge request
+  - Verification confirms MR state is "closed"
 
 toolkits:
   - id: ${GITLAB_TOOLKIT_ID}
     name: ${GITLAB_TOOLKIT_NAME}
 
 state:
+  branch_name:
+    type: str
+  file_path:
+    type: str
+  file_contents:
+    type: str
+  pr_title:
+    type: str
+  pr_body:
+    type: str
+  create_pr_result:
+    type: str
   pr_number:
     type: int
-    value: ${GITLAB_TEST_MR_NUMBER}
   tool_result:
+    type: dict
+  close_pr_result:
+    type: str
+  verify_closed_pr_result:
     type: dict
   test_results:
     type: dict
 
-entry_point: invoke_get_pr_changes
+entry_point: setup_branch_and_file
 
 nodes:
+  - id: setup_branch_and_file
+    type: code
+    description: "Generate unique branch name, file path, and PR details"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Build branch name
+        branch_name = f"gl16-test-mr-{timestamp}-{random_suffix}"
+        
+        # Build file path and contents
+        file_path = f"test-files/gl16-test-{timestamp}.md"
+        file_contents = f"# GL16 Test File\\n\\nCreated at {timestamp} for MR diff testing.\\n\\nThis file will be deleted after the test."
+        
+        # Build PR title and body
+        pr_title = f"GL16 Test MR - {timestamp}-{random_suffix}"
+        pr_body = f"Automated test merge request created by GL16 at {timestamp}. Will be deleted after test."
+        
+        # Return output dictionary
+        {
+          "branch_name": branch_name,
+          "file_path": file_path,
+          "file_contents": file_contents,
+          "pr_title": pr_title,
+          "pr_body": pr_body
+        }
+    output:
+      - branch_name
+      - file_path
+      - file_contents
+      - pr_title
+      - pr_body
+    structured_output: false
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    structured_output: true
+    transition: create_file
+
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_contents
+      - branch_name
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_contents
+      branch:
+        type: variable
+        value: branch_name
+    structured_output: true
+    transition: create_pull_request
+
+  - id: create_pull_request
+    type: toolkit
+    tool: create_pull_request
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - pr_title
+      - pr_body
+      - branch_name
+    input_mapping:
+      pr_title:
+        type: variable
+        value: pr_title
+      pr_body:
+        type: variable
+        value: pr_body
+      branch:
+        type: variable
+        value: branch_name
+    output:
+      - create_pr_result
+    structured_output: true
+    transition: extract_pr_number
+
+  - id: extract_pr_number
+    type: code
+    description: "Extract MR number from create_pull_request result"
+    code:
+      type: fixed
+      value: |
+        import re
+        
+        # Get the result string from create_pull_request
+        result_str = alita_state.get('create_pr_result', '')
+        
+        # Extract PR number using regex: "PR number 123"
+        match = re.search(r'PR number (\d+)', result_str)
+        
+        if match:
+            pr_number = int(match.group(1))
+            alita_state['pr_number'] = pr_number
+        else:
+            raise Exception(f"Failed to extract PR number from result: {result_str}")
+    output:
+      - pr_number
+    structured_output: false
+    transition: invoke_get_pr_changes
+
   - id: invoke_get_pr_changes
     type: toolkit
     tool: get_pr_changes
@@ -39,6 +187,38 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    transition: close_pr_test
+
+  - id: close_pr_test
+    type: toolkit
+    tool: close_pr
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    description: "Close the test merge request"
+    input:
+      - pr_number
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+    output:
+      - close_pr_result
+    structured_output: true
+    transition: verify_pr_closed
+
+  - id: verify_pr_closed
+    type: toolkit
+    tool: get_pr_changes
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    description: "Verify the MR was closed"
+    input:
+      - pr_number
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+    output:
+      - verify_closed_pr_result
+    structured_output: true
     transition: process_results
 
   - id: process_results
@@ -46,6 +226,9 @@ nodes:
     model: gpt-4o-2024-11-20
     input:
       - tool_result
+      - file_path
+      - close_pr_result
+      - verify_closed_pr_result
     input_mapping:
       system:
         type: fixed
@@ -53,29 +236,37 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the output from the 'get_pr_changes' tool.
+          Analyze the output from get_pr_changes and close_pr operations.
 
-          tool executed: get_pr_changes
-          parameters: pr_number=1
-          results: {tool_result}
+          get_pr_changes results: {tool_result}
+          close_pr result: {close_pr_result}
+          verification after close: {verify_closed_pr_result}
+          expected file: {file_path}
 
-          expected behavior:
-          - tool executes successfully without errors
-          - returns diff in git diff format showing file changes
-          - includes additions, deletions, and context lines
+          validate two operations:
 
-          note: if the MR does not exist, error handling is acceptable.
-          the key is that the tool executes without unexpected system errors.
+          1. get_pr_changes validation:
+          - tool executed successfully
+          - returns diff in git diff format
+          - includes additions, deletions, context lines
+          - shows the test file we created
+
+          2. close_pr validation:
+          - close_pr returned success message
+          - merge request is now in closed state
+          - verification confirms MR is closed
 
           evaluate:
-          1. did the tool execute?
-          2. if successful, does the output contain diff information?
-          3. if there are errors, are they about MR not found (acceptable) or system errors (failure)?
+          1. did get_pr_changes execute successfully?
+          2. does the output contain proper diff information?
+          3. did close_pr execute successfully?
+          4. does verification confirm the MR is now closed?
+          5. check for "closed" state or status in verification
 
           return a json object with:
           {{
             "test_passed": true/false,
-            "summary": "brief description of outcome",
+            "summary": "brief description of both operations outcome",
             "error": "error details if failed, null if passed"
           }}
 
@@ -87,4 +278,23 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    description: "Delete the test branch"
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+      force:
+        type: fixed
+        value: true
+    structured_output: true
+    continue_on_error: true
     transition: END
+

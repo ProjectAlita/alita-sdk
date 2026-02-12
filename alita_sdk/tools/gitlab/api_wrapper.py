@@ -116,6 +116,23 @@ GetCommitsModel = create_model(
     author=(Optional[str], Field(description="Author name", default=None)),
 )
 
+CreateIssueModel = create_model(
+    "CreateIssueModel",
+    title=(str, Field(description="The title of the issue")),
+    description=(Optional[str], Field(default="", description="The description of the issue. Optional.")),
+    labels=(Optional[List[str]], Field(default=None, description="Labels for the issue. Optional.")),
+)
+
+CloseIssueModel = create_model(
+    "CloseIssueModel",
+    issue_number=(int, Field(description="The number of the issue to close")),
+)
+
+ClosePRModel = create_model(
+    "ClosePRModel",
+    pr_number=(int, Field(description="The number of the merge request (pull request) to close")),
+)
+
 class GitLabAPIWrapper(CodeIndexerToolkit):
     url: str
     repository: str
@@ -399,6 +416,75 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             return "Commented on merge request " + str(pr_number)
         except Exception as e:
             return "Unable to make comment due to error:\n" + str(e)
+
+    def create_issue(self, title: str, description: str = "", labels: Optional[List[str]] = None) -> str:
+        """
+        Create a new issue in the repository.
+
+        Parameters:
+            title: The title of the issue
+            description: The description of the issue (optional)
+            labels: List of labels to assign to the issue (optional)
+
+        Returns:
+            Success message with issue number or error description
+        """
+        try:
+            issue_data = {
+                "title": title,
+                "description": description,
+            }
+            if labels:
+                issue_data["labels"] = labels
+            
+            issue = self.repo_instance.issues.create(issue_data)
+            return f"Successfully created issue #{issue.iid} with title: {title}"
+        except Exception as e:
+            raise ToolException(f"Failed to create issue: {str(e)}")
+
+    def close_issue(self, issue_number: int) -> str:
+        """
+        Close an issue in the repository.
+
+        Parameters:
+            issue_number: The number of the issue to close
+
+        Returns:
+            Success message or error description
+        """
+        try:
+            issue = self.repo_instance.issues.get(issue_number)
+            issue.state_event = 'close'
+            issue.save()
+            return f"Successfully closed issue #{issue_number}"
+        except GitlabGetError as e:
+            if e.response_code == 404:
+                raise ToolException(f"Issue #{issue_number} not found")
+            raise ToolException(f"Failed to close issue #{issue_number}: {str(e)}")
+        except Exception as e:
+            raise ToolException(f"Failed to close issue #{issue_number}: {str(e)}")
+
+    def close_pr(self, pr_number: int) -> str:
+        """
+        Close a merge request (pull request) in the repository.
+
+        Parameters:
+            pr_number: The number of the merge request to close
+
+        Returns:
+            Success message or error description
+        """
+        try:
+            mr = self.repo_instance.mergerequests.get(pr_number)
+            mr.state_event = 'close'
+            mr.save()
+            return f"Successfully closed merge request #{pr_number}"
+        except GitlabGetError as e:
+            if e.response_code == 404:
+                raise ToolException(f"Merge request #{pr_number} not found")
+            raise ToolException(f"Failed to close merge request #{pr_number}: {str(e)}")
+        except Exception as e:
+            raise ToolException(f"Failed to close merge request #{pr_number}: {str(e)}")
 
     def create_file(self, file_path: str, file_contents: str, branch: str) -> str:
         # Default to active branch if branch is None
@@ -697,10 +783,28 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
                 "args_schema": GetIssueModel,
             },
             {
+                "name": "create_issue",
+                "ref": self.create_issue,
+                "description": "Create a new issue in the repository.",
+                "args_schema": CreateIssueModel,
+            },
+            {
+                "name": "close_issue",
+                "ref": self.close_issue,
+                "description": "Close an issue in the repository.",
+                "args_schema": CloseIssueModel,
+            },
+            {
                 "name": "create_pull_request",
                 "ref": self.create_pull_request,
                 "description": self.create_pull_request.__doc__ or "Create a pull request (merge request) in the repository.",
                 "args_schema": CreatePullRequestModel,
+            },
+            {
+                "name": "close_pr",
+                "ref": self.close_pr,
+                "description": "Close a merge request (pull request) in the repository.",
+                "args_schema": ClosePRModel,
             },
             {
                 "name": "comment_on_issue",

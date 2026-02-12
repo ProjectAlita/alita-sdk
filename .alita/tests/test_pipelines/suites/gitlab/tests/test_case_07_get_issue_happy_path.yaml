@@ -5,27 +5,114 @@ description: |
   
   Objective: Confirm issue retrieval functionality
   
+  Test Flow:
+  1. Create a test issue with unique title
+  2. Get the issue by number
+  3. Close the test issue using close_issue tool
+  4. Verify the issue was closed
+  5. Validate both get_issue and close_issue operations
+  
   Expected Behavior:
-  - Tool executes successfully without errors
-  - Returns issue details including title and description
-  - Issue number matches requested issue
+  - get_issue: retrieves issue details correctly
+  - close_issue: successfully closes the issue
+  - Verification confirms issue state is "closed"
 
 toolkits:
   - id: ${GITLAB_TOOLKIT_ID}
     name: ${GITLAB_TOOLKIT_NAME}
 
 state:
+  issue_title:
+    type: str
+  issue_description:
+    type: str
+  create_result:
+    type: str
   issue_number:
     type: int
-    value: ${GITLAB_TEST_ISSUE_NUMBER}
   tool_result:
+    type: dict
+  close_result:
+    type: str
+  verify_closed_result:
     type: dict
   test_results:
     type: dict
 
-entry_point: invoke_get_issue
+entry_point: setup_create_issue
 
 nodes:
+  - id: setup_create_issue
+    type: code
+    description: "Generate unique issue title and description"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Build issue title and description
+        issue_title = f"GL07 Test Issue - {timestamp}-{random_suffix}"
+        issue_description = f"Automated test issue created by GL07 at {timestamp}. This issue will be automatically deleted after the test."
+        
+        # Return dict with output variables
+        {"issue_title": issue_title, "issue_description": issue_description}
+    output:
+      - issue_title
+      - issue_description
+    structured_output: true
+    transition: create_issue
+
+  - id: create_issue
+    type: toolkit
+    tool: create_issue
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - issue_title
+      - issue_description
+    input_mapping:
+      title:
+        type: variable
+        value: issue_title
+      description:
+        type: variable
+        value: issue_description
+    output:
+      - create_result
+    structured_output: true
+    transition: extract_issue_number
+
+  - id: extract_issue_number
+    type: code
+    description: "Extract issue number from create_issue result"
+    code:
+      type: fixed
+      value: |
+        import re
+        
+        # Get the result string from create_issue
+        result_str = alita_state.get('create_result', '')
+        
+        # Extract issue number using regex: "issue #123"
+        match = re.search(r'issue #(\d+)', result_str)
+        
+        if match:
+            issue_number = int(match.group(1))
+        else:
+            raise Exception(f"Failed to extract issue number from result: {result_str}")
+        
+        # Return dict with output variable
+        {"issue_number": issue_number}
+    output:
+      - issue_number
+    structured_output: true
+    transition: invoke_get_issue
+
   - id: invoke_get_issue
     type: toolkit
     tool: get_issue
@@ -39,6 +126,38 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    transition: close_issue_test
+
+  - id: close_issue_test
+    type: toolkit
+    tool: close_issue
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    description: "Close the test issue"
+    input:
+      - issue_number
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+    output:
+      - close_result
+    structured_output: true
+    transition: verify_issue_closed
+
+  - id: verify_issue_closed
+    type: toolkit
+    tool: get_issue
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    description: "Verify the issue was closed"
+    input:
+      - issue_number
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+    output:
+      - verify_closed_result
+    structured_output: true
     transition: process_results
 
   - id: process_results
@@ -46,7 +165,10 @@ nodes:
     model: gpt-4o-2024-11-20
     input:
       - issue_number
+      - issue_title
       - tool_result
+      - close_result
+      - verify_closed_result
     input_mapping:
       system:
         type: fixed
@@ -54,27 +176,38 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the output from the 'get_issue' tool.
+          Analyze the output from get_issue and close_issue operations.
 
-          tool executed: get_issue
-          parameters: issue_number={issue_number}
-          results: {tool_result}
+          get_issue results: {tool_result}
+          close_issue result: {close_result}
+          verification after close: {verify_closed_result}
+          expected issue number: {issue_number}
+          expected title: {issue_title}
 
-          expected behavior:
-          - tool executes successfully without errors
+          validate two operations:
+
+          1. get_issue validation:
+          - tool executed successfully
           - returns issue details including title and description
-          - issue number matches the requested issue
+          - issue number matches
+          - title matches expected
+
+          2. close_issue validation:
+          - close_issue returned success message
+          - verification shows issue state is "closed"
+          - issue remains accessible after closing
 
           evaluate:
-          1. did the tool execute successfully?
-          2. are there any errors?
-          3. does the output contain issue details (title, description)?
-          4. is the issue data properly structured?
+          1. did get_issue execute successfully?
+          2. does get_issue output contain correct issue details?
+          3. did close_issue execute successfully?
+          4. does verification confirm the issue is now closed?
+          5. is the state field set to "closed" in verification?
 
           return a json object with:
           {{
             "test_passed": true/false,
-            "summary": "brief description of outcome",
+            "summary": "brief description of both operations outcome",
             "error": "error details if failed, null if passed"
           }}
 
@@ -87,3 +220,4 @@ nodes:
     structured_output_dict:
       test_results: "dict"
     transition: END
+
