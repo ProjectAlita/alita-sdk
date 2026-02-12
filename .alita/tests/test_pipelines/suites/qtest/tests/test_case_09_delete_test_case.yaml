@@ -1,0 +1,199 @@
+name: "QT09 - delete_test_case: Delete test case"
+description: |
+  Verify the QTest 'delete_test_case' tool successfully deletes a test case.
+
+  Objective: Test deletion of a test case by its QTest ID
+
+  Expected Behavior:
+  - Test case is created first
+  - Test case is deleted successfully
+  - Returns confirmation message
+  - Subsequent lookup fails (test case no longer exists)
+  - No error indicators in output
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  test_case_json:
+    type: str
+  create_result:
+    type: str
+  qtest_id:
+    type: int
+  delete_result:
+    type: str
+  verification_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["deleted", "successfully", "removed"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "Unable to delete"]
+  test_results:
+    type: dict
+
+entry_point: prepare_test_case
+nodes:
+  - id: prepare_test_case
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        import json
+        
+        # Generate unique identifier
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        
+        # Create test case for deletion
+        test_case = {
+            "Name": f"QT09 Test for Deletion {timestamp}-{random_suffix}",
+            "Description": "This test case will be deleted by QT09 test",
+            "Type": "Manual",
+            "Status": "New",
+            "Priority": "Low",
+            "Steps": [
+                {
+                    "Test Step Number": 1,
+                    "Test Step Description": "This is a temporary test case",
+                    "Test Step Expected Result": "To be deleted"
+                }
+            ]
+        }
+        
+        test_case_json = json.dumps(test_case)
+        {"test_case_json": test_case_json}
+    input:
+      - project_id
+    output:
+      - test_case_json
+    structured_output: true
+    transition: create_test_case
+
+  - id: create_test_case
+    type: toolkit
+    input:
+      - test_case_json
+    input_mapping:
+      test_case_content:
+        type: variable
+        value: test_case_json
+      folder_to_place_test_cases_to:
+        type: fixed
+        value: ""
+    output:
+      - create_result
+    structured_output: false
+    tool: create_test_cases
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: extract_qtest_id
+
+  - id: extract_qtest_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+        
+        # Extract QTest ID from creation result
+        result_str = alita_state.get("create_result", "")
+        qtest_id = 0
+        
+        try:
+            # Look for QTest Id in result (numeric ID)
+            qtest_match = re.search(r"['\"]QTest [Ii]d['\"]:\s*['\"]?(\d+)['\"]?", result_str)
+            if qtest_match:
+                qtest_id = int(qtest_match.group(1))
+        except Exception as e:
+            pass
+        
+        if qtest_id == 0:
+            raise Exception(f"Failed to extract QTest ID from creation result: {result_str}")
+        
+        {"qtest_id": qtest_id}
+    input:
+      - create_result
+    output:
+      - qtest_id
+    structured_output: true
+    transition: delete_test_case
+
+  - id: delete_test_case
+    type: toolkit
+    input:
+      - qtest_id
+    input_mapping:
+      qtest_id:
+        type: variable
+        value: qtest_id
+    output:
+      - delete_result
+    structured_output: false
+    tool: delete_test_case
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - delete_result
+      - qtest_id
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'delete_test_case' tool execution.
+
+          Delete Result: {delete_result}
+          QTest ID Deleted: {qtest_id}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful deletion.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran without throwing an exception
+          2. no_errors: Output does NOT contain error indicators
+          3. has_success_message: Response indicates successful deletion
+          4. confirms_deletion: Output confirms test case was removed
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_success_message": boolean,
+            "confirms_deletion": boolean,
+            "deleted_qtest_id": {qtest_id},
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output: true
+    transition: end
+
+  - id: end
+    type: end

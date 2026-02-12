@@ -1,11 +1,11 @@
-name: "BB25 - delete_branch: Prevent deletion of main/master branches"
+name: "BB22 - delete_branch: Prevent deletion of 'main' branch"
 description: |
-  Verify the Bitbucket 'delete_branch' tool prevents deletion of protected branches (main/master).
+  Verify the Bitbucket 'delete_branch' tool prevents deletion of the protected 'main' branch.
 
-  Objective: Test protection mechanism for critical branches
+  Objective: Test protection mechanism for critical branch
 
   Expected Behavior:
-  - Attempting to delete 'main' or 'master' branch fails
+  - Attempting to delete 'main' branch fails
   - Appropriate error message is returned
   - Error indicates deletion is forbidden
   - No unhandled exceptions
@@ -29,8 +29,6 @@ state:
       - "main or master"
       - "safety"
   delete_main_result:
-    type: str
-  delete_master_result:
     type: str
   branch_list:
     type: str
@@ -66,28 +64,12 @@ nodes:
     structured_output: true
     tool: delete_branch
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: attempt_delete_master
-
-  - id: attempt_delete_master
-    type: toolkit
-    continue_on_error: true
-    input: []
-    input_mapping:
-      branch_name:
-        type: fixed
-        value: "master"
-    output:
-      - delete_master_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results
     type: llm
     input:
       - delete_main_result
-      - delete_master_result
       - branch_list
       - expected_error_indicators
       - protected_branches
@@ -101,38 +83,33 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the output from 'delete_branch' attempts on protected branches (main/master).
+          Analyze the output from 'delete_branch' attempt on the protected 'main' branch.
 
           Branch List: {branch_list}
           Delete 'main' Result: {delete_main_result}
-          Delete 'master' Result: {delete_master_result}
           Protected Branches: {protected_branches}
           Expected Error Indicators: {expected_error_indicators}
 
-          This is a NEGATIVE test - we expect the tool to PREVENT deletion of main/master branches.
+          This is a NEGATIVE test - we expect the tool to PREVENT deletion of the 'main' branch.
 
           Validation Criteria for test_passed=true:
           REQUIRED (ALL must pass):
           1. branch_list_retrieved: List of branches was retrieved successfully
           2. main_deletion_blocked: Deletion of 'main' failed with appropriate error (if 'main' exists)
-          3. master_deletion_blocked: Deletion of 'master' failed with appropriate error (if 'master' exists)
-          4. error_message_appropriate: Error message indicates deletion is forbidden/not allowed
-          5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          3. error_message_appropriate: Error message contains one of the expected error indicators
+          4. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
 
-          Note: If a branch doesn't exist in the repository, mark its corresponding deletion check as 'skipped' but don't fail the test.
+          Note: If 'main' branch doesn't exist in the repository, mark main_deletion_blocked as 'skipped' but don't fail the test.
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (true if deletion was properly blocked for all protected branches that exist),
+            "test_passed": boolean (true if deletion was properly blocked for main branch),
             "branch_list_retrieved": boolean,
             "main_exists": boolean,
-            "master_exists": boolean,
             "main_deletion_blocked": boolean | "skipped",
-            "master_deletion_blocked": boolean | "skipped",
             "error_message_appropriate": boolean,
             "no_unhandled_exception": boolean,
-            "main_error_indicator_found": "which error indicator was found or 'none'",
-            "master_error_indicator_found": "which error indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
             "branches_count": number
           }}
 

@@ -1,4 +1,4 @@
-name: "BB17 - create_pull_request: Create PR with cloud format"
+name: "BB15 - create_pull_request: Create PR with cloud format"
 description: |
   Verify the Bitbucket 'create_pull_request' tool creates a PR using Cloud format.
 
@@ -22,14 +22,14 @@ state:
   test_file_content:
     type: str
     value: |
-      Test file for BB17 - Cloud PR Format
+      Test file for BB15 - Cloud PR Format
       =====================================
 
       This file demonstrates changes for the pull request.
       Created using Bitbucket Cloud format specifications.
   pr_title:
     type: str
-    value: "BB17: Test PR with Cloud Format"
+    value: "BB15: Test PR with Cloud Format"
   pr_description:
     type: str
     value: |
@@ -75,8 +75,8 @@ nodes:
         random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
 
         # Generate unique branch and file names
-        source_branch = f"feature/bb17-cloud-pr-{timestamp}-{random_suffix}"
-        test_file_path = f"test-files/bb17-pr-changes-{timestamp}-{random_suffix}.txt"
+        source_branch = f"feature/bb15-cloud-pr-{timestamp}-{random_suffix}"
+        test_file_path = f"test-files/bb15-pr-changes-{timestamp}-{random_suffix}.txt"
 
         {"source_branch": source_branch, "test_file_path": test_file_path}
     output:

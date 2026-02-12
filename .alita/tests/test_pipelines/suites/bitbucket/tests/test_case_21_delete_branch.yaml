@@ -1,4 +1,4 @@
-name: "BB24 - delete_branch: Delete branch successfully"
+name: "BB21 - delete_branch: Delete branch successfully"
 description: |
   Verify the Bitbucket 'delete_branch' tool deletes an existing branch successfully.
 
@@ -51,7 +51,7 @@ nodes:
         random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
 
         # Generate unique branch name
-        branch_name = f"test-delete-bb24-{timestamp}-{random_suffix}"
+        branch_name = f"test-delete-bb21-{timestamp}-{random_suffix}"
 
         {"branch_name": branch_name}
     output:
