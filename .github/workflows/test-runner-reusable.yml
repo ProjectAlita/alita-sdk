@@ -245,10 +245,9 @@ jobs:
           # Build the results path first
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json"
           
-          # Match docker-compose.yml escaping - use \\\" to get literal \" in the variable
-          export DOCKER_COMMAND="alita agent run .alita/agents/test-fixer.agent.md --dir . \"Analyze ${RESULTS_PATH}\""
-          
-          docker-compose run --rm alita-sdk || echo "AI analysis completed with warnings"
+          # Single quotes inside the sh -c command keep the message as one argument
+          docker-compose run --rm alita-sdk \
+          sh -c "alita agent run .alita/agents/test-fixer.agent.md --dir . --message 'Analyze ${RESULTS_PATH}'" || echo "AI analysis completed with warnings"
           
       - name: Stop docker-compose
         if: always()

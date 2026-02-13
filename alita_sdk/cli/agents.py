@@ -2597,7 +2597,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
 
 @agent.command('run')
 @click.argument('agent_source')
-@click.argument('message')
+@click.option('--message', type=str, help='Input message to send to the agent', default="Go")
 @click.option('--version', help='Agent version (for platform agents)')
 @click.option('--toolkit-config', multiple=True, type=click.Path(exists=True),
               help='Toolkit configuration files')
