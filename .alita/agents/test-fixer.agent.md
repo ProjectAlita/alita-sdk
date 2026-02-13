@@ -28,7 +28,7 @@ From results.json, extract the short test ID for each failed test:
 For each failed test, rerun using the short test ID:
 ```
 terminal_run_command(
-  command="bash -c \".alita/tests/test_pipelines/run_test.sh --local suites/<suite> <test_id>\"",
+  command="bash -c \".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> <test_id>\"",
   timeout=180
 )
 ```
@@ -72,7 +72,7 @@ Verified Failed Tests:
 - If RCA exists, extract key point only
 
 ## Command Format for Rerun
-`bash -c ".alita/tests/test_pipelines/run_test.sh --local suites/<suite> <test_id>"`
+`bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> <test_id>"` 
 - ALWAYS use bash -c with double quotes for Windows CMD compatibility
 - Extract suite from results.json path (e.g., "ado", "github")
 - Use SHORT test ID like "ADO15", "GH08" - NOT full file names
