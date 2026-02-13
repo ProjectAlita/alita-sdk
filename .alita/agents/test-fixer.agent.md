@@ -20,12 +20,21 @@ filesystem_read_file(".alita/tests/test_pipelines/test_results/suites/<suite>/re
 
 ### 2. Extract Test IDs
 From results.json, extract the short test ID for each failed test:
-- Look for field like "test_id" or extract from "pipeline_name" (e.g., "ADO15" from "ADO15 - Create Branch")
+- Test IDs can be extracted from any test case file (e.g name: "XR01 - execute_graphql: Execute custom GraphQL query" → test ID is "XR01")
+- From the results.json in a field "pipeline_name": "XR10 - get_tests: Handle invalid JQL syntax (Negative Test)" → test ID is "XR10"
 - The test ID format is typically: <SUITE_PREFIX><NUMBER> (e.g., ADO15, GH08, GL12)
 - DO NOT use full file names like "test_case_17_create_branch_edge_case"
 
-### 3. Verify Failures (Double-Check)
-For each failed test, rerun using the short test ID:
+### 3. Group Similar Failures (Smart Verification)
+Before rerunning tests, group failures by error pattern:
+- Group by: identical error messages, same tool/step failures, common keywords
+- Examples: "Authentication failed", "Timeout", "Connection refused", "Missing environment variable"
+- Only rerun ONE test from each group to verify the pattern
+- If verified, apply the same analysis to all tests in that group
+- This avoids redundant reruns when 5+ tests fail for the same reason
+
+### 4. Verify Representative Failures
+For each unique error pattern group, rerun ONLY the first test:
 ```
 terminal_run_command(
   command="bash -c \".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> <test_id>\"",
@@ -33,10 +42,11 @@ terminal_run_command(
 )
 ```
 Example: `bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/ado ADO15"`
-- If test passes on rerun: Skip it (was flaky)
-- If test fails again: Proceed to analysis
+- If test passes on rerun: Mark entire group as flaky
+- If test fails again: Apply same root cause to all tests in group
+- Only rerun additional tests if error pattern is unclear or conflicts with group
 
-### 4. Analyze Verified Failures
+### 5. Analyze Verified Failures
 For each confirmed failed test:
 - Extract test ID, pipeline name, error message from rerun output
 - Look for RCA (Root Cause Analysis) data if available
@@ -49,27 +59,34 @@ filesystem_read_file(".alita/tests/test_pipelines/suites/<suite>/tests/<test_fil
 ```
 
 ### 6. Present Analysis
-Be extremely concise. For each verified failed test:
+Be extremely concise. Group by error pattern if multiple tests share same root cause:
 - Test name + error in 1 line
 - Root cause in 1 sentence
 - Fix suggestion in 1 sentence
 
 ## Output Format
 
-Summary: X passed, Y failed, Z flaky (passed on rerun)
+Summary: X passed, Y failed (Z unique patterns), W flaky (passed on rerun)
 
-Verified Failed Tests:
-1. **TestName** - Error: <brief_error> | Cause: <1_sentence> | Fix: <1_sentence>
-2. **TestName** - Error: <brief_error> | Cause: <1_sentence> | Fix: <1_sentence>
+**Pattern 1: <Error Description>** [Verified via TestID]
+- **Test1, Test2, Test3** - Error: <brief_error> | Cause: <1_sentence> | Fix: <1_sentence>
+
+**Pattern 2: <Error Description>** [Verified via TestID]
+- **Test4** - Error: <brief_error> | Cause: <1_sentence> | Fix: <1_sentence>
+
+Individual Failures:
+- **Test5** - Error: <brief_error> | Cause: <1_sentence> | Fix: <1_sentence>
 
 ## Important Rules
-- ALWAYS rerun failed tests before reporting
+- Group similar failures to avoid redundant analysis
+- Only rerun ONE test per error pattern group
 - Mark tests as flaky if they pass on second run
 - NO markdown formatting except bold test names
 - NO verbose explanations or background
-- ONE line per failed test maximum
+- ONE line per failed test or group maximum
 - Skip passed tests entirely
 - If RCA exists, extract key point only
+- Show which test was used to verify each pattern group
 
 ## Command Format for Rerun
 `bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> <test_id>"` 
