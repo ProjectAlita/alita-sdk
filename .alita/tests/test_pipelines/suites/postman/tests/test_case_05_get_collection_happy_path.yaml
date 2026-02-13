@@ -1,0 +1,96 @@
+name: "PST05 get collection"
+priority: Critical
+description: |
+  Validates that the get_collection tool successfully retrieves a specific collection
+  in flattened format with path-based structure.
+  
+  Objective: Verify collection retrieval in flattened format
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns flattened collection structure
+  - Includes folders and requests organized by path
+  - Contains collection metadata and variables
+
+toolkits:
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
+
+state:
+  collection_id:
+    type: str
+    value: ${POSTMAN_COLLECTION_ID}
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_collection
+
+nodes:
+  - id: invoke_get_collection
+    type: toolkit
+    tool: get_collection
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    input:
+      - collection_id
+    input_mapping:
+      collection_id:
+        type: variable
+        value: collection_id
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - tool_result
+      - collection_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_collection' tool.
+          
+          Tool Result: {tool_result}
+          Collection ID: {collection_id}
+          
+          This test validates that get_collection returns a flattened collection structure.
+          
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool executed successfully
+          2. has_collection: Result contains collection information
+          3. flattened_structure: Result uses flattened structure with paths
+          4. has_metadata: Contains collection metadata (name, id)
+          5. has_items: Contains folders or requests
+          6. no_errors: No error indicators in output
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "has_collection": boolean,
+            "flattened_structure": boolean,
+            "has_metadata": boolean,
+            "has_items": boolean,
+            "no_errors": boolean,
+            "collection_name": "name of collection or null",
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object. No markdown formatting.
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

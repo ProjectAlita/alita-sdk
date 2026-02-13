@@ -1,0 +1,234 @@
+name: "PST04 update variables"
+priority: High
+description: |
+  Validates duplicate_collection and update_collection_variables tools.
+  
+  Objective: Test collection duplication and variable updates
+  
+  Expected Behavior:
+  - Collection is duplicated successfully
+  - Variables are updated on the duplicate
+  - Updated variables are verified
+  - Duplicate collection is deleted after test
+
+toolkits:
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
+
+state:
+  source_collection_id:
+    type: str
+    value: ${POSTMAN_COLLECTION_ID}
+  duplicate_name:
+    type: str
+  new_variables_json:
+    type: str
+    value: '[{"key": "test_var_pst04", "value": "test_value_123", "type": "string", "enabled": true}, {"key": "test_var_2", "value": "value_456", "type": "string", "enabled": true}]'
+  duplicate_result:
+    type: str
+  duplicate_id:
+    type: str
+  update_result:
+    type: str
+  get_updated_result:
+    type: str
+  delete_result:
+    type: str
+  test_results:
+    type: dict
+  variables:
+    type: list
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        duplicate_name = f"PST04_VarTest_{timestamp}_{random_suffix}"
+        
+        {"duplicate_name": duplicate_name}
+    output:
+      - duplicate_name
+    structured_output: true
+    transition: duplicate_collection
+
+  - id: duplicate_collection
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: duplicate_collection
+    input:
+      - duplicate_name
+    input_mapping:
+      new_name:
+        type: variable
+        value: duplicate_name
+    output:
+      - duplicate_result
+    structured_output: true
+    transition: extract_duplicate_id
+
+  - id: extract_duplicate_id
+    type: code
+    code:
+      type: fstring
+      value: |
+        import json
+        import re
+        
+        result_str = alita_state.get('duplicate_result', '')
+        duplicate_id = None
+        
+        try:
+            result_data = json.loads(result_str)
+            if isinstance(result_data, dict) and 'collection' in result_data:
+                coll = result_data['collection']
+                duplicate_id = coll.get('id') or coll.get('uid')
+                if not duplicate_id and 'info' in coll:
+                    duplicate_id = coll['info'].get('_postman_id') or coll['info'].get('uid')
+        except:
+            pass
+        
+        if not duplicate_id:
+            id_match = re.search(r'"(?:id|uid|_postman_id)"\s*:\s*"([^"]+)"', result_str)
+            if id_match:
+                duplicate_id = id_match.group(1)
+        
+        duplicate_id or "ID_NOT_FOUND"
+    input:
+      - duplicate_result
+    output:
+      - duplicate_id
+    structured_output: true
+    transition: parse_variables
+
+  - id: parse_variables
+    type: code
+    code:
+      type: fstring
+      value: |
+        import json
+        
+        variables_json_str = alita_state.get('new_variables_json', '[]')
+        {"variables": json.loads(variables_json_str)}
+    input:
+      - new_variables_json
+    output:
+      - variables
+    structured_output: true
+    transition: update_variables
+
+  - id: update_variables
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: update_collection_variables
+    input:
+      - duplicate_id
+      - variables
+    input_mapping:
+      collection_id:
+        type: variable
+        value: duplicate_id
+      variables:
+        type: variable
+        value: variables
+    output:
+      - update_result
+    structured_output: true
+    transition: get_updated_collection
+
+  - id: get_updated_collection
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: get_collection
+    input:
+      - duplicate_id
+    input_mapping:
+      collection_id:
+        type: variable
+        value: duplicate_id
+    output:
+      - get_updated_result
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - duplicate_result
+      - duplicate_id
+      - update_result
+      - get_updated_result
+      - new_variables_json
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze collection duplication and variables update operations.
+          
+          Duplication Result: {duplicate_result}
+          Duplicate ID: {duplicate_id}
+          Update Result: {update_result}
+          Get Updated Collection: {get_updated_result}
+          Expected Variables: {new_variables_json}
+          
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. duplication_succeeded: Collection was duplicated successfully
+          2. id_extracted: Duplicate ID was extracted
+          3. update_succeeded: Variables update completed without errors
+          4. collection_retrieved: Updated collection was retrieved
+          5. variables_present: Collection includes variable data
+          6. test_var_found: At least one test variable (test_var_pst04) is present
+          7. no_errors: No error indicators in outputs
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "duplication_succeeded": boolean,
+            "id_extracted": boolean,
+            "update_succeeded": boolean,
+            "collection_retrieved": boolean,
+            "variables_present": boolean,
+            "test_var_found": boolean,
+            "no_errors": boolean,
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object. No markdown formatting.
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_delete_collection
+
+  - id: cleanup_delete_collection
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_collection
+    input:
+      - duplicate_id
+    input_mapping:
+      collection_id:
+        type: variable
+        value: duplicate_id
+    output:
+      - delete_result
+    structured_output: true
+    transition: END
